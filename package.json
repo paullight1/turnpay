@@ -1,0 +1,29 @@
+{
+  "name": "trustpay",
+  "version": "1.0.0",
+  "private": true,
+  "description": "TrustPay - Fintech application for currency exchange, VTU, and bill payments",
+  "scripts": {
+    "dev:backend": "cd backend && npm run start:dev",
+    "dev:web": "cd website && npm run dev",
+    "dev": "concurrently \"npm run dev:backend\" \"npm run dev:web\"",
+    "build:backend": "cd backend && npm run build",
+    "build:web": "cd website && npm run build",
+    "build": "npm run build:backend && npm run build:web",
+    "lint:backend": "cd backend && npm run lint",
+    "lint:web": "cd website && npm run lint",
+    "lint": "npm run lint:backend && npm run lint:web",
+    "test:backend": "cd backend && npm run test",
+    "test:web": "cd website && npm run test",
+    "test": "npm run test:backend && npm run test:web",
+    "db:migrate": "cd backend && npx prisma migrate dev",
+    "db:generate": "cd backend && npx prisma generate",
+    "docker:up": "cd backend && docker-compose up -d",
+    "docker:down": "cd backend && docker-compose down",
+    "prepare": "husky"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0",
+    "husky": "^9.1.7"
+  }
+}

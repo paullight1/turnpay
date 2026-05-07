@@ -1,0 +1,43 @@
+# Dependencies
+node_modules/
+**/node_modules/
+
+# Environment files
+.env
+.env.local
+.env.*.local
+**/.env
+
+# Build outputs
+dist/
+**/dist/
+build/
+**/build/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Flutter
+**/flutter/
+*.iml
+
+# Generated
+**/generated/
+
+# Logs
+*.log
+logs/
+
+# Coverage
+coverage/
+**/coverage/
+
+# Prisma
+prisma/migrations/

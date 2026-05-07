@@ -1,0 +1,30 @@
+# Node
+node_modules/
+dist/
+coverage/
+.nyc_output/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Prisma
+generated/
+
+# Logs
+*.log
+logs/
+
+# Testing
+test-results/

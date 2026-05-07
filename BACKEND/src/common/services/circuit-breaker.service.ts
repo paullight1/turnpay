@@ -1,0 +1,116 @@
+import { Injectable, Logger } from '@nestjs/common';
+import { RedisService } from '../../redis/redis.service';
+
+export interface CircuitBreakerOptions {
+  failureThreshold: number;
+  recoveryTimeout: number;
+  halfOpenMaxRequests: number;
+}
+
+export type CircuitState = 'CLOSED' | 'OPEN' | 'HALF_OPEN';
+
+@Injectable()
+export class CircuitBreakerService {
+  private readonly logger = new Logger(CircuitBreakerService.name);
+  private readonly options: CircuitBreakerOptions;
+
+  constructor(
+    private readonly redis: RedisService,
+    options?: Partial<CircuitBreakerOptions>,
+  ) {
+    this.options = {
+      failureThreshold: options?.failureThreshold ?? 5,
+      recoveryTimeout: options?.recoveryTimeout ?? 60000,
+      halfOpenMaxRequests: options?.halfOpenMaxRequests ?? 3,
+    };
+  }
+
+  private getStateKey(service: string): string {
+    return `circuit:${service}:state`;
+  }
+
+  private getFailuresKey(service: string): string {
+    return `circuit:${service}:failures`;
+  }
+
+  private getRequestsKey(service: string): string {
+    return `circuit:${service}:halfOpenRequests`;
+  }
+
+  async getState(service: string): Promise<CircuitState> {
+    const state = await this.redis.get(this.getStateKey(service));
+    return (state as CircuitState) || 'CLOSED';
+  }
+
+  async canExecute(service: string): Promise<boolean> {
+    const state = await this.getState(service);
+
+    if (state === 'CLOSED') {
+      return true;
+    }
+
+    if (state === 'OPEN') {
+      const failures = await this.redis.get(this.getFailuresKey(service));
+      if (!failures) {
+        await this.transitionTo(service, 'HALF_OPEN');
+        return true;
+      }
+
+      const lastFailure = parseInt(failures, 10);
+      if (Date.now() - lastFailure > this.options.recoveryTimeout) {
+        await this.transitionTo(service, 'HALF_OPEN');
+        return true;
+      }
+
+      return false;
+    }
+
+    // HALF_OPEN
+    const requests = await this.redis.get(this.getRequestsKey(service));
+    const currentRequests = requests ? parseInt(requests, 10) : 0;
+
+    if (currentRequests < this.options.halfOpenMaxRequests) {
+      await this.redis.set(this.getRequestsKey(service), String(currentRequests + 1), 30);
+      return true;
+    }
+
+    return false;
+  }
+
+  async recordSuccess(service: string): Promise<void> {
+    await this.transitionTo(service, 'CLOSED');
+    this.logger.log(`Circuit breaker for ${service} closed (success)`);
+  }
+
+  async recordFailure(service: string): Promise<void> {
+    const failuresKey = this.getFailuresKey(service);
+    const failures = await this.redis.get(failuresKey);
+    const count = failures ? parseInt(failures, 10) + 1 : 1;
+
+    await this.redis.set(failuresKey, String(Date.now()), 300);
+
+    if (count >= this.options.failureThreshold) {
+      await this.transitionTo(service, 'OPEN');
+      this.logger.warn(
+        `Circuit breaker for ${service} opened after ${count} failures`,
+      );
+    } else {
+      this.logger.warn(
+        `Circuit breaker for ${service}: ${count}/${this.options.failureThreshold} failures`,
+      );
+    }
+  }
+
+  private async transitionTo(service: string, state: CircuitState): Promise<void> {
+    await this.redis.set(this.getStateKey(service), state, 300);
+
+    if (state === 'CLOSED') {
+      await this.redis.del(this.getFailuresKey(service));
+      await this.redis.del(this.getRequestsKey(service));
+    }
+
+    if (state === 'HALF_OPEN') {
+      await this.redis.set(this.getRequestsKey(service), '0', 30);
+    }
+  }
+}

@@ -1,0 +1,15 @@
+#!/bin/sh
+
+echo "Running pre-commit checks..."
+
+# Lint backend
+echo "Linting backend..."
+cd backend && npm run lint
+cd ..
+
+# Lint web
+echo "Linting web..."
+cd website && npm run lint
+cd ..
+
+echo "Pre-commit checks passed."
