@@ -1,11 +1,4 @@
-import {
-  Controller,
-  Get,
-  Post,
-  Body,
-  UseGuards,
-  Query,
-} from '@nestjs/common';
+import { Controller, Get, Post, Body, UseGuards, Query } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { ExchangeService } from './exchange.service';
 import { RateService } from './providers/rate.service';
@@ -13,7 +6,11 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
-import { CreateQuoteDto, ExecuteQuoteDto, AdminUpdateRateDto } from './dto/exchange.dto';
+import {
+  CreateQuoteDto,
+  ExecuteQuoteDto,
+  AdminUpdateRateDto,
+} from './dto/exchange.dto';
 
 @Controller('exchange')
 @UseGuards(JwtAuthGuard)
@@ -51,7 +48,12 @@ export class ExchangeController {
   @Roles('ADMIN')
   @UseGuards(RolesGuard)
   async updateRate(@Body() dto: AdminUpdateRateDto) {
-    await this.rateService.setManualRate(dto.from, dto.to, dto.rate, dto.markup);
+    await this.rateService.setManualRate(
+      dto.from,
+      dto.to,
+      dto.rate,
+      dto.markup,
+    );
     return { success: true, message: `Rate updated for ${dto.from}/${dto.to}` };
   }
 }

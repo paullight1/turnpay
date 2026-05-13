@@ -14,9 +14,8 @@ export class OtpService {
     private readonly redis: RedisService,
     private readonly configService: ConfigService,
   ) {
-    this.expirySeconds = parseInt(
-      this.configService.get<string>('OTP_EXPIRES_IN') || '5',
-    ) * 60;
+    this.expirySeconds =
+      parseInt(this.configService.get<string>('OTP_EXPIRES_IN') || '5') * 60;
     this.otpLength = parseInt(
       this.configService.get<string>('OTP_LENGTH') || '6',
     );

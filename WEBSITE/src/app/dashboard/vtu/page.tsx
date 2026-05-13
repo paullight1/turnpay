@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, Suspense } from "react";
+import { useState, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import DashboardLayout from "@/components/layout/dashboard-layout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -9,10 +9,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Badge } from "@/components/ui/badge";
-import { Separator } from "@/components/ui/separator";
 import { toast } from "sonner";
 import { vtuApi } from "@/services/api";
+import { useQuery } from "@tanstack/react-query";
 
 import { VtuProvider, VtuPackage, ApiError } from "@/types";
 
@@ -27,44 +26,30 @@ function VtuContent() {
   const searchParams = useSearchParams();
   const initialType = searchParams.get("type") || "airtime";
   const [activeType, setActiveType] = useState(initialType);
-  const [providers, setProviders] = useState<VtuProvider[]>([]);
-  const [packages, setPackages] = useState<VtuPackage[]>([]);
   const [selectedProvider, setSelectedProvider] = useState("");
   const [selectedPackage, setSelectedPackage] = useState("");
   const [recipientNumber, setRecipientNumber] = useState("");
   const [smartCardNumber, setSmartCardNumber] = useState("");
   const [meterNumber, setMeterNumber] = useState("");
   const [amount, setAmount] = useState("");
-  const [isLoading, setIsLoading] = useState(false);
   const [isPurchasing, setIsPurchasing] = useState(false);
 
-  useEffect(() => {
-    loadProviders();
-  }, [activeType]);
-
-  useEffect(() => {
-    if (selectedProvider && activeType === "data") {
-      loadPackages();
-    }
-  }, [selectedProvider]);
-
-  const loadProviders = async () => {
-    try {
+  const { data: providers = [] } = useQuery({
+    queryKey: ["vtu-providers", activeType],
+    queryFn: async () => {
       const response = await vtuApi.getProviders(activeType);
-      setProviders(response.data);
-    } catch {
-      toast.error("Failed to load providers");
-    }
-  };
+      return response.data as VtuProvider[];
+    },
+  });
 
-  const loadPackages = async () => {
-    try {
+  const { data: packages = [] } = useQuery({
+    queryKey: ["vtu-packages", selectedProvider],
+    queryFn: async () => {
       const response = await vtuApi.getPackages(selectedProvider);
-      setPackages(response.data);
-    } catch {
-      toast.error("Failed to load packages");
-    }
-  };
+      return response.data as VtuPackage[];
+    },
+    enabled: !!selectedProvider && activeType === "data",
+  });
 
   const handlePurchase = async () => {
     if (activeType === "airtime" && (!recipientNumber || !amount)) {

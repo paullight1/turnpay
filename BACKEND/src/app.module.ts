@@ -16,6 +16,10 @@ import { TransactionsModule } from './transactions/transactions.module';
 import { HealthModule } from './health/health.module';
 import { RedisModule } from './redis/redis.module';
 import { CircuitBreakerModule } from './common/services/circuit-breaker.module';
+import { ReconciliationModule } from './common/services/reconciliation.module';
+import { AdminModule } from './admin/admin.module';
+import { KycModule } from './kyc/kyc.module';
+import { SupabaseModule } from './supabase/supabase.module';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 
@@ -30,12 +34,12 @@ import { AppService } from './app.service';
           .default('development'),
         PORT: Joi.number().default(3000),
         DATABASE_URL: Joi.string().required(),
+        SUPABASE_URL: Joi.string().required(),
+        SUPABASE_ANON_KEY: Joi.string().required(),
+        SUPABASE_SERVICE_ROLE_KEY: Joi.string().optional(),
+        SUPABASE_JWT_SECRET: Joi.string().optional(),
         REDIS_HOST: Joi.string().default('localhost'),
         REDIS_PORT: Joi.number().default(6379),
-        JWT_SECRET: Joi.string().required(),
-        JWT_EXPIRES_IN: Joi.string().default('15m'),
-        JWT_REFRESH_SECRET: Joi.string().required(),
-        JWT_REFRESH_EXPIRES_IN: Joi.string().default('7d'),
       }),
     }),
     LoggerModule.forRoot({
@@ -56,6 +60,8 @@ import { AppService } from './app.service';
     ScheduleModule.forRoot(),
     RedisModule,
     CircuitBreakerModule,
+    ReconciliationModule,
+    SupabaseModule,
     PrismaModule,
     AuthModule,
     UsersModule,
@@ -65,6 +71,8 @@ import { AppService } from './app.service';
     PaymentsModule,
     VtuModule,
     TransactionsModule,
+    AdminModule,
+    KycModule,
     HealthModule,
   ],
   controllers: [AppController],

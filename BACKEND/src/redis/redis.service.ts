@@ -1,4 +1,9 @@
-import { Injectable, OnModuleInit, OnModuleDestroy, Logger } from '@nestjs/common';
+import {
+  Injectable,
+  OnModuleInit,
+  OnModuleDestroy,
+  Logger,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import IORedis from 'ioredis';
 
@@ -33,7 +38,9 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
       await this.client.ping();
       this.logger.log('Redis server is reachable');
     } catch (error) {
-      this.logger.warn('Redis server not reachable, falling back to memory storage');
+      this.logger.warn(
+        'Redis server not reachable, falling back to memory storage',
+      );
     }
   }
 
@@ -66,6 +73,20 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
       await this.client.del(key);
     } catch {
       this.logger.warn(`Failed to delete Redis key: ${key}`);
+    }
+  }
+
+  async setIfNotExists(
+    key: string,
+    value: string,
+    ttlSeconds: number,
+  ): Promise<boolean> {
+    try {
+      const result = await this.client.set(key, value, 'EX', ttlSeconds, 'NX');
+      return result === 'OK';
+    } catch {
+      this.logger.warn(`Failed to acquire Redis lock: ${key}`);
+      return false;
     }
   }
 

@@ -4,12 +4,15 @@ import {
   ExecutionContext,
   CallHandler,
   BadRequestException,
+  ConflictException,
 } from '@nestjs/common';
 import { Observable, of } from 'rxjs';
+import { lastValueFrom } from 'rxjs';
 import { RedisService } from '../../redis/redis.service';
 import { PinoLogger } from 'nestjs-pino';
 
 const IDEMPOTENCY_TTL = 86400; // 24 hours
+const IDEMPOTENCY_LOCK_TTL = 30;
 
 @Injectable()
 export class IdempotencyInterceptor implements NestInterceptor {
@@ -23,13 +26,28 @@ export class IdempotencyInterceptor implements NestInterceptor {
     next: CallHandler,
   ): Promise<Observable<any>> {
     const request = context.switchToHttp().getRequest();
-    const idempotencyKey = request.headers['x-idempotency-key'];
+    const method = request.method?.toUpperCase();
+    const path = request.originalUrl || request.url || '';
+    const shouldProcess =
+      ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method) &&
+      !path.startsWith('/api/webhooks') &&
+      !path.startsWith('/api/auth');
 
-    if (!idempotencyKey) {
+    if (!shouldProcess) {
       return next.handle();
     }
 
-    const cacheKey = `idempotency:${idempotencyKey}`;
+    const idempotencyKey =
+      request.headers['idempotency-key'] ||
+      request.headers['x-idempotency-key'];
+
+    if (!idempotencyKey) {
+      throw new BadRequestException('Idempotency-Key header is required');
+    }
+
+    const userId = request.user?.userId || 'anonymous';
+    const cacheKey = `idempotency:${userId}:${idempotencyKey}`;
+    const lockKey = `${cacheKey}:lock`;
 
     const existing = await this.redis.get(cacheKey);
     if (existing) {
@@ -40,12 +58,32 @@ export class IdempotencyInterceptor implements NestInterceptor {
       return of(JSON.parse(existing));
     }
 
-    const response = await next.handle().toPromise();
+    const lock = await this.redis.setIfNotExists(
+      lockKey,
+      '1',
+      IDEMPOTENCY_LOCK_TTL,
+    );
 
-    if (response) {
-      await this.redis.set(cacheKey, JSON.stringify(response), IDEMPOTENCY_TTL);
+    if (!lock) {
+      throw new ConflictException(
+        'Request with this idempotency key is already in progress',
+      );
     }
 
-    return of(response);
+    try {
+      const response = await lastValueFrom(next.handle());
+
+      if (response) {
+        await this.redis.set(
+          cacheKey,
+          JSON.stringify(response),
+          IDEMPOTENCY_TTL,
+        );
+      }
+
+      return of(response);
+    } finally {
+      await this.redis.del(lockKey);
+    }
   }
 }

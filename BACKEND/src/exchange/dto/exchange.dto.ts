@@ -1,4 +1,4 @@
-import { IsString, IsNumber, IsIn, IsPositive } from 'class-validator';
+import { IsString, IsNumber, IsIn, IsPositive, Max } from 'class-validator';
 import { Type } from 'class-transformer';
 
 const SUPPORTED_CURRENCIES = ['NGN', 'GHS'] as const;
@@ -26,6 +26,7 @@ export class CreateQuoteDto {
   @IsNumber()
   @Type(() => Number)
   @IsPositive()
+  @Max(MAX_AMOUNT)
   @IsNumber({ maxDecimalPlaces: 2 })
   amount: number;
 }

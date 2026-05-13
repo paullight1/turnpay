@@ -23,7 +23,9 @@ export class WalletsService {
         ),
       );
 
-      this.logger.log(`Provisioned ${wallets.length} wallets for user ${userId}`);
+      this.logger.log(
+        `Provisioned ${wallets.length} wallets for user ${userId}`,
+      );
 
       return wallets;
     } catch (error: any) {

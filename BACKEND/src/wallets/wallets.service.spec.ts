@@ -6,8 +6,22 @@ describe('WalletsService', () => {
   let service: WalletsService;
 
   const mockWallets = [
-    { id: 'wallet-1', userId: 'user-1', currency: 'NGN', balance: 0, createdAt: new Date(), updatedAt: new Date() },
-    { id: 'wallet-2', userId: 'user-1', currency: 'GHS', balance: 0, createdAt: new Date(), updatedAt: new Date() },
+    {
+      id: 'wallet-1',
+      userId: 'user-1',
+      currency: 'NGN',
+      balance: 0,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    },
+    {
+      id: 'wallet-2',
+      userId: 'user-1',
+      currency: 'GHS',
+      balance: 0,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    },
   ];
 
   const mockPrisma = {
@@ -53,9 +67,14 @@ describe('WalletsService', () => {
 
   describe('getWallets', () => {
     it('should return all wallets for a user', async () => {
-      const resultWallets = mockWallets.map(({ id, currency, balance, updatedAt }) => ({
-        id, currency, balance, updatedAt,
-      }));
+      const resultWallets = mockWallets.map(
+        ({ id, currency, balance, updatedAt }) => ({
+          id,
+          currency,
+          balance,
+          updatedAt,
+        }),
+      );
 
       mockPrisma.wallet.findMany.mockResolvedValue(resultWallets);
 

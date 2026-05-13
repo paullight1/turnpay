@@ -13,8 +13,10 @@ interface FxRateResponse {
 @Injectable()
 export class RateService implements OnModuleInit {
   private readonly logger = new Logger(RateService.name);
-  private readonly cache: Map<string, { rate: number; markup: number; validUntil: Date }> =
-    new Map();
+  private readonly cache: Map<
+    string,
+    { rate: number; markup: number; validUntil: Date }
+  > = new Map();
   private readonly cacheTtlMs: number;
 
   constructor(
@@ -35,7 +37,10 @@ export class RateService implements OnModuleInit {
     await this.fetchRates();
   }
 
-  async getRate(from: string, to: string): Promise<{ rate: number; markup: number }> {
+  async getRate(
+    from: string,
+    to: string,
+  ): Promise<{ rate: number; markup: number }> {
     const key = `${from}_${to}`;
     const cached = this.cache.get(key);
 
@@ -53,7 +58,12 @@ export class RateService implements OnModuleInit {
     throw new Error(`Rate not available for ${from} to ${to}`);
   }
 
-  async setManualRate(from: string, to: string, rate: number, markup: number): Promise<void> {
+  async setManualRate(
+    from: string,
+    to: string,
+    rate: number,
+    markup: number,
+  ): Promise<void> {
     const key = `${from}_${to}`;
 
     await this.prisma.rate.upsert({
@@ -76,7 +86,9 @@ export class RateService implements OnModuleInit {
       validUntil: new Date(Date.now() + this.cacheTtlMs),
     });
 
-    this.logger.log(`Manual rate set: ${from}/${to} = ${rate} (markup: ${markup}%)`);
+    this.logger.log(
+      `Manual rate set: ${from}/${to} = ${rate} (markup: ${markup}%)`,
+    );
   }
 
   private async fetchRates(): Promise<void> {
@@ -103,14 +115,17 @@ export class RateService implements OnModuleInit {
         this.logger.log('FX rates fetched and cached successfully');
       }
     } catch (error) {
-      this.logger.error('Failed to fetch FX rates from API, using fallback', error);
+      this.logger.error(
+        'Failed to fetch FX rates from API, using fallback',
+        error,
+      );
       await this.loadFallbackRates();
     }
   }
 
   private async loadFallbackRates(): Promise<void> {
     const fallbackRates = {
-      NGN_GHS: 0.3150,
+      NGN_GHS: 0.315,
       GHS_NGN: 3.1746,
     };
 
@@ -140,7 +155,9 @@ export class RateService implements OnModuleInit {
     this.logger.log('Fallback rates loaded');
   }
 
-  private async saveRatesToDatabase(rates: Record<string, number>): Promise<void> {
+  private async saveRatesToDatabase(
+    rates: Record<string, number>,
+  ): Promise<void> {
     const markupPercent = 2.5;
 
     const ghsNgn = rates['GHS_NGN'] || rates['NGN'] || 3.1746;

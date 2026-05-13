@@ -8,29 +8,24 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import Link from "next/link";
 import { toast } from "sonner";
-import { ApiError } from "@/types";
+import { getErrorMessage } from "@/lib/errors";
 
 export default function RegisterPage() {
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-  const { register } = useAuth();
+  const { signUp } = useAuth();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
 
     try {
-      await register(email, phone, password);
+      await signUp(email, password, phone);
       toast.success("Account created successfully!");
-    } catch (error) {
-      const err = error as { message?: string; response?: { data?: ApiError } };
-      const message =
-        typeof err.response?.data?.message === "string"
-          ? err.response.data.message
-          : err.message || "Registration failed";
-      toast.error(message);
+    } catch (error: unknown) {
+      toast.error(getErrorMessage(error, "Registration failed"));
     } finally {
       setIsLoading(false);
     }

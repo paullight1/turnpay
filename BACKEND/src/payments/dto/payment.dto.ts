@@ -1,4 +1,11 @@
-import { IsString, IsNumber, IsIn, IsPositive, IsOptional } from 'class-validator';
+import {
+  IsString,
+  IsNumber,
+  IsIn,
+  IsPositive,
+  IsOptional,
+  Max,
+} from 'class-validator';
 import { Type } from 'class-transformer';
 
 const SUPPORTED_CURRENCIES = ['NGN', 'GHS'] as const;
@@ -10,6 +17,7 @@ export class FundWalletDto {
   @IsNumber()
   @Type(() => Number)
   @IsPositive()
+  @Max(MAX_AMOUNT)
   @IsNumber({ maxDecimalPlaces: 2 })
   amount: number;
 
@@ -17,18 +25,22 @@ export class FundWalletDto {
   @IsIn(SUPPORTED_CURRENCIES)
   currency: (typeof SUPPORTED_CURRENCIES)[number];
 
+  @IsOptional()
   @IsString()
   @IsIn(PAYMENT_CHANNELS)
   channel?: (typeof PAYMENT_CHANNELS)[number];
 
+  @IsOptional()
   @IsString()
   @IsIn(PAYMENT_PROVIDERS)
   provider?: (typeof PAYMENT_PROVIDERS)[number];
 
   @IsOptional()
+  @IsString()
   email?: string;
 
   @IsOptional()
+  @IsString()
   callbackUrl?: string;
 }
 
@@ -36,6 +48,7 @@ export class WithdrawDto {
   @IsNumber()
   @Type(() => Number)
   @IsPositive()
+  @Max(MAX_AMOUNT)
   @IsNumber({ maxDecimalPlaces: 2 })
   amount: number;
 
@@ -52,6 +65,7 @@ export class WithdrawDto {
   @IsString()
   accountName: string;
 
+  @IsOptional()
   @IsString()
   @IsIn(PAYMENT_PROVIDERS)
   provider?: (typeof PAYMENT_PROVIDERS)[number];

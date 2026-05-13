@@ -1,8 +1,16 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { type TransactionType } from '@prisma/client';
 import { WalletsService } from '../wallets/wallets.service';
-import { VtuApiProvider, VtuProvider, VtuPackage } from './providers/vtu-api.provider';
+import {
+  VtuApiProvider,
+  VtuProvider,
+  VtuPackage,
+} from './providers/vtu-api.provider';
 import { PurchaseVtuDto } from './dto/vtu.dto';
 import { v4 as uuidv4 } from 'uuid';
 import { PinoLogger } from 'nestjs-pino';
@@ -39,7 +47,9 @@ export class VtuService {
     }
 
     if (wallet.balance.lt(dto.amount)) {
-      throw new BadRequestException(`Insufficient NGN balance. Required: ${dto.amount}`);
+      throw new BadRequestException(
+        `Insufficient NGN balance. Required: ${dto.amount}`,
+      );
     }
 
     const reference = `VTU-${Date.now()}-${uuidv4().slice(0, 8)}`;
@@ -48,10 +58,19 @@ export class VtuService {
 
     try {
       await this.prisma.$transaction(async (tx) => {
-        await tx.wallet.update({
-          where: { id: wallet.id },
+        const deducted = await tx.wallet.updateMany({
+          where: {
+            id: wallet.id,
+            balance: { gte: dto.amount },
+          },
           data: { balance: { decrement: dto.amount } },
         });
+
+        if (deducted.count !== 1) {
+          throw new BadRequestException(
+            `Insufficient NGN balance. Required: ${dto.amount}`,
+          );
+        }
 
         await tx.transaction.create({
           data: {
@@ -91,12 +110,20 @@ export class VtuService {
         });
 
         this.logger.info(
-          { userId, reference, type: dto.type, provider: dto.provider, amount: dto.amount },
+          {
+            userId,
+            reference,
+            type: dto.type,
+            provider: dto.provider,
+            amount: dto.amount,
+          },
           'VTU purchase successful',
         );
       } else {
         await this.reverseVtuPurchase(userId, reference, dto.amount);
-        throw new BadRequestException(`VTU purchase failed: ${purchaseResult.message}`);
+        throw new BadRequestException(
+          `VTU purchase failed: ${purchaseResult.message}`,
+        );
       }
     } catch (error) {
       if (error instanceof BadRequestException) {
@@ -110,7 +137,9 @@ export class VtuService {
         'VTU purchase failed, balance reversed',
       );
 
-      throw new BadRequestException('VTU purchase failed. Balance has been reversed.');
+      throw new BadRequestException(
+        'VTU purchase failed. Balance has been reversed.',
+      );
     }
 
     return {
@@ -121,7 +150,11 @@ export class VtuService {
     };
   }
 
-  private async reverseVtuPurchase(userId: string, reference: string, amount: number) {
+  private async reverseVtuPurchase(
+    userId: string,
+    reference: string,
+    amount: number,
+  ) {
     await this.prisma.$transaction(async (tx) => {
       const wallet = await tx.wallet.findFirst({
         where: { userId, currency: 'NGN' },

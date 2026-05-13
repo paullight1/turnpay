@@ -12,10 +12,10 @@ import { useQuery } from "@tanstack/react-query";
 import { Wallet, Transaction } from "@/types";
 
 const quickActions = [
+  { label: "Fund Wallet", href: "/dashboard/fund", icon: "💰", color: "bg-green-500" },
   { label: "Exchange Currency", href: "/dashboard/exchange", icon: "💱", color: "bg-blue-500" },
-  { label: "Buy Airtime", href: "/dashboard/vtu?type=airtime", icon: "📱", color: "bg-green-500" },
-  { label: "Buy Data", href: "/dashboard/vtu?type=data", icon: "🌐", color: "bg-purple-500" },
-  { label: "Pay Bills", href: "/dashboard/vtu?type=cable", icon: "📺", color: "bg-orange-500" },
+  { label: "Withdraw", href: "/dashboard/withdraw", icon: "🏦", color: "bg-red-500" },
+  { label: "Buy Airtime", href: "/dashboard/vtu?type=airtime", icon: "📱", color: "bg-purple-500" },
 ];
 
 function WalletCard({ wallet, isLoading }: { wallet?: Wallet; isLoading: boolean }) {

@@ -1,8 +1,25 @@
-import { IsString, IsNumber, IsIn, IsPositive, IsOptional } from 'class-validator';
+import {
+  IsString,
+  IsNumber,
+  IsIn,
+  IsPositive,
+  IsOptional,
+  Max,
+} from 'class-validator';
 import { Type } from 'class-transformer';
 
 const VTU_TYPES = ['airtime', 'data', 'cable', 'electricity'] as const;
-const VTU_PROVIDERS = ['mtn', 'airtel', 'glo', 'dstv', 'gotv', 'startimes', 'ikedc', 'ekedc', 'aedc'] as const;
+const VTU_PROVIDERS = [
+  'mtn',
+  'airtel',
+  'glo',
+  'dstv',
+  'gotv',
+  'startimes',
+  'ikedc',
+  'ekedc',
+  'aedc',
+] as const;
 const MAX_AMOUNT = 1_000_000;
 
 export class GetVtuProvidersDto {
@@ -33,6 +50,7 @@ export class PurchaseVtuDto {
   @IsNumber()
   @Type(() => Number)
   @IsPositive()
+  @Max(MAX_AMOUNT)
   @IsNumber({ maxDecimalPlaces: 2 })
   amount: number;
 

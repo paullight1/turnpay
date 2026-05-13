@@ -36,7 +36,9 @@ export class PaystackProvider {
     private readonly configService: ConfigService,
     private readonly logger: PinoLogger,
   ) {
-    this.secretKey = this.configService.getOrThrow<string>('PAYSTACK_SECRET_KEY');
+    this.secretKey = this.configService.getOrThrow<string>(
+      'PAYSTACK_SECRET_KEY',
+    );
   }
 
   private get headers() {
@@ -70,7 +72,11 @@ export class PaystackProvider {
     );
 
     this.logger.info(
-      { reference: params.reference, amount: params.amount, currency: params.currency },
+      {
+        reference: params.reference,
+        amount: params.amount,
+        currency: params.currency,
+      },
       'Paystack payment initialized',
     );
 
@@ -105,20 +111,28 @@ export class PaystackProvider {
     return response.data.data;
   }
 
-  async resolveBankAccount(accountNumber: string, bankCode: string): Promise<{ accountName: string }> {
+  async resolveBankAccount(
+    accountNumber: string,
+    bankCode: string,
+  ): Promise<{ accountName: string }> {
     const response = await firstValueFrom(
       this.httpService.get<{
         status: boolean;
         data: { account_name: string };
-      }>(`${this.baseUrl}/bank/resolve?account_number=${accountNumber}&bank_code=${bankCode}`, {
-        headers: this.headers,
-      }),
+      }>(
+        `${this.baseUrl}/bank/resolve?account_number=${accountNumber}&bank_code=${bankCode}`,
+        {
+          headers: this.headers,
+        },
+      ),
     );
 
     return { accountName: response.data.data.account_name };
   }
 
-  async listBanks(): Promise<Array<{ name: string; code: string; slug: string }>> {
+  async listBanks(): Promise<
+    Array<{ name: string; code: string; slug: string }>
+  > {
     const response = await firstValueFrom(
       this.httpService.get<{
         status: boolean;

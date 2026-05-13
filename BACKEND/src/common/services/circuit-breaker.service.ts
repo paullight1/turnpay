@@ -70,7 +70,11 @@ export class CircuitBreakerService {
     const currentRequests = requests ? parseInt(requests, 10) : 0;
 
     if (currentRequests < this.options.halfOpenMaxRequests) {
-      await this.redis.set(this.getRequestsKey(service), String(currentRequests + 1), 30);
+      await this.redis.set(
+        this.getRequestsKey(service),
+        String(currentRequests + 1),
+        30,
+      );
       return true;
     }
 
@@ -101,7 +105,10 @@ export class CircuitBreakerService {
     }
   }
 
-  private async transitionTo(service: string, state: CircuitState): Promise<void> {
+  private async transitionTo(
+    service: string,
+    state: CircuitState,
+  ): Promise<void> {
     await this.redis.set(this.getStateKey(service), state, 300);
 
     if (state === 'CLOSED') {

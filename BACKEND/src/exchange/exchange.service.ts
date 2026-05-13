@@ -54,7 +54,9 @@ export class ExchangeService {
 
   async createQuote(userId: string, dto: CreateQuoteDto): Promise<QuoteData> {
     if (dto.from === dto.to) {
-      throw new BadRequestException('Source and destination currencies must be different');
+      throw new BadRequestException(
+        'Source and destination currencies must be different',
+      );
     }
 
     const { rate, markup } = await this.rateService.getRate(dto.from, dto.to);
@@ -106,7 +108,9 @@ export class ExchangeService {
     const raw = await this.redis.get(`quote:${dto.quoteId}`);
 
     if (!raw) {
-      throw new NotFoundException('Quote not found. Please create a new quote.');
+      throw new NotFoundException(
+        'Quote not found. Please create a new quote.',
+      );
     }
 
     const quote = JSON.parse(raw) as QuoteData;
@@ -117,7 +121,9 @@ export class ExchangeService {
 
     if (new Date() > quote.expiresAt) {
       await this.redis.del(`quote:${quote.id}`);
-      throw new BadRequestException('Quote has expired. Please create a new quote.');
+      throw new BadRequestException(
+        'Quote has expired. Please create a new quote.',
+      );
     }
 
     const result = await this.prisma.$transaction(
@@ -152,14 +158,27 @@ export class ExchangeService {
 
         const reference = `EXC-${Date.now()}-${uuidv4().slice(0, 8)}`;
 
-        const deductedWallet = await tx.wallet.update({
-          where: { id: sourceWallet.id },
+        const deducted = await tx.wallet.updateMany({
+          where: {
+            id: sourceWallet.id,
+            balance: { gte: quote.sendAmount },
+          },
           data: { balance: { decrement: quote.sendAmount } },
         });
+
+        if (deducted.count !== 1) {
+          throw new BadRequestException(
+            `Insufficient ${quote.from} balance. Required: ${quote.sendAmount}`,
+          );
+        }
 
         const creditedWallet = await tx.wallet.update({
           where: { id: targetWallet.id },
           data: { balance: { increment: quote.receiveAmount } },
+        });
+
+        const deductedWallet = await tx.wallet.findUniqueOrThrow({
+          where: { id: sourceWallet.id },
         });
 
         const transaction = await tx.transaction.create({

@@ -39,7 +39,9 @@ describe('ExchangeService', () => {
       imports: [
         ConfigModule.forRoot({
           isGlobal: true,
-          load: [() => ({ JWT_EXPIRES_IN: '15m', JWT_REFRESH_EXPIRES_IN: '7d' })],
+          load: [
+            () => ({ JWT_EXPIRES_IN: '15m', JWT_REFRESH_EXPIRES_IN: '7d' }),
+          ],
         }),
       ],
       providers: [

@@ -1,9 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import DashboardLayout from "@/components/layout/dashboard-layout";
 import { useAuth } from "@/lib/auth-provider";
-import { authApi } from "@/services/api";
+import { userApi } from "@/services/api";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Separator } from "@/components/ui/separator";
@@ -12,13 +12,37 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
+import { getErrorMessage } from "@/lib/errors";
+
+interface UserProfile {
+  id: string;
+  email: string;
+  phone: string;
+  role: string;
+  kycStatus: string;
+}
 
 export default function ProfilePage() {
-  const { user, logout } = useAuth();
-  const [currentPassword, setCurrentPassword] = useState("");
+  const { user, signOut, updatePassword } = useAuth();
+  const [profile, setProfile] = useState<UserProfile | null>(null);
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [isChangingPassword, setIsChangingPassword] = useState(false);
+
+  useEffect(() => {
+    const fetchProfile = async () => {
+      try {
+        const res = await userApi.getProfile();
+        setProfile(res.data);
+      } catch {
+        console.error("Failed to fetch profile");
+      }
+    };
+
+    if (user) {
+      fetchProfile();
+    }
+  }, [user]);
 
   const handlePasswordChange = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -35,13 +59,12 @@ export default function ProfilePage() {
 
     setIsChangingPassword(true);
     try {
-      await authApi.changePassword(currentPassword, newPassword);
+      await updatePassword(newPassword);
       toast.success("Password changed successfully");
-      setCurrentPassword("");
       setNewPassword("");
       setConfirmPassword("");
-    } catch (error: any) {
-      toast.error(error.response?.data?.message || "Failed to change password");
+    } catch (error: unknown) {
+      toast.error(getErrorMessage(error, "Failed to change password"));
     } finally {
       setIsChangingPassword(false);
     }
@@ -69,7 +92,7 @@ export default function ProfilePage() {
               </Avatar>
               <div>
                 <p className="font-medium text-lg">{user?.email}</p>
-                <p className="text-muted-foreground">{user?.phone}</p>
+                <p className="text-muted-foreground">{profile?.phone || user?.user_metadata?.phone}</p>
               </div>
             </div>
 
@@ -78,22 +101,22 @@ export default function ProfilePage() {
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <p className="text-sm text-muted-foreground">Role</p>
-                <Badge variant={user?.role === "ADMIN" ? "default" : "secondary"}>
-                  {user?.role}
+                <Badge variant={profile?.role === "ADMIN" ? "default" : "secondary"}>
+                  {profile?.role || "USER"}
                 </Badge>
               </div>
               <div>
                 <p className="text-sm text-muted-foreground">KYC Status</p>
                 <Badge
                   variant={
-                    user?.kycStatus === "VERIFIED"
+                    profile?.kycStatus === "VERIFIED"
                       ? "default"
-                      : user?.kycStatus === "REJECTED"
+                      : profile?.kycStatus === "REJECTED"
                       ? "destructive"
                       : "secondary"
                   }
                 >
-                  {user?.kycStatus}
+                  {profile?.kycStatus || "PENDING"}
                 </Badge>
               </div>
             </div>
@@ -107,16 +130,6 @@ export default function ProfilePage() {
           </CardHeader>
           <CardContent>
             <form onSubmit={handlePasswordChange} className="flex flex-col gap-4">
-              <div className="flex flex-col gap-2">
-                <Label htmlFor="current">Current Password</Label>
-                <Input
-                  id="current"
-                  type="password"
-                  value={currentPassword}
-                  onChange={(e) => setCurrentPassword(e.target.value)}
-                  required
-                />
-              </div>
               <div className="flex flex-col gap-2">
                 <Label htmlFor="new">New Password</Label>
                 <Input
@@ -154,7 +167,7 @@ export default function ProfilePage() {
             <p className="text-muted-foreground mb-4">
               Sign out of your account on this device.
             </p>
-            <Button variant="destructive" onClick={logout}>
+            <Button variant="destructive" onClick={signOut}>
               Sign Out
             </Button>
           </CardContent>

@@ -72,7 +72,7 @@ export class PaymentService {
         userId,
         type: 'FUND',
         amount: dto.amount,
-        currency: dto.currency as 'NGN' | 'GHS',
+        currency: dto.currency,
         status: 'PENDING',
         reference,
         metadata: {
@@ -178,9 +178,10 @@ export class PaymentService {
         return { received: true, processed: false };
       }
 
-      const webhookAmount = data.currency === 'NGN' || data.currency === 'GHS'
-        ? data.amount
-        : data.amount / 100;
+      const webhookAmount =
+        data.currency === 'NGN' || data.currency === 'GHS'
+          ? data.amount
+          : data.amount / 100;
 
       const storedAmount = Number(transaction.amount);
       if (Math.abs(webhookAmount - storedAmount) > 0.01) {
@@ -203,7 +204,7 @@ export class PaymentService {
         where: {
           userId_currency: {
             userId: transaction.userId,
-            currency: transaction.currency as WalletCurrency,
+            currency: transaction.currency,
           },
         },
       });
@@ -238,9 +239,63 @@ export class PaymentService {
     }
 
     if (wallet.balance.lt(dto.amount)) {
-      throw new BadRequestException(
-        `Insufficient ${dto.currency} balance`,
-      );
+      throw new BadRequestException(`Insufficient ${dto.currency} balance`);
+    }
+
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        dailyWithdrawLimit: true,
+        monthlyWithdrawLimit: true,
+        dailyWithdrawn: true,
+        monthlyWithdrawn: true,
+        limitResetDate: true,
+      },
+    });
+
+    if (user) {
+      const now = new Date();
+      const needsReset = !user.limitResetDate || user.limitResetDate < now;
+
+      if (needsReset) {
+        await this.prisma.user.update({
+          where: { id: userId },
+          data: {
+            dailyWithdrawn: 0,
+            monthlyWithdrawn: 0,
+            limitResetDate: new Date(now.getFullYear(), now.getMonth() + 1, 1),
+          },
+        });
+      }
+
+      const updated = await this.prisma.user.findUnique({
+        where: { id: userId },
+        select: {
+          dailyWithdrawn: true,
+          monthlyWithdrawn: true,
+          dailyWithdrawLimit: true,
+          monthlyWithdrawLimit: true,
+        },
+      });
+
+      if (!updated) {
+        throw new BadRequestException('User not found');
+      }
+
+      const newDaily = Number(updated.dailyWithdrawn) + Number(dto.amount);
+      const newMonthly = Number(updated.monthlyWithdrawn) + Number(dto.amount);
+
+      if (newDaily > Number(updated.dailyWithdrawLimit)) {
+        throw new BadRequestException(
+          `Daily withdrawal limit exceeded. Remaining: ₦${(Number(updated.dailyWithdrawLimit) - Number(updated.dailyWithdrawn)).toFixed(2)}`,
+        );
+      }
+
+      if (newMonthly > Number(updated.monthlyWithdrawLimit)) {
+        throw new BadRequestException(
+          `Monthly withdrawal limit exceeded. Remaining: ₦${(Number(updated.monthlyWithdrawLimit) - Number(updated.monthlyWithdrawn)).toFixed(2)}`,
+        );
+      }
     }
 
     const reference = `WD-${Date.now()}-${uuidv4().slice(0, 8)}`;
@@ -248,9 +303,24 @@ export class PaymentService {
     let transferStatus = 'FAILED';
 
     await this.prisma.$transaction(async (tx) => {
-      await tx.wallet.update({
-        where: { id: wallet.id },
+      const deducted = await tx.wallet.updateMany({
+        where: {
+          id: wallet.id,
+          balance: { gte: dto.amount },
+        },
         data: { balance: { decrement: dto.amount } },
+      });
+
+      if (deducted.count !== 1) {
+        throw new BadRequestException(`Insufficient ${dto.currency} balance`);
+      }
+
+      await tx.user.update({
+        where: { id: userId },
+        data: {
+          dailyWithdrawn: { increment: dto.amount },
+          monthlyWithdrawn: { increment: dto.amount },
+        },
       });
 
       await tx.transaction.create({
@@ -258,7 +328,7 @@ export class PaymentService {
           userId,
           type: 'WITHDRAW',
           amount: dto.amount,
-          currency: dto.currency as 'NGN' | 'GHS',
+          currency: dto.currency,
           status: 'PENDING',
           reference,
           walletId: wallet.id,
@@ -302,11 +372,12 @@ export class PaymentService {
         transferStatus = transfer.status;
       }
 
-      const finalStatus = transferStatus === 'success' || transferStatus === 'SUCCESSFUL'
-        ? 'SUCCESS'
-        : transferStatus === 'pending' || transferStatus === 'PENDING'
-        ? 'PENDING'
-        : 'FAILED';
+      const finalStatus =
+        transferStatus === 'success' || transferStatus === 'SUCCESSFUL'
+          ? 'SUCCESS'
+          : transferStatus === 'pending' || transferStatus === 'PENDING'
+            ? 'PENDING'
+            : 'FAILED';
 
       await this.prisma.transaction.update({
         where: { reference },
@@ -325,7 +396,9 @@ export class PaymentService {
           { reference, transferStatus },
           'Transfer failed, balance reversed',
         );
-        throw new BadRequestException('Transfer failed. Balance has been reversed.');
+        throw new BadRequestException(
+          'Transfer failed. Balance has been reversed.',
+        );
       }
     } catch (error) {
       if (error instanceof BadRequestException) {
@@ -348,7 +421,9 @@ export class PaymentService {
         { reference, error },
         'Transfer failed, balance reversed',
       );
-      throw new BadRequestException('Transfer failed. Balance has been reversed.');
+      throw new BadRequestException(
+        'Transfer failed. Balance has been reversed.',
+      );
     }
 
     this.logger.info(
@@ -373,6 +448,9 @@ export class PaymentService {
   verifyPaystackSignature(rawBody: string, signature: string): boolean {
     const secret = this.configService.getOrThrow<string>('PAYSTACK_SECRET_KEY');
     const hash = createHmac('sha512', secret).update(rawBody).digest('hex');
+    if (hash.length !== signature.length) {
+      return false;
+    }
     return timingSafeEqual(Buffer.from(hash), Buffer.from(signature));
   }
 
@@ -381,16 +459,35 @@ export class PaymentService {
       'FLUTTERWAVE_SECRET_KEY',
     );
     const hash = createHmac('sha256', secret).update(rawBody).digest('hex');
+    if (hash.length !== signature.length) {
+      return false;
+    }
     return timingSafeEqual(Buffer.from(hash), Buffer.from(signature));
   }
 
   private async processSuccessfulDeposit(transaction: Transaction) {
     await this.prisma.$transaction(async (tx) => {
+      const updated = await tx.transaction.updateMany({
+        where: {
+          id: transaction.id,
+          status: 'PENDING',
+        },
+        data: { status: 'SUCCESS' },
+      });
+
+      if (updated.count === 0) {
+        this.logger.info(
+          { reference: transaction.reference },
+          'Deposit already processed',
+        );
+        return;
+      }
+
       const wallet = await tx.wallet.findUnique({
         where: {
           userId_currency: {
             userId: transaction.userId,
-            currency: transaction.currency as WalletCurrency,
+            currency: transaction.currency,
           },
         },
       });
@@ -407,11 +504,6 @@ export class PaymentService {
       await tx.wallet.update({
         where: { id: wallet.id },
         data: { balance: { increment: txAmount } },
-      });
-
-      await tx.transaction.update({
-        where: { id: transaction.id },
-        data: { status: 'SUCCESS' },
       });
     });
 

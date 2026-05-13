@@ -14,8 +14,25 @@ enum UserRole {
 
 enum KYCStatus {
   PENDING
+  SUBMITTED
   VERIFIED
   REJECTED
+}
+
+enum KYCType {
+  BVN
+  NIN
+  PASSPORT
+  DRIVERS_LICENSE
+  VOTERS_CARD
+}
+
+enum DisputeStatus {
+  OPEN
+  UNDER_REVIEW
+  RESOLVED
+  CLOSED
+  ESCALATED
 }
 
 enum TransactionType {
@@ -41,20 +58,28 @@ enum WalletCurrency {
 }
 
 model User {
-  id             String    @id @default(uuid())
-  email          String    @unique
-  phone          String    @unique
-  password       String
-  role           UserRole  @default(USER)
-  kycStatus      KYCStatus @default(PENDING)
-  failedAttempts Int       @default(0)
-  lockedUntil    DateTime?
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
+  id                  String          @id @default(uuid())
+  email               String          @unique
+  phone               String          @unique
+  password            String
+  role                UserRole        @default(USER)
+  kycStatus           KYCStatus       @default(PENDING)
+  dailyWithdrawLimit  Decimal         @default(500000) @db.Decimal(15, 2)
+  monthlyWithdrawLimit Decimal        @default(5000000) @db.Decimal(15, 2)
+  dailyWithdrawn      Decimal         @default(0) @db.Decimal(15, 2)
+  monthlyWithdrawn    Decimal         @default(0) @db.Decimal(15, 2)
+  limitResetDate      DateTime?
+  isSuspended         Boolean         @default(false)
+  failedAttempts      Int             @default(0)
+  lockedUntil         DateTime?
+  createdAt           DateTime        @default(now())
+  updatedAt           DateTime        @updatedAt
 
-  wallets        Wallet[]
-  transactions   Transaction[]
-  refreshTokens  RefreshToken[]
+  wallets             Wallet[]
+  transactions        Transaction[]
+  refreshTokens       RefreshToken[]
+  kycDocuments        KycDocument[]
+  disputes            Dispute[]
 
   @@map("users")
 }
@@ -103,8 +128,9 @@ model Transaction {
   createdAt   DateTime          @default(now())
   updatedAt   DateTime          @updatedAt
 
-  user   User   @relation(fields: [userId], references: [id])
-  wallet Wallet? @relation(fields: [walletId], references: [id])
+  user    User     @relation(fields: [userId], references: [id])
+  wallet  Wallet?  @relation(fields: [walletId], references: [id])
+  disputes Dispute[]
 
   @@index([userId, status])
   @@index([userId, createdAt(sort: Desc)])
@@ -138,4 +164,59 @@ model Service {
   updatedAt   DateTime @updatedAt
 
   @@map("services")
+}
+
+model KycDocument {
+  id           String   @id @default(uuid())
+  userId       String
+  type         KYCType
+  documentUrl  String
+  idNumber     String
+  status       KYCStatus @default(PENDING)
+  rejectionNote String?
+  reviewedBy   String?
+  reviewedAt   DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, status])
+  @@map("kyc_documents")
+}
+
+model Dispute {
+  id            String        @id @default(uuid())
+  userId        String
+  transactionId String?
+  type          String
+  description   String
+  status        DisputeStatus @default(OPEN)
+  resolution    String?
+  resolvedBy    String?
+  resolvedAt    DateTime?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  user        User         @relation(fields: [userId], references: [id])
+  transaction Transaction? @relation(fields: [transactionId], references: [id])
+
+  @@index([userId, status])
+  @@index([transactionId])
+  @@map("disputes")
+}
+
+model WebhookLog {
+  id           String   @id @default(uuid())
+  provider     String
+  eventType    String
+  reference    String   @unique
+  payload      Json
+  processed    Boolean  @default(false)
+  errorMessage String?
+  createdAt    DateTime @default(now())
+
+  @@index([provider, reference])
+  @@index([processed])
+  @@map("webhook_logs")
 }

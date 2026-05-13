@@ -1,4 +1,5 @@
 import axios from "axios";
+import { createClient } from "@/lib/supabase";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3000";
 
@@ -25,13 +26,23 @@ export const apiClient = axios.create({
   headers: { "Content-Type": "application/json" },
 });
 
-apiClient.interceptors.request.use((config) => {
-  if (typeof window !== "undefined") {
-    const token = localStorage.getItem("auth_token");
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`;
-    }
+apiClient.interceptors.request.use(async (config) => {
+  const supabase = createClient();
+  const { data: { session } } = await supabase.auth.getSession();
+
+  if (session?.access_token) {
+    config.headers.Authorization = `Bearer ${session.access_token}`;
   }
+
+  const method = config.method?.toUpperCase();
+  if (
+    method &&
+    ["POST", "PUT", "PATCH", "DELETE"].includes(method) &&
+    !config.headers["Idempotency-Key"]
+  ) {
+    config.headers["Idempotency-Key"] = crypto.randomUUID();
+  }
+
   return config;
 });
 
@@ -55,66 +66,38 @@ apiClient.interceptors.response.use(
       originalRequest._retry = true;
       isRefreshing = true;
 
-      const refreshToken = localStorage.getItem("refresh_token");
+      const supabase = createClient();
+      const { data: { session }, error: refreshError } = await supabase.auth.refreshSession();
 
-      if (!refreshToken) {
-        clearAuth();
-        return Promise.reject(error);
-      }
-
-      try {
-        const response = await axios.post(
-          `${API_URL}/api/auth/refresh`,
-          {},
-          {
-            headers: { Authorization: `Bearer ${refreshToken}` },
-          }
-        );
-
-        const { accessToken, refreshToken: newRefreshToken } = response.data;
-        localStorage.setItem("auth_token", accessToken);
-        if (newRefreshToken) {
-          localStorage.setItem("refresh_token", newRefreshToken);
-        }
-
-        apiClient.defaults.headers.common.Authorization = `Bearer ${accessToken}`;
-        processQueue(null, accessToken);
-
-        originalRequest.headers.Authorization = `Bearer ${accessToken}`;
-        return apiClient(originalRequest);
-      } catch (refreshError) {
+      if (refreshError || !session) {
         processQueue(refreshError, null);
-        clearAuth();
+        if (typeof window !== "undefined") {
+          window.location.href = "/login";
+        }
         return Promise.reject(refreshError);
-      } finally {
-        isRefreshing = false;
       }
+
+      const accessToken = session.access_token;
+      apiClient.defaults.headers.common.Authorization = `Bearer ${accessToken}`;
+      processQueue(null, accessToken);
+
+      originalRequest.headers.Authorization = `Bearer ${accessToken}`;
+      return apiClient(originalRequest);
     }
 
     return Promise.reject(error);
   }
 );
 
-function clearAuth() {
-  if (typeof window !== "undefined") {
-    localStorage.removeItem("auth_token");
-    localStorage.removeItem("refresh_token");
-    localStorage.removeItem("user");
-    window.location.href = "/login";
-  }
-}
-
 export const authApi = {
   login: (email: string, password: string) =>
     apiClient.post("/api/auth/login", { email, password }),
   register: (email: string, phone: string, password: string) =>
     apiClient.post("/api/auth/register", { email, phone, password }),
-  refresh: (refreshToken: string) =>
-    apiClient.post("/api/auth/refresh", null, {
-      headers: { Authorization: `Bearer ${refreshToken}` },
-    }),
-  logout: (refreshToken: string) =>
-    apiClient.post("/api/auth/logout", { refreshToken }),
+  forgotPassword: (email: string) =>
+    apiClient.post("/api/auth/forgot-password", { email }),
+  logout: () =>
+    apiClient.post("/api/auth/logout"),
   changePassword: (currentPassword: string, newPassword: string) =>
     apiClient.post("/api/auth/change-password", {
       currentPassword,
@@ -134,7 +117,7 @@ export const walletApi = {
 
 export const exchangeApi = {
   getRate: (from: string, to: string) =>
-    apiClient.get(`/api/exchange/rate?from=${from}&to=${to}`),
+    apiClient.get(`/api/exchange/rate?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`),
   createQuote: (data: { from: string; to: string; amount: number }) =>
     apiClient.post("/api/exchange/quote", data),
   executeQuote: (quoteId: string) =>
@@ -166,9 +149,9 @@ export const paymentApi = {
 
 export const vtuApi = {
   getProviders: (type?: string) =>
-    apiClient.get(`/api/vtu/providers${type ? `?type=${type}` : ""}`),
+    apiClient.get(`/api/vtu/providers${type ? `?type=${encodeURIComponent(type)}` : ""}`),
   getPackages: (provider: string) =>
-    apiClient.get(`/api/vtu/packages?provider=${provider}`),
+    apiClient.get(`/api/vtu/packages?provider=${encodeURIComponent(provider)}`),
   purchase: (data: {
     type: string;
     provider: string;
@@ -180,11 +163,11 @@ export const vtuApi = {
   }) => apiClient.post("/api/vtu/purchase", data),
   validateSmartCard: (provider: string, number: string) =>
     apiClient.post(
-      `/api/vtu/validate/smartcard?provider=${provider}&number=${number}`
+      `/api/vtu/validate/smartcard?provider=${encodeURIComponent(provider)}&number=${encodeURIComponent(number)}`
     ),
   validateMeter: (provider: string, number: string) =>
     apiClient.post(
-      `/api/vtu/validate/meter?provider=${provider}&number=${number}`
+      `/api/vtu/validate/meter?provider=${encodeURIComponent(provider)}&number=${encodeURIComponent(number)}`
     ),
 };
 

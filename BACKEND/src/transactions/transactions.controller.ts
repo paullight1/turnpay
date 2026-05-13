@@ -1,10 +1,4 @@
-import {
-  Controller,
-  Get,
-  Query,
-  UseGuards,
-  Param,
-} from '@nestjs/common';
+import { Controller, Get, Query, UseGuards, Param } from '@nestjs/common';
 import { TransactionsService } from './transactions.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
@@ -36,23 +30,6 @@ export class TransactionsController {
     );
   }
 
-  @Get(':reference')
-  async getTransactionByReference(
-    @CurrentUser() user: { userId: string },
-    @Param('reference') reference: string,
-  ) {
-    const transaction = await this.transactionsService.getTransactionByReference(
-      reference,
-      user.userId,
-    );
-
-    if (!transaction) {
-      return { error: 'Transaction not found' };
-    }
-
-    return transaction;
-  }
-
   @Get('all')
   @Roles('ADMIN')
   @UseGuards(RolesGuard)
@@ -71,5 +48,23 @@ export class TransactionsController {
       status,
       type,
     );
+  }
+
+  @Get(':reference')
+  async getTransactionByReference(
+    @CurrentUser() user: { userId: string },
+    @Param('reference') reference: string,
+  ) {
+    const transaction =
+      await this.transactionsService.getTransactionByReference(
+        reference,
+        user.userId,
+      );
+
+    if (!transaction) {
+      return { error: 'Transaction not found' };
+    }
+
+    return transaction;
   }
 }

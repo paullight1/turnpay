@@ -117,7 +117,10 @@ export class VtuApiProvider {
     }
   }
 
-  async validateSmartCard(provider: string, smartCardNumber: string): Promise<{ name: string; status: string }> {
+  async validateSmartCard(
+    provider: string,
+    smartCardNumber: string,
+  ): Promise<{ name: string; status: string }> {
     if (!this.baseUrl) {
       return { name: 'Test User', status: 'active' };
     }
@@ -132,7 +135,10 @@ export class VtuApiProvider {
     return response.data;
   }
 
-  async validateMeter(provider: string, meterNumber: string): Promise<{ name: string; address: string }> {
+  async validateMeter(
+    provider: string,
+    meterNumber: string,
+  ): Promise<{ name: string; address: string }> {
     if (!this.baseUrl) {
       return { name: 'Test Customer', address: 'Test Address' };
     }
@@ -155,9 +161,24 @@ export class VtuApiProvider {
       { id: 'dstv', name: 'DStv', type: 'cable', isActive: true },
       { id: 'gotv', name: 'GOtv', type: 'cable', isActive: true },
       { id: 'startimes', name: 'StarTimes', type: 'cable', isActive: true },
-      { id: 'ikedc', name: 'Ikeja Electric', type: 'electricity', isActive: true },
-      { id: 'ekedc', name: 'Eko Electric', type: 'electricity', isActive: true },
-      { id: 'aedc', name: 'Abuja Electric', type: 'electricity', isActive: true },
+      {
+        id: 'ikedc',
+        name: 'Ikeja Electric',
+        type: 'electricity',
+        isActive: true,
+      },
+      {
+        id: 'ekedc',
+        name: 'Eko Electric',
+        type: 'electricity',
+        isActive: true,
+      },
+      {
+        id: 'aedc',
+        name: 'Abuja Electric',
+        type: 'electricity',
+        isActive: true,
+      },
     ];
 
     if (type) {
@@ -186,7 +207,12 @@ export class VtuApiProvider {
       ],
       dstv: [
         { id: 'dstv-jolli', name: 'Jolli', price: 6500, validity: '30 days' },
-        { id: 'dstv-premium', name: 'Premium', price: 29500, validity: '30 days' },
+        {
+          id: 'dstv-premium',
+          name: 'Premium',
+          price: 29500,
+          validity: '30 days',
+        },
       ],
       gotv: [
         { id: 'gotv-jinja', name: 'Jinja', price: 3100, validity: '30 days' },

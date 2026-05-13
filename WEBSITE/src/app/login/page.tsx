@@ -8,30 +8,23 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import Link from "next/link";
 import { toast } from "sonner";
-import { useRouter } from "next/navigation";
-import { ApiError } from "@/types";
+import { getErrorMessage } from "@/lib/errors";
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-  const { login } = useAuth();
-  const router = useRouter();
+  const { signIn } = useAuth();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
 
     try {
-      await login(email, password);
+      await signIn(email, password);
       toast.success("Welcome back!");
-    } catch (error) {
-      const err = error as { message?: string; response?: { data?: ApiError } };
-      const message =
-        typeof err.response?.data?.message === "string"
-          ? err.response.data.message
-          : err.message || "Login failed";
-      toast.error(message);
+    } catch (error: unknown) {
+      toast.error(getErrorMessage(error, "Login failed"));
     } finally {
       setIsLoading(false);
     }
@@ -57,17 +50,20 @@ export default function LoginPage() {
                 required
               />
             </div>
-            <div className="flex flex-col gap-2">
+            <div className="flex items-center justify-between">
               <Label htmlFor="password">Password</Label>
-              <Input
-                id="password"
-                type="password"
-                placeholder="••••••••"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-              />
+              <Link href="/forgot-password" className="text-xs text-primary hover:underline">
+                Forgot password?
+              </Link>
             </div>
+            <Input
+              id="password"
+              type="password"
+              placeholder="••••••••"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              required
+            />
             <Button type="submit" disabled={isLoading} className="w-full">
               {isLoading ? "Signing in..." : "Sign In"}
             </Button>

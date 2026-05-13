@@ -5,11 +5,16 @@ import { AuthProvider } from "@/lib/auth-provider";
 import { QueryProvider } from "@/lib/query-provider";
 import { Toaster } from "@/components/ui/sonner";
 
-const inter = Inter({ subsets: ["latin"] });
+const inter = Inter({
+  subsets: ["latin"],
+  display: "swap",
+  variable: "--font-inter",
+});
 
 export const metadata: Metadata = {
-  title: "TrustPay — Currency Exchange & Bill Payments",
-  description: "Send money, buy airtime, pay bills — all in one place.",
+  title: "TrustPay - NGN & GHS Wallets, Exchange & Bills",
+  description:
+    "TrustPay brings NGN and GHS wallets, currency exchange, airtime, data, cable, electricity, withdrawals, and receipts into one focused app.",
 };
 
 export default function RootLayout({
@@ -18,8 +23,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className={inter.className}>
-      <body className="min-h-screen antialiased">
+    <html lang="en" className={inter.variable}>
+      <body className="min-h-screen font-sans antialiased">
         <QueryProvider>
           <AuthProvider>
             {children}

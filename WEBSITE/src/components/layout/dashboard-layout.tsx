@@ -24,14 +24,18 @@ import { cn } from "@/lib/utils";
 
 const navItems = [
   { label: "Dashboard", href: "/dashboard", icon: "📊" },
+  { label: "Fund", href: "/dashboard/fund", icon: "💰" },
+  { label: "Withdraw", href: "/dashboard/withdraw", icon: "🏦" },
   { label: "Exchange", href: "/dashboard/exchange", icon: "💱" },
-  { label: "Airtime & Data", href: "/dashboard/vtu", icon: "📱" },
+  { label: "VTU", href: "/dashboard/vtu", icon: "📱" },
   { label: "Transactions", href: "/dashboard/transactions", icon: "📋" },
+  { label: "KYC", href: "/dashboard/kyc", icon: "🪪" },
   { label: "Profile", href: "/dashboard/profile", icon: "👤" },
 ];
 
 const adminItems = [
   { label: "Admin", href: "/admin", icon: "🛡️" },
+  { label: "KYC Review", href: "/admin/kyc", icon: "📝" },
 ];
 
 function Sidebar({ items, pathname }: { items: typeof navItems; pathname: string }) {
@@ -61,7 +65,7 @@ export default function DashboardLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const { user, logout, isLoading } = useAuth();
+  const { user, signOut, isLoading } = useAuth();
   const pathname = usePathname();
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -129,7 +133,7 @@ export default function DashboardLayout({
                 <DropdownMenuSeparator />
                 <DropdownMenuItem
                   className="cursor-pointer text-destructive"
-                  onClick={logout}
+                  onClick={signOut}
                 >
                   Sign Out
                 </DropdownMenuItem>
