@@ -129,6 +129,27 @@ export class FlutterwaveProvider {
     };
   }
 
+  async verifyTransfer(transferId: number) {
+    const response = await firstValueFrom(
+      this.httpService.get<{
+        status: string;
+        message: string;
+        data: {
+          id: number;
+          status: string;
+          reference: string;
+          amount: number;
+          currency: string;
+          complete_message?: string;
+        };
+      }>(`${this.baseUrl}/transfers/${transferId}`, {
+        headers: this.headers,
+      }),
+    );
+
+    return response.data.data;
+  }
+
   verifySignature(payload: string, signature: string): boolean {
     const hash = createHmac('sha256', this.secretKey)
       .update(payload)

@@ -1,8 +1,8 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 import '../../../core/theme/app_theme.dart';
 
 /// Superlist-inspired social auth button.
-/// Dark surface with icon + label — used for Google / Apple sign-in.
+/// Dark surface with icon + label â€” used for Google / Apple sign-in.
 class SocialAuthButton extends StatelessWidget {
   final String label;
   final IconData icon;
@@ -31,7 +31,7 @@ class SocialAuthButton extends StatelessWidget {
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Icon(icon, color: AppColors.textPrimary, size: 22),
-            const SizedBox(width: AppSpacing.sm),
+            SizedBox(width: AppSpacing.sm),
             Text(label, style: AppTextStyles.labelM),
           ],
         ),
@@ -39,3 +39,4 @@ class SocialAuthButton extends StatelessWidget {
     );
   }
 }
+

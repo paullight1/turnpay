@@ -1,20 +1,27 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { WalletCurrency } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
 export class WalletsService {
   private readonly logger = new Logger(WalletsService.name);
+  private readonly currencies: WalletCurrency[] = ['NGN', 'GHS'];
 
   constructor(private readonly prisma: PrismaService) {}
 
   async provisionWallets(userId: string) {
-    const currencies = ['NGN', 'GHS'] as const;
-
-    try {
-      const wallets = await this.prisma.$transaction(
-        currencies.map((currency) =>
-          this.prisma.wallet.create({
-            data: {
+    const wallets = await this.prisma.$transaction(async (tx) => {
+      await Promise.all(
+        this.currencies.map((currency) =>
+          tx.wallet.upsert({
+            where: {
+              userId_currency: {
+                userId,
+                currency,
+              },
+            },
+            update: {},
+            create: {
               userId,
               currency,
               balance: 0,
@@ -23,29 +30,33 @@ export class WalletsService {
         ),
       );
 
-      this.logger.log(
-        `Provisioned ${wallets.length} wallets for user ${userId}`,
-      );
+      return tx.wallet.findMany({
+        where: { userId },
+        select: this.walletSelect,
+        orderBy: { currency: 'desc' },
+      });
+    });
 
-      return wallets;
-    } catch (error: any) {
-      if (error.code === 'P2002') {
-        this.logger.warn(`Wallets already exist for user ${userId}`);
-        return this.getWallets(userId);
-      }
-      throw error;
-    }
+    this.logger.log(`Ensured ${wallets.length} wallets for user ${userId}`);
+
+    return wallets;
   }
 
   async getWallets(userId: string) {
+    const wallets = await this.findWallets(userId);
+
+    if (wallets.length >= this.currencies.length) {
+      return wallets;
+    }
+
+    return this.provisionWallets(userId);
+  }
+
+  private findWallets(userId: string) {
     return this.prisma.wallet.findMany({
       where: { userId },
-      select: {
-        id: true,
-        currency: true,
-        balance: true,
-        updatedAt: true,
-      },
+      select: this.walletSelect,
+      orderBy: { currency: 'desc' },
     });
   }
 
@@ -64,4 +75,11 @@ export class WalletsService {
     const wallet = await this.getWallet(userId, currency);
     return wallet?.balance ?? 0;
   }
+
+  private readonly walletSelect = {
+    id: true,
+    currency: true,
+    balance: true,
+    updatedAt: true,
+  } as const;
 }

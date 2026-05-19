@@ -5,14 +5,14 @@ import {
   HttpException,
   HttpStatus,
 } from '@nestjs/common';
+import type { LoggerService } from '@nestjs/common';
 import { HttpAdapterHost } from '@nestjs/core';
-import { PinoLogger } from 'nestjs-pino';
 
 @Catch()
 export class AllExceptionsFilter implements ExceptionFilter {
   constructor(
     private readonly httpAdapterHost: HttpAdapterHost,
-    private readonly logger: PinoLogger,
+    private readonly logger: LoggerService,
   ) {}
 
   catch(exception: unknown, host: ArgumentsHost): void {

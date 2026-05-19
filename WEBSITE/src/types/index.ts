@@ -9,18 +9,18 @@ export interface User {
 export interface Wallet {
   id: string;
   currency: string;
-  balance: number;
+  balance: number | string;
   updatedAt: string;
 }
 
 export interface Transaction {
   id: string;
   type: string;
-  amount: number;
+  amount: number | string;
   currency: string;
   status: string;
   reference: string;
-  fee: number;
+  fee: number | string;
   metadata: Record<string, unknown> | null;
   createdAt: string;
   updatedAt: string;

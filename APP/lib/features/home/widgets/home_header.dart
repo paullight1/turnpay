@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 import '../../../core/theme/app_theme.dart';
 
 /// Header row: "Welcome Back! / Hi, [Name]." + notification bell with badge.
@@ -18,7 +18,7 @@ class HomeHeader extends StatelessWidget {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
-        // ── Left: Greeting ──
+        // â”€â”€ Left: Greeting â”€â”€
         Expanded(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -30,7 +30,7 @@ class HomeHeader extends StatelessWidget {
                   fontWeight: FontWeight.w400,
                 ),
               ),
-              const SizedBox(height: 2),
+              SizedBox(height: 2),
               Text(
                 'Hi, $userName.',
                 style: AppTextStyles.headingXL.copyWith(
@@ -42,7 +42,7 @@ class HomeHeader extends StatelessWidget {
           ),
         ),
 
-        // ── Right: Notification Bell ──
+        // â”€â”€ Right: Notification Bell â”€â”€
         Stack(
           clipBehavior: Clip.none,
           children: [
@@ -53,7 +53,7 @@ class HomeHeader extends StatelessWidget {
                 color: AppColors.surfaceVariant,
                 borderRadius: BorderRadius.circular(AppRadius.md),
               ),
-              child: const Icon(
+              child: Icon(
                 Icons.notifications_none_rounded,
                 color: AppColors.textPrimary,
                 size: 22,
@@ -74,7 +74,7 @@ class HomeHeader extends StatelessWidget {
                   child: Center(
                     child: Text(
                       notificationCount > 9 ? '9+' : '$notificationCount',
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 9,
                         fontWeight: FontWeight.w700,
                         color: Colors.white,
@@ -89,3 +89,4 @@ class HomeHeader extends StatelessWidget {
     );
   }
 }
+

@@ -7,6 +7,7 @@ import { PaystackProvider } from './providers/paystack.provider';
 import { FlutterwaveProvider } from './providers/flutterwave.provider';
 import { UsersModule } from '../users/users.module';
 import { WalletsModule } from '../wallets/wallets.module';
+import { BankingModule } from '../banking/banking.module';
 
 @Module({
   imports: [
@@ -16,9 +17,10 @@ import { WalletsModule } from '../wallets/wallets.module';
     }),
     UsersModule,
     WalletsModule,
+    BankingModule,
   ],
   controllers: [PaymentController, WebhookController],
   providers: [PaymentService, PaystackProvider, FlutterwaveProvider],
-  exports: [PaymentService],
+  exports: [PaymentService, PaystackProvider, FlutterwaveProvider],
 })
 export class PaymentsModule {}

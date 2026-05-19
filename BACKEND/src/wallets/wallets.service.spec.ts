@@ -27,6 +27,7 @@ describe('WalletsService', () => {
   const mockPrisma = {
     wallet: {
       create: jest.fn(),
+      upsert: jest.fn(),
       findMany: jest.fn(),
       findUnique: jest.fn(),
     },
@@ -55,12 +56,21 @@ describe('WalletsService', () => {
 
   describe('provisionWallets', () => {
     it('should create NGN and GHS wallets for a user', async () => {
-      mockPrisma.wallet.create.mockResolvedValue(mockWallets[0]);
-      mockPrisma.$transaction.mockResolvedValue(mockWallets);
+      const resultWallets = mockWallets.map(
+        ({ id, currency, balance, updatedAt }) => ({
+          id,
+          currency,
+          balance,
+          updatedAt,
+        }),
+      );
+      mockPrisma.wallet.upsert.mockResolvedValue(mockWallets[0]);
+      mockPrisma.wallet.findMany.mockResolvedValue(resultWallets);
 
       const wallets = await service.provisionWallets('user-1');
 
       expect(mockPrisma.$transaction).toHaveBeenCalled();
+      expect(mockPrisma.wallet.upsert).toHaveBeenCalledTimes(2);
       expect(wallets).toHaveLength(2);
     });
   });
@@ -84,6 +94,7 @@ describe('WalletsService', () => {
       expect(mockPrisma.wallet.findMany).toHaveBeenCalledWith({
         where: { userId: 'user-1' },
         select: { id: true, currency: true, balance: true, updatedAt: true },
+        orderBy: { currency: 'desc' },
       });
     });
   });

@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/theme/app_theme.dart';
@@ -89,7 +89,7 @@ class _SplashScreenState extends State<SplashScreen>
               child: _LogoMark(),
             ),
 
-            const SizedBox(height: AppSpacing.xl),
+            SizedBox(height: AppSpacing.xl),
 
             // App Name + Tagline
             AnimatedBuilder(
@@ -109,7 +109,7 @@ class _SplashScreenState extends State<SplashScreen>
                       color: AppColors.textPrimary,
                     ),
                   ),
-                  const SizedBox(height: AppSpacing.sm),
+                  SizedBox(height: AppSpacing.sm),
                   Text(
                     'Send money across borders.',
                     style: AppTextStyles.bodyL.copyWith(
@@ -126,7 +126,7 @@ class _SplashScreenState extends State<SplashScreen>
   }
 }
 
-// ─── LOGO MARK WIDGET ─────────────────────────────────────────────────────────
+// â”€â”€â”€ LOGO MARK WIDGET â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 class _LogoMark extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
@@ -144,7 +144,7 @@ class _LogoMark extends StatelessWidget {
           ),
         ],
       ),
-      child: const Center(
+      child: Center(
         child: Text(
           'T',
           style: TextStyle(
@@ -158,3 +158,4 @@ class _LogoMark extends StatelessWidget {
     );
   }
 }
+

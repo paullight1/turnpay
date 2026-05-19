@@ -1,4 +1,36 @@
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN
+    CREATE ROLE anon NOLOGIN;
+  END IF;
+
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated') THEN
+    CREATE ROLE authenticated NOLOGIN;
+  END IF;
+END
+$$;
+
+CREATE SCHEMA IF NOT EXISTS auth;
 CREATE SCHEMA IF NOT EXISTS private;
+
+DO $$
+BEGIN
+  IF to_regprocedure('auth.uid()') IS NULL THEN
+    CREATE FUNCTION auth.uid()
+    RETURNS UUID
+    LANGUAGE sql
+    STABLE
+    AS 'SELECT NULL::UUID';
+  END IF;
+END
+$$;
+
+CREATE TABLE IF NOT EXISTS auth.users (
+  id UUID PRIMARY KEY,
+  email TEXT,
+  phone TEXT,
+  raw_user_meta_data JSONB DEFAULT '{}'::JSONB
+);
 
 CREATE OR REPLACE FUNCTION private.current_user_is_admin()
 RETURNS BOOLEAN

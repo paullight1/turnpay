@@ -5,6 +5,7 @@ import {
   Matches,
   IsOptional,
   IsUUID,
+  MaxLength,
 } from 'class-validator';
 
 export class CreateUserDto {
@@ -14,6 +15,11 @@ export class CreateUserDto {
 
   @IsEmail()
   email: string;
+
+  @IsString()
+  @IsOptional()
+  @MaxLength(120)
+  fullName?: string;
 
   @IsString()
   @Matches(/^(\+?\d{10,15})$/, {
@@ -32,6 +38,11 @@ export class CreateUserDto {
 }
 
 export class UpdateUserDto {
+  @IsString()
+  @IsOptional()
+  @MaxLength(120)
+  fullName?: string;
+
   @IsEmail()
   @IsOptional()
   email?: string;

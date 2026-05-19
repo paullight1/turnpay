@@ -57,13 +57,20 @@ export class WithdrawDto {
   currency: (typeof SUPPORTED_CURRENCIES)[number];
 
   @IsString()
-  bankCode: string;
+  @IsOptional()
+  beneficiaryId?: string;
 
+  @IsOptional()
   @IsString()
-  accountNumber: string;
+  bankCode?: string;
 
+  @IsOptional()
   @IsString()
-  accountName: string;
+  accountNumber?: string;
+
+  @IsOptional()
+  @IsString()
+  accountName?: string;
 
   @IsOptional()
   @IsString()

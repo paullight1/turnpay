@@ -1,9 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useAuth } from "@/lib/auth-provider";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect } from "react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -14,48 +13,72 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import {
-  Sheet,
-  SheetContent,
-  SheetTrigger,
-} from "@/components/ui/sheet";
+import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
+import {
+  ArrowLeftRight,
+  BadgeCheck,
+  Banknote,
+  BarChart3,
+  ClipboardList,
+  FileCheck2,
+  Landmark,
+  Menu,
+  ShieldCheck,
+  Smartphone,
+  UserRound,
+  type LucideIcon,
+} from "lucide-react";
 
-const navItems = [
-  { label: "Dashboard", href: "/dashboard", icon: "📊" },
-  { label: "Fund", href: "/dashboard/fund", icon: "💰" },
-  { label: "Withdraw", href: "/dashboard/withdraw", icon: "🏦" },
-  { label: "Exchange", href: "/dashboard/exchange", icon: "💱" },
-  { label: "VTU", href: "/dashboard/vtu", icon: "📱" },
-  { label: "Transactions", href: "/dashboard/transactions", icon: "📋" },
-  { label: "KYC", href: "/dashboard/kyc", icon: "🪪" },
-  { label: "Profile", href: "/dashboard/profile", icon: "👤" },
+type NavItem = {
+  label: string;
+  href: string;
+  icon: LucideIcon;
+};
+
+const navItems: NavItem[] = [
+  { label: "Dashboard", href: "/dashboard", icon: BarChart3 },
+  { label: "Fund", href: "/dashboard/fund", icon: Banknote },
+  { label: "Withdraw", href: "/dashboard/withdraw", icon: Landmark },
+  { label: "Exchange", href: "/dashboard/exchange", icon: ArrowLeftRight },
+  { label: "VTU", href: "/dashboard/vtu", icon: Smartphone },
+  {
+    label: "Transactions",
+    href: "/dashboard/transactions",
+    icon: ClipboardList,
+  },
+  { label: "KYC", href: "/dashboard/kyc", icon: BadgeCheck },
+  { label: "Profile", href: "/dashboard/profile", icon: UserRound },
 ];
 
-const adminItems = [
-  { label: "Admin", href: "/admin", icon: "🛡️" },
-  { label: "KYC Review", href: "/admin/kyc", icon: "📝" },
+const adminItems: NavItem[] = [
+  { label: "Admin", href: "/admin", icon: ShieldCheck },
+  { label: "KYC Review", href: "/admin/kyc", icon: FileCheck2 },
 ];
 
-function Sidebar({ items, pathname }: { items: typeof navItems; pathname: string }) {
+function Sidebar({ items, pathname }: { items: NavItem[]; pathname: string }) {
   return (
-    <nav className="p-4 flex flex-col gap-2">
-      {items.map((item) => (
-        <Link
-          key={item.href}
-          href={item.href}
-          className={cn(
-            "flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors",
-            pathname === item.href
-              ? "bg-primary text-primary-foreground"
-              : "hover:bg-muted"
-          )}
-        >
-          <span>{item.icon}</span>
-          {item.label}
-        </Link>
-      ))}
+    <nav className="flex flex-col gap-2 p-4">
+      {items.map((item) => {
+        const Icon = item.icon;
+
+        return (
+          <Link
+            key={item.href}
+            href={item.href}
+            className={cn(
+              "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
+              pathname === item.href
+                ? "bg-primary text-primary-foreground"
+                : "hover:bg-muted",
+            )}
+          >
+            <Icon className="size-4" />
+            {item.label}
+          </Link>
+        );
+      })}
     </nav>
   );
 }
@@ -78,8 +101,10 @@ export default function DashboardLayout({
 
   if (isLoading || !user) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="animate-pulse text-lg text-muted-foreground">Loading...</div>
+      <div className="flex min-h-screen items-center justify-center">
+        <div className="animate-pulse text-lg text-muted-foreground">
+          Loading...
+        </div>
       </div>
     );
   }
@@ -88,14 +113,19 @@ export default function DashboardLayout({
   const allItems = [...navItems, ...(user.role === "ADMIN" ? adminItems : [])];
 
   return (
-    <div className="min-h-screen flex flex-col">
+    <div className="flex min-h-screen flex-col">
       <header className="border-b bg-background">
         <div className="container mx-auto flex h-16 items-center justify-between px-4">
           <div className="flex items-center gap-3">
             <Sheet open={open} onOpenChange={setOpen}>
               <SheetTrigger asChild>
-                <Button variant="ghost" size="icon" className="md:hidden" aria-label="Open menu">
-                  ☰
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="md:hidden"
+                  aria-label="Open menu"
+                >
+                  <Menu className="size-5" />
                 </Button>
               </SheetTrigger>
               <SheetContent side="left" className="w-64 p-0">
@@ -103,20 +133,18 @@ export default function DashboardLayout({
               </SheetContent>
             </Sheet>
             <span className="text-xl font-bold text-primary">TrustPay</span>
-            {user.role === "ADMIN" && (
-              <Badge variant="secondary">Admin</Badge>
-            )}
+            {user.role === "ADMIN" && <Badge variant="secondary">Admin</Badge>}
           </div>
           <div className="flex items-center gap-4">
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button variant="ghost" className="flex items-center gap-2">
                   <Avatar className="size-8">
-                    <AvatarFallback className="text-xs bg-primary text-primary-foreground">
+                    <AvatarFallback className="bg-primary text-xs text-primary-foreground">
                       {initials}
                     </AvatarFallback>
                   </Avatar>
-                  <span className="hidden sm:inline text-sm">{user.email}</span>
+                  <span className="hidden text-sm sm:inline">{user.email}</span>
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-48">
@@ -126,7 +154,10 @@ export default function DashboardLayout({
                   </Link>
                 </DropdownMenuItem>
                 <DropdownMenuItem asChild>
-                  <Link href="/dashboard/transactions" className="cursor-pointer">
+                  <Link
+                    href="/dashboard/transactions"
+                    className="cursor-pointer"
+                  >
                     Transactions
                   </Link>
                 </DropdownMenuItem>
@@ -143,7 +174,7 @@ export default function DashboardLayout({
         </div>
       </header>
       <div className="flex flex-1">
-        <aside className="w-64 border-r bg-muted/20 hidden md:block">
+        <aside className="hidden w-64 border-r bg-muted/20 md:block">
           <Sidebar items={allItems} pathname={pathname} />
         </aside>
         <main className="flex-1 p-6">{children}</main>

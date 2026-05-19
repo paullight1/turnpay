@@ -1,7 +1,7 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 import '../../../core/theme/app_theme.dart';
 
-// ─── MOCK DATA ────────────────────────────────────────────────────────────────
+// â”€â”€â”€ MOCK DATA â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 class _Recipient {
   final String name;
   final String initials;
@@ -27,7 +27,7 @@ final _mockRecipients = [
     avatarColor: Color(0xFF7C3AED),
     shortDate: '5 May',
     lastAmount: 1200.00,
-    currency: 'GH₵',
+    currency: 'GHâ‚µ',
   ),
   const _Recipient(
     name: 'Fatima Bello',
@@ -35,7 +35,7 @@ final _mockRecipients = [
     avatarColor: Color(0xFF2563EB),
     shortDate: '4 May',
     lastAmount: 50000,
-    currency: '₦',
+    currency: 'â‚¦',
   ),
   const _Recipient(
     name: 'Ama Kofie',
@@ -43,12 +43,12 @@ final _mockRecipients = [
     avatarColor: Color(0xFF059669),
     shortDate: '3 May',
     lastAmount: 340.00,
-    currency: 'GH₵',
+    currency: 'GHâ‚µ',
   ),
 ];
 
-// ─── RECENT RECIPIENTS WIDGET ─────────────────────────────────────────────────
-/// 2×2 grid of recent beneficiaries + "Add More" cell.
+// â”€â”€â”€ RECENT RECIPIENTS WIDGET â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+/// 2Ã—2 grid of recent beneficiaries + "Add More" cell.
 /// Matches the reference design exactly.
 class RecentRecipients extends StatelessWidget {
   const RecentRecipients({super.key});
@@ -57,7 +57,7 @@ class RecentRecipients extends StatelessWidget {
   Widget build(BuildContext context) {
     return Column(
       children: [
-        // ── Section Header ──
+        // â”€â”€ Section Header â”€â”€
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
@@ -75,9 +75,9 @@ class RecentRecipients extends StatelessWidget {
           ],
         ),
 
-        const SizedBox(height: AppSpacing.md),
+        SizedBox(height: AppSpacing.md),
 
-        // ── 2×2 Grid ──
+        // â”€â”€ 2Ã—2 Grid â”€â”€
         GridView.count(
           crossAxisCount: 2,
           shrinkWrap: true,
@@ -95,7 +95,7 @@ class RecentRecipients extends StatelessWidget {
   }
 }
 
-// ─── INDIVIDUAL RECIPIENT CARD ────────────────────────────────────────────────
+// â”€â”€â”€ INDIVIDUAL RECIPIENT CARD â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 class _RecipientCard extends StatelessWidget {
   final _Recipient recipient;
 
@@ -123,7 +123,7 @@ class _RecipientCard extends StatelessWidget {
             child: Center(
               child: Text(
                 recipient.initials,
-                style: const TextStyle(
+                style: TextStyle(
                   color: Colors.white,
                   fontWeight: FontWeight.w700,
                   fontSize: 13,
@@ -138,7 +138,7 @@ class _RecipientCard extends StatelessWidget {
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
           ),
-          const SizedBox(height: 2),
+          SizedBox(height: 2),
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
@@ -162,7 +162,7 @@ class _RecipientCard extends StatelessWidget {
   }
 }
 
-// ─── ADD MORE CARD ────────────────────────────────────────────────────────────
+// â”€â”€â”€ ADD MORE CARD â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 class _AddMoreCard extends StatelessWidget {
   final VoidCallback onTap;
   const _AddMoreCard({required this.onTap});
@@ -188,13 +188,13 @@ class _AddMoreCard extends StatelessWidget {
                 shape: BoxShape.circle,
                 border: Border.all(color: AppColors.border, width: 1.5),
               ),
-              child: const Icon(
+              child: Icon(
                 Icons.add_rounded,
                 color: AppColors.textSecondary,
                 size: 20,
               ),
             ),
-            const SizedBox(height: AppSpacing.xs),
+            SizedBox(height: AppSpacing.xs),
             Text(
               'Add More',
               style: AppTextStyles.labelS.copyWith(
@@ -207,3 +207,4 @@ class _AddMoreCard extends StatelessWidget {
     );
   }
 }
+

@@ -1,19 +1,5 @@
-import 'package:flutter/material.dart';
+import '../../features/home/screens/dashboard_detail_screen.dart';
 
-import '../../core/theme/app_theme.dart';
-
-class ProfileScreen extends StatelessWidget {
+class ProfileScreen extends DashboardProfileScreen {
   const ProfileScreen({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: AppColors.background,
-      body: SafeArea(
-        child: Center(
-          child: Text('Profile', style: AppTextStyles.displayMedium),
-        ),
-      ),
-    );
-  }
 }

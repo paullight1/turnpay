@@ -1,10 +1,10 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/theme/app_theme.dart';
 import '../../../core/router/app_router.dart';
 
-// ─── ONBOARDING DATA ──────────────────────────────────────────────────────────
+// â”€â”€â”€ ONBOARDING DATA â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 class _OnboardingPage {
   final String title;
   final String subtitle;
@@ -31,7 +31,7 @@ const _pages = [
   ),
   _OnboardingPage(
     title: 'Pay your bills\nin seconds.',
-    subtitle: 'Top up airtime, pay for data, electricity and cable TV — all in one place.',
+    subtitle: 'Top up airtime, pay for data, electricity and cable TV â€” all in one place.',
     gradientTopColor: Color(0xFF0A0F1A),
     gradientBottomColor: Color(0xFF0D0E14),
     icon: Icons.receipt_long_rounded,
@@ -45,7 +45,7 @@ const _pages = [
   ),
 ];
 
-// ─── ONBOARDING SCREEN ────────────────────────────────────────────────────────
+// â”€â”€â”€ ONBOARDING SCREEN â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 /// SeatGeek-inspired full-screen onboarding with large hero illustrations,
 /// dot page indicators, and dual Sign Up / Log In bottom CTAs.
 class OnboardingScreen extends StatefulWidget {
@@ -76,7 +76,7 @@ class _OnboardingScreenState extends State<OnboardingScreen>
       backgroundColor: AppColors.background,
       body: Stack(
         children: [
-          // ── Full-screen PageView ──
+          // â”€â”€ Full-screen PageView â”€â”€
           PageView.builder(
             controller: _pageController,
             itemCount: _pages.length,
@@ -86,7 +86,7 @@ class _OnboardingScreenState extends State<OnboardingScreen>
             },
           ),
 
-          // ── Skip Button ──
+          // â”€â”€ Skip Button â”€â”€
           Positioned(
             top: 56,
             right: AppSpacing.lg,
@@ -112,7 +112,7 @@ class _OnboardingScreenState extends State<OnboardingScreen>
             ),
           ),
 
-          // ── Bottom Section (Dots + Buttons) ──
+          // â”€â”€ Bottom Section (Dots + Buttons) â”€â”€
           Positioned(
             left: 0,
             right: 0,
@@ -128,7 +128,7 @@ class _OnboardingScreenState extends State<OnboardingScreen>
   }
 }
 
-// ─── INDIVIDUAL PAGE ──────────────────────────────────────────────────────────
+// â”€â”€â”€ INDIVIDUAL PAGE â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 class _OnboardingPageView extends StatelessWidget {
   final _OnboardingPage page;
 
@@ -175,7 +175,7 @@ class _OnboardingPageView extends StatelessWidget {
                 page.title,
                 style: AppTextStyles.displayLarge,
               ),
-              const SizedBox(height: AppSpacing.md),
+              SizedBox(height: AppSpacing.md),
               Text(
                 page.subtitle,
                 style: AppTextStyles.bodyL,
@@ -188,7 +188,7 @@ class _OnboardingPageView extends StatelessWidget {
   }
 }
 
-// ─── HERO ILLUSTRATION (placeholder icon with glow) ──────────────────────────
+// â”€â”€â”€ HERO ILLUSTRATION (placeholder icon with glow) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 class _HeroIllustration extends StatelessWidget {
   final IconData icon;
   const _HeroIllustration({required this.icon});
@@ -218,7 +218,7 @@ class _HeroIllustration extends StatelessWidget {
   }
 }
 
-// ─── BOTTOM SECTION ───────────────────────────────────────────────────────────
+// â”€â”€â”€ BOTTOM SECTION â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 class _BottomSection extends StatelessWidget {
   final int currentPage;
   final int totalPages;
@@ -271,7 +271,7 @@ class _BottomSection extends StatelessWidget {
             }),
           ),
 
-          const SizedBox(height: AppSpacing.lg),
+          SizedBox(height: AppSpacing.lg),
 
           // CTA Buttons Row (Sign up | Log in)
           Row(
@@ -284,7 +284,7 @@ class _BottomSection extends StatelessWidget {
                   onTap: () => context.push(AppRoutes.register),
                 ),
               ),
-              const SizedBox(width: AppSpacing.md),
+              SizedBox(width: AppSpacing.md),
               // Log In - Dark outline
               Expanded(
                 child: _AuthButton(
@@ -296,7 +296,7 @@ class _BottomSection extends StatelessWidget {
             ],
           ),
 
-          const SizedBox(height: AppSpacing.lg),
+          SizedBox(height: AppSpacing.lg),
 
           // Legal links
           Row(
@@ -356,3 +356,4 @@ class _AuthButton extends StatelessWidget {
     );
   }
 }
+

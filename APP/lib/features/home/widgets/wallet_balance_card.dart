@@ -1,10 +1,10 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../../../core/theme/app_theme.dart';
 
 /// Large wallet balance section.
 /// Shows "Wallet Balance" label, huge amount in GHS, and eye toggle icon.
-/// Matches reference: "$17,298.92 👁" style.
+/// Matches reference: "$17,298.92 ðŸ‘" style.
 class WalletBalanceCard extends StatelessWidget {
   final double balanceGHS;
   final bool visible;
@@ -21,7 +21,7 @@ class WalletBalanceCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final formatted = NumberFormat.currency(
       locale: 'en_GH',
-      symbol: 'GH₵ ',
+      symbol: 'GHâ‚µ ',
       decimalDigits: 2,
     ).format(balanceGHS);
 
@@ -34,7 +34,7 @@ class WalletBalanceCard extends StatelessWidget {
             color: AppColors.textSecondary,
           ),
         ),
-        const SizedBox(height: AppSpacing.xs),
+        SizedBox(height: AppSpacing.xs),
         Row(
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
@@ -50,7 +50,7 @@ class WalletBalanceCard extends StatelessWidget {
                       overflow: TextOverflow.ellipsis,
                     )
                   : Text(
-                      'GH₵ ••••••',
+                      'GHâ‚µ â€¢â€¢â€¢â€¢â€¢â€¢',
                       style: AppTextStyles.displayLarge.copyWith(
                         fontSize: 36,
                         letterSpacing: 4,
@@ -59,7 +59,7 @@ class WalletBalanceCard extends StatelessWidget {
                       ),
                     ),
             ),
-            const SizedBox(width: AppSpacing.sm),
+            SizedBox(width: AppSpacing.sm),
             GestureDetector(
               onTap: onToggleVisibility,
               child: Icon(
@@ -76,3 +76,4 @@ class WalletBalanceCard extends StatelessWidget {
     );
   }
 }
+

@@ -9,16 +9,40 @@ import '../../features/auth/screens/login_screen.dart';
 import '../../features/auth/screens/register_screen.dart';
 import '../../features/auth/screens/otp_screen.dart';
 import '../../features/auth/screens/forgot_password_screen.dart';
+import '../../features/home/screens/dashboard_detail_screen.dart';
+import '../../features/home/screens/home_task_screen.dart';
+import '../../features/home/screens/money_action_screen.dart';
+import '../../features/security/screens/transaction_security_screen.dart';
 
 // ─── ROUTE NAMES ──────────────────────────────────────────────────────────────
 class AppRoutes {
-  static const splash         = '/';
-  static const onboarding     = '/onboarding';
-  static const login          = '/login';
-  static const register       = '/register';
-  static const otp            = '/otp';
+  static const splash = '/';
+  static const onboarding = '/onboarding';
+  static const login = '/login';
+  static const register = '/register';
+  static const otp = '/otp';
   static const forgotPassword = '/forgot-password';
-  static const home           = '/home';
+  static const home = '/home';
+  static const notifications = '/notifications';
+  static const kyc = '/kyc';
+  static const fund = '/fund';
+  static const send = '/send';
+  static const withdraw = '/withdraw';
+  static const exchange = '/exchange';
+  static const exchangeSettlement = '/exchange/settlement';
+  static const airtime = '/airtime';
+  static const data = '/data';
+  static const electricity = '/electricity';
+  static const bills = electricity;
+  static const wallets = '/wallets';
+  static const virtualAccount = '/virtual-account';
+  static const activity = '/activity';
+  static const more = '/more';
+  static const profileAccount = '/profile/account';
+  static const profileAppearance = '/profile/appearance';
+  static const profileSecurity = '/profile/security';
+  static const transactionSecurity = '/profile/security/transaction-security';
+  static const profileSupport = '/profile/support';
 }
 
 // ─── ROUTER ───────────────────────────────────────────────────────────────────
@@ -39,6 +63,142 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         pageBuilder: (context, state) => _fadeTransition(
           state,
           const MainShell(),
+        ),
+      ),
+      GoRoute(
+        path: AppRoutes.notifications,
+        pageBuilder: (context, state) => _slideTransition(
+          state,
+          const DashboardDetailScreen(kind: DashboardDetailKind.notifications),
+        ),
+      ),
+      GoRoute(
+        path: AppRoutes.profileAccount,
+        pageBuilder: (context, state) => _slideTransition(
+          state,
+          const ProfileActionScreen(kind: ProfileActionKind.account),
+        ),
+      ),
+      GoRoute(
+        path: AppRoutes.profileAppearance,
+        pageBuilder: (context, state) => _slideTransition(
+          state,
+          const ProfileActionScreen(kind: ProfileActionKind.appearance),
+        ),
+      ),
+      GoRoute(
+        path: AppRoutes.profileSecurity,
+        pageBuilder: (context, state) => _slideTransition(
+          state,
+          const ProfileActionScreen(kind: ProfileActionKind.security),
+        ),
+      ),
+      GoRoute(
+        path: AppRoutes.transactionSecurity,
+        pageBuilder: (context, state) => _slideTransition(
+          state,
+          const TransactionSecurityScreen(),
+        ),
+      ),
+      GoRoute(
+        path: AppRoutes.profileSupport,
+        pageBuilder: (context, state) => _slideTransition(
+          state,
+          const ProfileActionScreen(kind: ProfileActionKind.support),
+        ),
+      ),
+      GoRoute(
+        path: AppRoutes.kyc,
+        pageBuilder: (context, state) => _slideTransition(
+          state,
+          const DashboardDetailScreen(kind: DashboardDetailKind.kyc),
+        ),
+      ),
+      GoRoute(
+        path: AppRoutes.fund,
+        pageBuilder: (context, state) => _slideTransition(
+          state,
+          const MoneyActionScreen(kind: MoneyActionKind.fund),
+        ),
+      ),
+      GoRoute(
+        path: AppRoutes.send,
+        pageBuilder: (context, state) => _slideTransition(
+          state,
+          const MoneyActionScreen(kind: MoneyActionKind.send),
+        ),
+      ),
+      GoRoute(
+        path: AppRoutes.withdraw,
+        pageBuilder: (context, state) => _slideTransition(
+          state,
+          const MoneyActionScreen(kind: MoneyActionKind.withdraw),
+        ),
+      ),
+      GoRoute(
+        path: AppRoutes.exchange,
+        pageBuilder: (context, state) => _slideTransition(
+          state,
+          const MoneyActionScreen(kind: MoneyActionKind.exchange),
+        ),
+      ),
+      GoRoute(
+        path: AppRoutes.exchangeSettlement,
+        pageBuilder: (context, state) {
+          final receipt = state.extra as ExchangeReceipt?;
+          return _slideTransition(
+            state,
+            ExchangeSettlementScreen(receipt: receipt),
+          );
+        },
+      ),
+      GoRoute(
+        path: AppRoutes.airtime,
+        pageBuilder: (context, state) => _slideTransition(
+          state,
+          const MoneyActionScreen(kind: MoneyActionKind.airtime),
+        ),
+      ),
+      GoRoute(
+        path: AppRoutes.data,
+        pageBuilder: (context, state) => _slideTransition(
+          state,
+          const MoneyActionScreen(kind: MoneyActionKind.data),
+        ),
+      ),
+      GoRoute(
+        path: AppRoutes.electricity,
+        pageBuilder: (context, state) => _slideTransition(
+          state,
+          const MoneyActionScreen(kind: MoneyActionKind.electricity),
+        ),
+      ),
+      GoRoute(
+        path: AppRoutes.wallets,
+        pageBuilder: (context, state) => _slideTransition(
+          state,
+          const DashboardDetailScreen(kind: DashboardDetailKind.wallets),
+        ),
+      ),
+      GoRoute(
+        path: AppRoutes.virtualAccount,
+        pageBuilder: (context, state) => _slideTransition(
+          state,
+          const DashboardDetailScreen(kind: DashboardDetailKind.virtualAccount),
+        ),
+      ),
+      GoRoute(
+        path: AppRoutes.activity,
+        pageBuilder: (context, state) => _slideTransition(
+          state,
+          const DashboardDetailScreen(kind: DashboardDetailKind.activity),
+        ),
+      ),
+      GoRoute(
+        path: AppRoutes.more,
+        pageBuilder: (context, state) => _slideTransition(
+          state,
+          const HomeTaskScreen(),
         ),
       ),
       GoRoute(

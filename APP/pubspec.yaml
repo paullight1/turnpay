@@ -18,13 +18,17 @@ dependencies:
   riverpod_annotation: ^2.3.5
   # HTTP Client
   dio: ^5.4.3+1
+  uuid: ^4.5.1
   # Secure Storage
   flutter_secure_storage: ^9.2.0
+  local_auth: ^3.0.1
+  crypto: ^3.0.7
   # Utilities
   intl: ^0.19.0
   logger: ^2.3.0
   # Animations
   lottie: ^3.1.2
+  supabase_flutter: ^2.12.4
 
 dev_dependencies:
   flutter_test:

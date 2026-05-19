@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 import '../../../core/theme/app_theme.dart';
 
 /// Horizontal scrolling row of wallet/card items.
@@ -23,14 +23,14 @@ class WalletCardsRow extends StatelessWidget {
             ),
           ],
         ),
-        const SizedBox(height: AppSpacing.sm),
+        SizedBox(height: AppSpacing.sm),
         SizedBox(
           height: 100,
           child: ListView(
             scrollDirection: Axis.horizontal,
             clipBehavior: Clip.none,
             children: [
-              // ── Add new wallet button ──
+              // â”€â”€ Add new wallet button â”€â”€
               GestureDetector(
                 onTap: () {},
                 child: Container(
@@ -45,7 +45,7 @@ class WalletCardsRow extends StatelessWidget {
                       width: 1.5,
                     ),
                   ),
-                  child: const Icon(
+                  child: Icon(
                     Icons.add_rounded,
                     color: AppColors.textSecondary,
                     size: 26,
@@ -53,10 +53,10 @@ class WalletCardsRow extends StatelessWidget {
                 ),
               ),
 
-              // ── GHS Wallet Card ──
+              // â”€â”€ GHS Wallet Card â”€â”€
               _WalletCard(
                 currency: 'GHS',
-                flag: '🇬🇭',
+                flag: 'ðŸ‡¬ðŸ‡­',
                 label: 'Ghana Cedi',
                 balance: 17298.92,
                 gradientColors: const [
@@ -67,12 +67,12 @@ class WalletCardsRow extends StatelessWidget {
                 lastFour: '4269',
               ),
 
-              const SizedBox(width: AppSpacing.sm),
+              SizedBox(width: AppSpacing.sm),
 
-              // ── NGN Wallet Card ──
+              // â”€â”€ NGN Wallet Card â”€â”€
               _WalletCard(
                 currency: 'NGN',
-                flag: '🇳🇬',
+                flag: 'ðŸ‡³ðŸ‡¬',
                 label: 'Naira',
                 balance: 5240000,
                 gradientColors: const [
@@ -83,7 +83,7 @@ class WalletCardsRow extends StatelessWidget {
                 lastFour: '4258',
               ),
 
-              const SizedBox(width: AppSpacing.lg),
+              SizedBox(width: AppSpacing.lg),
             ],
           ),
         ),
@@ -92,7 +92,7 @@ class WalletCardsRow extends StatelessWidget {
   }
 }
 
-// ─── INDIVIDUAL WALLET CARD ───────────────────────────────────────────────────
+// â”€â”€â”€ INDIVIDUAL WALLET CARD â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 class _WalletCard extends StatelessWidget {
   final String currency;
   final String flag;
@@ -155,12 +155,12 @@ class _WalletCard extends StatelessWidget {
                     Container(
                       width: 6,
                       height: 6,
-                      decoration: const BoxDecoration(
+                      decoration: BoxDecoration(
                         color: Colors.greenAccent,
                         shape: BoxShape.circle,
                       ),
                     ),
-                    const SizedBox(width: 4),
+                    SizedBox(width: 4),
                     Text(
                       'Active',
                       style: AppTextStyles.caption.copyWith(
@@ -184,7 +184,7 @@ class _WalletCard extends StatelessWidget {
                 ),
               ),
               Text(
-                '•••• •••• $lastFour',
+                'â€¢â€¢â€¢â€¢ â€¢â€¢â€¢â€¢ $lastFour',
                 style: AppTextStyles.caption.copyWith(
                   color: Colors.white60,
                   letterSpacing: 2,
@@ -198,7 +198,7 @@ class _WalletCard extends StatelessWidget {
   }
 
   String _formatBalance(double amount, String currency) {
-    final symbol = currency == 'GHS' ? 'GH₵' : '₦';
+    final symbol = currency == 'GHS' ? 'GHâ‚µ' : 'â‚¦';
     if (amount >= 1000000) {
       return '$symbol${(amount / 1000000).toStringAsFixed(2)}M';
     } else if (amount >= 1000) {
@@ -207,3 +207,4 @@ class _WalletCard extends StatelessWidget {
     return '$symbol${amount.toStringAsFixed(2)}';
   }
 }
+

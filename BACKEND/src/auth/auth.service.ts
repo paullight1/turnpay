@@ -3,14 +3,13 @@ import {
   UnauthorizedException,
   ConflictException,
   BadRequestException,
-  ForbiddenException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { SupabaseService } from '../supabase/supabase.service';
 import { UsersService } from '../users/users.service';
 import { WalletsService } from '../wallets/wallets.service';
 import { OtpService } from '../otp/otp.service';
-import { RegisterDto, LoginDto, ChangePasswordDto } from './dto/auth.dto';
+import { RegisterDto, LoginDto } from './dto/auth.dto';
 import { PinoLogger } from 'nestjs-pino';
 
 @Injectable()
@@ -25,18 +24,27 @@ export class AuthService {
   ) {}
 
   async register(registerDto: RegisterDto) {
-    const existingUser = await this.usersService.findByEmail(registerDto.email);
+    const email = registerDto.email.trim().toLowerCase();
+    const phone = registerDto.phone.replace(/\s+/g, '').trim();
+    const fullName = registerDto.fullName?.trim();
+
+    const existingUser = await this.usersService.findByEmail(email);
     if (existingUser) {
       throw new ConflictException('Email already registered');
     }
 
-    const { data, error } = await this.supabaseService.client.auth.signUp({
-      email: registerDto.email,
+    const existingPhone = await this.usersService.findByPhone(phone);
+    if (existingPhone) {
+      throw new ConflictException('Phone number already registered');
+    }
+
+    const { data, error } = await this.supabaseService.authClient.auth.signUp({
+      email,
       password: registerDto.password,
       options: {
         data: {
-          phone: registerDto.phone,
-          role: 'USER',
+          phone,
+          ...(fullName ? { fullName } : {}),
         },
       },
     });
@@ -49,16 +57,11 @@ export class AuthService {
       throw new BadRequestException('Registration failed');
     }
 
-    const user = await this.usersService.create({
-      id: data.user.id,
-      email: data.user.email!,
-      phone: registerDto.phone,
-      password: '',
-    });
+    await this.syncSupabaseAppRole(data.user.id, 'USER');
+    const syncedUser = await this.supabaseService.syncUser(data.user);
+    const user = await this.usersService.findOne(syncedUser.id);
 
-    await this.walletsService.provisionWallets(user.id);
-
-    await this.otpService.sendOtp(registerDto.phone);
+    await this.otpService.sendOtp(phone);
 
     this.logger.info(
       { userId: user.id, event: 'user_registered' },
@@ -73,7 +76,7 @@ export class AuthService {
 
   async login(loginDto: LoginDto) {
     const { data, error } =
-      await this.supabaseService.client.auth.signInWithPassword({
+      await this.supabaseService.authClient.auth.signInWithPassword({
         email: loginDto.email,
         password: loginDto.password,
       });
@@ -86,17 +89,7 @@ export class AuthService {
       throw new UnauthorizedException('Login failed');
     }
 
-    const user = await this.usersService.findByEmail(data.user.email!);
-
-    if (!user) {
-      const newUser = await this.usersService.create({
-        id: data.user.id,
-        email: data.user.email!,
-        phone: data.user.user_metadata?.phone || '',
-        password: '',
-      });
-      await this.walletsService.provisionWallets(newUser.id);
-    }
+    const syncedUser = await this.supabaseService.syncUser(data.user);
 
     this.logger.info(
       { userId: data.user.id, event: 'user_login' },
@@ -104,14 +97,28 @@ export class AuthService {
     );
 
     return {
-      user: await this.usersService.findByEmail(data.user.email!),
+      user: await this.usersService.findOne(syncedUser.id),
       session: data.session,
     };
   }
 
+  async bootstrap(userId: string) {
+    const [user, wallets] = await Promise.all([
+      this.usersService.findOne(userId),
+      this.walletsService.getWallets(userId),
+    ]);
+
+    this.logger.info(
+      { userId, event: 'auth_bootstrap' },
+      'User session bootstrapped',
+    );
+
+    return { user, wallets };
+  }
+
   async refreshToken(refreshToken: string) {
     const { data, error } =
-      await this.supabaseService.client.auth.refreshSession({
+      await this.supabaseService.authClient.auth.refreshSession({
         refresh_token: refreshToken,
       });
 
@@ -123,7 +130,9 @@ export class AuthService {
   }
 
   async logout(accessToken: string) {
-    const { error } = await this.supabaseService.client.auth.signOut();
+    const { error } = await this.supabaseService
+      .createUserScopedClient(accessToken)
+      .auth.signOut({ scope: 'local' });
 
     if (error) {
       this.logger.warn({ error }, 'Supabase logout failed');
@@ -136,12 +145,26 @@ export class AuthService {
 
   async changePassword(
     userId: string,
+    accessToken: string,
     currentPassword: string,
     newPassword: string,
   ) {
-    const { error } = await this.supabaseService.client.auth.updateUser({
-      password: newPassword,
-    });
+    const user = await this.usersService.findOne(userId);
+    const reauth =
+      await this.supabaseService.authClient.auth.signInWithPassword({
+        email: user.email,
+        password: currentPassword,
+      });
+
+    if (reauth.error) {
+      throw new UnauthorizedException('Current password is incorrect');
+    }
+
+    const { error } = await this.supabaseService
+      .createUserScopedClient(accessToken)
+      .auth.updateUser({
+        password: newPassword,
+      });
 
     if (error) {
       throw new BadRequestException(error.message);
@@ -180,8 +203,8 @@ export class AuthService {
     }
 
     const { error } =
-      await this.supabaseService.client.auth.resetPasswordForEmail(email, {
-        redirectTo: `${process.env.WEB_URL}/reset-password`,
+      await this.supabaseService.authClient.auth.resetPasswordForEmail(email, {
+        redirectTo: `${this.configService.getOrThrow<string>('WEB_URL')}/reset-password`,
       });
 
     if (error) {
@@ -192,7 +215,7 @@ export class AuthService {
   }
 
   async resendConfirmationEmail(email: string) {
-    const { error } = await this.supabaseService.client.auth.resend({
+    const { error } = await this.supabaseService.authClient.auth.resend({
       type: 'signup',
       email,
     });
@@ -202,5 +225,19 @@ export class AuthService {
     }
 
     return { success: true, message: 'Confirmation email sent' };
+  }
+
+  private async syncSupabaseAppRole(userId: string, role: 'USER' | 'ADMIN') {
+    try {
+      await this.supabaseService.setAuthAppRole(userId, role);
+    } catch (error) {
+      this.logger.warn(
+        {
+          userId,
+          error: error instanceof Error ? error.message : 'Unknown error',
+        },
+        'Unable to sync Supabase app_metadata role',
+      );
+    }
   }
 }

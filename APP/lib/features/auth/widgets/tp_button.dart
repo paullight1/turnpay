@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 import '../../../core/theme/app_theme.dart';
 
 /// Primary CTA button used across all auth screens.
@@ -51,7 +51,7 @@ class TpButton extends StatelessWidget {
         ),
         child: Center(
           child: isLoading
-              ? const SizedBox(
+              ? SizedBox(
                   width: 22,
                   height: 22,
                   child: CircularProgressIndicator(
@@ -72,3 +72,4 @@ class TpButton extends StatelessWidget {
     );
   }
 }
+

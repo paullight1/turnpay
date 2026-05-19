@@ -1,13 +1,14 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/theme/app_theme.dart';
 import '../../../core/router/app_router.dart';
+import '../../../services/auth_service.dart';
 import '../widgets/auth_text_field.dart';
 import '../widgets/tp_button.dart';
 import '../widgets/social_auth_button.dart';
 
-/// Register screen — mirroring Login with additional Full Name, Phone fields.
+/// Register screen â€” mirroring Login with additional Full Name, Phone fields.
 /// Matches the same dark Superlist-inspired layout.
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({super.key});
@@ -23,6 +24,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
   final _phoneController = TextEditingController();
   final _passwordController = TextEditingController();
   final _confirmPasswordController = TextEditingController();
+  final _authService = AuthService();
   bool _obscurePassword = true;
   bool _obscureConfirm = true;
   bool _isLoading = false;
@@ -54,21 +56,48 @@ class _RegisterScreenState extends State<RegisterScreen> {
     }
 
     setState(() => _isLoading = true);
-    // TODO: Call auth service
-    await Future.delayed(const Duration(seconds: 2));
 
-    if (mounted) {
-      // Navigate to OTP screen for phone verification
-      context.push(
-        AppRoutes.otp,
-        extra: {
-          'phone': _phoneController.text.trim(),
-          'purpose': 'verify',
-        },
+    try {
+      final hasSession = await _authService.register(
+        fullName: _nameController.text,
+        email: _emailController.text,
+        phone: _phoneController.text,
+        password: _passwordController.text,
       );
-    }
 
-    setState(() => _isLoading = false);
+      if (!mounted) return;
+
+      if (hasSession) {
+        context.go(AppRoutes.home);
+      } else {
+        context.push(
+          AppRoutes.otp,
+          extra: {
+            'phone': _phoneController.text.trim(),
+            'purpose': 'verify',
+          },
+        );
+      }
+    } catch (error) {
+      if (!mounted) return;
+      _showError(authErrorMessage(error, 'Registration failed'));
+    } finally {
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
+    }
+  }
+
+  void _showError(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          message,
+          style: AppTextStyles.bodyM.copyWith(color: AppColors.textPrimary),
+        ),
+        backgroundColor: AppColors.surfaceVariant,
+      ),
+    );
   }
 
   @override
@@ -86,7 +115,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // ── Back Button ──
+                // â”€â”€ Back Button â”€â”€
                 GestureDetector(
                   onTap: () => context.pop(),
                   child: Container(
@@ -96,7 +125,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                       color: AppColors.surfaceVariant,
                       borderRadius: BorderRadius.circular(AppRadius.sm),
                     ),
-                    child: const Icon(
+                    child: Icon(
                       Icons.arrow_back_ios_new_rounded,
                       color: AppColors.textPrimary,
                       size: 18,
@@ -104,9 +133,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   ),
                 ),
 
-                const SizedBox(height: AppSpacing.xl),
+                SizedBox(height: AppSpacing.xl),
 
-                // ── Logo ──
+                // â”€â”€ Logo â”€â”€
                 Container(
                   width: 52,
                   height: 52,
@@ -121,7 +150,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                       ),
                     ],
                   ),
-                  child: const Center(
+                  child: Center(
                     child: Text(
                       'T',
                       style: TextStyle(
@@ -133,20 +162,21 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   ),
                 ),
 
-                const SizedBox(height: AppSpacing.lg),
+                SizedBox(height: AppSpacing.lg),
 
-                Text('Create your\naccount.', style: AppTextStyles.displayMedium),
+                Text('Create your\naccount.',
+                    style: AppTextStyles.displayMedium),
 
-                const SizedBox(height: AppSpacing.sm),
+                SizedBox(height: AppSpacing.sm),
 
                 Text(
                   'Join thousands of people sending money across Africa.',
                   style: AppTextStyles.bodyL,
                 ),
 
-                const SizedBox(height: AppSpacing.xxl),
+                SizedBox(height: AppSpacing.xxl),
 
-                // ── Full Name ──
+                // â”€â”€ Full Name â”€â”€
                 AuthTextField(
                   controller: _nameController,
                   label: 'Full name',
@@ -160,9 +190,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   },
                 ),
 
-                const SizedBox(height: AppSpacing.md),
+                SizedBox(height: AppSpacing.md),
 
-                // ── Email ──
+                // â”€â”€ Email â”€â”€
                 AuthTextField(
                   controller: _emailController,
                   label: 'Email address',
@@ -170,16 +200,17 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   keyboardType: TextInputType.emailAddress,
                   prefixIcon: Icons.mail_outline_rounded,
                   validator: (v) {
-                    if (v == null || v.isEmpty) return 'Please enter your email';
-                    final emailRegex = RegExp(r'^[\w-.]+@[\w-]+\.\w+\$');
+                    if (v == null || v.isEmpty)
+                      return 'Please enter your email';
+                    final emailRegex = RegExp(r'^[\w\.-]+@[\w-]+\.\w+$');
                     if (!emailRegex.hasMatch(v)) return 'Enter a valid email';
                     return null;
                   },
                 ),
 
-                const SizedBox(height: AppSpacing.md),
+                SizedBox(height: AppSpacing.md),
 
-                // ── Phone Number ──
+                // â”€â”€ Phone Number â”€â”€
                 AuthTextField(
                   controller: _phoneController,
                   label: 'Phone number',
@@ -187,20 +218,22 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   keyboardType: TextInputType.phone,
                   prefixIcon: Icons.phone_outlined,
                   validator: (v) {
-                    if (v == null || v.trim().length < 10) {
+                    final phone = v?.replaceAll(RegExp(r'\s+'), '') ?? '';
+                    final phoneRegex = RegExp(r'^\+?[1-9]\d{9,14}$');
+                    if (!phoneRegex.hasMatch(phone)) {
                       return 'Enter a valid phone number';
                     }
                     return null;
                   },
                 ),
 
-                const SizedBox(height: AppSpacing.md),
+                SizedBox(height: AppSpacing.md),
 
-                // ── Password ──
+                // â”€â”€ Password â”€â”€
                 AuthTextField(
                   controller: _passwordController,
                   label: 'Password',
-                  hint: '••••••••',
+                  hint: 'â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢',
                   obscureText: _obscurePassword,
                   prefixIcon: Icons.lock_outline_rounded,
                   suffixIcon: GestureDetector(
@@ -215,20 +248,23 @@ class _RegisterScreenState extends State<RegisterScreen> {
                     ),
                   ),
                   validator: (v) {
-                    if (v == null || v.length < 8) {
-                      return 'At least 8 characters required';
+                    final password = v ?? '';
+                    final passwordRegex =
+                        RegExp(r'^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).{8,}$');
+                    if (!passwordRegex.hasMatch(password)) {
+                      return 'Use 8+ chars with upper, lower, and number';
                     }
                     return null;
                   },
                 ),
 
-                const SizedBox(height: AppSpacing.md),
+                SizedBox(height: AppSpacing.md),
 
-                // ── Confirm Password ──
+                // â”€â”€ Confirm Password â”€â”€
                 AuthTextField(
                   controller: _confirmPasswordController,
                   label: 'Confirm password',
-                  hint: '••••••••',
+                  hint: 'â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢',
                   obscureText: _obscureConfirm,
                   prefixIcon: Icons.lock_outline_rounded,
                   suffixIcon: GestureDetector(
@@ -250,9 +286,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   },
                 ),
 
-                const SizedBox(height: AppSpacing.lg),
+                SizedBox(height: AppSpacing.lg),
 
-                // ── Terms Checkbox ──
+                // â”€â”€ Terms Checkbox â”€â”€
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -264,7 +300,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                         onChanged: (v) =>
                             setState(() => _agreedToTerms = v ?? false),
                         activeColor: AppColors.primary,
-                        side: const BorderSide(
+                        side: BorderSide(
                           color: AppColors.border,
                           width: 1.5,
                         ),
@@ -273,7 +309,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                         ),
                       ),
                     ),
-                    const SizedBox(width: AppSpacing.sm),
+                    SizedBox(width: AppSpacing.sm),
                     Expanded(
                       child: RichText(
                         text: TextSpan(
@@ -302,32 +338,33 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   ],
                 ),
 
-                const SizedBox(height: AppSpacing.xl),
+                SizedBox(height: AppSpacing.xl),
 
-                // ── Create Account CTA ──
+                // â”€â”€ Create Account CTA â”€â”€
                 TpButton(
                   label: 'Create account',
                   isLoading: _isLoading,
                   onTap: _onRegister,
                 ),
 
-                const SizedBox(height: AppSpacing.lg),
+                SizedBox(height: AppSpacing.lg),
 
-                // ── OR Divider ──
+                // â”€â”€ OR Divider â”€â”€
                 Row(
                   children: [
-                    const Expanded(child: Divider(color: AppColors.divider)),
+                    Expanded(child: Divider(color: AppColors.divider)),
                     Padding(
                       padding: const EdgeInsets.symmetric(
                         horizontal: AppSpacing.md,
                       ),
-                      child: Text('or sign up with', style: AppTextStyles.caption),
+                      child:
+                          Text('or sign up with', style: AppTextStyles.caption),
                     ),
-                    const Expanded(child: Divider(color: AppColors.divider)),
+                    Expanded(child: Divider(color: AppColors.divider)),
                   ],
                 ),
 
-                const SizedBox(height: AppSpacing.lg),
+                SizedBox(height: AppSpacing.lg),
 
                 SocialAuthButton(
                   label: 'Continue with Google',
@@ -335,7 +372,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   onTap: () {},
                 ),
 
-                const SizedBox(height: AppSpacing.sm),
+                SizedBox(height: AppSpacing.sm),
 
                 SocialAuthButton(
                   label: 'Continue with Apple',
@@ -343,9 +380,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   onTap: () {},
                 ),
 
-                const SizedBox(height: AppSpacing.xl),
+                SizedBox(height: AppSpacing.xl),
 
-                // ── Login redirect ──
+                // â”€â”€ Login redirect â”€â”€
                 Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
@@ -365,7 +402,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   ],
                 ),
 
-                const SizedBox(height: AppSpacing.xl),
+                SizedBox(height: AppSpacing.xl),
               ],
             ),
           ),
@@ -374,3 +411,4 @@ class _RegisterScreenState extends State<RegisterScreen> {
     );
   }
 }
+

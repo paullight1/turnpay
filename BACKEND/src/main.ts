@@ -1,10 +1,9 @@
 import { json } from 'body-parser';
-import { ValidationPipe } from '@nestjs/common';
+import { Logger, ValidationPipe } from '@nestjs/common';
 import { HttpAdapterHost, NestFactory } from '@nestjs/core';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import * as Sentry from '@sentry/nestjs';
 import { nodeProfilingIntegration } from '@sentry/profiling-node';
-import { PinoLogger } from 'nestjs-pino';
 import helmet from 'helmet';
 import { AppModule } from './app.module';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
@@ -21,23 +20,44 @@ if (process.env.SENTRY_DSN) {
 }
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule, { bufferLogs: true });
-
-  app.useLogger(app.get(PinoLogger));
+  const logger = new Logger('Bootstrap');
+  const app = await NestFactory.create(AppModule, {
+    bufferLogs: true,
+    bodyParser: false,
+  });
 
   app.use(helmet());
 
-  const webUrl = process.env.WEB_URL;
-  const adminUrl = process.env.ADMIN_URL;
-
-  if (!webUrl || !adminUrl) {
-    throw new Error('WEB_URL and ADMIN_URL environment variables are required');
-  }
+  const webUrl = process.env.WEB_URL || 'http://localhost:3001';
+  const adminUrl = process.env.ADMIN_URL || 'http://localhost:3002';
+  const allowedOrigins = new Set([webUrl, adminUrl]);
 
   app.enableCors({
-    origin: [webUrl, adminUrl],
+    origin: (origin, callback) => {
+      if (
+        !origin ||
+        allowedOrigins.has(origin) ||
+        /^http:\/\/(localhost|127\.0\.0\.1):\d+$/.test(origin)
+      ) {
+        callback(null, true);
+        return;
+      }
+
+      callback(new Error(`CORS origin not allowed: ${origin}`));
+    },
     credentials: true,
   });
+
+  app.use(
+    json({
+      limit: '10mb',
+      verify: (req: any, _res, buf) => {
+        if (req.url.startsWith('/api/webhooks')) {
+          req.rawBody = buf.toString();
+        }
+      },
+    }),
+  );
 
   app.setGlobalPrefix('api');
 
@@ -52,21 +72,8 @@ async function bootstrap() {
 
   app.useGlobalInterceptors(app.get(IdempotencyInterceptor));
 
-  app.use(
-    json({
-      limit: '10mb',
-      verify: (req: any, _res, buf) => {
-        if (req.url.startsWith('/api/webhooks')) {
-          req.rawBody = buf.toString();
-        }
-      },
-    }),
-  );
-
   const httpAdapterHost = app.get(HttpAdapterHost);
-  app.useGlobalFilters(
-    new AllExceptionsFilter(httpAdapterHost, app.get(PinoLogger)),
-  );
+  app.useGlobalFilters(new AllExceptionsFilter(httpAdapterHost, logger));
 
   const config = new DocumentBuilder()
     .setTitle('TrustPay API')
@@ -78,6 +85,8 @@ async function bootstrap() {
     .addTag('wallets', 'Wallet operations')
     .addTag('exchange', 'Currency exchange')
     .addTag('payments', 'Payment gateway')
+    .addTag('banking', 'Virtual accounts and banking readiness')
+    .addTag('transfers', 'Internal wallet transfers')
     .addTag('vtu', 'VTU and bill payments')
     .addTag('admin', 'Admin operations')
     .build();
@@ -89,22 +98,20 @@ async function bootstrap() {
 
   const port = process.env.PORT ?? 3000;
   const server = await app.listen(port);
-  app.get(PinoLogger).info(`Application started on port ${port}`);
-  app
-    .get(PinoLogger)
-    .info(`API docs available at http://localhost:${port}/api/docs`);
+  logger.log(`Application started on port ${port}`);
+  logger.log(`API docs available at http://localhost:${port}/api/docs`);
 
   const gracefulShutdown = async (signal: string) => {
-    app.get(PinoLogger).info(`${signal} received, shutting down gracefully`);
+    logger.log(`${signal} received, shutting down gracefully`);
     await Sentry.close(2000);
     server.close(async () => {
-      app.get(PinoLogger).info('HTTP server closed');
+      logger.log('HTTP server closed');
       await app.close();
       process.exit(0);
     });
 
     setTimeout(() => {
-      app.get(PinoLogger).error('Forced shutdown after timeout');
+      logger.error('Forced shutdown after timeout');
       process.exit(1);
     }, 10000);
   };

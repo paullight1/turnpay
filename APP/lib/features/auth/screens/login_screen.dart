@@ -1,13 +1,14 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/theme/app_theme.dart';
 import '../../../core/router/app_router.dart';
+import '../../../services/auth_service.dart';
 import '../widgets/auth_text_field.dart';
 import '../widgets/tp_button.dart';
 import '../widgets/social_auth_button.dart';
 
-/// Login screen — Superlist-inspired dark layout with top logo,
+/// Login screen â€” Superlist-inspired dark layout with top logo,
 /// bold welcome heading, email/password fields, and social auth options.
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -20,6 +21,7 @@ class _LoginScreenState extends State<LoginScreen> {
   final _formKey = GlobalKey<FormState>();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
+  final _authService = AuthService();
   bool _obscurePassword = true;
   bool _isLoading = false;
 
@@ -34,12 +36,35 @@ class _LoginScreenState extends State<LoginScreen> {
     if (!(_formKey.currentState?.validate() ?? false)) return;
 
     setState(() => _isLoading = true);
-    // TODO: Call auth service
-    await Future.delayed(const Duration(seconds: 2));
-    if (mounted) {
-      setState(() => _isLoading = false);
+
+    try {
+      await _authService.login(
+        email: _emailController.text,
+        password: _passwordController.text,
+      );
+
+      if (!mounted) return;
       context.go(AppRoutes.home);
+    } catch (error) {
+      if (!mounted) return;
+      _showError(authErrorMessage(error, 'Login failed'));
+    } finally {
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
     }
+  }
+
+  void _showError(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          message,
+          style: AppTextStyles.bodyM.copyWith(color: AppColors.textPrimary),
+        ),
+        backgroundColor: AppColors.surfaceVariant,
+      ),
+    );
   }
 
   @override
@@ -57,7 +82,7 @@ class _LoginScreenState extends State<LoginScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // ── Back Button ──
+                // â”€â”€ Back Button â”€â”€
                 GestureDetector(
                   onTap: () => context.pop(),
                   child: Container(
@@ -67,7 +92,7 @@ class _LoginScreenState extends State<LoginScreen> {
                       color: AppColors.surfaceVariant,
                       borderRadius: BorderRadius.circular(AppRadius.sm),
                     ),
-                    child: const Icon(
+                    child: Icon(
                       Icons.arrow_back_ios_new_rounded,
                       color: AppColors.textPrimary,
                       size: 18,
@@ -75,26 +100,26 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                 ),
 
-                const SizedBox(height: AppSpacing.xl),
+                SizedBox(height: AppSpacing.xl),
 
-                // ── Logo Mark ──
+                // â”€â”€ Logo Mark â”€â”€
                 _TrustPayIcon(),
 
-                const SizedBox(height: AppSpacing.lg),
+                SizedBox(height: AppSpacing.lg),
 
-                // ── Welcome Copy ──
+                // â”€â”€ Welcome Copy â”€â”€
                 Text('Welcome\nback.', style: AppTextStyles.displayMedium),
 
-                const SizedBox(height: AppSpacing.sm),
+                SizedBox(height: AppSpacing.sm),
 
                 Text(
                   'Log in to manage your transfers and payments.',
                   style: AppTextStyles.bodyL,
                 ),
 
-                const SizedBox(height: AppSpacing.xxl),
+                SizedBox(height: AppSpacing.xxl),
 
-                // ── Email Field ──
+                // â”€â”€ Email Field â”€â”€
                 AuthTextField(
                   controller: _emailController,
                   label: 'Email address',
@@ -102,20 +127,21 @@ class _LoginScreenState extends State<LoginScreen> {
                   keyboardType: TextInputType.emailAddress,
                   prefixIcon: Icons.mail_outline_rounded,
                   validator: (v) {
-                    if (v == null || v.isEmpty) return 'Please enter your email';
-                    final emailRegex = RegExp(r'^[\w-.]+@[\w-]+\.\w+\$');
+                    if (v == null || v.isEmpty)
+                      return 'Please enter your email';
+                    final emailRegex = RegExp(r'^[\w\.-]+@[\w-]+\.\w+$');
                     if (!emailRegex.hasMatch(v)) return 'Enter a valid email';
                     return null;
                   },
                 ),
 
-                const SizedBox(height: AppSpacing.md),
+                SizedBox(height: AppSpacing.md),
 
-                // ── Password Field ──
+                // â”€â”€ Password Field â”€â”€
                 AuthTextField(
                   controller: _passwordController,
                   label: 'Password',
-                  hint: '••••••••',
+                  hint: 'â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢',
                   obscureText: _obscurePassword,
                   prefixIcon: Icons.lock_outline_rounded,
                   suffixIcon: GestureDetector(
@@ -131,15 +157,17 @@ class _LoginScreenState extends State<LoginScreen> {
                     ),
                   ),
                   validator: (v) {
-                    if (v == null || v.isEmpty) return 'Please enter your password';
-                    if (v.length < 6) return 'Password must be at least 6 characters';
+                    if (v == null || v.isEmpty)
+                      return 'Please enter your password';
+                    if (v.length < 8)
+                      return 'Password must be at least 8 characters';
                     return null;
                   },
                 ),
 
-                const SizedBox(height: AppSpacing.sm),
+                SizedBox(height: AppSpacing.sm),
 
-                // ── Forgot Password link ──
+                // â”€â”€ Forgot Password link â”€â”€
                 Align(
                   alignment: Alignment.centerRight,
                   child: GestureDetector(
@@ -151,30 +179,30 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                 ),
 
-                const SizedBox(height: AppSpacing.xl),
+                SizedBox(height: AppSpacing.xl),
 
-                // ── Log In Button ──
+                // â”€â”€ Log In Button â”€â”€
                 TpButton(
                   label: 'Log in',
                   isLoading: _isLoading,
                   onTap: _onLogin,
                 ),
 
-                const SizedBox(height: AppSpacing.lg),
+                SizedBox(height: AppSpacing.lg),
 
-                // ── Divider ──
+                // â”€â”€ Divider â”€â”€
                 _OrDivider(),
 
-                const SizedBox(height: AppSpacing.lg),
+                SizedBox(height: AppSpacing.lg),
 
-                // ── Social Logins ──
+                // â”€â”€ Social Logins â”€â”€
                 SocialAuthButton(
                   label: 'Continue with Google',
                   icon: Icons.g_mobiledata_rounded,
                   onTap: () {},
                 ),
 
-                const SizedBox(height: AppSpacing.sm),
+                SizedBox(height: AppSpacing.sm),
 
                 SocialAuthButton(
                   label: 'Continue with Apple',
@@ -182,9 +210,9 @@ class _LoginScreenState extends State<LoginScreen> {
                   onTap: () {},
                 ),
 
-                const SizedBox(height: AppSpacing.xl),
+                SizedBox(height: AppSpacing.xl),
 
-                // ── Sign Up redirect ──
+                // â”€â”€ Sign Up redirect â”€â”€
                 Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
@@ -204,7 +232,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   ],
                 ),
 
-                const SizedBox(height: AppSpacing.lg),
+                SizedBox(height: AppSpacing.lg),
               ],
             ),
           ),
@@ -214,7 +242,7 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 }
 
-// ─── SMALL LOGO MARK ──────────────────────────────────────────────────────────
+// â”€â”€â”€ SMALL LOGO MARK â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 class _TrustPayIcon extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
@@ -232,7 +260,7 @@ class _TrustPayIcon extends StatelessWidget {
           ),
         ],
       ),
-      child: const Center(
+      child: Center(
         child: Text(
           'T',
           style: TextStyle(
@@ -246,13 +274,13 @@ class _TrustPayIcon extends StatelessWidget {
   }
 }
 
-// ─── OR DIVIDER ───────────────────────────────────────────────────────────────
+// â”€â”€â”€ OR DIVIDER â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 class _OrDivider extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Row(
       children: [
-        const Expanded(child: Divider(color: AppColors.divider)),
+        Expanded(child: Divider(color: AppColors.divider)),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
           child: Text(
@@ -260,8 +288,9 @@ class _OrDivider extends StatelessWidget {
             style: AppTextStyles.caption,
           ),
         ),
-        const Expanded(child: Divider(color: AppColors.divider)),
+        Expanded(child: Divider(color: AppColors.divider)),
       ],
     );
   }
 }
+

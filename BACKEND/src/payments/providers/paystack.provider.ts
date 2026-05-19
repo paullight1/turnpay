@@ -26,6 +26,20 @@ interface TransferResponse {
   };
 }
 
+interface TransferVerifyResponse {
+  status: boolean;
+  message: string;
+  data: {
+    id: number;
+    transfer_code: string;
+    status: string;
+    reference: string;
+    amount: number;
+    currency: string;
+    reason?: string;
+  };
+}
+
 @Injectable()
 export class PaystackProvider {
   private readonly baseUrl = 'https://api.paystack.co';
@@ -172,6 +186,19 @@ export class PaystackProvider {
     );
 
     return response.data;
+  }
+
+  async verifyTransfer(
+    reference: string,
+  ): Promise<TransferVerifyResponse['data']> {
+    const response = await firstValueFrom(
+      this.httpService.get<TransferVerifyResponse>(
+        `${this.baseUrl}/transfer/verify/${reference}`,
+        { headers: this.headers },
+      ),
+    );
+
+    return response.data.data;
   }
 
   async createTransferRecipient(params: {

@@ -1,7 +1,7 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 import '../../../core/theme/app_theme.dart';
 
-// ─── SPEND CATEGORY MODEL ─────────────────────────────────────────────────────
+// â”€â”€â”€ SPEND CATEGORY MODEL â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 class SpendCategory {
   final String name;
   final double amount;
@@ -46,7 +46,7 @@ final _spendCategories = [
 final _weeklyData = [0.4, 0.6, 0.35, 1.0, 0.7, 0.5, 0.65]; // Normalized heights
 final _weekLabels = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
 
-// ─── ANALYTICS SCREEN ─────────────────────────────────────────────────────────
+// â”€â”€â”€ ANALYTICS SCREEN â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 /// Matches the reference analytics screen:
 /// - "Analytics" header with back arrow and dots menu
 /// - Income / Outcome pill toggle
@@ -101,9 +101,9 @@ class _AnalyticsScreenState extends State<AnalyticsScreen>
       body: SafeArea(
         child: Column(
           children: [
-            // ── Header ──
+            // â”€â”€ Header â”€â”€
             _AnalyticsHeader(),
-            const SizedBox(height: AppSpacing.md),
+            SizedBox(height: AppSpacing.md),
 
             Expanded(
               child: SingleChildScrollView(
@@ -112,35 +112,35 @@ class _AnalyticsScreenState extends State<AnalyticsScreen>
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // ── Income / Outcome Toggle ──
+                    // â”€â”€ Income / Outcome Toggle â”€â”€
                     _TabToggle(
                       selected: _tabIndex,
                       onSelect: _switchTab,
                     ),
 
-                    const SizedBox(height: AppSpacing.lg),
+                    SizedBox(height: AppSpacing.lg),
 
-                    // ── Summary Card with Bar Chart ──
+                    // â”€â”€ Summary Card with Bar Chart â”€â”€
                     _SummaryCard(
                       tabIndex: _tabIndex,
                       weeklyData: _weeklyData,
                       weekLabels: _weekLabels,
                     ),
 
-                    const SizedBox(height: AppSpacing.lg),
+                    SizedBox(height: AppSpacing.lg),
 
-                    // ── Donut Chart ──
+                    // â”€â”€ Donut Chart â”€â”€
                     _DonutChartSection(
                       animation: _donutAnimation,
                       categories: _spendCategories,
                     ),
 
-                    const SizedBox(height: AppSpacing.lg),
+                    SizedBox(height: AppSpacing.lg),
 
-                    // ── Spend Breakdown ──
+                    // â”€â”€ Spend Breakdown â”€â”€
                     _SpendBreakdownCard(categories: _spendCategories),
 
-                    const SizedBox(height: AppSpacing.xxl),
+                    SizedBox(height: AppSpacing.xxl),
                   ],
                 ),
               ),
@@ -152,7 +152,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen>
   }
 }
 
-// ─── HEADER ───────────────────────────────────────────────────────────────────
+// â”€â”€â”€ HEADER â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 class _AnalyticsHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
@@ -172,7 +172,7 @@ class _AnalyticsHeader extends StatelessWidget {
                 color: AppColors.surfaceVariant,
                 borderRadius: BorderRadius.circular(AppRadius.sm),
               ),
-              child: const Icon(
+              child: Icon(
                 Icons.arrow_back_ios_new_rounded,
                 size: 16,
                 color: AppColors.textPrimary,
@@ -189,7 +189,7 @@ class _AnalyticsHeader extends StatelessWidget {
               color: AppColors.surfaceVariant,
               borderRadius: BorderRadius.circular(AppRadius.sm),
             ),
-            child: const Icon(
+            child: Icon(
               Icons.more_horiz_rounded,
               color: AppColors.textPrimary,
             ),
@@ -200,7 +200,7 @@ class _AnalyticsHeader extends StatelessWidget {
   }
 }
 
-// ─── TAB TOGGLE ───────────────────────────────────────────────────────────────
+// â”€â”€â”€ TAB TOGGLE â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 class _TabToggle extends StatelessWidget {
   final int selected;
   final ValueChanged<int> onSelect;
@@ -270,9 +270,7 @@ class _ToggleTab extends StatelessWidget {
             child: Text(
               label,
               style: AppTextStyles.labelM.copyWith(
-                color: isSelected
-                    ? Colors.white
-                    : AppColors.textSecondary,
+                color: isSelected ? Colors.white : AppColors.textSecondary,
                 fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
               ),
             ),
@@ -283,7 +281,7 @@ class _ToggleTab extends StatelessWidget {
   }
 }
 
-// ─── SUMMARY CARD WITH BAR CHART ──────────────────────────────────────────────
+// â”€â”€â”€ SUMMARY CARD WITH BAR CHART â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 class _SummaryCard extends StatelessWidget {
   final int tabIndex;
   final List<double> weeklyData;
@@ -297,8 +295,9 @@ class _SummaryCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final amount = tabIndex == 0 ? 'GH₵ 6,542.18' : 'GH₵ 4,501.00';
-    final change = tabIndex == 0 ? '+4.9% From last week' : '-2.1% From last week';
+    final amount = tabIndex == 0 ? 'GHâ‚µ 6,542.18' : 'GHâ‚µ 4,501.00';
+    final change =
+        tabIndex == 0 ? '+4.9% From last week' : '-2.1% From last week';
     final isPositive = tabIndex == 0;
 
     return Container(
@@ -311,7 +310,7 @@ class _SummaryCard extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // ── Left: Amount ──
+          // â”€â”€ Left: Amount â”€â”€
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -320,15 +319,17 @@ class _SummaryCard extends StatelessWidget {
                   tabIndex == 0 ? 'My Income' : 'My Spending',
                   style: AppTextStyles.bodyM,
                 ),
-                const SizedBox(height: AppSpacing.xs),
+                SizedBox(height: AppSpacing.xs),
                 Text(
                   amount,
                   style: AppTextStyles.headingXL.copyWith(
-                    fontSize: 26,
+                    fontSize: 24,
                     fontWeight: FontWeight.w800,
                   ),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
                 ),
-                const SizedBox(height: AppSpacing.xs),
+                SizedBox(height: AppSpacing.xs),
                 Row(
                   children: [
                     Icon(
@@ -338,12 +339,17 @@ class _SummaryCard extends StatelessWidget {
                       color: isPositive ? AppColors.success : AppColors.error,
                       size: 14,
                     ),
-                    const SizedBox(width: 4),
-                    Text(
-                      change,
-                      style: AppTextStyles.bodyS.copyWith(
-                        color: isPositive ? AppColors.success : AppColors.error,
-                        fontWeight: FontWeight.w600,
+                    SizedBox(width: 4),
+                    Flexible(
+                      child: Text(
+                        change,
+                        style: AppTextStyles.bodyS.copyWith(
+                          color:
+                              isPositive ? AppColors.success : AppColors.error,
+                          fontWeight: FontWeight.w600,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                       ),
                     ),
                   ],
@@ -352,9 +358,9 @@ class _SummaryCard extends StatelessWidget {
             ),
           ),
 
-          const SizedBox(width: AppSpacing.md),
+          SizedBox(width: AppSpacing.sm),
 
-          // ── Right: Mini bar chart ──
+          // â”€â”€ Right: Mini bar chart â”€â”€
           _MiniBarchart(
             data: weeklyData,
             labels: weekLabels,
@@ -366,7 +372,7 @@ class _SummaryCard extends StatelessWidget {
   }
 }
 
-// ─── MINI BAR CHART ───────────────────────────────────────────────────────────
+// â”€â”€â”€ MINI BAR CHART â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 class _MiniBarchart extends StatelessWidget {
   final List<double> data;
   final List<String> labels;
@@ -381,7 +387,7 @@ class _MiniBarchart extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return SizedBox(
-      width: 120,
+      width: 108,
       child: Column(
         children: [
           SizedBox(
@@ -406,7 +412,7 @@ class _MiniBarchart extends StatelessWidget {
               }),
             ),
           ),
-          const SizedBox(height: 6),
+          SizedBox(height: 6),
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceEvenly,
             children: List.generate(labels.length, (i) {
@@ -415,8 +421,7 @@ class _MiniBarchart extends StatelessWidget {
                 labels[i],
                 style: AppTextStyles.caption.copyWith(
                   color: isActive ? AppColors.primary : AppColors.textHint,
-                  fontWeight:
-                      isActive ? FontWeight.w700 : FontWeight.w400,
+                  fontWeight: isActive ? FontWeight.w700 : FontWeight.w400,
                 ),
               );
             }),
@@ -427,7 +432,7 @@ class _MiniBarchart extends StatelessWidget {
   }
 }
 
-// ─── DONUT CHART SECTION ──────────────────────────────────────────────────────
+// â”€â”€â”€ DONUT CHART SECTION â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 class _DonutChartSection extends StatelessWidget {
   final Animation<double> animation;
   final List<SpendCategory> categories;
@@ -475,7 +480,7 @@ class _DonutChartSection extends StatelessWidget {
           },
         ),
 
-        const SizedBox(height: AppSpacing.md),
+        SizedBox(height: AppSpacing.md),
 
         // Legend row
         Wrap(
@@ -494,7 +499,7 @@ class _DonutChartSection extends StatelessWidget {
                     shape: BoxShape.circle,
                   ),
                 ),
-                const SizedBox(width: 6),
+                SizedBox(width: 6),
                 Text(c.name, style: AppTextStyles.bodyS),
               ],
             );
@@ -505,7 +510,7 @@ class _DonutChartSection extends StatelessWidget {
   }
 }
 
-// ─── DONUT CUSTOM PAINTER ─────────────────────────────────────────────────────
+// â”€â”€â”€ DONUT CUSTOM PAINTER â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 class _DonutPainter extends CustomPainter {
   final List<SpendCategory> categories;
   final double progress;
@@ -525,8 +530,7 @@ class _DonutPainter extends CustomPainter {
     double startAngle = -90 * (3.14159 / 180); // Start from top
 
     for (final cat in categories) {
-      final sweepAngle =
-          (cat.percentage / 100) * 2 * 3.14159 * progress;
+      final sweepAngle = (cat.percentage / 100) * 2 * 3.14159 * progress;
       final paint = Paint()
         ..color = cat.color
         ..style = PaintingStyle.stroke
@@ -546,11 +550,10 @@ class _DonutPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(_DonutPainter old) =>
-      old.progress != progress;
+  bool shouldRepaint(_DonutPainter old) => old.progress != progress;
 }
 
-// ─── SPEND BREAKDOWN CARD ─────────────────────────────────────────────────────
+// â”€â”€â”€ SPEND BREAKDOWN CARD â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 class _SpendBreakdownCard extends StatelessWidget {
   final List<SpendCategory> categories;
 
@@ -592,7 +595,7 @@ class _SpendBreakdownCard extends StatelessWidget {
           ),
 
           // Divider
-          const Divider(height: 1, color: AppColors.divider),
+          Divider(height: 1, color: AppColors.divider),
 
           // Rows
           ...categories.asMap().entries.map((entry) {
@@ -602,7 +605,7 @@ class _SpendBreakdownCard extends StatelessWidget {
               children: [
                 _BreakdownRow(category: cat),
                 if (i < categories.length - 1)
-                  const Divider(
+                  Divider(
                     height: 1,
                     color: AppColors.divider,
                     indent: AppSpacing.lg,
@@ -612,7 +615,7 @@ class _SpendBreakdownCard extends StatelessWidget {
             );
           }),
 
-          const SizedBox(height: AppSpacing.sm),
+          SizedBox(height: AppSpacing.sm),
         ],
       ),
     );
@@ -641,7 +644,7 @@ class _BreakdownRow extends StatelessWidget {
               shape: BoxShape.circle,
             ),
           ),
-          const SizedBox(width: AppSpacing.md),
+          SizedBox(width: AppSpacing.md),
 
           // Category name
           Expanded(
@@ -650,13 +653,13 @@ class _BreakdownRow extends StatelessWidget {
 
           // Amount
           Text(
-            'GH₵ ${category.amount.toStringAsFixed(2)}',
+            'GHâ‚µ ${category.amount.toStringAsFixed(2)}',
             style: AppTextStyles.labelM.copyWith(
               fontWeight: FontWeight.w700,
             ),
           ),
 
-          const SizedBox(width: AppSpacing.md),
+          SizedBox(width: AppSpacing.md),
 
           // Percentage badge
           Container(
@@ -679,3 +682,4 @@ class _BreakdownRow extends StatelessWidget {
     );
   }
 }
+

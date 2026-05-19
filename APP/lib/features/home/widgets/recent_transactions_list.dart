@@ -1,7 +1,7 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 import '../../../core/theme/app_theme.dart';
 
-// ─── TRANSACTION MODEL (mock) ─────────────────────────────────────────────────
+// â”€â”€â”€ TRANSACTION MODEL (mock) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 class _Transaction {
   final String title;
   final String subtitle;
@@ -30,17 +30,17 @@ final _mockTransactions = [
     subtitle: 'Sent to Kwame Asante',
     amount: 1200.00,
     isCredit: false,
-    currency: 'GH₵',
+    currency: 'GHâ‚µ',
     time: '09:41 AM',
     icon: Icons.send_rounded,
     iconColor: Color(0xFF7C3AED),
   ),
   const _Transaction(
     title: 'Airtime Top-up',
-    subtitle: 'MTN • 080 4502 1193',
+    subtitle: 'MTN â€¢ 080 4502 1193',
     amount: 50.00,
     isCredit: false,
-    currency: 'GH₵',
+    currency: 'GHâ‚µ',
     time: 'Yesterday',
     icon: Icons.phone_android_rounded,
     iconColor: Color(0xFFF59E0B),
@@ -50,24 +50,24 @@ final _mockTransactions = [
     subtitle: 'From Emeka Eze',
     amount: 75000,
     isCredit: true,
-    currency: '₦',
+    currency: 'â‚¦',
     time: '4 May',
     icon: Icons.arrow_downward_rounded,
     iconColor: Color(0xFF059669),
   ),
   const _Transaction(
     title: 'Electricity Bill',
-    subtitle: 'NEPA • Meter 4802 6271',
+    subtitle: 'NEPA â€¢ Meter 4802 6271',
     amount: 120.00,
     isCredit: false,
-    currency: 'GH₵',
+    currency: 'GHâ‚µ',
     time: '3 May',
     icon: Icons.bolt_rounded,
     iconColor: Color(0xFFE8472A),
   ),
 ];
 
-// ─── RECENT TRANSACTIONS LIST ─────────────────────────────────────────────────
+// â”€â”€â”€ RECENT TRANSACTIONS LIST â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 class RecentTransactionsList extends StatelessWidget {
   const RecentTransactionsList({super.key});
 
@@ -91,14 +91,14 @@ class RecentTransactionsList extends StatelessWidget {
             ),
           ],
         ),
-        const SizedBox(height: AppSpacing.md),
+        SizedBox(height: AppSpacing.md),
         ..._mockTransactions.map((tx) => _TransactionRow(tx: tx)),
       ],
     );
   }
 }
 
-// ─── SINGLE TRANSACTION ROW ───────────────────────────────────────────────────
+// â”€â”€â”€ SINGLE TRANSACTION ROW â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 class _TransactionRow extends StatelessWidget {
   final _Transaction tx;
   const _TransactionRow({required this.tx});
@@ -124,7 +124,7 @@ class _TransactionRow extends StatelessWidget {
             ),
             child: Icon(tx.icon, color: tx.iconColor, size: 20),
           ),
-          const SizedBox(width: AppSpacing.md),
+          SizedBox(width: AppSpacing.md),
 
           // Title + Subtitle
           Expanded(
@@ -132,7 +132,7 @@ class _TransactionRow extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(tx.title, style: AppTextStyles.labelM),
-                const SizedBox(height: 2),
+                SizedBox(height: 2),
                 Text(tx.subtitle, style: AppTextStyles.bodyS),
               ],
             ),
@@ -149,7 +149,7 @@ class _TransactionRow extends StatelessWidget {
                   fontWeight: FontWeight.w700,
                 ),
               ),
-              const SizedBox(height: 2),
+              SizedBox(height: 2),
               Text(tx.time, style: AppTextStyles.bodyS),
             ],
           ),
@@ -165,3 +165,4 @@ class _TransactionRow extends StatelessWidget {
     return amount.toStringAsFixed(2);
   }
 }
+

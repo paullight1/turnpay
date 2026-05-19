@@ -8,6 +8,7 @@ export class OtpService {
   private readonly logger = new Logger(OtpService.name);
   private readonly expirySeconds: number;
   private readonly otpLength: number;
+  private readonly devOtpCode?: string;
   private readonly maxAttempts = 3;
 
   constructor(
@@ -19,10 +20,17 @@ export class OtpService {
     this.otpLength = parseInt(
       this.configService.get<string>('OTP_LENGTH') || '6',
     );
+    const configuredDevCode = this.configService.get<string>('OTP_DEV_CODE');
+    this.devOtpCode =
+      this.configService.get<string>('NODE_ENV') !== 'production' &&
+      configuredDevCode &&
+      /^\d{6}$/.test(configuredDevCode)
+        ? configuredDevCode
+        : undefined;
   }
 
   async sendOtp(phone: string): Promise<{ success: boolean; message: string }> {
-    const code = this.generateOtp();
+    const code = this.devOtpCode ?? this.generateOtp();
     const key = `otp:${this.hashPhone(phone)}`;
 
     await this.redis.set(
@@ -34,6 +42,9 @@ export class OtpService {
     this.logger.log(
       `OTP generated for ${phone} (expires in ${this.expirySeconds / 60}min)`,
     );
+    if (this.devOtpCode) {
+      this.logger.warn('Development OTP override is enabled');
+    }
 
     return {
       success: true,
@@ -51,6 +62,7 @@ export class OtpService {
     }
 
     const record = JSON.parse(raw) as { code: string; attempts: number };
+    const isValidDevCode = this.devOtpCode && otp === this.devOtpCode;
 
     if (record.attempts >= this.maxAttempts) {
       await this.redis.del(key);
@@ -58,7 +70,7 @@ export class OtpService {
       return false;
     }
 
-    if (record.code !== otp) {
+    if (record.code !== otp && !isValidDevCode) {
       record.attempts++;
       await this.redis.set(key, JSON.stringify(record), this.expirySeconds);
       this.logger.warn(

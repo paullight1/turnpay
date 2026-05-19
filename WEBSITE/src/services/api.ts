@@ -28,7 +28,9 @@ export const apiClient = axios.create({
 
 apiClient.interceptors.request.use(async (config) => {
   const supabase = createClient();
-  const { data: { session } } = await supabase.auth.getSession();
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
 
   if (session?.access_token) {
     config.headers.Authorization = `Bearer ${session.access_token}`;
@@ -67,7 +69,10 @@ apiClient.interceptors.response.use(
       isRefreshing = true;
 
       const supabase = createClient();
-      const { data: { session }, error: refreshError } = await supabase.auth.refreshSession();
+      const {
+        data: { session },
+        error: refreshError,
+      } = await supabase.auth.refreshSession();
 
       if (refreshError || !session) {
         processQueue(refreshError, null);
@@ -86,18 +91,18 @@ apiClient.interceptors.response.use(
     }
 
     return Promise.reject(error);
-  }
+  },
 );
 
 export const authApi = {
+  bootstrap: () => apiClient.post("/api/auth/bootstrap"),
   login: (email: string, password: string) =>
     apiClient.post("/api/auth/login", { email, password }),
   register: (email: string, phone: string, password: string) =>
     apiClient.post("/api/auth/register", { email, phone, password }),
   forgotPassword: (email: string) =>
     apiClient.post("/api/auth/forgot-password", { email }),
-  logout: () =>
-    apiClient.post("/api/auth/logout"),
+  logout: () => apiClient.post("/api/auth/logout"),
   changePassword: (currentPassword: string, newPassword: string) =>
     apiClient.post("/api/auth/change-password", {
       currentPassword,
@@ -117,7 +122,9 @@ export const walletApi = {
 
 export const exchangeApi = {
   getRate: (from: string, to: string) =>
-    apiClient.get(`/api/exchange/rate?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`),
+    apiClient.get(
+      `/api/exchange/rate?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`,
+    ),
   createQuote: (data: { from: string; to: string; amount: number }) =>
     apiClient.post("/api/exchange/quote", data),
   executeQuote: (quoteId: string) =>
@@ -149,7 +156,9 @@ export const paymentApi = {
 
 export const vtuApi = {
   getProviders: (type?: string) =>
-    apiClient.get(`/api/vtu/providers${type ? `?type=${encodeURIComponent(type)}` : ""}`),
+    apiClient.get(
+      `/api/vtu/providers${type ? `?type=${encodeURIComponent(type)}` : ""}`,
+    ),
   getPackages: (provider: string) =>
     apiClient.get(`/api/vtu/packages?provider=${encodeURIComponent(provider)}`),
   purchase: (data: {
@@ -163,11 +172,11 @@ export const vtuApi = {
   }) => apiClient.post("/api/vtu/purchase", data),
   validateSmartCard: (provider: string, number: string) =>
     apiClient.post(
-      `/api/vtu/validate/smartcard?provider=${encodeURIComponent(provider)}&number=${encodeURIComponent(number)}`
+      `/api/vtu/validate/smartcard?provider=${encodeURIComponent(provider)}&number=${encodeURIComponent(number)}`,
     ),
   validateMeter: (provider: string, number: string) =>
     apiClient.post(
-      `/api/vtu/validate/meter?provider=${encodeURIComponent(provider)}&number=${encodeURIComponent(number)}`
+      `/api/vtu/validate/meter?provider=${encodeURIComponent(provider)}&number=${encodeURIComponent(number)}`,
     ),
 };
 

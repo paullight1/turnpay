@@ -38,6 +38,14 @@ export class PaymentController {
     return this.paymentService.withdraw(user.userId, dto);
   }
 
+  @Get('withdrawals/:reference')
+  async getWithdrawal(
+    @CurrentUser() user: { userId: string },
+    @Param('reference') reference: string,
+  ) {
+    return this.paymentService.getWithdrawal(user.userId, reference);
+  }
+
   @Get('verify/:reference')
   async verifyPayment(@Param('reference') reference: string) {
     return this.paymentService.verifyPayment(reference);

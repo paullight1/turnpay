@@ -2,10 +2,10 @@ import {
   Controller,
   Post,
   Body,
+  Headers,
   HttpCode,
   HttpStatus,
   UseGuards,
-  Headers,
 } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { AuthService } from './auth.service';
@@ -13,6 +13,9 @@ import {
   RegisterDto,
   LoginDto,
   ChangePasswordDto,
+  EmailDto,
+  PhoneDto,
+  RefreshTokenDto,
   VerifyOtpDto,
 } from './dto/auth.dto';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
@@ -36,18 +39,24 @@ export class AuthController {
     return this.authService.login(loginDto);
   }
 
+  @Post('bootstrap')
+  @UseGuards(SupabaseAuthGuard)
+  @HttpCode(HttpStatus.OK)
+  async bootstrap(@CurrentUser() user: { userId: string }) {
+    return this.authService.bootstrap(user.userId);
+  }
+
   @Post('refresh')
   @HttpCode(HttpStatus.OK)
-  async refreshTokens(@Body('refreshToken') refreshToken: string) {
-    return this.authService.refreshToken(refreshToken);
+  async refreshTokens(@Body() dto: RefreshTokenDto) {
+    return this.authService.refreshToken(dto.refreshToken);
   }
 
   @Post('logout')
   @UseGuards(SupabaseAuthGuard)
   @HttpCode(HttpStatus.OK)
-  async logout(@Headers('authorization') authHeader: string) {
-    const accessToken = authHeader?.replace('Bearer ', '');
-    return this.authService.logout(accessToken);
+  async logout(@Headers('authorization') authorization: string) {
+    return this.authService.logout(this.extractBearerToken(authorization));
   }
 
   @Post('change-password')
@@ -55,10 +64,12 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   async changePassword(
     @CurrentUser() user: { userId: string },
+    @Headers('authorization') authorization: string,
     @Body() dto: ChangePasswordDto,
   ) {
     return this.authService.changePassword(
       user.userId,
+      this.extractBearerToken(authorization),
       dto.currentPassword,
       dto.newPassword,
     );
@@ -67,8 +78,8 @@ export class AuthController {
   @Post('otp/send')
   @Throttle({ default: { limit: 3, ttl: 3600000 } })
   @HttpCode(HttpStatus.OK)
-  async sendOtp(@Body('phone') phone: string) {
-    return this.authService.sendOtp(phone);
+  async sendOtp(@Body() dto: PhoneDto) {
+    return this.authService.sendOtp(dto.phone);
   }
 
   @Post('otp/verify')
@@ -80,14 +91,20 @@ export class AuthController {
   @Post('forgot-password')
   @Throttle({ default: { limit: 3, ttl: 3600000 } })
   @HttpCode(HttpStatus.OK)
-  async forgotPassword(@Body('email') email: string) {
-    return this.authService.sendPasswordResetEmail(email);
+  async forgotPassword(@Body() dto: EmailDto) {
+    return this.authService.sendPasswordResetEmail(dto.email);
   }
 
   @Post('resend-confirmation')
   @Throttle({ default: { limit: 3, ttl: 3600000 } })
   @HttpCode(HttpStatus.OK)
-  async resendConfirmation(@Body('email') email: string) {
-    return this.authService.resendConfirmationEmail(email);
+  async resendConfirmation(@Body() dto: EmailDto) {
+    return this.authService.resendConfirmationEmail(dto.email);
+  }
+
+  private extractBearerToken(authorization?: string) {
+    return authorization?.startsWith('Bearer ')
+      ? authorization.slice('Bearer '.length).trim()
+      : '';
   }
 }

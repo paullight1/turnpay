@@ -12,18 +12,13 @@ export type CircuitState = 'CLOSED' | 'OPEN' | 'HALF_OPEN';
 @Injectable()
 export class CircuitBreakerService {
   private readonly logger = new Logger(CircuitBreakerService.name);
-  private readonly options: CircuitBreakerOptions;
+  private readonly options: CircuitBreakerOptions = {
+    failureThreshold: 5,
+    recoveryTimeout: 60000,
+    halfOpenMaxRequests: 3,
+  };
 
-  constructor(
-    private readonly redis: RedisService,
-    options?: Partial<CircuitBreakerOptions>,
-  ) {
-    this.options = {
-      failureThreshold: options?.failureThreshold ?? 5,
-      recoveryTimeout: options?.recoveryTimeout ?? 60000,
-      halfOpenMaxRequests: options?.halfOpenMaxRequests ?? 3,
-    };
-  }
+  constructor(private readonly redis: RedisService) {}
 
   private getStateKey(service: string): string {
     return `circuit:${service}:state`;

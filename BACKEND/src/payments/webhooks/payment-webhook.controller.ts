@@ -10,6 +10,8 @@ import type { Request } from 'express';
 import { PaymentService } from '../payment.service';
 import { PinoLogger } from 'nestjs-pino';
 import { Throttle } from '@nestjs/throttler';
+import { Decimal } from '@prisma/client/runtime/library';
+import { BankingService } from '../../banking/banking.service';
 
 interface PaystackWebhookEvent {
   event: string;
@@ -20,6 +22,9 @@ interface PaystackWebhookEvent {
     currency: string;
     gateway_response: string;
     id: number;
+    authorization?: {
+      receiver_bank_account_number?: string;
+    };
   };
 }
 
@@ -28,9 +33,14 @@ interface FlutterwaveWebhookEvent {
   data: {
     id: number;
     tx_ref: string;
+    reference?: string;
     status: string;
     amount: number;
     currency: string;
+    account_number?: string;
+    customer?: {
+      account_number?: string;
+    };
   };
 }
 
@@ -38,6 +48,7 @@ interface FlutterwaveWebhookEvent {
 export class WebhookController {
   constructor(
     private readonly paymentService: PaymentService,
+    private readonly bankingService: BankingService,
     private readonly logger: PinoLogger,
   ) {}
 
@@ -66,7 +77,7 @@ export class WebhookController {
     );
 
     if (!isValid) {
-      this.logger.warn({ signature }, 'Invalid Paystack webhook signature');
+      this.logger.warn('Invalid Paystack webhook signature');
       throw new BadRequestException('Invalid signature');
     }
 
@@ -75,7 +86,32 @@ export class WebhookController {
       'Paystack webhook received',
     );
 
-    if (body.event === 'charge.success' && body.data?.reference) {
+    const accountNumber =
+      body.data?.authorization?.receiver_bank_account_number;
+
+    if (body.event?.startsWith('transfer.') && body.data?.reference) {
+      await this.paymentService.processTransferWebhook({
+        provider: 'paystack',
+        eventType: body.event,
+        providerReference: body.data.reference,
+        providerStatus: body.data.status,
+        rawPayload: body as unknown as Record<string, unknown>,
+      });
+    } else if (
+      body.event === 'charge.success' &&
+      body.data?.reference &&
+      accountNumber
+    ) {
+      await this.bankingService.processVirtualAccountDeposit({
+        provider: 'paystack',
+        eventType: body.event,
+        providerReference: body.data.reference,
+        accountNumber,
+        amount: new Decimal(body.data.amount / 100),
+        currency: (body.data.currency || 'NGN') as 'NGN' | 'GHS',
+        rawPayload: body as unknown as Record<string, unknown>,
+      });
+    } else if (body.event === 'charge.success' && body.data?.reference) {
       await this.paymentService.processWebhookDeposit({
         reference: body.data.reference,
         status: body.data.status,
@@ -104,10 +140,7 @@ export class WebhookController {
       );
 
       if (!isValid) {
-        this.logger.warn(
-          { flwSignature },
-          'Invalid Flutterwave webhook signature',
-        );
+        this.logger.warn('Invalid Flutterwave webhook signature');
         throw new BadRequestException('Invalid signature');
       }
     } else if (verifHash) {
@@ -121,11 +154,33 @@ export class WebhookController {
       'Flutterwave webhook received',
     );
 
-    if (
-      (body.event === 'charge.completed' ||
-        body.event === 'transfer.completed') &&
-      body.data?.tx_ref
+    const flutterwaveAccountNumber =
+      body.data?.account_number || body.data?.customer?.account_number;
+    const transferReference = body.data?.reference || body.data?.tx_ref;
+
+    if (body.event?.startsWith('transfer') && transferReference) {
+      await this.paymentService.processTransferWebhook({
+        provider: 'flutterwave',
+        eventType: body.event,
+        providerReference: transferReference,
+        providerStatus: body.data.status,
+        rawPayload: body as unknown as Record<string, unknown>,
+      });
+    } else if (
+      body.event === 'charge.completed' &&
+      body.data?.tx_ref &&
+      flutterwaveAccountNumber
     ) {
+      await this.bankingService.processVirtualAccountDeposit({
+        provider: 'flutterwave',
+        eventType: body.event,
+        providerReference: body.data.tx_ref,
+        accountNumber: flutterwaveAccountNumber,
+        amount: new Decimal(body.data.amount),
+        currency: (body.data.currency || 'NGN') as 'NGN' | 'GHS',
+        rawPayload: body as unknown as Record<string, unknown>,
+      });
+    } else if (body.event === 'charge.completed' && body.data?.tx_ref) {
       await this.paymentService.processWebhookDeposit({
         reference: body.data.tx_ref,
         status: body.data.status,

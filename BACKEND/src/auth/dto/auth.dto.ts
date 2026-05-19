@@ -1,6 +1,18 @@
-import { IsEmail, IsString, MinLength, Matches } from 'class-validator';
+import {
+  IsEmail,
+  IsOptional,
+  IsString,
+  MaxLength,
+  MinLength,
+  Matches,
+} from 'class-validator';
 
 export class RegisterDto {
+  @IsString()
+  @IsOptional()
+  @MaxLength(120)
+  fullName?: string;
+
   @IsEmail()
   email: string;
 
@@ -41,6 +53,19 @@ export class ChangePasswordDto {
 export class RefreshTokenDto {
   @IsString()
   refreshToken: string;
+}
+
+export class EmailDto {
+  @IsEmail()
+  email: string;
+}
+
+export class PhoneDto {
+  @IsString()
+  @Matches(/^(\+?\d{10,15})$/, {
+    message: 'Phone number must be a valid format',
+  })
+  phone: string;
 }
 
 export class VerifyOtpDto {

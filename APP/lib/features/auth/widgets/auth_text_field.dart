@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 import '../../../core/theme/app_theme.dart';
 
 /// Reusable text field widget for auth screens.
@@ -32,7 +32,7 @@ class AuthTextField extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(label, style: AppTextStyles.labelM),
-        const SizedBox(height: AppSpacing.xs + 2),
+        SizedBox(height: AppSpacing.xs + 2),
         TextFormField(
           controller: controller,
           obscureText: obscureText,
@@ -60,3 +60,4 @@ class AuthTextField extends StatelessWidget {
     );
   }
 }
+

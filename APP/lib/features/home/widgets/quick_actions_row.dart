@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 import '../../../core/theme/app_theme.dart';
 
 /// Two large pill buttons: Send Money | Exchange
@@ -10,7 +10,7 @@ class QuickActionsRow extends StatelessWidget {
   Widget build(BuildContext context) {
     return Row(
       children: [
-        // ── Send Money ──
+        // â”€â”€ Send Money â”€â”€
         Expanded(
           child: _QuickActionPill(
             label: 'Send',
@@ -18,9 +18,9 @@ class QuickActionsRow extends StatelessWidget {
             onTap: () {},
           ),
         ),
-        const SizedBox(width: AppSpacing.md),
+        SizedBox(width: AppSpacing.md),
 
-        // ── Exchange ──
+        // â”€â”€ Exchange â”€â”€
         Expanded(
           child: _QuickActionPill(
             label: 'Exchange',
@@ -33,7 +33,7 @@ class QuickActionsRow extends StatelessWidget {
   }
 }
 
-// ─── INDIVIDUAL PILL BUTTON ───────────────────────────────────────────────────
+// â”€â”€â”€ INDIVIDUAL PILL BUTTON â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 class _QuickActionPill extends StatelessWidget {
   final String label;
   final IconData icon;
@@ -74,7 +74,7 @@ class _QuickActionPill extends StatelessWidget {
               ),
               child: Icon(icon, color: Colors.white, size: 15),
             ),
-            const SizedBox(width: AppSpacing.sm),
+            SizedBox(width: AppSpacing.sm),
             Text(
               label,
               style: AppTextStyles.labelL.copyWith(
@@ -88,3 +88,4 @@ class _QuickActionPill extends StatelessWidget {
     );
   }
 }
+
