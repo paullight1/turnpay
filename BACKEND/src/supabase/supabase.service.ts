@@ -8,12 +8,14 @@ import {
 import { WalletCurrency } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
+type TrustPaySupabaseClient = SupabaseClient<any, any, 'public', any, any>;
+
 @Injectable()
 export class SupabaseService {
   private readonly logger = new Logger(SupabaseService.name);
-  public client: SupabaseClient;
-  public authClient: SupabaseClient;
-  public adminClient?: SupabaseClient;
+  public client: TrustPaySupabaseClient;
+  public authClient: TrustPaySupabaseClient;
+  public adminClient?: TrustPaySupabaseClient;
 
   constructor(
     private readonly configService: ConfigService,
@@ -175,7 +177,10 @@ export class SupabaseService {
   }
 
   private resolvePhone(supabaseUser: SupabaseUser) {
-    const metadataPhone = supabaseUser.user_metadata?.phone;
+    const metadata = supabaseUser.user_metadata as
+      | Record<string, unknown>
+      | undefined;
+    const metadataPhone = metadata?.phone;
     const phone =
       typeof metadataPhone === 'string' && metadataPhone.trim().length > 0
         ? metadataPhone.trim()
@@ -185,7 +190,10 @@ export class SupabaseService {
   }
 
   private resolveFullName(supabaseUser: SupabaseUser) {
-    const metadata = supabaseUser.user_metadata || {};
+    const metadata = (supabaseUser.user_metadata ?? {}) as Record<
+      string,
+      unknown
+    >;
     const fullName = metadata.fullName || metadata.full_name || metadata.name;
 
     return typeof fullName === 'string' && fullName.trim().length > 0

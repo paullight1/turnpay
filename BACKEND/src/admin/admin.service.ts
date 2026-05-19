@@ -10,7 +10,7 @@ import {
   AdminUpdateUserDto,
 } from './dto/admin.dto';
 import { PinoLogger } from 'nestjs-pino';
-import { TransactionStatus } from '@prisma/client';
+import { Prisma, ProviderEventStatus, TransactionStatus } from '@prisma/client';
 import { Decimal } from '@prisma/client/runtime/library';
 import { LedgerService } from '../wallets/ledger.service';
 import { PaystackProvider } from '../payments/providers/paystack.provider';
@@ -138,8 +138,8 @@ export class AdminService {
           targetType: 'User',
           targetId: userId,
           reason,
-          before: this.sanitizeMetadata(existing) as any,
-          after: this.sanitizeMetadata(updatedUser) as any,
+          before: this.sanitizeMetadata(existing) as Prisma.InputJsonValue,
+          after: this.sanitizeMetadata(updatedUser) as Prisma.InputJsonValue,
           metadata: { fields: Object.keys(updates) },
         },
       });
@@ -250,7 +250,7 @@ export class AdminService {
     });
   }
 
-  async updateTransactionStatus(
+  updateTransactionStatus(
     reference: string,
     status: TransactionStatus,
     adminId: string,
@@ -328,7 +328,7 @@ export class AdminService {
   async getProviderEvents(limit = 50, status?: string) {
     const events = await this.prisma.providerEvent.findMany({
       take: limit,
-      where: status ? { status: status as any } : undefined,
+      where: status ? { status: status as ProviderEventStatus } : undefined,
       orderBy: { createdAt: 'desc' },
       select: {
         id: true,
@@ -477,7 +477,7 @@ export class AdminService {
             providerVerification: this.sanitizeMetadata(
               providerVerification.payload,
             ),
-          } as any,
+          } as Prisma.InputJsonValue,
         },
       });
 
@@ -683,7 +683,7 @@ export class AdminService {
         targetType: 'ReconciliationReport',
         targetId: `report-${Date.now()}`,
         reason: dto.reason,
-        after: report as any,
+        after: report,
         metadata: { summary: report.summary },
       },
     });
@@ -800,7 +800,11 @@ export class AdminService {
       return null;
     }
 
-    const decimalAmount = new Decimal(rawAmount as any);
+    if (typeof rawAmount !== 'string' && typeof rawAmount !== 'number') {
+      return null;
+    }
+
+    const decimalAmount = new Decimal(rawAmount);
     if (!decimalAmount.isFinite()) {
       return null;
     }
@@ -813,19 +817,17 @@ export class AdminService {
       return {};
     }
 
-    const {
-      accountNumber,
-      account_number,
-      accountNumberEncrypted,
-      receiver_bank_account_number,
-      bvn,
-      nin,
-      signature,
-      token,
-      password,
-      secret,
-      ...safeMetadata
-    } = metadata as Record<string, unknown>;
+    const safeMetadata = { ...(metadata as Record<string, unknown>) };
+    delete safeMetadata.accountNumber;
+    delete safeMetadata.account_number;
+    delete safeMetadata.accountNumberEncrypted;
+    delete safeMetadata.receiver_bank_account_number;
+    delete safeMetadata.bvn;
+    delete safeMetadata.nin;
+    delete safeMetadata.signature;
+    delete safeMetadata.token;
+    delete safeMetadata.password;
+    delete safeMetadata.secret;
 
     return safeMetadata;
   }

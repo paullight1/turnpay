@@ -3,6 +3,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { Decimal } from '@prisma/client/runtime/library';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -19,26 +20,28 @@ interface WalletMovementInput {
   metadata?: Record<string, unknown>;
 }
 
+type LedgerClient = Pick<Prisma.TransactionClient, 'wallet' | 'ledgerEntry'>;
+
 @Injectable()
 export class LedgerService {
   constructor(private readonly prisma: PrismaService) {}
 
-  creditWallet(input: WalletMovementInput, client?: any) {
+  creditWallet(input: WalletMovementInput, client?: LedgerClient) {
     return this.postWalletMovement('CREDIT', input, client);
   }
 
-  debitWallet(input: WalletMovementInput, client?: any) {
+  debitWallet(input: WalletMovementInput, client?: LedgerClient) {
     return this.postWalletMovement('DEBIT', input, client);
   }
 
   private async postWalletMovement(
     direction: LedgerDirection,
     input: WalletMovementInput,
-    client?: any,
+    client?: LedgerClient,
   ) {
     this.assertPositiveAmount(input.amount);
 
-    const execute = async (tx: any) => {
+    const execute = async (tx: LedgerClient) => {
       const wallet = await tx.wallet.findUnique({
         where: {
           userId_currency: {
@@ -99,7 +102,7 @@ export class LedgerService {
           balanceAfter,
           reference: input.reference,
           source: input.source,
-          metadata: input.metadata,
+          metadata: input.metadata as Prisma.InputJsonValue | undefined,
         },
       });
 

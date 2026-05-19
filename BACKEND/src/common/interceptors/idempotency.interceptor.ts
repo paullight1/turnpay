@@ -12,6 +12,8 @@ import { createHash } from 'crypto';
 import { RedisService } from '../../redis/redis.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { PinoLogger } from 'nestjs-pino';
+import { Prisma } from '@prisma/client';
+import { AuthenticatedRequest } from '../types/request-context';
 
 const IDEMPOTENCY_TTL = 86400; // 24 hours
 const IDEMPOTENCY_LOCK_TTL = 30;
@@ -27,9 +29,9 @@ export class IdempotencyInterceptor implements NestInterceptor {
   async intercept(
     context: ExecutionContext,
     next: CallHandler,
-  ): Promise<Observable<any>> {
-    const request = context.switchToHttp().getRequest();
-    const method = request.method?.toUpperCase();
+  ): Promise<Observable<unknown>> {
+    const request = context.switchToHttp().getRequest<AuthenticatedRequest>();
+    const method = request.method.toUpperCase();
     const path = request.originalUrl || request.url || '';
     const shouldProcess =
       ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method) &&
@@ -44,7 +46,7 @@ export class IdempotencyInterceptor implements NestInterceptor {
       request.headers['idempotency-key'] ||
       request.headers['x-idempotency-key'];
 
-    if (!idempotencyKey) {
+    if (typeof idempotencyKey !== 'string') {
       throw new BadRequestException('Idempotency-Key header is required');
     }
 
@@ -62,7 +64,7 @@ export class IdempotencyInterceptor implements NestInterceptor {
         { idempotencyKey },
         'Idempotency key matched, returning cached response',
       );
-      return of(JSON.parse(existing));
+      return of(this.parseJson(existing));
     }
 
     const existingRecord = await this.prisma.idempotencyRecord.findUnique({
@@ -100,7 +102,9 @@ export class IdempotencyInterceptor implements NestInterceptor {
     });
 
     try {
-      const response = await lastValueFrom(next.handle());
+      const response: unknown = await lastValueFrom(
+        next.handle() as Observable<unknown>,
+      );
 
       if (response) {
         const responseJson = this.toJsonValue(response);
@@ -142,11 +146,15 @@ export class IdempotencyInterceptor implements NestInterceptor {
       .digest('hex');
   }
 
-  private toJsonValue(value: unknown) {
-    return JSON.parse(JSON.stringify(value));
+  private toJsonValue(value: unknown): Prisma.InputJsonValue {
+    return this.parseJson(JSON.stringify(value)) as Prisma.InputJsonValue;
   }
 
-  private async resolveExistingRecord(
+  private parseJson(value: string): unknown {
+    return JSON.parse(value) as unknown;
+  }
+
+  private resolveExistingRecord(
     record: {
       requestHash: string;
       status: string;
@@ -179,8 +187,11 @@ export class IdempotencyInterceptor implements NestInterceptor {
   }) {
     try {
       return await this.prisma.idempotencyRecord.create({ data });
-    } catch (error: any) {
-      if (error?.code === 'P2002') {
+    } catch (error: unknown) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2002'
+      ) {
         const existing = await this.prisma.idempotencyRecord.findUnique({
           where: {
             scope_key: {

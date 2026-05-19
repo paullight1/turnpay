@@ -11,6 +11,7 @@ import {
   ResolveDisputeDto,
 } from './dto/kyc.dto';
 import { PinoLogger } from 'nestjs-pino';
+import { DisputeStatus } from '@prisma/client';
 
 @Injectable()
 export class KycService {
@@ -247,7 +248,7 @@ export class KycService {
     const resolved = await this.prisma.dispute.update({
       where: { id: disputeId },
       data: {
-        status: dto.status as any,
+        status: dto.status as DisputeStatus,
         resolution: dto.resolution || null,
         resolvedBy: adminId,
         resolvedAt: new Date(),

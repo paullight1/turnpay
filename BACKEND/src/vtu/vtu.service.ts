@@ -6,11 +6,7 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { type TransactionType } from '@prisma/client';
 import { WalletsService } from '../wallets/wallets.service';
-import {
-  VtuApiProvider,
-  VtuProvider,
-  VtuPackage,
-} from './providers/vtu-api.provider';
+import { VtuApiProvider } from './providers/vtu-api.provider';
 import { PurchaseVtuDto } from './dto/vtu.dto';
 import { v4 as uuidv4 } from 'uuid';
 import { PinoLogger } from 'nestjs-pino';
@@ -133,7 +129,11 @@ export class VtuService {
       await this.reverseVtuPurchase(userId, reference, dto.amount);
 
       this.logger.error(
-        { userId, reference, error },
+        {
+          userId,
+          reference,
+          error: error instanceof Error ? error.message : 'Unknown VTU error',
+        },
         'VTU purchase failed, balance reversed',
       );
 

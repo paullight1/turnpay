@@ -52,7 +52,7 @@ export class VtuApiProvider {
         ),
       );
       return response.data.providers;
-    } catch (error) {
+    } catch {
       this.logger.warn('VTU API unavailable, using fallback providers');
       return this.getFallbackProviders(type);
     }
@@ -71,7 +71,7 @@ export class VtuApiProvider {
         ),
       );
       return response.data.packages;
-    } catch (error) {
+    } catch {
       this.logger.warn('VTU API unavailable, using fallback packages');
       return this.getFallbackPackages(provider);
     }

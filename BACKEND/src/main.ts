@@ -5,9 +5,11 @@ import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import * as Sentry from '@sentry/nestjs';
 import { nodeProfilingIntegration } from '@sentry/profiling-node';
 import helmet from 'helmet';
+import type { Server } from 'http';
 import { AppModule } from './app.module';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 import { IdempotencyInterceptor } from './common/interceptors/idempotency.interceptor';
+import type { RawBodyRequest } from './common/types/request-context';
 
 if (process.env.SENTRY_DSN) {
   Sentry.init({
@@ -33,7 +35,10 @@ async function bootstrap() {
   const allowedOrigins = new Set([webUrl, adminUrl]);
 
   app.enableCors({
-    origin: (origin, callback) => {
+    origin: (
+      origin: string | undefined,
+      callback: (error: Error | null, allow?: boolean) => void,
+    ) => {
       if (
         !origin ||
         allowedOrigins.has(origin) ||
@@ -51,7 +56,7 @@ async function bootstrap() {
   app.use(
     json({
       limit: '10mb',
-      verify: (req: any, _res, buf) => {
+      verify: (req: RawBodyRequest, _res, buf) => {
         if (req.url.startsWith('/api/webhooks')) {
           req.rawBody = buf.toString();
         }
@@ -97,17 +102,16 @@ async function bootstrap() {
   });
 
   const port = process.env.PORT ?? 3000;
-  const server = await app.listen(port);
+  const server = (await app.listen(port)) as Server;
   logger.log(`Application started on port ${port}`);
   logger.log(`API docs available at http://localhost:${port}/api/docs`);
 
   const gracefulShutdown = async (signal: string) => {
     logger.log(`${signal} received, shutting down gracefully`);
     await Sentry.close(2000);
-    server.close(async () => {
+    server.close(() => {
       logger.log('HTTP server closed');
-      await app.close();
-      process.exit(0);
+      void app.close().then(() => process.exit(0));
     });
 
     setTimeout(() => {
@@ -116,7 +120,7 @@ async function bootstrap() {
     }, 10000);
   };
 
-  process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
-  process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+  process.on('SIGTERM', () => void gracefulShutdown('SIGTERM'));
+  process.on('SIGINT', () => void gracefulShutdown('SIGINT'));
 }
-bootstrap();
+void bootstrap();

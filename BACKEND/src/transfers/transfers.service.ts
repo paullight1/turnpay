@@ -12,8 +12,6 @@ import { LedgerService } from '../wallets/ledger.service';
 import { InternalTransferDto } from './dto/internal-transfer.dto';
 import { maskEmail, maskPhone } from '../common/utils/masking';
 
-type TransferCurrency = 'NGN' | 'GHS';
-
 @Injectable()
 export class TransfersService {
   constructor(

@@ -141,7 +141,7 @@ export class ExchangeService {
 
         if (sourceWallet.balance.lt(quote.sendAmount)) {
           throw new BadRequestException(
-            `Insufficient ${quote.from} balance. Required: ${quote.sendAmount}, Available: ${sourceWallet.balance}`,
+            `Insufficient ${quote.from} balance. Required: ${quote.sendAmount.toString()}, Available: ${sourceWallet.balance.toString()}`,
           );
         }
 

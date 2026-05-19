@@ -63,6 +63,8 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
   }
 
   Future<void> _submit() async {
+    if (_isSubmitting) return;
+
     if (widget.kind == MoneyActionKind.exchange) {
       await _submitExchange();
       return;
@@ -74,20 +76,23 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
       return;
     }
 
+    setState(() {
+      _isSubmitting = true;
+      _message = null;
+    });
+
     if (widget.kind == MoneyActionKind.withdraw) {
       final approved = await _requireTransactionApproval(
         title: 'Enter your transaction PIN',
         subtitle: 'Approve this withdrawal before it is submitted.',
       );
       if (!approved) {
+        if (mounted) {
+          setState(() => _isSubmitting = false);
+        }
         return;
       }
     }
-
-    setState(() {
-      _isSubmitting = true;
-      _message = null;
-    });
 
     try {
       final response = await _request(amount);
@@ -106,6 +111,8 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
   }
 
   Future<void> _submitExchange() async {
+    if (_isSubmitting) return;
+
     final amount = double.tryParse(_amountController.text.trim());
     if (amount == null || amount <= 0) {
       setState(() => _message = 'Enter a valid amount to exchange.');
@@ -117,18 +124,21 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
       return;
     }
 
+    setState(() {
+      _isSubmitting = true;
+      _message = null;
+    });
+
     final approved = await _requireTransactionApproval(
       title: 'Enter your transaction PIN',
       subtitle: 'Approve this exchange request before the quote is created.',
     );
     if (!approved) {
+      if (mounted) {
+        setState(() => _isSubmitting = false);
+      }
       return;
     }
-
-    setState(() {
-      _isSubmitting = true;
-      _message = null;
-    });
 
     try {
       final response = await _apiClient.client.post(

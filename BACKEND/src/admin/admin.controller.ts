@@ -88,7 +88,7 @@ export class AdminController {
   }
 
   @Post('transactions/:reference/status')
-  async updateTransactionStatus(
+  updateTransactionStatus(
     @CurrentUser() user: { userId: string },
     @Param('reference') reference: string,
     @Body('status') status: TransactionStatus,

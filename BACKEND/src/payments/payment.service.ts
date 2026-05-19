@@ -15,7 +15,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { createHmac, timingSafeEqual } from 'crypto';
 import { PinoLogger } from 'nestjs-pino';
 import { UsersService } from '../users/users.service';
-import { Transaction, WalletCurrency } from '@prisma/client';
+import { Prisma, Transaction } from '@prisma/client';
 import { Decimal } from '@prisma/client/runtime/library';
 import { LedgerService } from '../wallets/ledger.service';
 import { decryptSensitiveValue } from '../common/utils/encryption';
@@ -593,25 +593,14 @@ export class PaymentService {
           eventType: input.eventType,
           providerReference: input.providerReference,
           status: 'PROCESSING',
-          payload: payload as any,
+          payload: payload as Prisma.InputJsonValue,
         },
         select: { id: true, status: true },
       });
-    } catch (error: any) {
-      if (error?.code !== 'P2002') {
+    } catch (error: unknown) {
+      if (!this.isUniqueConstraintError(error)) {
         throw error;
       }
-
-      const existing = await this.prisma.providerEvent.findUnique({
-        where: {
-          provider_providerReference_eventType: {
-            provider,
-            providerReference: input.providerReference,
-            eventType: input.eventType,
-          },
-        },
-        select: { id: true, status: true },
-      });
 
       return { received: true, processed: false, duplicate: true };
     }
@@ -659,7 +648,7 @@ export class PaymentService {
             lastCheckedAt: new Date(),
             metadata: this.mergeJsonMetadata(latestAttempt.metadata, {
               providerEventId: providerEvent.id,
-            }) as any,
+            }) as Prisma.InputJsonValue,
           },
         });
       }
@@ -821,17 +810,15 @@ export class PaymentService {
       return {};
     }
 
-    const {
-      accountNumber,
-      account_number,
-      accountNumberEncrypted,
-      receiver_bank_account_number,
-      bvn,
-      nin,
-      signature,
-      token,
-      ...safeMetadata
-    } = metadata as Record<string, unknown>;
+    const safeMetadata = { ...(metadata as Record<string, unknown>) };
+    delete safeMetadata.accountNumber;
+    delete safeMetadata.account_number;
+    delete safeMetadata.accountNumberEncrypted;
+    delete safeMetadata.receiver_bank_account_number;
+    delete safeMetadata.bvn;
+    delete safeMetadata.nin;
+    delete safeMetadata.signature;
+    delete safeMetadata.token;
 
     return safeMetadata;
   }
@@ -846,6 +833,13 @@ export class PaymentService {
         : {}),
       ...updates,
     };
+  }
+
+  private isUniqueConstraintError(error: unknown) {
+    return (
+      error instanceof Prisma.PrismaClientKnownRequestError &&
+      error.code === 'P2002'
+    );
   }
 
   private sanitizeProviderPayload(payload: Record<string, unknown>) {

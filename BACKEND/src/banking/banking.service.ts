@@ -17,7 +17,6 @@ import {
 import { ProvisionVirtualAccountDto } from './dto/banking.dto';
 import { PaystackVirtualAccountProvider } from './providers/paystack-virtual-account.provider';
 import {
-  BankingCurrency,
   BankingProviderName,
   NormalizedDepositEvent,
   NormalizedProviderName,

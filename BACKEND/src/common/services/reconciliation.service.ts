@@ -32,8 +32,11 @@ export class ReconciliationService {
         this.logger.warn(`Found ${result.mismatches.length} wallet mismatches`);
       }
     } catch (error) {
-      this.logger.error('Reconciliation failed', error);
-      this.pinoLogger.error({ error }, 'Daily reconciliation failed');
+      const errorMessage =
+        error instanceof Error ? error.message : 'Unknown reconciliation error';
+
+      this.logger.error('Reconciliation failed', errorMessage);
+      this.pinoLogger.error({ errorMessage }, 'Daily reconciliation failed');
     }
   }
 

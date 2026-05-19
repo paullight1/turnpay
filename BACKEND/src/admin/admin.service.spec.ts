@@ -162,8 +162,8 @@ describe('AdminService banking operations', () => {
   it('blocks generic status updates for withdrawal transactions', async () => {
     prisma.transaction.findUnique.mockResolvedValue({ type: 'WITHDRAW' });
 
-    await expect(
+    expect(() =>
       service.updateTransactionStatus('WD-1', 'SUCCESS', 'admin-1'),
-    ).rejects.toBeInstanceOf(BadRequestException);
+    ).toThrow(BadRequestException);
   });
 });

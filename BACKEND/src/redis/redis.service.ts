@@ -37,7 +37,7 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
     try {
       await this.client.ping();
       this.logger.log('Redis server is reachable');
-    } catch (error) {
+    } catch {
       this.logger.warn(
         'Redis server not reachable, falling back to memory storage',
       );

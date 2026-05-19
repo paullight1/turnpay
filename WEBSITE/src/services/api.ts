@@ -1,7 +1,31 @@
 import axios from "axios";
 import { createClient } from "@/lib/supabase";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3000";
+const API_URL = resolveApiUrl();
+
+function resolveApiUrl() {
+  const configured = process.env.NEXT_PUBLIC_API_URL;
+  if (configured) {
+    if (
+      typeof window !== "undefined" &&
+      process.env.NODE_ENV === "production" &&
+      !configured.startsWith("https://")
+    ) {
+      throw new Error("NEXT_PUBLIC_API_URL must be HTTPS in production");
+    }
+    return configured;
+  }
+
+  if (typeof window === "undefined") {
+    return "http://localhost:3000";
+  }
+
+  if (process.env.NODE_ENV === "production") {
+    throw new Error("NEXT_PUBLIC_API_URL is required in production");
+  }
+
+  return "http://localhost:3000";
+}
 
 let isRefreshing = false;
 let failedQueue: Array<{

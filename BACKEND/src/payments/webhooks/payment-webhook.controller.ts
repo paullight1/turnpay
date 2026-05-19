@@ -6,12 +6,12 @@ import {
   Req,
   BadRequestException,
 } from '@nestjs/common';
-import type { Request } from 'express';
 import { PaymentService } from '../payment.service';
 import { PinoLogger } from 'nestjs-pino';
 import { Throttle } from '@nestjs/throttler';
 import { Decimal } from '@prisma/client/runtime/library';
 import { BankingService } from '../../banking/banking.service';
+import type { RawBodyRequest } from '../../common/types/request-context';
 
 interface PaystackWebhookEvent {
   event: string;
@@ -56,10 +56,10 @@ export class WebhookController {
   @Throttle({ default: { limit: 100, ttl: 60000 } })
   async handlePaystackWebhook(
     @Headers('x-paystack-signature') signature: string,
-    @Req() req: Request,
+    @Req() req: RawBodyRequest,
     @Body() body: PaystackWebhookEvent,
   ) {
-    const rawBody = (req as any).rawBody;
+    const rawBody = req.rawBody;
 
     if (!signature) {
       this.logger.warn('Missing Paystack webhook signature');
@@ -128,10 +128,10 @@ export class WebhookController {
   async handleFlutterwaveWebhook(
     @Headers('verif-hash') verifHash: string,
     @Headers('flw-signature') flwSignature: string,
-    @Req() req: Request,
+    @Req() req: RawBodyRequest,
     @Body() body: FlutterwaveWebhookEvent,
   ) {
-    const rawBody = (req as any).rawBody;
+    const rawBody = req.rawBody;
 
     if (flwSignature && rawBody) {
       const isValid = this.paymentService.verifyFlutterwaveSignature(

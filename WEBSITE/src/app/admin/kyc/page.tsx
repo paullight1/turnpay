@@ -1,12 +1,21 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { useAuth } from "@/lib/auth-provider";
 import { apiClient } from "@/services/api";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { toast } from "sonner";
 import { getErrorMessage } from "@/lib/errors";
 
@@ -31,22 +40,42 @@ type AdminKycResponse = {
 };
 
 export default function AdminKycPage() {
+  const { user, isLoading: authLoading } = useAuth();
+  const router = useRouter();
+  const isAdmin = user?.role === "ADMIN";
   const [page, setPage] = useState(1);
   const [selectedDoc, setSelectedDoc] = useState<AdminKycDocument | null>(null);
   const [rejectionNote, setRejectionNote] = useState("");
   const queryClient = useQueryClient();
 
+  useEffect(() => {
+    if (!authLoading && !isAdmin) {
+      router.push("/dashboard");
+    }
+  }, [authLoading, isAdmin, router]);
+
   const { data: kycData, isLoading } = useQuery({
     queryKey: ["admin-kyc", page],
     queryFn: async () => {
-      const res = await apiClient.get(`/api/admin/kyc/pending?page=${page}&limit=20`);
+      const res = await apiClient.get(
+        `/api/admin/kyc/pending?page=${page}&limit=20`,
+      );
       return res.data as AdminKycResponse;
     },
+    enabled: isAdmin,
     staleTime: 30000,
   });
 
   const reviewMutation = useMutation({
-    mutationFn: async ({ documentId, status, rejectionNote }: { documentId: string; status: string; rejectionNote?: string }) => {
+    mutationFn: async ({
+      documentId,
+      status,
+      rejectionNote,
+    }: {
+      documentId: string;
+      status: string;
+      rejectionNote?: string;
+    }) => {
       const res = await apiClient.put(`/api/admin/kyc/${documentId}/review`, {
         status,
         rejectionNote,
@@ -64,15 +93,21 @@ export default function AdminKycPage() {
     },
   });
 
-  if (isLoading) {
+  if (authLoading || !user || isLoading) {
     return <div className="p-6">Loading...</div>;
+  }
+
+  if (!isAdmin) {
+    return null;
   }
 
   return (
     <div className="min-h-screen bg-muted/20">
       <header className="border-b bg-background">
         <div className="container mx-auto flex h-16 items-center justify-between px-4">
-          <span className="text-xl font-bold text-primary">TrustPay Admin — KYC Review</span>
+          <span className="text-xl font-bold text-primary">
+            TrustPay Admin — KYC Review
+          </span>
           <Button variant="outline" onClick={() => window.history.back()}>
             Back to Admin
           </Button>
@@ -86,7 +121,9 @@ export default function AdminKycPage() {
           </CardHeader>
           <CardContent>
             {kycData?.documents?.length === 0 ? (
-              <div className="text-center py-8 text-muted-foreground">No pending KYC documents</div>
+              <div className="text-center py-8 text-muted-foreground">
+                No pending KYC documents
+              </div>
             ) : (
               <Table>
                 <TableHeader>
@@ -105,17 +142,29 @@ export default function AdminKycPage() {
                       <TableCell>
                         <div>
                           <p className="font-medium">{doc.user?.email}</p>
-                          <p className="text-sm text-muted-foreground">{doc.user?.phone}</p>
+                          <p className="text-sm text-muted-foreground">
+                            {doc.user?.phone}
+                          </p>
                         </div>
                       </TableCell>
-                      <TableCell className="capitalize">{doc.type.toLowerCase().replace("_", " ")}</TableCell>
-                      <TableCell className="font-mono text-sm">{doc.idNumber}</TableCell>
+                      <TableCell className="capitalize">
+                        {doc.type.toLowerCase().replace("_", " ")}
+                      </TableCell>
+                      <TableCell className="font-mono text-sm">
+                        {doc.idNumber}
+                      </TableCell>
                       <TableCell>
-                        <Badge variant={doc.status === "SUBMITTED" ? "default" : "secondary"}>
+                        <Badge
+                          variant={
+                            doc.status === "SUBMITTED" ? "default" : "secondary"
+                          }
+                        >
                           {doc.status}
                         </Badge>
                       </TableCell>
-                      <TableCell>{new Date(doc.createdAt).toLocaleDateString()}</TableCell>
+                      <TableCell>
+                        {new Date(doc.createdAt).toLocaleDateString()}
+                      </TableCell>
                       <TableCell>
                         <div className="flex gap-2">
                           <Button
@@ -139,10 +188,20 @@ export default function AdminKycPage() {
                   Page {kycData.page} of {kycData.totalPages}
                 </p>
                 <div className="flex gap-2">
-                  <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={page <= 1}
+                    onClick={() => setPage((p) => p - 1)}
+                  >
                     Previous
                   </Button>
-                  <Button variant="outline" size="sm" disabled={page >= (kycData.totalPages || 1)} onClick={() => setPage((p) => p + 1)}>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={page >= (kycData.totalPages || 1)}
+                    onClick={() => setPage((p) => p + 1)}
+                  >
                     Next
                   </Button>
                 </div>
@@ -168,7 +227,9 @@ export default function AdminKycPage() {
                 </div>
                 <div>
                   <p className="text-muted-foreground">ID Type</p>
-                  <p className="font-medium capitalize">{selectedDoc.type.toLowerCase().replace("_", " ")}</p>
+                  <p className="font-medium capitalize">
+                    {selectedDoc.type.toLowerCase().replace("_", " ")}
+                  </p>
                 </div>
                 <div>
                   <p className="text-muted-foreground">ID Number</p>
@@ -189,7 +250,9 @@ export default function AdminKycPage() {
               </div>
 
               <div className="flex flex-col gap-2">
-                <label className="text-sm font-medium">Rejection Note (optional)</label>
+                <label className="text-sm font-medium">
+                  Rejection Note (optional)
+                </label>
                 <textarea
                   className="flex min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
                   placeholder="Reason for rejection..."
@@ -223,7 +286,13 @@ export default function AdminKycPage() {
                 >
                   Reject
                 </Button>
-                <Button variant="outline" onClick={() => { setSelectedDoc(null); setRejectionNote(""); }}>
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setSelectedDoc(null);
+                    setRejectionNote("");
+                  }}
+                >
                   Cancel
                 </Button>
               </div>

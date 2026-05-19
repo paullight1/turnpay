@@ -12,6 +12,7 @@ class ApiClient {
   static const _uuid = Uuid();
 
   late final Dio _dio;
+  Future<String?>? _refreshInFlight;
 
   ApiClient() {
     _dio = Dio(
@@ -51,9 +52,25 @@ class ApiClient {
 
           return handler.next(options);
         },
-        onError: (error, handler) {
-          // TODO: Handle 401 unauthorized - redirect to login
-          return handler.next(error);
+        onError: (error, handler) async {
+          if (!_shouldRefresh(error)) {
+            return handler.next(error);
+          }
+
+          final accessToken = await _refreshAccessToken();
+          if (accessToken == null) {
+            await clearSession();
+            return handler.next(error);
+          }
+
+          try {
+            final retryOptions = error.requestOptions;
+            retryOptions.headers['Authorization'] = 'Bearer $accessToken';
+            final response = await _dio.fetch<dynamic>(retryOptions);
+            return handler.resolve(response);
+          } on DioException catch (retryError) {
+            return handler.next(retryError);
+          }
         },
       ),
     );
@@ -79,5 +96,64 @@ class ApiClient {
   Future<void> clearSession() async {
     await _storage.delete(key: _accessTokenKey);
     await _storage.delete(key: _refreshTokenKey);
+  }
+
+  bool _shouldRefresh(DioException error) {
+    if (error.response?.statusCode != 401) return false;
+    if (error.requestOptions.extra['retriedAfterRefresh'] == true) {
+      return false;
+    }
+    if (error.requestOptions.path.contains('/api/auth/refresh')) {
+      return false;
+    }
+    error.requestOptions.extra['retriedAfterRefresh'] = true;
+    return true;
+  }
+
+  Future<String?> _refreshAccessToken() {
+    _refreshInFlight ??= _performRefresh().whenComplete(() {
+      _refreshInFlight = null;
+    });
+    return _refreshInFlight!;
+  }
+
+  Future<String?> _performRefresh() async {
+    final refreshToken = await readRefreshToken();
+    if (refreshToken == null || refreshToken.isEmpty) {
+      return null;
+    }
+
+    final refreshClient = Dio(
+      BaseOptions(
+        baseUrl: AppConstants.apiBaseUrl,
+        connectTimeout: AppConstants.apiTimeout,
+        receiveTimeout: AppConstants.apiTimeout,
+        headers: {'Content-Type': 'application/json'},
+      ),
+    );
+
+    try {
+      final response = await refreshClient.post<dynamic>(
+        '/api/auth/refresh',
+        data: {'refreshToken': refreshToken},
+      );
+
+      final data = response.data;
+      if (data is! Map<String, dynamic>) return null;
+      final session = data['session'];
+      if (session is! Map<String, dynamic>) return null;
+      final accessToken = session['access_token'];
+      if (accessToken is! String || accessToken.isEmpty) return null;
+
+      final nextRefreshToken = session['refresh_token'];
+      await saveSession(
+        accessToken: accessToken,
+        refreshToken: nextRefreshToken is String ? nextRefreshToken : null,
+      );
+
+      return accessToken;
+    } on DioException {
+      return null;
+    }
   }
 }
