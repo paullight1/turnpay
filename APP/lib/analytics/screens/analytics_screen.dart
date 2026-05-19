@@ -11,7 +11,7 @@ class AnalyticsScreen extends StatelessWidget {
       backgroundColor: AppColors.background,
       body: SafeArea(
         child: Center(
-          child: Text('Analytics', style: AppTextStyles.displayMedium),
+          child: Text('History', style: AppTextStyles.displayMedium),
         ),
       ),
     );

@@ -1,4 +1,4 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import '../../../core/theme/app_theme.dart';
 
 // â”€â”€â”€ SPEND CATEGORY MODEL â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -48,7 +48,7 @@ final _weekLabels = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
 
 // â”€â”€â”€ ANALYTICS SCREEN â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 /// Matches the reference analytics screen:
-/// - "Analytics" header with back arrow and dots menu
+/// - "History" header with back arrow and dots menu
 /// - Income / Outcome pill toggle
 /// - White summary card with bar chart
 /// - Donut chart with center percentage
@@ -180,7 +180,7 @@ class _AnalyticsHeader extends StatelessWidget {
             ),
           ),
           const Spacer(),
-          Text('Analytics', style: AppTextStyles.headingM),
+          Text('History', style: AppTextStyles.headingM),
           const Spacer(),
           Container(
             width: 40,
@@ -682,4 +682,3 @@ class _BreakdownRow extends StatelessWidget {
     );
   }
 }
-

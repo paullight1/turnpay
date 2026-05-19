@@ -1,4 +1,4 @@
-﻿import 'dart:ui';
+import 'dart:ui';
 
 import 'package:flutter/material.dart';
 
@@ -32,7 +32,7 @@ const _navItems = [
     activeIcon: Icons.currency_exchange_rounded,
   ),
   _NavItem(
-    label: 'Analytics',
+    label: 'History',
     icon: Icons.pie_chart_outline_rounded,
     activeIcon: Icons.pie_chart_rounded,
   ),
@@ -233,4 +233,3 @@ class _GlassNavItem extends StatelessWidget {
     );
   }
 }
-
