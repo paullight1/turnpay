@@ -411,10 +411,11 @@ class _QuickActionsGrid extends StatelessWidget {
         AppRoutes.withdraw,
         badge: needsKyc ? 'KYC' : null,
       ),
-      const _ActionItem(
+      _ActionItem(
         'Exchange',
         Icons.currency_exchange_rounded,
         AppRoutes.exchange,
+        badge: needsKyc ? 'KYC' : null,
       ),
       const _ActionItem(
           'Airtime', Icons.phone_android_rounded, AppRoutes.airtime),
@@ -440,7 +441,7 @@ class _QuickActionsGrid extends StatelessWidget {
       ),
       itemBuilder: (context, index) {
         final action = actions[index];
-        return _QuickActionTile(action: action);
+        return _QuickActionTile(action: action, kycStatus: kycStatus);
       },
     );
   }
@@ -448,8 +449,12 @@ class _QuickActionsGrid extends StatelessWidget {
 
 class _QuickActionTile extends StatelessWidget {
   final _ActionItem action;
+  final String kycStatus;
 
-  const _QuickActionTile({required this.action});
+  const _QuickActionTile({
+    required this.action,
+    required this.kycStatus,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -458,7 +463,7 @@ class _QuickActionTile extends StatelessWidget {
       borderRadius: BorderRadius.circular(AppRadius.sm),
       child: InkWell(
         borderRadius: BorderRadius.circular(AppRadius.sm),
-        onTap: () => context.push(action.route),
+        onTap: () => _openAction(context),
         child: Padding(
           padding: const EdgeInsets.all(AppSpacing.sm),
           child: Column(
@@ -511,6 +516,53 @@ class _QuickActionTile extends StatelessWidget {
       ),
     );
   }
+
+  Future<void> _openAction(BuildContext context) async {
+    if (!KycGatePolicy.isBlocked(route: action.route, status: kycStatus)) {
+      context.push(action.route);
+      return;
+    }
+
+    final goToKyc = await _showKycRequiredDialog(context, action.label);
+    if (goToKyc == true && context.mounted) {
+      context.push(AppRoutes.kyc);
+    }
+  }
+}
+
+Future<bool?> _showKycRequiredDialog(BuildContext context, String actionLabel) {
+  return showDialog<bool>(
+    context: context,
+    builder: (dialogContext) {
+      return AlertDialog(
+        backgroundColor: AppColors.surface,
+        title: Text('KYC required', style: AppTextStyles.headingM),
+        content: Text(
+          '$actionLabel is available after KYC verification. Complete KYC to continue.',
+          style: AppTextStyles.bodyM,
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: Text(
+              'Not now',
+              style: AppTextStyles.labelM.copyWith(
+                color: AppColors.textSecondary,
+              ),
+            ),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            style: FilledButton.styleFrom(
+              backgroundColor: AppColors.primary,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('Complete KYC'),
+          ),
+        ],
+      );
+    },
+  );
 }
 
 class _WalletSummaryRow extends StatelessWidget {
@@ -673,7 +725,22 @@ class _VirtualAccountPanel extends StatelessWidget {
       color: Colors.transparent,
       child: InkWell(
         borderRadius: BorderRadius.circular(AppRadius.sm),
-        onTap: () => context.push(AppRoutes.virtualAccount),
+        onTap: () async {
+          if (!KycGatePolicy.isBlocked(
+            route: AppRoutes.virtualAccount,
+            status: kycStatus,
+          )) {
+            context.push(AppRoutes.virtualAccount);
+            return;
+          }
+          final goToKyc = await _showKycRequiredDialog(
+            context,
+            'Virtual account access',
+          );
+          if (goToKyc == true && context.mounted) {
+            context.push(AppRoutes.kyc);
+          }
+        },
         child: Ink(
           padding: const EdgeInsets.all(AppSpacing.md),
           decoration: BoxDecoration(

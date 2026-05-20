@@ -25,14 +25,7 @@ class ApiClient {
     );
 
     _dio.interceptors.add(
-      LogInterceptor(
-        request: kDebugMode,
-        requestHeader: kDebugMode,
-        requestBody: kDebugMode,
-        responseHeader: kDebugMode,
-        responseBody: kDebugMode,
-        error: kDebugMode,
-      ),
+      SafeDioLogInterceptor(enabled: kDebugMode),
     );
 
     _dio.interceptors.add(
@@ -155,5 +148,159 @@ class ApiClient {
     } on DioException {
       return null;
     }
+  }
+}
+
+typedef IdempotencyKeyGenerator = String Function();
+
+class MoneyAttemptIdempotency {
+  MoneyAttemptIdempotency({
+    IdempotencyKeyGenerator? keyGenerator,
+  }) : _keyGenerator = keyGenerator ?? ApiClient._uuid.v4;
+
+  final IdempotencyKeyGenerator _keyGenerator;
+  String? _attemptFingerprint;
+  String? _attemptKey;
+
+  String keyFor(String fingerprint) {
+    if (_attemptFingerprint == fingerprint && _attemptKey != null) {
+      return _attemptKey!;
+    }
+
+    _attemptFingerprint = fingerprint;
+    _attemptKey = _keyGenerator();
+    return _attemptKey!;
+  }
+
+  void markFinalOutcome() {
+    _attemptFingerprint = null;
+    _attemptKey = null;
+  }
+}
+
+class SafeDioLogInterceptor extends Interceptor {
+  SafeDioLogInterceptor({required this.enabled});
+
+  final bool enabled;
+
+  @override
+  void onRequest(RequestOptions options, RequestInterceptorHandler handler) {
+    if (enabled) {
+      final snapshot = ApiLogRedactor.redactRequest(options);
+      debugPrint(
+        'API request ${options.method} ${options.uri.path} '
+        'headers=${snapshot.headers} body=${snapshot.body}',
+      );
+    }
+    handler.next(options);
+  }
+
+  @override
+  void onResponse(
+      Response<dynamic> response, ResponseInterceptorHandler handler) {
+    if (enabled) {
+      final snapshot = ApiLogRedactor.redactResponse(response);
+      debugPrint(
+        'API response ${response.statusCode} '
+        '${response.requestOptions.uri.path} body=${snapshot.body}',
+      );
+    }
+    handler.next(response);
+  }
+
+  @override
+  void onError(DioException err, ErrorInterceptorHandler handler) {
+    if (enabled) {
+      final snapshot = ApiLogRedactor.redactRequest(err.requestOptions);
+      final responseSnapshot = err.response == null
+          ? null
+          : ApiLogRedactor.redactResponse(err.response!);
+      debugPrint(
+        'API error ${err.response?.statusCode ?? 'network'} '
+        '${err.requestOptions.uri.path} headers=${snapshot.headers} '
+        'requestBody=${snapshot.body} responseBody=${responseSnapshot?.body}',
+      );
+    }
+    handler.next(err);
+  }
+}
+
+class ApiLogSnapshot {
+  const ApiLogSnapshot({
+    required this.headers,
+    required this.body,
+  });
+
+  final Map<String, dynamic> headers;
+  final dynamic body;
+}
+
+class ApiLogRedactor {
+  static const redacted = '<redacted>';
+  static const omittedSensitiveEndpoint = '<omitted:sensitive-endpoint>';
+
+  static final List<RegExp> _sensitiveEndpointPatterns = [
+    RegExp(r'/api/auth/(login|register|refresh|otp|password|reset)',
+        caseSensitive: false),
+    RegExp(r'/api/payments', caseSensitive: false),
+    RegExp(r'/api/transfers', caseSensitive: false),
+    RegExp(r'/api/exchange', caseSensitive: false),
+    RegExp(r'/api/vtu', caseSensitive: false),
+    RegExp(r'/api/banking/accounts', caseSensitive: false),
+  ];
+
+  static final List<RegExp> _sensitiveKeyPatterns = [
+    RegExp('authorization', caseSensitive: false),
+    RegExp('cookie', caseSensitive: false),
+    RegExp('password', caseSensitive: false),
+    RegExp('token', caseSensitive: false),
+    RegExp('secret', caseSensitive: false),
+    RegExp('api[-_]?key', caseSensitive: false),
+    RegExp('pin', caseSensitive: false),
+    RegExp('otp', caseSensitive: false),
+    RegExp('account(number)?', caseSensitive: false),
+    RegExp('card', caseSensitive: false),
+  ];
+
+  static ApiLogSnapshot redactRequest(RequestOptions options) {
+    return ApiLogSnapshot(
+      headers: _redactMap(options.headers),
+      body: _shouldOmitBody(options.path)
+          ? omittedSensitiveEndpoint
+          : _redactValue(options.data),
+    );
+  }
+
+  static ApiLogSnapshot redactResponse(Response<dynamic> response) {
+    return ApiLogSnapshot(
+      headers: _redactMap(response.headers.map),
+      body: _shouldOmitBody(response.requestOptions.path)
+          ? omittedSensitiveEndpoint
+          : _redactValue(response.data),
+    );
+  }
+
+  static bool _shouldOmitBody(String path) {
+    return _sensitiveEndpointPatterns.any((pattern) => pattern.hasMatch(path));
+  }
+
+  static Map<String, dynamic> _redactMap(Map<dynamic, dynamic> input) {
+    return input.map((key, value) {
+      final keyText = '$key';
+      return MapEntry(
+        keyText,
+        _isSensitiveKey(keyText) ? redacted : _redactValue(value),
+      );
+    });
+  }
+
+  static dynamic _redactValue(dynamic value) {
+    if (value is Map) return _redactMap(value);
+    if (value is List) return value.map(_redactValue).toList();
+    return value;
+  }
+
+  static bool _isSensitiveKey(String key) {
+    return _sensitiveKeyPatterns.any((pattern) => pattern.hasMatch(key));
   }
 }

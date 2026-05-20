@@ -8,6 +8,7 @@ describe('PaymentService withdrawals', () => {
     user: {
       findUnique: jest.fn(),
       update: jest.fn(),
+      updateMany: jest.fn(),
     },
     bankAccount: {
       findFirst: jest.fn(),
@@ -109,6 +110,7 @@ describe('PaymentService withdrawals', () => {
       id: 'tx-1',
       reference: 'WD-1',
     });
+    prisma.user.updateMany.mockResolvedValue({ count: 1 });
     ledger.debitWallet.mockResolvedValue({
       balanceAfter: new Decimal(4000),
     });
@@ -194,6 +196,7 @@ describe('PaymentService withdrawals', () => {
       id: 'tx-1',
       reference: 'WD-1',
     });
+    prisma.user.updateMany.mockResolvedValue({ count: 1 });
     ledger.debitWallet.mockResolvedValue({
       balanceAfter: new Decimal(4000),
     });
@@ -327,6 +330,57 @@ describe('PaymentService withdrawals', () => {
       },
     });
 
+    expect(ledger.creditWallet).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: 'user-1',
+        transactionId: 'tx-1',
+        reference: 'WD-1-REVERSAL',
+        source: 'WITHDRAWAL_REVERSAL',
+      }),
+      prisma,
+    );
+  });
+
+  it('reverses a previously successful transfer when provider later sends reversed', async () => {
+    prisma.providerEvent.create.mockResolvedValue({
+      id: 'event-1',
+      status: 'PROCESSING',
+    });
+    prisma.transaction.findUnique.mockResolvedValue({
+      id: 'tx-1',
+      userId: 'user-1',
+      type: 'WITHDRAW',
+      status: 'SUCCESS',
+      amount: new Decimal(1000),
+      currency: 'NGN',
+      reference: 'WD-1',
+      transferAttempts: [{ id: 'attempt-1', metadata: {} }],
+    });
+    prisma.transaction.updateMany.mockImplementation(({ where }) =>
+      Promise.resolve({
+        count:
+          where.status?.in?.includes('SUCCESS') || where.status === 'SUCCESS'
+            ? 1
+            : 0,
+      }),
+    );
+    prisma.ledgerEntry.findFirst.mockResolvedValue(null);
+
+    await service.processTransferWebhook({
+      provider: 'paystack',
+      eventType: 'transfer.reversed',
+      providerReference: 'WD-1',
+      providerStatus: 'reversed',
+      rawPayload: {
+        event: 'transfer.reversed',
+        data: { reference: 'WD-1', status: 'reversed' },
+      },
+    });
+
+    expect(prisma.transaction.updateMany).toHaveBeenCalledWith({
+      where: { id: 'tx-1', status: { in: ['PENDING', 'SUCCESS'] } },
+      data: { status: 'REVERSED' },
+    });
     expect(ledger.creditWallet).toHaveBeenCalledWith(
       expect.objectContaining({
         userId: 'user-1',

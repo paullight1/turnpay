@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import DashboardLayout from "@/components/layout/dashboard-layout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -12,6 +12,7 @@ import { toast } from "sonner";
 import { apiClient } from "@/services/api";
 import { useQuery } from "@tanstack/react-query";
 import { getErrorMessage } from "@/lib/errors";
+import { maskKycId } from "@/lib/privacy";
 
 type KycDocument = {
   id: string;
@@ -31,8 +32,9 @@ const kycTypes = [
 export default function KycPage() {
   const [type, setType] = useState("");
   const [idNumber, setIdNumber] = useState("");
-  const [documentUrl, setDocumentUrl] = useState("");
+  const [secureDocumentUrl, setSecureDocumentUrl] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const inFlightRef = useRef(false);
 
   const { data: kycDocs, refetch } = useQuery({
     queryKey: ["kyc-documents"],
@@ -45,26 +47,41 @@ export default function KycPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!type || !idNumber || !documentUrl) {
+    if (inFlightRef.current) return;
+
+    if (!type || !idNumber || !secureDocumentUrl) {
       toast.error("Please fill in all fields");
       return;
     }
 
+    try {
+      const parsedUrl = new URL(secureDocumentUrl);
+      if (parsedUrl.protocol !== "https:") {
+        toast.error("Use a private HTTPS upload URL");
+        return;
+      }
+    } catch {
+      toast.error("Enter a valid private HTTPS upload URL");
+      return;
+    }
+
+    inFlightRef.current = true;
     setIsLoading(true);
     try {
       await apiClient.post("/api/kyc/submit", {
         type,
         idNumber,
-        documentUrl,
+        documentUrl: secureDocumentUrl,
       });
       toast.success("KYC document submitted successfully");
       setType("");
       setIdNumber("");
-      setDocumentUrl("");
+      setSecureDocumentUrl("");
       refetch();
     } catch (error: unknown) {
       toast.error(getErrorMessage(error, "Failed to submit KYC"));
     } finally {
+      inFlightRef.current = false;
       setIsLoading(false);
     }
   };
@@ -90,7 +107,7 @@ export default function KycPage() {
           <CardHeader>
             <CardTitle>Submit Document</CardTitle>
             <CardDescription>
-              Upload a valid government-issued ID for verification
+              Provide a private secure upload URL for a valid government-issued ID
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -122,16 +139,17 @@ export default function KycPage() {
               </div>
 
               <div className="flex flex-col gap-2">
-                <Label>Document URL</Label>
+                <Label>Private secure document URL</Label>
                 <Input
-                  placeholder="https://example.com/document.jpg"
+                  name="secureDocumentUrl"
+                  placeholder="https://secure-storage.example/private-upload-token"
                   type="url"
-                  value={documentUrl}
-                  onChange={(e) => setDocumentUrl(e.target.value)}
+                  value={secureDocumentUrl}
+                  onChange={(e) => setSecureDocumentUrl(e.target.value)}
                   required
                 />
                 <p className="text-xs text-muted-foreground">
-                  Upload your document to a secure storage and paste the URL here
+                  Use only a private HTTPS upload URL with restricted access. Do not paste public file-sharing links.
                 </p>
               </div>
 
@@ -152,7 +170,7 @@ export default function KycPage() {
                 <div key={doc.id} className="flex items-center justify-between p-3 rounded-lg border">
                   <div>
                     <p className="font-medium">{kycTypes.find((t) => t.value === doc.type)?.label}</p>
-                    <p className="text-sm text-muted-foreground">{doc.idNumber}</p>
+                    <p className="text-sm text-muted-foreground">{maskKycId(doc.idNumber)}</p>
                   </div>
                   <Badge variant={statusColors[doc.status] || "secondary"}>
                     {doc.status}

@@ -1,5 +1,4 @@
 import type { ReactNode } from "react";
-import Image from "next/image";
 
 import { Badge } from "@/components/ui/badge";
 
@@ -12,29 +11,22 @@ type PageHeroProps = {
 
 export function PageHero({ eyebrow, title, description, children }: PageHeroProps) {
   return (
-    <section className="relative isolate overflow-hidden border-b border-border/70 bg-muted/30 px-4 pb-16 pt-28 sm:px-6 lg:px-8">
-      <Image
-        src="/trustpay-hero.svg"
-        alt=""
-        fill
-        sizes="100vw"
-        loading="lazy"
-        className="absolute inset-y-0 right-0 -z-20 h-full w-[72rem] max-w-none object-cover opacity-45"
-      />
-      <div className="absolute inset-0 -z-10 bg-[linear-gradient(90deg,var(--background)_0%,color-mix(in_oklab,var(--background)_92%,transparent)_52%,color-mix(in_oklab,var(--background)_70%,transparent)_100%)]" />
-      <div className="mx-auto flex max-w-7xl flex-col gap-6">
-        <Badge variant="secondary" className="w-fit">
+    <section className="relative isolate overflow-hidden border-b border-white/10 bg-[#050605] px-4 pb-16 pt-28 text-white sm:px-6 lg:px-8">
+      <div className="absolute -left-28 -top-64 -z-10 h-[28rem] w-[calc(100%+14rem)] rounded-[0_0_100%_100%] bg-[radial-gradient(circle_at_45%_55%,#ffd36b_0%,#ff7a18_34%,#dc2f02_58%,rgba(5,6,5,0)_74%)] opacity-80 blur-[2px]" />
+      <div className="absolute inset-0 -z-20 bg-[linear-gradient(180deg,rgba(255,255,255,0.04),transparent_45%)]" />
+      <div className="mx-auto flex max-w-7xl flex-col items-center gap-6 text-center">
+        <Badge variant="secondary" className="w-fit border-white/10 bg-white/[0.06] text-white">
           {eyebrow}
         </Badge>
-        <div className="flex max-w-4xl flex-col gap-4">
-          <h1 className="text-4xl font-semibold leading-tight text-balance md:text-6xl">
+        <div className="flex max-w-5xl flex-col items-center gap-4">
+          <h1 className="text-4xl font-semibold leading-tight text-balance md:text-6xl lg:text-7xl">
             {title}
           </h1>
-          <p className="max-w-3xl text-base leading-7 text-muted-foreground md:text-xl">
+          <p className="max-w-3xl text-base leading-7 text-white/68 md:text-xl">
             {description}
           </p>
         </div>
-        {children ? <div className="flex flex-col gap-3 sm:flex-row">{children}</div> : null}
+        {children ? <div className="flex w-full max-w-md flex-col justify-center gap-3 sm:w-auto sm:max-w-none sm:flex-row">{children}</div> : null}
       </div>
     </section>
   );

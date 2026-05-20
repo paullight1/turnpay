@@ -2,50 +2,50 @@
 @import "tw-animate-css";
 
 :root {
-  color-scheme: light;
+  color-scheme: dark;
   --radius: 0.65rem;
-  --background: #f8faf7;
-  --foreground: #17392f;
-  --card: #ffffff;
-  --card-foreground: #17392f;
-  --popover: #ffffff;
-  --popover-foreground: #17392f;
-  --primary: #0d7a5f;
-  --primary-foreground: #f8faf7;
-  --secondary: #eaf7ee;
-  --secondary-foreground: #17392f;
-  --muted: #eef3ef;
-  --muted-foreground: #607168;
-  --accent: #f9e8b9;
-  --accent-foreground: #17392f;
-  --destructive: #c93f3f;
+  --background: #080a09;
+  --foreground: #f7f3ec;
+  --card: #121613;
+  --card-foreground: #f7f3ec;
+  --popover: #121613;
+  --popover-foreground: #f7f3ec;
+  --primary: #ff6b0a;
+  --primary-foreground: #ffffff;
+  --secondary: #1c211e;
+  --secondary-foreground: #f7f3ec;
+  --muted: #151916;
+  --muted-foreground: #b9b0a4;
+  --accent: #2b1b12;
+  --accent-foreground: #ffd7a8;
+  --destructive: #ef4444;
   --destructive-foreground: #ffffff;
-  --border: #d8ded7;
-  --input: #d8ded7;
-  --ring: #0d7a5f;
+  --border: #2a2f2b;
+  --input: #2f3631;
+  --ring: #ff8a2a;
 }
 
 .dark {
   color-scheme: dark;
-  --background: #0f1714;
-  --foreground: #edf6f0;
-  --card: #14211c;
-  --card-foreground: #edf6f0;
-  --popover: #14211c;
-  --popover-foreground: #edf6f0;
-  --primary: #8be0bf;
-  --primary-foreground: #0f1714;
-  --secondary: #1f332c;
-  --secondary-foreground: #edf6f0;
-  --muted: #1a2823;
-  --muted-foreground: #a9bbb2;
-  --accent: #d9b65f;
-  --accent-foreground: #0f1714;
-  --destructive: #f07171;
-  --destructive-foreground: #0f1714;
-  --border: #2c3b35;
-  --input: #2c3b35;
-  --ring: #8be0bf;
+  --background: #080a09;
+  --foreground: #f7f3ec;
+  --card: #121613;
+  --card-foreground: #f7f3ec;
+  --popover: #121613;
+  --popover-foreground: #f7f3ec;
+  --primary: #ff6b0a;
+  --primary-foreground: #ffffff;
+  --secondary: #1c211e;
+  --secondary-foreground: #f7f3ec;
+  --muted: #151916;
+  --muted-foreground: #b9b0a4;
+  --accent: #2b1b12;
+  --accent-foreground: #ffd7a8;
+  --destructive: #ef4444;
+  --destructive-foreground: #ffffff;
+  --border: #2a2f2b;
+  --input: #2f3631;
+  --ring: #ff8a2a;
 }
 
 @theme inline {

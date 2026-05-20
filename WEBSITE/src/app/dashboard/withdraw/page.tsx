@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
+import Link from "next/link";
 import DashboardLayout from "@/components/layout/dashboard-layout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -11,8 +12,13 @@ import { toast } from "sonner";
 import { paymentApi } from "@/services/api";
 import { useQuery } from "@tanstack/react-query";
 import { getErrorMessage } from "@/lib/errors";
+import { useAuth } from "@/lib/auth-provider";
+import { getMoneyActionGate } from "@/lib/account-status";
+import { createMoneyAttemptIdempotencyKey } from "@/lib/idempotency";
+import { maskAccountNumber } from "@/lib/privacy";
 
 export default function WithdrawPage() {
+  const { profile } = useAuth();
   const [amount, setAmount] = useState("");
   const [currency, setCurrency] = useState("NGN");
   const [bankCode, setBankCode] = useState("");
@@ -20,6 +26,15 @@ export default function WithdrawPage() {
   const [accountName, setAccountName] = useState("");
   const [isResolving, setIsResolving] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [isConfirming, setIsConfirming] = useState(false);
+  const inFlightRef = useRef(false);
+  const attemptKeyRef = useRef<string | null>(null);
+  const moneyGate = getMoneyActionGate(profile);
+
+  const resetAttempt = () => {
+    attemptKeyRef.current = null;
+    setIsConfirming(false);
+  };
 
   const { data: banks } = useQuery({
     queryKey: ["banks"],
@@ -49,6 +64,13 @@ export default function WithdrawPage() {
   };
 
   const handleWithdraw = async () => {
+    if (moneyGate) {
+      toast.error(moneyGate.title);
+      return;
+    }
+
+    if (inFlightRef.current) return;
+
     if (!amount || parseFloat(amount) <= 0) {
       toast.error("Please enter a valid amount");
       return;
@@ -59,23 +81,35 @@ export default function WithdrawPage() {
       return;
     }
 
+    if (!isConfirming) {
+      setIsConfirming(true);
+      return;
+    }
+
+    inFlightRef.current = true;
     setIsLoading(true);
     try {
+      const idempotencyKey =
+        attemptKeyRef.current ?? createMoneyAttemptIdempotencyKey("withdraw");
+      attemptKeyRef.current = idempotencyKey;
+
       await paymentApi.withdraw({
         amount: parseFloat(amount),
         currency,
         bankCode,
         accountNumber,
         accountName,
-      });
+      }, idempotencyKey);
       toast.success("Withdrawal initiated successfully");
       setAmount("");
       setAccountNumber("");
       setAccountName("");
       setBankCode("");
+      resetAttempt();
     } catch (error: unknown) {
       toast.error(getErrorMessage(error, "Withdrawal failed"));
     } finally {
+      inFlightRef.current = false;
       setIsLoading(false);
     }
   };
@@ -88,6 +122,22 @@ export default function WithdrawPage() {
           <p className="text-muted-foreground mt-1">Send money to your bank account</p>
         </div>
 
+        {moneyGate && (
+          <Card>
+            <CardHeader>
+              <CardTitle>{moneyGate.title}</CardTitle>
+              <CardDescription>{moneyGate.message}</CardDescription>
+            </CardHeader>
+            {moneyGate.actionHref && moneyGate.actionLabel && (
+              <CardContent>
+                <Button asChild variant="outline">
+                  <Link href={moneyGate.actionHref}>{moneyGate.actionLabel}</Link>
+                </Button>
+              </CardContent>
+            )}
+          </Card>
+        )}
+
         <Card>
           <CardHeader>
             <CardTitle>Bank Details</CardTitle>
@@ -96,7 +146,7 @@ export default function WithdrawPage() {
           <CardContent className="flex flex-col gap-4">
             <div className="flex flex-col gap-2">
               <Label>Currency</Label>
-              <Select value={currency} onValueChange={setCurrency}>
+              <Select value={currency} onValueChange={(value) => { setCurrency(value); resetAttempt(); }}>
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
@@ -109,7 +159,7 @@ export default function WithdrawPage() {
 
             <div className="flex flex-col gap-2">
               <Label>Bank</Label>
-              <Select value={bankCode} onValueChange={setBankCode}>
+              <Select value={bankCode} onValueChange={(value) => { setBankCode(value); setAccountName(""); resetAttempt(); }}>
                 <SelectTrigger>
                   <SelectValue placeholder="Select bank" />
                 </SelectTrigger>
@@ -130,7 +180,7 @@ export default function WithdrawPage() {
                   type="text"
                   placeholder="0123456789"
                   value={accountNumber}
-                  onChange={(e) => setAccountNumber(e.target.value.replace(/\D/g, "").slice(0, 10))}
+                  onChange={(e) => { setAccountNumber(e.target.value.replace(/\D/g, "").slice(0, 10)); setAccountName(""); resetAttempt(); }}
                   maxLength={10}
                 />
                 <Button
@@ -156,14 +206,23 @@ export default function WithdrawPage() {
                 type="number"
                 placeholder="1000"
                 value={amount}
-                onChange={(e) => setAmount(e.target.value)}
+                onChange={(e) => { setAmount(e.target.value); resetAttempt(); }}
                 min="1"
                 step="0.01"
               />
             </div>
 
-            <Button onClick={handleWithdraw} disabled={isLoading} className="w-full" size="lg">
-              {isLoading ? "Processing..." : "Withdraw"}
+            {isConfirming && (
+              <div className="rounded-lg border p-3 text-sm">
+                <p className="font-medium">Review withdrawal</p>
+                <p className="mt-1 text-muted-foreground">
+                  Confirm {currency} {Number(amount || 0).toFixed(2)} to {accountName} ({maskAccountNumber(accountNumber)}).
+                </p>
+              </div>
+            )}
+
+            <Button onClick={handleWithdraw} disabled={isLoading || !!moneyGate} className="w-full" size="lg">
+              {isLoading ? "Processing..." : isConfirming ? "Confirm Withdrawal" : "Review Withdrawal"}
             </Button>
           </CardContent>
         </Card>

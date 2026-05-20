@@ -1,5 +1,6 @@
 import axios from "axios";
 import { createClient } from "@/lib/supabase";
+import { createMoneyAttemptIdempotencyKey, withIdempotencyKey } from "@/lib/idempotency";
 
 const API_URL = resolveApiUrl();
 
@@ -9,9 +10,10 @@ function resolveApiUrl() {
     if (
       typeof window !== "undefined" &&
       process.env.NODE_ENV === "production" &&
-      !configured.startsWith("https://")
+      !configured.startsWith("https://") &&
+      !isLocalHttpUrl(configured)
     ) {
-      throw new Error("NEXT_PUBLIC_API_URL must be HTTPS in production");
+      throw new Error("NEXT_PUBLIC_API_URL must be HTTPS outside localhost in production");
     }
     return configured;
   }
@@ -25,6 +27,18 @@ function resolveApiUrl() {
   }
 
   return "http://localhost:3000";
+}
+
+function isLocalHttpUrl(value: string) {
+  try {
+    const url = new URL(value);
+    return (
+      url.protocol === "http:" &&
+      ["localhost", "127.0.0.1", "::1", "[::1]"].includes(url.hostname)
+    );
+  } catch {
+    return false;
+  }
 }
 
 let isRefreshing = false;
@@ -66,7 +80,7 @@ apiClient.interceptors.request.use(async (config) => {
     ["POST", "PUT", "PATCH", "DELETE"].includes(method) &&
     !config.headers["Idempotency-Key"]
   ) {
-    config.headers["Idempotency-Key"] = crypto.randomUUID();
+    config.headers["Idempotency-Key"] = createMoneyAttemptIdempotencyKey("mutation");
   }
 
   return config;
@@ -151,8 +165,12 @@ export const exchangeApi = {
     ),
   createQuote: (data: { from: string; to: string; amount: number }) =>
     apiClient.post("/api/exchange/quote", data),
-  executeQuote: (quoteId: string) =>
-    apiClient.post("/api/exchange/execute", { quoteId }),
+  executeQuote: (quoteId: string, idempotencyKey?: string) =>
+    apiClient.post(
+      "/api/exchange/execute",
+      { quoteId },
+      withIdempotencyKey(idempotencyKey),
+    ),
 };
 
 export const paymentApi = {
@@ -162,14 +180,16 @@ export const paymentApi = {
     channel?: string;
     provider?: string;
     email?: string;
-  }) => apiClient.post("/api/payments/fund", data),
+  }, idempotencyKey?: string) =>
+    apiClient.post("/api/payments/fund", data, withIdempotencyKey(idempotencyKey)),
   withdraw: (data: {
     amount: number;
     currency: string;
     bankCode: string;
     accountNumber: string;
     accountName: string;
-  }) => apiClient.post("/api/payments/withdraw", data),
+  }, idempotencyKey?: string) =>
+    apiClient.post("/api/payments/withdraw", data, withIdempotencyKey(idempotencyKey)),
   listBanks: () => apiClient.get("/api/payments/banks"),
   resolveBank: (accountNumber: string, bankCode: string) =>
     apiClient.post("/api/payments/banks/resolve", {
@@ -193,7 +213,8 @@ export const vtuApi = {
     packageId?: string;
     smartCardNumber?: string;
     meterNumber?: string;
-  }) => apiClient.post("/api/vtu/purchase", data),
+  }, idempotencyKey?: string) =>
+    apiClient.post("/api/vtu/purchase", data, withIdempotencyKey(idempotencyKey)),
   validateSmartCard: (provider: string, number: string) =>
     apiClient.post(
       `/api/vtu/validate/smartcard?provider=${encodeURIComponent(provider)}&number=${encodeURIComponent(number)}`,
@@ -214,4 +235,36 @@ export const transactionApi = {
     });
     return apiClient.get(`/api/transactions?${params}`);
   },
+};
+
+export const supportApi = {
+  createTicket: (data: {
+    category: string;
+    description: string;
+    transactionReference?: string;
+  }) => apiClient.post("/api/support/tickets", data),
+  getTickets: (page = 1, limit = 20, status?: string) => {
+    const params = new URLSearchParams({
+      page: String(page),
+      limit: String(limit),
+      ...(status && { status }),
+    });
+    return apiClient.get(`/api/support/tickets?${params}`);
+  },
+  getAdminTickets: (page = 1, limit = 20, status?: string) => {
+    const params = new URLSearchParams({
+      page: String(page),
+      limit: String(limit),
+      ...(status && { status }),
+    });
+    return apiClient.get(`/api/admin/support/tickets?${params}`);
+  },
+  resolveAdminTicket: (
+    ticketId: string,
+    data: {
+      status: "RESOLVED" | "CLOSED" | "ESCALATED";
+      resolution?: string;
+      reason: string;
+    },
+  ) => apiClient.put(`/api/admin/support/tickets/${ticketId}/resolve`, data),
 };

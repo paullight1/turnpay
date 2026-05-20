@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
+import Link from "next/link";
 import DashboardLayout from "@/components/layout/dashboard-layout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -11,16 +12,23 @@ import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { exchangeApi } from "@/services/api";
+import { useAuth } from "@/lib/auth-provider";
+import { getMoneyActionGate } from "@/lib/account-status";
+import { createMoneyAttemptIdempotencyKey } from "@/lib/idempotency";
 
 import { ExchangeQuote, ApiError } from "@/types";
 
 export default function ExchangePage() {
+  const { profile } = useAuth();
   const [from, setFrom] = useState("GHS");
   const [to, setTo] = useState("NGN");
   const [amount, setAmount] = useState("");
   const [quote, setQuote] = useState<ExchangeQuote | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isExecuting, setIsExecuting] = useState(false);
+  const inFlightRef = useRef(false);
+  const attemptKeyRef = useRef<string | null>(null);
+  const moneyGate = getMoneyActionGate(profile);
 
   const currencies = [
     { value: "GHS", label: "GHS (₵)", symbol: "₵" },
@@ -30,7 +38,16 @@ export default function ExchangePage() {
   const getSymbol = (currency: string) =>
     currencies.find((c) => c.value === currency)?.symbol || "";
 
+  const resetAttempt = () => {
+    attemptKeyRef.current = null;
+  };
+
   const handleGetQuote = async () => {
+    if (moneyGate) {
+      toast.error(moneyGate.title);
+      return;
+    }
+
     if (!amount || parseFloat(amount) <= 0) {
       toast.error("Please enter a valid amount");
       return;
@@ -44,6 +61,7 @@ export default function ExchangePage() {
         amount: parseFloat(amount),
       });
       setQuote(response.data);
+      resetAttempt();
       toast.success("Quote created");
     } catch (error) {
       const err = error as { response?: { data?: ApiError } };
@@ -59,6 +77,11 @@ export default function ExchangePage() {
 
   const handleExecute = async () => {
     if (!quote) return;
+    if (moneyGate) {
+      toast.error(moneyGate.title);
+      return;
+    }
+    if (inFlightRef.current) return;
 
     if (new Date(quote.expiresAt) < new Date()) {
       toast.error("Quote has expired. Please create a new quote.");
@@ -66,12 +89,18 @@ export default function ExchangePage() {
       return;
     }
 
+    inFlightRef.current = true;
     setIsExecuting(true);
     try {
-      await exchangeApi.executeQuote(quote.id);
+      const idempotencyKey =
+        attemptKeyRef.current ?? createMoneyAttemptIdempotencyKey("exchange");
+      attemptKeyRef.current = idempotencyKey;
+
+      await exchangeApi.executeQuote(quote.id, idempotencyKey);
       toast.success("Exchange completed successfully!");
       setQuote(null);
       setAmount("");
+      resetAttempt();
     } catch (error) {
       const err = error as { response?: { data?: ApiError } };
       const message =
@@ -80,6 +109,7 @@ export default function ExchangePage() {
           : "Exchange failed";
       toast.error(message);
     } finally {
+      inFlightRef.current = false;
       setIsExecuting(false);
     }
   };
@@ -88,6 +118,7 @@ export default function ExchangePage() {
     setFrom(to);
     setTo(from);
     setQuote(null);
+    resetAttempt();
   };
 
   return (
@@ -97,6 +128,22 @@ export default function ExchangePage() {
           <h1 className="text-3xl font-bold">Currency Exchange</h1>
           <p className="text-muted-foreground mt-1">Convert between GHS and NGN at competitive rates</p>
         </div>
+
+        {moneyGate && (
+          <Card>
+            <CardHeader>
+              <CardTitle>{moneyGate.title}</CardTitle>
+              <CardDescription>{moneyGate.message}</CardDescription>
+            </CardHeader>
+            {moneyGate.actionHref && moneyGate.actionLabel && (
+              <CardContent>
+                <Button asChild variant="outline">
+                  <Link href={moneyGate.actionHref}>{moneyGate.actionLabel}</Link>
+                </Button>
+              </CardContent>
+            )}
+          </Card>
+        )}
 
         <Card>
           <CardHeader>
@@ -108,7 +155,7 @@ export default function ExchangePage() {
               <div className="flex-1">
                 <Label>From</Label>
                 <div className="flex gap-2 mt-1">
-                  <Select value={from} onValueChange={(v) => { setFrom(v); setQuote(null); }}>
+                  <Select value={from} onValueChange={(v) => { setFrom(v); setQuote(null); resetAttempt(); }}>
                     <SelectTrigger className="w-32">
                       <SelectValue />
                     </SelectTrigger>
@@ -124,7 +171,7 @@ export default function ExchangePage() {
                     type="number"
                     placeholder="0.00"
                     value={amount}
-                    onChange={(e) => setAmount(e.target.value)}
+                    onChange={(e) => { setAmount(e.target.value); setQuote(null); resetAttempt(); }}
                     className="flex-1"
                     min="0"
                     step="0.01"
@@ -139,7 +186,7 @@ export default function ExchangePage() {
               <div className="flex-1">
                 <Label>To</Label>
                 <div className="flex gap-2 mt-1">
-                  <Select value={to} onValueChange={(v) => { setTo(v); setQuote(null); }}>
+                  <Select value={to} onValueChange={(v) => { setTo(v); setQuote(null); resetAttempt(); }}>
                     <SelectTrigger className="w-32">
                       <SelectValue />
                     </SelectTrigger>
@@ -158,7 +205,7 @@ export default function ExchangePage() {
               </div>
             </div>
 
-            <Button onClick={handleGetQuote} disabled={isLoading || !amount} className="w-full">
+            <Button onClick={handleGetQuote} disabled={isLoading || !amount || !!moneyGate} className="w-full">
               {isLoading ? "Getting quote..." : "Get Quote"}
             </Button>
 
@@ -199,7 +246,7 @@ export default function ExchangePage() {
 
                 <Button
                   onClick={handleExecute}
-                  disabled={isExecuting}
+                  disabled={isExecuting || !!moneyGate}
                   className="w-full"
                   size="lg"
                 >

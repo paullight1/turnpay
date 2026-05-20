@@ -22,6 +22,7 @@ import { KycModule } from './kyc/kyc.module';
 import { SupabaseModule } from './supabase/supabase.module';
 import { BankingModule } from './banking/banking.module';
 import { TransfersModule } from './transfers/transfers.module';
+import { SupportModule } from './support/support.module';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { IdempotencyInterceptor } from './common/interceptors/idempotency.interceptor';
@@ -118,6 +119,7 @@ import { IdempotencyInterceptor } from './common/interceptors/idempotency.interc
     KycModule,
     BankingModule,
     TransfersModule,
+    SupportModule,
     HealthModule,
   ],
   controllers: [AppController],

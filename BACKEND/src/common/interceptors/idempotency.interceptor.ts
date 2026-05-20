@@ -60,11 +60,26 @@ export class IdempotencyInterceptor implements NestInterceptor {
 
     const existing = await this.redis.get(cacheKey);
     if (existing) {
+      const cached = this.parseJson(existing);
+      if (this.isCachedIdempotencyResponse(cached)) {
+        if (cached.requestHash !== requestHash) {
+          throw new ConflictException(
+            'Idempotency-Key was already used with a different request body',
+          );
+        }
+
+        this.logger.info(
+          { idempotencyKey },
+          'Idempotency key matched, returning cached response',
+        );
+        return of(cached.response);
+      }
+
       this.logger.info(
         { idempotencyKey },
         'Idempotency key matched, returning cached response',
       );
-      return of(this.parseJson(existing));
+      return of(cached);
     }
 
     const existingRecord = await this.prisma.idempotencyRecord.findUnique({
@@ -118,7 +133,7 @@ export class IdempotencyInterceptor implements NestInterceptor {
         });
         await this.redis.set(
           cacheKey,
-          JSON.stringify(responseJson),
+          JSON.stringify({ requestHash, response: responseJson }),
           IDEMPOTENCY_TTL,
         );
       }
@@ -152,6 +167,18 @@ export class IdempotencyInterceptor implements NestInterceptor {
 
   private parseJson(value: string): unknown {
     return JSON.parse(value) as unknown;
+  }
+
+  private isCachedIdempotencyResponse(
+    value: unknown,
+  ): value is { requestHash: string; response: unknown } {
+    return (
+      !!value &&
+      typeof value === 'object' &&
+      !Array.isArray(value) &&
+      typeof (value as { requestHash?: unknown }).requestHash === 'string' &&
+      'response' in value
+    );
   }
 
   private resolveExistingRecord(

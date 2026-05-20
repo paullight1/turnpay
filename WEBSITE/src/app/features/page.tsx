@@ -44,8 +44,8 @@ export default function FeaturesPage() {
         <div className="mx-auto flex max-w-7xl flex-col gap-10">
           <SectionHeading
             eyebrow="Core Capabilities"
-            title="A complete public product story for the current app."
-            description="The feature set now matches the app structure: user wallets, dashboard actions, exchange, funding, withdrawals, VTU, KYC, and transaction history."
+            title="The wallet tools users need every day."
+            description="Fund your balance, exchange NGN and GHS, pay bills, complete KYC, withdraw, and track each receipt."
           />
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
             {productFeatures.map((feature) => {
@@ -128,7 +128,7 @@ export default function FeaturesPage() {
               <div className="flex items-start gap-3">
                 <CheckCircle2 aria-hidden="true" className="mt-1 size-5 text-primary" />
                 <p className="max-w-3xl text-sm leading-6 text-muted-foreground">
-                  Feature copy intentionally avoids unsupported claims and stays aligned with the current TrustPay stack.
+                  TrustPay keeps each money move clear: amount, currency, fee, destination, and status.
                 </p>
               </div>
               <Button variant="outline" asChild className="w-fit">

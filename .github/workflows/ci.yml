@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: backend
+        working-directory: BACKEND
 
     services:
       postgres:
@@ -44,9 +44,9 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '22'
-          cache: 'npm'
-          cache-dependency-path: backend/package-lock.json
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: BACKEND/package-lock.json
 
       - name: Install dependencies
         run: npm ci
@@ -54,8 +54,31 @@ jobs:
       - name: Run linter
         run: npm run lint
 
+      - name: Generate Prisma client
+        run: npm run db:generate
+        env:
+          DATABASE_URL: postgresql://trustpay:trustpay_secret@localhost:5432/trustpay_test?schema=public
+
+      - name: Deploy database migrations
+        run: npm run db:deploy
+        env:
+          DATABASE_URL: postgresql://trustpay:trustpay_secret@localhost:5432/trustpay_test?schema=public
+
       - name: Run tests
         run: npm run test
+        env:
+          DATABASE_URL: postgresql://trustpay:trustpay_secret@localhost:5432/trustpay_test?schema=public
+          REDIS_HOST: localhost
+          REDIS_PORT: 6379
+          JWT_SECRET: test-secret-key-for-ci
+          JWT_EXPIRES_IN: 15m
+          JWT_REFRESH_SECRET: test-refresh-secret-for-ci
+          JWT_REFRESH_EXPIRES_IN: 7d
+          WEB_URL: http://localhost:3001
+          ADMIN_URL: http://localhost:3002
+
+      - name: Run backend e2e tests
+        run: npm run test:e2e
         env:
           DATABASE_URL: postgresql://trustpay:trustpay_secret@localhost:5432/trustpay_test?schema=public
           REDIS_HOST: localhost
@@ -74,7 +97,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: website
+        working-directory: WEBSITE
 
     steps:
       - uses: actions/checkout@v4
@@ -82,9 +105,9 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '22'
-          cache: 'npm'
-          cache-dependency-path: website/package-lock.json
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: WEBSITE/package-lock.json
 
       - name: Install dependencies
         run: npm ci
@@ -97,8 +120,41 @@ jobs:
         env:
           NEXT_PUBLIC_API_URL: http://localhost:3000
 
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps
+
+      - name: Run Playwright e2e tests
+        run: npm run test:e2e
+        env:
+          PORT: 3001
+          NEXT_PUBLIC_API_URL: http://localhost:3000
+
+  flutter-test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: APP
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Analyze
+        run: flutter analyze --no-fatal-infos
+
+      - name: Run tests
+        run: flutter test
+
   docker:
-    needs: [backend-test, website-test]
+    needs: [backend-test, website-test, flutter-test]
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main'
 
@@ -117,7 +173,7 @@ jobs:
       - name: Build and push backend
         uses: docker/build-push-action@v5
         with:
-          context: ./backend
+          context: ./BACKEND
           push: true
           tags: trustpay/backend:latest,trustpay/backend:${{ github.sha }}
           cache-from: type=gha
@@ -126,7 +182,7 @@ jobs:
       - name: Build and push website
         uses: docker/build-push-action@v5
         with:
-          context: ./website
+          context: ./WEBSITE
           push: true
           tags: trustpay/website:latest,trustpay/website:${{ github.sha }}
           cache-from: type=gha

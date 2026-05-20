@@ -8,9 +8,10 @@ function resolveApiUrl() {
     if (
       typeof window !== "undefined" &&
       process.env.NODE_ENV === "production" &&
-      !configured.startsWith("https://")
+      !configured.startsWith("https://") &&
+      !isLocalHttpUrl(configured)
     ) {
-      throw new Error("NEXT_PUBLIC_API_URL must be HTTPS in production");
+      throw new Error("NEXT_PUBLIC_API_URL must be HTTPS outside localhost in production");
     }
     return configured;
   }
@@ -24,6 +25,18 @@ function resolveApiUrl() {
   }
 
   return "http://localhost:3000";
+}
+
+function isLocalHttpUrl(value: string) {
+  try {
+    const url = new URL(value);
+    return (
+      url.protocol === "http:" &&
+      ["localhost", "127.0.0.1", "::1", "[::1]"].includes(url.hostname)
+    );
+  } catch {
+    return false;
+  }
 }
 
 export const config = {

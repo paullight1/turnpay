@@ -1,131 +1,185 @@
 import Link from "next/link";
-import Image from "next/image";
 import {
+  Activity,
+  ArrowDownRight,
   ArrowRight,
-  BadgeCheck,
-  CheckCircle2,
-  ChevronRight,
+  Banknote,
+  FileCheck2,
+  Landmark,
+  ListChecks,
   LockKeyhole,
-  ReceiptText,
+  RefreshCw,
   ShieldCheck,
+  UserCheck,
+  WalletCards,
 } from "lucide-react";
 
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { SectionHeading } from "@/components/marketing/section-heading";
-import {
-  corridorSteps,
-  heroStats,
-  liveRails,
-  pricingPlans,
-  productFeatures,
-  securityControls,
-  serviceRows,
-  testimonials,
-} from "@/lib/marketing";
+
+const heroSteps = [
+  "Choose NGN or GHS",
+  "See the rate before you pay",
+  "Get a clear receipt",
+];
+
+const operationCards = [
+  {
+    icon: ListChecks,
+    title: "Exchange NGN and GHS",
+    text: "See the rate, choose the wallet, and confirm only when the amount looks right.",
+    metric: "Clear quote",
+  },
+  {
+    icon: WalletCards,
+    title: "Fund your wallet",
+    text: "Add money, check your balance, and know when the credit is ready to use.",
+    metric: "Live balance",
+  },
+  {
+    icon: ShieldCheck,
+    title: "Pay bills faster",
+    text: "Buy airtime, data, cable, and electricity from the same wallet flow.",
+    metric: "Airtime + bills",
+  },
+  {
+    icon: RefreshCw,
+    title: "Track every payment",
+    text: "Follow pending, successful, failed, and reversed payments with clear receipts.",
+    metric: "Easy receipts",
+  },
+];
+
+const paymentRows = [
+  { name: "Wallet funding", state: "Successful", value: "NGN 75,000" },
+  { name: "Exchange", state: "Pending", value: "GHS 420" },
+  { name: "Airtime order", state: "Successful", value: "MTN" },
+  { name: "Withdrawal", state: "Reversed", value: "NGN 20,000" },
+];
+
+function StatusPill({ tone, children }: { tone: string; children: React.ReactNode }) {
+  const tones: Record<string, string> = {
+    green: "border-emerald-400/30 bg-emerald-400/12 text-emerald-200",
+    amber: "border-amber-300/30 bg-amber-300/12 text-amber-100",
+    red: "border-rose-400/30 bg-rose-400/12 text-rose-100",
+    blue: "border-sky-400/30 bg-sky-400/12 text-sky-100",
+  };
+
+  return (
+    <span className={`rounded-full border px-2.5 py-1 text-xs font-medium ${tones[tone]}`}>
+      {children}
+    </span>
+  );
+}
 
 function HeroSection() {
   return (
-    <section className="relative isolate flex min-h-[86svh] items-center overflow-hidden px-4 pb-14 pt-28 sm:px-6 lg:px-8">
-      <Image
-        src="/trustpay-hero.svg"
-        alt=""
-        fill
-        priority
-        sizes="100vw"
-        className="absolute inset-0 -z-20 h-full w-full object-cover"
-      />
-      <div className="absolute inset-0 -z-10 bg-[linear-gradient(90deg,var(--background)_0%,color-mix(in_oklab,var(--background)_90%,transparent)_38%,color-mix(in_oklab,var(--background)_56%,transparent)_100%)]" />
-      <div className="absolute inset-x-0 bottom-0 -z-10 h-36 bg-[linear-gradient(0deg,var(--background)_0%,transparent_100%)]" />
+    <section className="relative isolate min-h-[calc(100svh-1px)] overflow-hidden bg-[#050605] px-4 pb-20 pt-28 text-white sm:px-6 lg:px-8">
+      <div className="absolute -left-20 -top-56 -z-10 h-[30rem] w-[calc(100%+10rem)] rounded-[0_0_100%_100%] bg-[radial-gradient(circle_at_45%_50%,#ffd36b_0%,#ff7a18_34%,#dc2f02_58%,rgba(5,6,5,0)_73%)] opacity-90 blur-[2px]" />
+      <div className="absolute -right-28 bottom-[-18rem] -z-10 h-[32rem] w-[48rem] rounded-[100%_100%_0_0] bg-[radial-gradient(circle_at_45%_30%,#ffd36b_0%,#ff7a18_35%,#7f1d1d_62%,rgba(5,6,5,0)_74%)] opacity-80 blur-[2px]" />
+      <div className="absolute inset-0 -z-20 bg-[radial-gradient(circle_at_50%_18%,rgba(255,122,24,0.18),transparent_30%),linear-gradient(180deg,rgba(255,255,255,0.04),transparent_24%,transparent_72%,rgba(255,122,24,0.08))]" />
 
-      <div className="mx-auto flex w-full max-w-7xl flex-col gap-9">
-        <div className="flex max-w-3xl flex-col gap-6">
-          <Badge variant="secondary" className="w-fit">
-            Ghana-Nigeria Wallet Corridor
-          </Badge>
-          <div className="flex flex-col gap-4">
-            <h1 className="text-5xl font-semibold leading-[1.02] text-balance md:text-7xl">
-              TrustPay
-            </h1>
-            <p className="max-w-2xl text-lg leading-8 text-muted-foreground md:text-xl">
-              A clean financial home for NGN and GHS wallets, transparent exchange, airtime,
-              data, cable, electricity, and withdrawals.
-            </p>
-          </div>
-          <div className="flex flex-col gap-3 sm:flex-row">
-            <Button size="lg" asChild>
-              <Link href="/register">
-                Create Account
-                <ArrowRight data-icon="inline-end" aria-hidden="true" />
-              </Link>
-            </Button>
-            <Button size="lg" variant="outline" asChild>
-              <Link href="/features">Explore Features</Link>
-            </Button>
-          </div>
+      <div className="mx-auto flex max-w-6xl flex-col items-center text-center">
+        <div className="inline-flex max-w-full items-center gap-2 rounded-full border border-white/12 bg-white/[0.06] px-3 py-1.5 text-sm text-white/74 shadow-lg shadow-black/20">
+          <span className="rounded-full bg-orange-500 px-2 py-0.5 text-xs font-semibold text-white">
+            Wallet
+          </span>
+          NGN, GHS, bills, and receipts
         </div>
 
-        <div className="grid max-w-4xl gap-3 sm:grid-cols-3">
-          {heroStats.map((stat) => (
-            <div
-              key={stat.label}
-              className="rounded-lg border border-border/75 bg-background/78 p-4 shadow-sm backdrop-blur-md"
-            >
-              <p className="text-2xl font-semibold tabular-nums">{stat.value}</p>
-              <p className="mt-1 text-sm text-muted-foreground">{stat.label}</p>
-            </div>
+        <h1 className="mt-7 max-w-5xl text-5xl font-semibold leading-[1.02] text-balance md:text-7xl lg:text-8xl">
+          Exchange money fast. Pay bills with ease.
+        </h1>
+
+        <p className="mt-5 max-w-2xl text-base leading-7 text-white/68 md:text-lg">
+          Convert between NGN and GHS, fund your wallet, buy airtime or data,
+          and track every payment with a clear receipt.
+        </p>
+
+        <div className="mt-8 flex w-full max-w-md flex-col justify-center gap-3 sm:w-auto sm:max-w-none sm:flex-row">
+          <Button size="lg" asChild className="bg-orange-500 text-white shadow-lg shadow-orange-950/30 hover:bg-orange-400">
+            <Link href="/register">
+              Start exchange
+              <ArrowRight data-icon="inline-end" aria-hidden="true" />
+            </Link>
+          </Button>
+          <Button
+            size="lg"
+            variant="outline"
+            asChild
+            className="border-white/18 bg-white text-black hover:bg-white/90 hover:text-black"
+          >
+            <Link href="#queue">See wallet features</Link>
+          </Button>
+        </div>
+
+        <div className="mt-11 flex max-w-3xl flex-wrap items-center justify-center gap-3 text-sm text-white/36">
+          {["NGN + GHS", "Wallet funding", "Airtime", "Data", "Bills", "Withdrawals", "Receipts"].map((item) => (
+            <span key={item} className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-1">
+              {item}
+            </span>
           ))}
         </div>
 
-        <div className="max-w-5xl overflow-hidden rounded-lg border border-border/75 bg-background/78 py-3 shadow-sm backdrop-blur-md">
-          <div className="animate-trustpay-marquee flex w-max gap-3 px-3 motion-reduce:animate-none">
-            {[...liveRails, ...liveRails].map((item, index) => (
-              <span
-                key={`${item}-${index}`}
-                className="inline-flex items-center gap-2 rounded-full border border-border bg-muted/60 px-3 py-1 text-sm text-muted-foreground"
-              >
-                <span className="size-1.5 rounded-full bg-primary" aria-hidden="true" />
-                {item}
+        <div className="mt-10 grid w-full max-w-3xl gap-3 sm:grid-cols-3">
+          {heroSteps.map((step, index) => (
+            <div
+              key={step}
+              className="rounded-lg border border-white/10 bg-[#101412]/72 p-4 text-left"
+            >
+              <span className="text-xs font-semibold text-orange-300">
+                Step {index + 1}
               </span>
-            ))}
-          </div>
+              <p className="mt-2 text-sm font-medium leading-6 text-white/82">{step}</p>
+            </div>
+          ))}
         </div>
       </div>
     </section>
   );
 }
 
-function FeatureSection() {
+function OperationsSection() {
   return (
-    <section className="px-4 py-20 sm:px-6 lg:px-8">
-      <div className="mx-auto flex max-w-7xl flex-col gap-10">
-        <SectionHeading
-          eyebrow="Product"
-          title="Everything users expect from a serious wallet, without the clutter."
-          description="TrustPay turns exchange, VTU, funding, withdrawals, and transaction visibility into one repeated workflow."
-        />
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-          {productFeatures.map((feature) => {
-            const Icon = feature.icon;
+    <section id="queue" className="bg-[#111512] px-4 py-20 text-white sm:px-6 lg:px-8">
+      <div className="mx-auto grid max-w-7xl gap-10 lg:grid-cols-[0.8fr_1.2fr]">
+        <div className="flex flex-col gap-5">
+          <p className="text-sm text-orange-300">/ 01</p>
+          <h2 className="text-3xl font-semibold leading-tight text-balance md:text-5xl">
+            Everything starts from your wallet.
+          </h2>
+          <p className="max-w-md text-base leading-7 text-white/60">
+            Fund your balance, exchange NGN and GHS, pay bills, withdraw, and
+            keep a receipt for every step.
+          </p>
+          <Button asChild className="w-fit bg-orange-500 text-white hover:bg-orange-400">
+            <Link href="/admin">
+              See how it works
+              <ArrowRight data-icon="inline-end" aria-hidden="true" />
+            </Link>
+          </Button>
+        </div>
+
+        <div className="grid gap-4 md:grid-cols-2">
+          {operationCards.map((card, index) => {
+            const Icon = card.icon;
 
             return (
-              <Card key={feature.title} className="rounded-lg">
-                <CardHeader>
-                  <div className="grid size-10 place-items-center rounded-lg bg-primary/10 text-primary">
+              <div
+                key={card.title}
+                className="rounded-lg border border-white/10 bg-white/[0.06] p-5"
+              >
+                <div className="flex items-start justify-between gap-4">
+                  <span className="grid size-11 place-items-center rounded-lg bg-orange-500/16 text-orange-200">
                     <Icon aria-hidden="true" className="size-5" />
-                  </div>
-                  <CardTitle>{feature.title}</CardTitle>
-                  <CardDescription>{feature.description}</CardDescription>
-                </CardHeader>
-              </Card>
+                  </span>
+                  <span className="rounded-full bg-orange-500 px-2 py-1 text-xs font-semibold text-white">
+                    0{index + 1}
+                  </span>
+                </div>
+                <h3 className="mt-5 text-xl font-semibold">{card.title}</h3>
+                <p className="mt-3 text-sm leading-6 text-white/68">{card.text}</p>
+                <p className="mt-5 text-sm font-medium text-emerald-300">{card.metric}</p>
+              </div>
             );
           })}
         </div>
@@ -134,85 +188,53 @@ function FeatureSection() {
   );
 }
 
-function CorridorSection() {
+function DataSection() {
   return (
-    <section className="bg-muted/35 px-4 py-20 sm:px-6 lg:px-8">
-      <div className="mx-auto grid max-w-7xl gap-10 lg:grid-cols-[1fr_0.9fr] lg:items-center">
-        <div className="flex flex-col gap-8">
-          <SectionHeading
-            eyebrow="Live Operations"
-            title="Designed for the messy middle between banks, wallets, and billers."
-            description="The public site now mirrors what the product does: quote clearly, capture intent, prevent accidental repeats, and keep the user informed."
-          />
-          <div className="grid gap-3 sm:grid-cols-2">
-            {serviceRows.map((service) => {
-              const Icon = service.icon;
-
-              return (
-                <div
-                  key={service.title}
-                  className="rounded-lg border border-border bg-background p-4 shadow-sm"
-                >
-                  <div className="flex items-start justify-between gap-4">
-                    <div className="grid size-10 place-items-center rounded-lg bg-secondary text-secondary-foreground">
-                      <Icon aria-hidden="true" className="size-5" />
-                    </div>
-                    <Badge variant="outline">{service.metric}</Badge>
-                  </div>
-                  <h3 className="mt-4 text-base font-semibold">{service.title}</h3>
-                  <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                    {service.description}
-                  </p>
-                </div>
-              );
-            })}
-          </div>
+    <section className="bg-[#0a0d0b] px-4 py-20 text-white sm:px-6 lg:px-8">
+      <div className="mx-auto grid max-w-7xl gap-10 lg:grid-cols-[0.72fr_1.28fr] lg:items-end">
+        <div className="flex flex-col gap-5">
+          <p className="text-sm text-orange-300">/ 03</p>
+          <h2 className="text-3xl font-semibold leading-tight text-balance md:text-5xl">
+            Know what happened to your money.
+          </h2>
+          <p className="max-w-md text-base leading-7 text-white/60">
+            Every payment should show a clear status. You can see if it is
+            pending, successful, failed, or reversed.
+          </p>
         </div>
 
-        <div className="flex flex-col gap-4">
-          <Image
-            src="/trustpay-operations.svg"
-            alt="TrustPay dashboard preview with wallet balances, exchange quotes, and bill payment activity"
-            width={1200}
-            height={900}
-            loading="lazy"
-            className="h-auto w-full rounded-lg border border-border bg-background shadow-xl"
-          />
-          <Tabs defaultValue="exchange" className="rounded-lg border border-border bg-background p-3 shadow-sm">
-            <TabsList className="w-full">
-              <TabsTrigger value="exchange">Exchange</TabsTrigger>
-              <TabsTrigger value="bills">Bills</TabsTrigger>
-              <TabsTrigger value="withdraw">Withdraw</TabsTrigger>
-            </TabsList>
-            <TabsContent value="exchange" className="pt-4">
-              <div className="grid gap-3 sm:grid-cols-2">
-                <div className="rounded-lg bg-muted p-4">
-                  <p className="text-sm text-muted-foreground">You Send</p>
-                  <p className="mt-1 text-2xl font-semibold tabular-nums">GHS 2,450</p>
+        <div className="grid gap-6 lg:grid-cols-[0.9fr_1.1fr]">
+          <div className="flex items-end gap-4 rounded-[1.25rem] border border-white/10 bg-white/[0.05] p-5">
+            {[
+              ["1", "choose a service", "h-36"],
+              ["2", "confirm the amount", "h-48"],
+              ["3", "track the receipt", "h-60"],
+            ].map(([value, label, height]) => (
+              <div key={value} className="flex flex-1 flex-col items-center gap-3">
+                <p className="text-3xl font-semibold">{value}</p>
+                <div className={`${height} w-full rounded-t-[2rem] bg-[radial-gradient(circle_at_50%_30%,#0a0d0b_0%,#0a0d0b_22%,#fb923c_58%,#f97316_100%)]`} />
+                <p className="min-h-10 text-center text-xs leading-5 text-white/66">{label}</p>
+              </div>
+            ))}
+          </div>
+
+          <div className="rounded-[1.25rem] border border-white/10 bg-white/[0.05] p-5">
+            <div className="flex items-center justify-between">
+              <p className="font-medium">Recent payment status</p>
+              <Activity aria-hidden="true" className="size-5 text-emerald-300" />
+            </div>
+            <div className="mt-5 divide-y divide-white/10">
+              {paymentRows.map((row) => (
+                <div key={row.name} className="grid grid-cols-[1fr_auto_auto] items-center gap-3 py-4 text-sm">
+                  <span className="text-white/72">{row.name}</span>
+                  <StatusPill tone={row.state === "Successful" ? "green" : row.state === "Pending" ? "amber" : row.state === "Reversed" ? "blue" : "red"}>
+                    {row.state}
+                  </StatusPill>
+                  <span className="font-medium">{row.value}</span>
                 </div>
-                <div className="rounded-lg bg-muted p-4">
-                  <p className="text-sm text-muted-foreground">Recipient Gets</p>
-                  <p className="mt-1 text-2xl font-semibold tabular-nums">NGN 515,000</p>
-                </div>
-              </div>
-            </TabsContent>
-            <TabsContent value="bills" className="pt-4">
-              <div className="flex items-center gap-3 rounded-lg bg-muted p-4">
-                <ReceiptText aria-hidden="true" className="size-5 text-primary" />
-                <p className="text-sm text-muted-foreground">
-                  Cable, electricity, airtime, and data purchases stay attached to wallet receipts.
-                </p>
-              </div>
-            </TabsContent>
-            <TabsContent value="withdraw" className="pt-4">
-              <div className="flex items-center gap-3 rounded-lg bg-muted p-4">
-                <LockKeyhole aria-hidden="true" className="size-5 text-primary" />
-                <p className="text-sm text-muted-foreground">
-                  Withdrawals are positioned around verified destinations and clear status tracking.
-                </p>
-              </div>
-            </TabsContent>
-          </Tabs>
+              ))}
+            </div>
+          </div>
         </div>
       </div>
     </section>
@@ -221,147 +243,37 @@ function CorridorSection() {
 
 function SecuritySection() {
   return (
-    <section className="bg-foreground px-4 py-20 text-background sm:px-6 lg:px-8">
-      <div className="mx-auto grid max-w-7xl gap-10 lg:grid-cols-[0.9fr_1.1fr] lg:items-start">
+    <section className="bg-[#151716] px-4 py-20 text-white sm:px-6 lg:px-8">
+      <div className="mx-auto grid max-w-7xl gap-10 lg:grid-cols-[1fr_1fr]">
         <div className="flex flex-col gap-5">
-          <Badge variant="secondary" className="w-fit">
-            Trust Layer
-          </Badge>
+          <p className="text-sm text-orange-300">/ 04</p>
           <h2 className="text-3xl font-semibold leading-tight text-balance md:text-5xl">
-            Security messaging that matches a financial product.
+            Built for admin safety.
           </h2>
-          <p className="text-base leading-7 text-background/72 md:text-lg">
-            The site now foregrounds the principles users care about: protected sessions,
-            idempotent transaction flows, audit-ready history, and clear receipts.
+          <p className="max-w-lg text-base leading-7 text-white/60">
+            The panel should protect users and the business. Sensitive data is
+            masked. Money actions are checked. Admin work is logged.
           </p>
-          <Button variant="secondary" asChild className="w-fit">
-            <Link href="/security">
-              Review Security
-              <ArrowRight data-icon="inline-end" aria-hidden="true" />
-            </Link>
-          </Button>
         </div>
         <div className="grid gap-4 sm:grid-cols-2">
-          {securityControls.map((control) => {
-            const Icon = control.icon;
+          {[
+            [LockKeyhole, "Guarded routes", "Only approved admins can open protected tools."],
+            [FileCheck2, "Reason capture", "Risky changes need a clear written reason."],
+            [Landmark, "Masked bank data", "Show only what support staff truly need."],
+            [Banknote, "Ledger first", "Money changes must follow safe ledger records."],
+            [UserCheck, "KYC gates", "Limits and reviews follow identity status."],
+            [ArrowDownRight, "No double action", "Retries and approvals need idempotency keys."],
+          ].map(([Icon, title, text]) => {
+            const TileIcon = Icon as typeof LockKeyhole;
 
             return (
-              <div
-                key={control.title}
-                className="rounded-lg border border-background/12 bg-background/8 p-5"
-              >
-                <div className="grid size-10 place-items-center rounded-lg bg-background text-foreground">
-                  <Icon aria-hidden="true" className="size-5" />
-                </div>
-                <h3 className="mt-4 text-base font-semibold">{control.title}</h3>
-                <p className="mt-2 text-sm leading-6 text-background/70">{control.description}</p>
+              <div key={title as string} className="rounded-lg border border-white/10 bg-[#0b0e0c]/70 p-5">
+                <TileIcon aria-hidden="true" className="size-5 text-orange-300" />
+                <h3 className="mt-4 text-lg font-semibold">{title as string}</h3>
+                <p className="mt-2 text-sm leading-6 text-white/68">{text as string}</p>
               </div>
             );
           })}
-        </div>
-      </div>
-    </section>
-  );
-}
-
-function StepsSection() {
-  return (
-    <section className="px-4 py-20 sm:px-6 lg:px-8">
-      <div className="mx-auto flex max-w-7xl flex-col gap-10">
-        <SectionHeading
-          eyebrow="Workflow"
-          title="A repeatable path for every money movement."
-          description="Each step keeps the user oriented so they can move from wallet setup to receipt without hunting for context."
-          align="center"
-        />
-        <div className="grid gap-4 md:grid-cols-4">
-          {corridorSteps.map((step, index) => {
-            const Icon = step.icon;
-
-            return (
-              <div key={step.title} className="relative rounded-lg border border-border bg-card p-5">
-                <span className="text-sm font-semibold text-primary tabular-nums">
-                  0{index + 1}
-                </span>
-                <div className="mt-5 grid size-10 place-items-center rounded-lg bg-primary/10 text-primary">
-                  <Icon aria-hidden="true" className="size-5" />
-                </div>
-                <h3 className="mt-4 text-base font-semibold">{step.title}</h3>
-                <p className="mt-2 text-sm leading-6 text-muted-foreground">{step.description}</p>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-    </section>
-  );
-}
-
-function PricingPreview() {
-  return (
-    <section className="bg-muted/35 px-4 py-20 sm:px-6 lg:px-8">
-      <div className="mx-auto flex max-w-7xl flex-col gap-10">
-        <div className="flex flex-col justify-between gap-5 lg:flex-row lg:items-end">
-          <SectionHeading
-            eyebrow="Pricing"
-            title="Simple public positioning for personal and business users."
-            description="Plans describe how TrustPay can grow from personal wallet use into operational teams."
-          />
-          <Button variant="outline" asChild className="w-fit">
-            <Link href="/pricing">
-              See Pricing
-              <ChevronRight data-icon="inline-end" aria-hidden="true" />
-            </Link>
-          </Button>
-        </div>
-        <div className="grid gap-4 md:grid-cols-3">
-          {pricingPlans.map((plan) => (
-            <Card key={plan.title} className="rounded-lg">
-              <CardHeader>
-                <CardTitle>{plan.title}</CardTitle>
-                <CardDescription>{plan.description}</CardDescription>
-              </CardHeader>
-              <CardContent className="flex flex-col gap-5">
-                <p className="text-3xl font-semibold">{plan.price}</p>
-                <div className="flex flex-col gap-3">
-                  {plan.points.map((point) => (
-                    <span key={point} className="flex items-center gap-2 text-sm">
-                      <CheckCircle2 aria-hidden="true" className="size-4 text-primary" />
-                      {point}
-                    </span>
-                  ))}
-                </div>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-      </div>
-    </section>
-  );
-}
-
-function TestimonialsSection() {
-  return (
-    <section className="px-4 py-20 sm:px-6 lg:px-8">
-      <div className="mx-auto flex max-w-7xl flex-col gap-10">
-        <SectionHeading
-          eyebrow="Feedback"
-          title="A public story that feels closer to the product users will open."
-          description="The redesign trades generic fintech copy for concrete TrustPay surfaces: exchange, receipts, bills, and wallet history."
-          align="center"
-        />
-        <div className="grid gap-4 md:grid-cols-3">
-          {testimonials.map((item) => (
-            <Card key={item.name} className="rounded-lg">
-              <CardHeader>
-                <BadgeCheck aria-hidden="true" className="size-5 text-primary" />
-                <CardTitle className="text-lg">{item.quote}</CardTitle>
-                <CardDescription>
-                  {item.name}, {item.role}
-                </CardDescription>
-              </CardHeader>
-            </Card>
-          ))}
         </div>
       </div>
     </section>
@@ -370,22 +282,22 @@ function TestimonialsSection() {
 
 function CtaSection() {
   return (
-    <section className="px-4 pb-20 sm:px-6 lg:px-8">
-      <div className="mx-auto flex max-w-7xl flex-col gap-6 rounded-lg border border-border bg-primary p-8 text-primary-foreground shadow-lg md:p-12">
-        <ShieldCheck aria-hidden="true" className="size-10" />
+    <section className="bg-[#080a09] px-4 py-16 text-white sm:px-6 lg:px-8">
+      <div className="mx-auto flex max-w-7xl flex-col gap-6 rounded-[1.25rem] border border-orange-300/25 bg-[linear-gradient(135deg,rgba(249,115,22,0.2),rgba(34,197,94,0.08),rgba(255,255,255,0.04))] p-8 md:p-12">
+        <ShieldCheck aria-hidden="true" className="size-10 text-orange-300" />
         <div className="flex flex-col justify-between gap-6 lg:flex-row lg:items-end">
-          <div className="flex max-w-3xl flex-col gap-3">
+          <div className="max-w-3xl">
             <h2 className="text-3xl font-semibold leading-tight text-balance md:text-5xl">
-              Start with a wallet that respects the transaction.
+              Give support staff a safer way to work.
             </h2>
-            <p className="text-base leading-7 text-primary-foreground/78">
-              Create an account, provision balances, and keep exchange, VTU, withdrawals,
-              and receipts in one place.
+            <p className="mt-4 text-base leading-7 text-white/64">
+              Replace database edits with queues, review panels, provider checks,
+              and audit trails that are easy to use.
             </p>
           </div>
-          <Button variant="secondary" size="lg" asChild>
-            <Link href="/register">
-              Open Wallet
+          <Button size="lg" asChild className="bg-orange-500 text-white shadow-lg shadow-orange-950/25 hover:bg-orange-400">
+            <Link href="/admin">
+              Open admin panel
               <ArrowRight data-icon="inline-end" aria-hidden="true" />
             </Link>
           </Button>
@@ -399,12 +311,9 @@ export function LandingPage() {
   return (
     <>
       <HeroSection />
-      <FeatureSection />
-      <CorridorSection />
+      <OperationsSection />
+      <DataSection />
       <SecuritySection />
-      <StepsSection />
-      <PricingPreview />
-      <TestimonialsSection />
       <CtaSection />
     </>
   );

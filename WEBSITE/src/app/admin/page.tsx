@@ -16,6 +16,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { apiClient } from "@/services/api";
 import { useQuery } from "@tanstack/react-query";
+import DashboardLayout from "@/components/layout/dashboard-layout";
 
 type AdminStats = {
   totalUsers: number;
@@ -82,15 +83,14 @@ export default function AdminPage() {
   }
 
   return (
-    <div className="min-h-screen bg-muted/20">
-      <header className="border-b bg-background">
-        <div className="container mx-auto flex h-16 items-center justify-between px-4">
-          <span className="text-xl font-bold text-primary">TrustPay Admin</span>
-          <Badge variant="secondary">{user.email}</Badge>
+    <DashboardLayout>
+      <div className="flex flex-col gap-6">
+        <div>
+          <h1 className="text-3xl font-semibold">Admin operations</h1>
+          <p className="mt-1 text-muted-foreground">
+            Track users, transaction volume, fees, and recent payment activity.
+          </p>
         </div>
-      </header>
-
-      <main className="container mx-auto p-6 flex flex-col gap-6">
         <div className="grid gap-4 md:grid-cols-4">
           <Card>
             <CardHeader className="pb-2">
@@ -142,7 +142,7 @@ export default function AdminPage() {
               ) : (
                 <>
                   <div className="text-2xl font-bold">
-                    ₦ {(stats?.totalVolume ?? 0).toLocaleString()}
+                    NGN {(stats?.totalVolume ?? 0).toLocaleString()}
                   </div>
                   <p className="text-xs text-muted-foreground">
                     {stats?.totalTransactions ?? 0} transactions
@@ -163,8 +163,8 @@ export default function AdminPage() {
                 <Skeleton className="h-8 w-20" />
               ) : (
                 <>
-                  <div className="text-3xl font-bold text-green-600">
-                    ₦ {(stats?.totalFees ?? 0).toLocaleString()}
+                  <div className="text-3xl font-bold text-emerald-300">
+                    NGN {(stats?.totalFees ?? 0).toLocaleString()}
                   </div>
                   <p className="text-xs text-muted-foreground">From fees</p>
                 </>
@@ -211,7 +211,7 @@ export default function AdminPage() {
                         {tx.type.toLowerCase()}
                       </TableCell>
                       <TableCell className="font-medium">
-                        {tx.currency === "NGN" ? "₦" : "₵"}
+                        {tx.currency === "NGN" ? "NGN " : "GHS "}
                         {Number(tx.amount).toLocaleString()}
                       </TableCell>
                       <TableCell>
@@ -237,7 +237,7 @@ export default function AdminPage() {
             )}
           </CardContent>
         </Card>
-      </main>
-    </div>
+      </div>
+    </DashboardLayout>
   );
 }

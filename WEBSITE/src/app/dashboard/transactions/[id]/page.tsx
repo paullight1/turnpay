@@ -9,6 +9,7 @@ import { Separator } from "@/components/ui/separator";
 import { useQuery } from "@tanstack/react-query";
 import { apiClient } from "@/services/api";
 import { Transaction } from "@/types";
+import { redactTransactionMetadata } from "@/lib/privacy";
 
 export default function TransactionDetailPage() {
   const { id } = useParams();
@@ -56,6 +57,7 @@ export default function TransactionDetailPage() {
   }
 
   const symbols: Record<string, string> = { NGN: "₦", GHS: "₵" };
+  const metadataRows = redactTransactionMetadata(transaction.metadata);
   const statusVariant = (status: string): "default" | "secondary" | "destructive" | "outline" => {
     switch (status) {
       case "SUCCESS": return "default";
@@ -120,14 +122,19 @@ export default function TransactionDetailPage() {
               </div>
             </div>
 
-            {transaction.metadata && typeof transaction.metadata === "object" && (
+            {metadataRows.length > 0 && (
               <>
                 <Separator />
                 <div>
-                  <p className="text-muted-foreground text-sm mb-2">Metadata</p>
-                  <pre className="text-xs bg-muted p-3 rounded-lg overflow-auto">
-                    {JSON.stringify(transaction.metadata, null, 2)}
-                  </pre>
+                  <p className="text-muted-foreground text-sm mb-2">Payment details</p>
+                  <div className="grid grid-cols-2 gap-3 text-sm">
+                    {metadataRows.map((row) => (
+                      <div key={row.label}>
+                        <p className="text-muted-foreground">{row.label}</p>
+                        <p className="font-medium break-words">{row.value}</p>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               </>
             )}

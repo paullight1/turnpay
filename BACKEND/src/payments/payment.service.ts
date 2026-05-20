@@ -15,13 +15,14 @@ import { v4 as uuidv4 } from 'uuid';
 import { createHmac, timingSafeEqual } from 'crypto';
 import { PinoLogger } from 'nestjs-pino';
 import { UsersService } from '../users/users.service';
-import { Prisma, Transaction } from '@prisma/client';
+import { Prisma, Transaction, TransactionStatus } from '@prisma/client';
 import { Decimal } from '@prisma/client/runtime/library';
 import { LedgerService } from '../wallets/ledger.service';
 import { decryptSensitiveValue } from '../common/utils/encryption';
 import { maskAccountNumber } from '../common/utils/masking';
 
 type WithdrawalProvider = 'paystack' | 'flutterwave';
+type PaymentProviderName = 'paystack' | 'flutterwave';
 
 interface WithdrawalDestination {
   beneficiaryId?: string;
@@ -57,7 +58,11 @@ export class PaymentService {
       dto.callbackUrl ||
       `${process.env.WEB_URL || 'http://localhost:3001'}/payment/callback`;
 
-    let paymentResult: { paymentUrl: string; reference: string };
+    let paymentResult: {
+      paymentUrl: string;
+      reference: string;
+      providerTransactionId?: number;
+    };
 
     if (provider === 'paystack') {
       const result = await this.paystack.initializePayment({
@@ -82,6 +87,7 @@ export class PaymentService {
       paymentResult = {
         paymentUrl: result.paymentUrl,
         reference,
+        providerTransactionId: result.transactionId,
       };
     }
 
@@ -97,6 +103,7 @@ export class PaymentService {
           provider,
           channel: dto.channel || 'card',
           paymentUrl: paymentResult.paymentUrl,
+          providerTransactionId: paymentResult.providerTransactionId,
         },
       },
     });
@@ -119,12 +126,12 @@ export class PaymentService {
     };
   }
 
-  async verifyPayment(reference: string) {
+  async verifyPayment(reference: string, userId?: string) {
     const transaction = await this.prisma.transaction.findUnique({
       where: { reference },
     });
 
-    if (!transaction) {
+    if (!transaction || (userId && transaction.userId !== userId)) {
       throw new NotFoundException('Transaction not found');
     }
 
@@ -136,20 +143,36 @@ export class PaymentService {
     }
 
     const metadata = transaction.metadata as Record<string, unknown>;
-    const provider = (metadata?.provider as string) || 'paystack';
+    const provider = this.normalizePaymentProvider(
+      (metadata?.provider as string) || 'paystack',
+    );
     const providerTxId = metadata?.providerTransactionId as number;
 
     if (provider === 'paystack') {
       const verification = await this.paystack.verifyPayment(reference);
 
       if (verification.status === 'success') {
-        await this.processSuccessfulDeposit(transaction);
+        await this.processVerifiedDeposit(transaction, {
+          provider,
+          reference: verification.reference,
+          status: verification.status,
+          amount: new Decimal(verification.amount).div(100),
+          currency: verification.currency,
+          source: 'PAYSTACK_VERIFY',
+        });
       }
     } else if (providerTxId) {
       const verification = await this.flutterwave.verifyPayment(providerTxId);
 
       if (verification.status === 'successful') {
-        await this.processSuccessfulDeposit(transaction);
+        await this.processVerifiedDeposit(transaction, {
+          provider,
+          reference: verification.tx_ref,
+          status: verification.status,
+          amount: new Decimal(verification.amount),
+          currency: verification.currency,
+          source: 'FLUTTERWAVE_VERIFY',
+        });
       }
     }
 
@@ -162,18 +185,121 @@ export class PaymentService {
   }
 
   async processWebhookDeposit(data: {
+    provider?: PaymentProviderName;
+    eventType?: string;
     reference: string;
     status: string;
     amount: number;
     currency: string;
+    rawPayload?: Record<string, unknown>;
   }) {
     const result = await this.prisma.$transaction(async (tx) => {
+      const transaction = await tx.transaction.findUnique({
+        where: { reference: data.reference },
+      });
+
+      if (!transaction) {
+        this.logger.info(
+          { reference: data.reference },
+          'Webhook: Transaction not found',
+        );
+        return { received: true, processed: false };
+      }
+
+      if (transaction.status !== 'PENDING') {
+        this.logger.info(
+          { reference: data.reference },
+          'Webhook: Already processed',
+        );
+        return { received: true, processed: false };
+      }
+
+      const metadata = transaction.metadata as Record<string, unknown>;
+      const provider = data.provider
+        ? this.normalizePaymentProvider(data.provider)
+        : this.normalizePaymentProvider(
+            (metadata?.provider as string) || 'paystack',
+          );
+      const eventType = data.eventType || 'payment.webhook';
+      const rawPayload: Record<string, unknown> = data.rawPayload ?? {
+        reference: data.reference,
+        status: data.status,
+        amount: data.amount,
+        currency: data.currency,
+      };
+
+      if (!this.isSuccessfulPaymentStatus(data.status)) {
+        await this.createFundingProviderEvent(tx, {
+          provider,
+          eventType,
+          providerReference: data.reference,
+          status: 'IGNORED',
+          rawPayload,
+          errorMessage: `Ignoring non-success payment status: ${data.status}`,
+        });
+        await tx.transaction.update({
+          where: { id: transaction.id },
+          data: { status: 'FAILED' },
+        });
+        return { received: true, processed: false };
+      }
+
+      const webhookAmount = new Decimal(data.amount);
+      const currency = this.normalizeCurrency(data.currency);
+
+      if (
+        currency !== transaction.currency ||
+        !this.amountsMatch(webhookAmount, new Decimal(transaction.amount))
+      ) {
+        this.logger.error(
+          {
+            reference: data.reference,
+            webhookAmount: webhookAmount.toString(),
+            storedAmount: transaction.amount.toString(),
+            webhookCurrency: currency,
+            storedCurrency: transaction.currency,
+          },
+          'Webhook: Deposit verification mismatch',
+        );
+        await this.createFundingProviderEvent(tx, {
+          provider,
+          eventType,
+          providerReference: data.reference,
+          status: 'FAILED',
+          rawPayload,
+          errorMessage: 'Provider amount or currency mismatch',
+        });
+        await tx.transaction.update({
+          where: { id: transaction.id },
+          data: { status: 'FAILED' },
+        });
+        return { received: true, processed: false };
+      }
+
+      const providerEvent = await this.createFundingProviderEvent(tx, {
+        provider,
+        eventType,
+        providerReference: data.reference,
+        status: 'PROCESSING',
+        rawPayload,
+      });
+
+      if (!providerEvent) {
+        return { received: true, processed: false, duplicate: true };
+      }
+
       const updated = await tx.transaction.updateMany({
         where: {
           reference: data.reference,
           status: 'PENDING',
         },
-        data: { status: 'SUCCESS' },
+        data: {
+          status: 'SUCCESS',
+          metadata: this.mergeJsonMetadata(transaction.metadata, {
+            providerEventId: providerEvent.id,
+            providerStatus: data.status,
+          }) as Prisma.InputJsonValue,
+        },
       });
 
       if (updated.count === 0) {
@@ -184,62 +310,35 @@ export class PaymentService {
         return { received: true, processed: false };
       }
 
-      const transaction = await tx.transaction.findUnique({
-        where: { reference: data.reference },
-      });
-
-      if (!transaction) {
-        this.logger.warn(
-          { reference: data.reference },
-          'Webhook: Transaction disappeared after lock',
-        );
-        return { received: true, processed: false };
-      }
-
-      const webhookAmount =
-        data.currency === 'NGN' || data.currency === 'GHS'
-          ? data.amount
-          : data.amount / 100;
-
-      const storedAmount = Number(transaction.amount);
-      if (Math.abs(webhookAmount - storedAmount) > 0.01) {
-        this.logger.error(
-          {
-            reference: data.reference,
-            webhookAmount,
-            storedAmount,
-          },
-          'Webhook: Amount mismatch',
-        );
-        await tx.transaction.update({
-          where: { id: transaction.id },
-          data: { status: 'FAILED' },
-        });
-        return { received: true, processed: false };
-      }
-
-      const wallet = await tx.wallet.findUnique({
-        where: {
-          userId_currency: {
-            userId: transaction.userId,
-            currency: transaction.currency,
+      await this.ledger.creditWallet(
+        {
+          userId: transaction.userId,
+          currency: transaction.currency,
+          amount: webhookAmount,
+          transactionId: transaction.id,
+          reference: transaction.reference,
+          source: 'PAYMENT_DEPOSIT',
+          metadata: {
+            provider: provider.toUpperCase(),
+            providerStatus: data.status,
+            providerEventId: providerEvent.id,
           },
         },
-      });
+        tx,
+      );
 
-      if (!wallet) {
-        throw new Error('Wallet not found for deposit');
-      }
-
-      await tx.wallet.update({
-        where: { id: wallet.id },
-        data: { balance: { increment: webhookAmount } },
+      await tx.providerEvent.update({
+        where: { id: providerEvent.id },
+        data: {
+          status: 'PROCESSED',
+          processedAt: new Date(),
+        },
       });
 
       this.logger.info(
         {
           reference: transaction.reference,
-          amount: webhookAmount,
+          amount: webhookAmount.toString(),
         },
         'Deposit processed successfully',
       );
@@ -285,51 +384,6 @@ export class PaymentService {
       throw new ForbiddenException('KYC verification is required');
     }
 
-    if (user) {
-      const now = new Date();
-      const needsReset = !user.limitResetDate || user.limitResetDate < now;
-
-      if (needsReset) {
-        await this.prisma.user.update({
-          where: { id: userId },
-          data: {
-            dailyWithdrawn: 0,
-            monthlyWithdrawn: 0,
-            limitResetDate: new Date(now.getFullYear(), now.getMonth() + 1, 1),
-          },
-        });
-      }
-
-      const updated = await this.prisma.user.findUnique({
-        where: { id: userId },
-        select: {
-          dailyWithdrawn: true,
-          monthlyWithdrawn: true,
-          dailyWithdrawLimit: true,
-          monthlyWithdrawLimit: true,
-        },
-      });
-
-      if (!updated) {
-        throw new BadRequestException('User not found');
-      }
-
-      const newDaily = Number(updated.dailyWithdrawn) + Number(dto.amount);
-      const newMonthly = Number(updated.monthlyWithdrawn) + Number(dto.amount);
-
-      if (newDaily > Number(updated.dailyWithdrawLimit)) {
-        throw new BadRequestException(
-          `Daily withdrawal limit exceeded. Remaining: ₦${(Number(updated.dailyWithdrawLimit) - Number(updated.dailyWithdrawn)).toFixed(2)}`,
-        );
-      }
-
-      if (newMonthly > Number(updated.monthlyWithdrawLimit)) {
-        throw new BadRequestException(
-          `Monthly withdrawal limit exceeded. Remaining: ₦${(Number(updated.monthlyWithdrawLimit) - Number(updated.monthlyWithdrawn)).toFixed(2)}`,
-        );
-      }
-    }
-
     const destination = await this.resolveWithdrawalDestination(userId, dto);
     const provider =
       dto.provider ||
@@ -340,15 +394,79 @@ export class PaymentService {
 
     let transferStatus = 'pending';
     let providerTransferId: number | undefined;
+    let transferRequestSent = false;
 
     const transactionRecord = await this.prisma.$transaction(async (tx) => {
-      await tx.user.update({
+      const limitUser = await tx.user.findUnique({
         where: { id: userId },
+        select: {
+          dailyWithdrawLimit: true,
+          monthlyWithdrawLimit: true,
+          dailyWithdrawn: true,
+          monthlyWithdrawn: true,
+          limitResetDate: true,
+        },
+      });
+
+      if (!limitUser) {
+        throw new BadRequestException('User not found');
+      }
+
+      const now = new Date();
+      const needsReset =
+        !limitUser.limitResetDate || limitUser.limitResetDate < now;
+
+      if (needsReset) {
+        await tx.user.update({
+          where: { id: userId },
+          data: {
+            dailyWithdrawn: new Decimal(0),
+            monthlyWithdrawn: new Decimal(0),
+            limitResetDate: new Date(now.getFullYear(), now.getMonth() + 1, 1),
+          },
+        });
+      }
+
+      const dailyWithdrawn = needsReset
+        ? new Decimal(0)
+        : new Decimal(limitUser.dailyWithdrawn);
+      const monthlyWithdrawn = needsReset
+        ? new Decimal(0)
+        : new Decimal(limitUser.monthlyWithdrawn);
+      const dailyWithdrawLimit = new Decimal(limitUser.dailyWithdrawLimit);
+      const monthlyWithdrawLimit = new Decimal(limitUser.monthlyWithdrawLimit);
+
+      if (dailyWithdrawn.plus(amount).greaterThan(dailyWithdrawLimit)) {
+        throw new BadRequestException(
+          `Daily withdrawal limit exceeded. Remaining: ${dailyWithdrawLimit
+            .minus(dailyWithdrawn)
+            .toFixed(2)}`,
+        );
+      }
+
+      if (monthlyWithdrawn.plus(amount).greaterThan(monthlyWithdrawLimit)) {
+        throw new BadRequestException(
+          `Monthly withdrawal limit exceeded. Remaining: ${monthlyWithdrawLimit
+            .minus(monthlyWithdrawn)
+            .toFixed(2)}`,
+        );
+      }
+
+      const limitsUpdated = await tx.user.updateMany({
+        where: {
+          id: userId,
+          dailyWithdrawn: { lte: dailyWithdrawLimit.minus(amount) },
+          monthlyWithdrawn: { lte: monthlyWithdrawLimit.minus(amount) },
+        },
         data: {
           dailyWithdrawn: { increment: amount },
           monthlyWithdrawn: { increment: amount },
         },
       });
+
+      if (limitsUpdated.count !== 1) {
+        throw new BadRequestException('Withdrawal limit exceeded');
+      }
 
       const transaction = await tx.transaction.create({
         data: {
@@ -398,6 +516,7 @@ export class PaymentService {
           currency: dto.currency,
         });
 
+        transferRequestSent = true;
         const transfer = await this.paystack.initiateTransfer({
           amount: dto.amount,
           recipientCode: recipient.recipientCode,
@@ -407,6 +526,7 @@ export class PaymentService {
 
         transferStatus = transfer.data.status;
       } else if (provider === 'flutterwave') {
+        transferRequestSent = true;
         const transfer = await this.flutterwave.initiateTransfer({
           amount: dto.amount,
           bankCode: destination.bankCode,
@@ -447,7 +567,7 @@ export class PaymentService {
         },
       });
 
-      if (finalStatus === 'FAILED') {
+      if (['FAILED', 'REVERSED'].includes(finalStatus)) {
         await this.reverseWithdrawal(
           userId,
           dto.currency,
@@ -467,6 +587,55 @@ export class PaymentService {
     } catch (error) {
       if (error instanceof BadRequestException) {
         throw error;
+      }
+
+      if (!transferRequestSent) {
+        await this.prisma.transaction.update({
+          where: { reference: transactionRecord.reference },
+          data: { status: 'FAILED' },
+        });
+
+        await this.reverseWithdrawal(
+          userId,
+          dto.currency,
+          amount,
+          transactionRecord,
+          destination,
+        );
+
+        await this.prisma.transferAttempt.create({
+          data: {
+            transactionId: transactionRecord.id,
+            provider: provider.toUpperCase() as 'PAYSTACK' | 'FLUTTERWAVE',
+            providerReference: transactionRecord.reference,
+            providerStatus: 'NOT_CREATED',
+            status: 'FAILED',
+            lastCheckedAt: new Date(),
+            metadata: {
+              beneficiaryId: destination.beneficiaryId,
+              bankCode: destination.bankCode,
+              bankName: destination.bankName,
+              accountName: destination.accountName,
+              accountNumberMasked: destination.accountNumberMasked,
+              errorMessage:
+                error instanceof Error
+                  ? error.message
+                  : 'Unknown provider error',
+            },
+          },
+        });
+
+        this.logger.error(
+          {
+            reference: transactionRecord.reference,
+            error: error instanceof Error ? error.message : 'Unknown error',
+          },
+          'Transfer was not created, balance reversed',
+        );
+
+        throw new BadRequestException(
+          'Transfer could not be created. Balance has been reversed.',
+        );
       }
 
       await this.prisma.transaction.update({
@@ -630,10 +799,14 @@ export class PaymentService {
     const finalStatus = this.mapTransferStatus(input.providerStatus);
 
     await this.prisma.$transaction(async (tx) => {
+      const transitionStatus =
+        finalStatus === 'REVERSED'
+          ? { in: ['PENDING', 'SUCCESS'] as TransactionStatus[] }
+          : 'PENDING';
       const updatedTransaction = await tx.transaction.updateMany({
         where: {
           id: transaction.id,
-          status: 'PENDING',
+          status: transitionStatus,
         },
         data: { status: finalStatus },
       });
@@ -881,14 +1054,84 @@ export class PaymentService {
     return timingSafeEqual(Buffer.from(hash), Buffer.from(signature));
   }
 
-  private async processSuccessfulDeposit(transaction: Transaction) {
+  verifyFlutterwaveSecretHash(verifHash: string): boolean {
+    const secretHash = this.configService.getOrThrow<string>(
+      'FLUTTERWAVE_SECRET_HASH',
+    );
+    if (secretHash.length !== verifHash.length) {
+      return false;
+    }
+    return timingSafeEqual(Buffer.from(secretHash), Buffer.from(verifHash));
+  }
+
+  private async processVerifiedDeposit(
+    transaction: Transaction,
+    providerData: {
+      provider: PaymentProviderName;
+      reference: string;
+      status: string;
+      amount: Decimal;
+      currency: string;
+      source: string;
+    },
+  ) {
+    const currency = this.normalizeCurrency(providerData.currency);
+
+    if (
+      providerData.reference !== transaction.reference ||
+      !this.isSuccessfulPaymentStatus(providerData.status) ||
+      currency !== transaction.currency ||
+      !this.amountsMatch(providerData.amount, new Decimal(transaction.amount))
+    ) {
+      await this.prisma.transaction.update({
+        where: { id: transaction.id },
+        data: { status: 'FAILED' },
+      });
+      this.logger.error(
+        {
+          reference: transaction.reference,
+          providerReference: providerData.reference,
+          providerStatus: providerData.status,
+          providerAmount: providerData.amount.toString(),
+          transactionAmount: transaction.amount.toString(),
+          providerCurrency: currency,
+          transactionCurrency: transaction.currency,
+        },
+        'Payment verification mismatch',
+      );
+      throw new BadRequestException('Payment verification mismatch');
+    }
+
     await this.prisma.$transaction(async (tx) => {
+      const providerEvent = await this.createFundingProviderEvent(tx, {
+        provider: providerData.provider,
+        eventType: 'payment.verify',
+        providerReference: transaction.reference,
+        status: 'PROCESSING',
+        rawPayload: {
+          reference: providerData.reference,
+          status: providerData.status,
+          amount: providerData.amount.toString(),
+          currency,
+        },
+      });
+
+      if (!providerEvent) {
+        return;
+      }
+
       const updated = await tx.transaction.updateMany({
         where: {
           id: transaction.id,
           status: 'PENDING',
         },
-        data: { status: 'SUCCESS' },
+        data: {
+          status: 'SUCCESS',
+          metadata: this.mergeJsonMetadata(transaction.metadata, {
+            providerEventId: providerEvent.id,
+            providerStatus: providerData.status,
+          }) as Prisma.InputJsonValue,
+        },
       });
 
       if (updated.count === 0) {
@@ -896,30 +1139,40 @@ export class PaymentService {
           { reference: transaction.reference },
           'Deposit already processed',
         );
+        await tx.providerEvent.update({
+          where: { id: providerEvent.id },
+          data: {
+            status: 'IGNORED',
+            errorMessage: 'Funding transaction is no longer pending',
+            processedAt: new Date(),
+          },
+        });
         return;
       }
 
-      const wallet = await tx.wallet.findUnique({
-        where: {
-          userId_currency: {
-            userId: transaction.userId,
-            currency: transaction.currency,
+      await this.ledger.creditWallet(
+        {
+          userId: transaction.userId,
+          currency: transaction.currency,
+          amount: providerData.amount,
+          transactionId: transaction.id,
+          reference: transaction.reference,
+          source: providerData.source,
+          metadata: {
+            provider: providerData.provider.toUpperCase(),
+            providerStatus: providerData.status,
+            providerEventId: providerEvent.id,
           },
         },
-      });
+        tx,
+      );
 
-      if (!wallet) {
-        throw new Error('Wallet not found for deposit');
-      }
-
-      const txAmount = Number(transaction.amount);
-      if (isNaN(txAmount) || txAmount <= 0) {
-        throw new Error('Invalid deposit amount');
-      }
-
-      await tx.wallet.update({
-        where: { id: wallet.id },
-        data: { balance: { increment: txAmount } },
+      await tx.providerEvent.update({
+        where: { id: providerEvent.id },
+        data: {
+          status: 'PROCESSED',
+          processedAt: new Date(),
+        },
       });
     });
 
@@ -930,6 +1183,64 @@ export class PaymentService {
       },
       'Deposit processed successfully',
     );
+  }
+
+  private isSuccessfulPaymentStatus(status: string) {
+    return ['success', 'successful', 'completed', 'complete'].includes(
+      status.toLowerCase(),
+    );
+  }
+
+  private async createFundingProviderEvent(
+    tx: Pick<Prisma.TransactionClient, 'providerEvent'>,
+    input: {
+      provider: PaymentProviderName;
+      eventType: string;
+      providerReference: string;
+      status: 'PROCESSING' | 'FAILED' | 'IGNORED';
+      rawPayload: Record<string, unknown>;
+      errorMessage?: string;
+    },
+  ) {
+    try {
+      return await tx.providerEvent.create({
+        data: {
+          provider: input.provider.toUpperCase() as 'PAYSTACK' | 'FLUTTERWAVE',
+          eventType: input.eventType,
+          providerReference: input.providerReference,
+          status: input.status,
+          payload: this.sanitizeProviderPayload(
+            input.rawPayload,
+          ) as Prisma.InputJsonValue,
+          errorMessage: input.errorMessage,
+          processedAt: input.status === 'PROCESSING' ? undefined : new Date(),
+        },
+        select: { id: true, status: true },
+      });
+    } catch (error: unknown) {
+      if (this.isUniqueConstraintError(error)) {
+        return null;
+      }
+
+      throw error;
+    }
+  }
+
+  private normalizeCurrency(currency: string) {
+    return currency.toUpperCase() as 'NGN' | 'GHS';
+  }
+
+  private normalizePaymentProvider(provider: string): PaymentProviderName {
+    const normalized = provider.toLowerCase();
+    if (normalized !== 'paystack' && normalized !== 'flutterwave') {
+      throw new BadRequestException('Unsupported payment provider');
+    }
+
+    return normalized;
+  }
+
+  private amountsMatch(left: Decimal, right: Decimal) {
+    return left.minus(right).abs().lessThanOrEqualTo(new Decimal(0.01));
   }
 
   private getDefaultProvider(currency: string): string {

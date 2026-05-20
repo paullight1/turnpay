@@ -18,6 +18,8 @@ import {
 } from "@/components/ui/table";
 import { toast } from "sonner";
 import { getErrorMessage } from "@/lib/errors";
+import DashboardLayout from "@/components/layout/dashboard-layout";
+import { maskEmail, maskKycId, maskPhone } from "@/lib/privacy";
 
 type AdminKycDocument = {
   id: string;
@@ -45,7 +47,8 @@ export default function AdminKycPage() {
   const isAdmin = user?.role === "ADMIN";
   const [page, setPage] = useState(1);
   const [selectedDoc, setSelectedDoc] = useState<AdminKycDocument | null>(null);
-  const [rejectionNote, setRejectionNote] = useState("");
+  const [reviewReason, setReviewReason] = useState("");
+  const [pendingReviewStatus, setPendingReviewStatus] = useState<"VERIFIED" | "REJECTED" | null>(null);
   const queryClient = useQueryClient();
 
   useEffect(() => {
@@ -85,7 +88,8 @@ export default function AdminKycPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["admin-kyc"] });
       setSelectedDoc(null);
-      setRejectionNote("");
+      setReviewReason("");
+      setPendingReviewStatus(null);
       toast.success("KYC document reviewed successfully");
     },
     onError: (error: unknown) => {
@@ -101,9 +105,28 @@ export default function AdminKycPage() {
     return null;
   }
 
+  const requestReview = (status: "VERIFIED" | "REJECTED") => {
+    if (!reviewReason.trim()) {
+      toast.error("Enter a review reason before continuing");
+      return;
+    }
+
+    setPendingReviewStatus(status);
+  };
+
+  const confirmReview = () => {
+    if (!selectedDoc || !pendingReviewStatus) return;
+
+    reviewMutation.mutate({
+      documentId: selectedDoc.id,
+      status: pendingReviewStatus,
+      rejectionNote: reviewReason.trim(),
+    });
+  };
+
   return (
-    <div className="min-h-screen bg-muted/20">
-      <header className="border-b bg-background">
+    <DashboardLayout>
+      <header className="hidden border-b bg-background">
         <div className="container mx-auto flex h-16 items-center justify-between px-4">
           <span className="text-xl font-bold text-primary">
             TrustPay Admin — KYC Review
@@ -114,7 +137,16 @@ export default function AdminKycPage() {
         </div>
       </header>
 
-      <main className="container mx-auto p-6 flex flex-col gap-6">
+      <div className="flex flex-col gap-6">
+        <div className="flex flex-col justify-between gap-3 md:flex-row md:items-end">
+          <div>
+            <h1 className="text-3xl font-semibold">KYC review</h1>
+            <p className="mt-1 text-muted-foreground">
+              Review submitted identity documents with masked user details.
+            </p>
+          </div>
+        </div>
+
         <Card>
           <CardHeader>
             <CardTitle>Pending KYC Documents ({kycData?.total || 0})</CardTitle>
@@ -141,9 +173,9 @@ export default function AdminKycPage() {
                     <TableRow key={doc.id}>
                       <TableCell>
                         <div>
-                          <p className="font-medium">{doc.user?.email}</p>
+                          <p className="font-medium">{maskEmail(doc.user?.email)}</p>
                           <p className="text-sm text-muted-foreground">
-                            {doc.user?.phone}
+                            {maskPhone(doc.user?.phone)}
                           </p>
                         </div>
                       </TableCell>
@@ -151,7 +183,7 @@ export default function AdminKycPage() {
                         {doc.type.toLowerCase().replace("_", " ")}
                       </TableCell>
                       <TableCell className="font-mono text-sm">
-                        {doc.idNumber}
+                        {maskKycId(doc.idNumber)}
                       </TableCell>
                       <TableCell>
                         <Badge
@@ -170,7 +202,11 @@ export default function AdminKycPage() {
                           <Button
                             size="sm"
                             variant="outline"
-                            onClick={() => setSelectedDoc(doc)}
+                            onClick={() => {
+                              setSelectedDoc(doc);
+                              setReviewReason("");
+                              setPendingReviewStatus(null);
+                            }}
                           >
                             View
                           </Button>
@@ -219,11 +255,11 @@ export default function AdminKycPage() {
               <div className="grid grid-cols-2 gap-4 text-sm">
                 <div>
                   <p className="text-muted-foreground">User</p>
-                  <p className="font-medium">{selectedDoc.user?.email}</p>
+                  <p className="font-medium">{maskEmail(selectedDoc.user?.email)}</p>
                 </div>
                 <div>
                   <p className="text-muted-foreground">Phone</p>
-                  <p className="font-medium">{selectedDoc.user?.phone}</p>
+                  <p className="font-medium">{maskPhone(selectedDoc.user?.phone)}</p>
                 </div>
                 <div>
                   <p className="text-muted-foreground">ID Type</p>
@@ -233,7 +269,7 @@ export default function AdminKycPage() {
                 </div>
                 <div>
                   <p className="text-muted-foreground">ID Number</p>
-                  <p className="font-mono">{selectedDoc.idNumber}</p>
+                  <p className="font-mono">{maskKycId(selectedDoc.idNumber)}</p>
                 </div>
               </div>
 
@@ -251,46 +287,62 @@ export default function AdminKycPage() {
 
               <div className="flex flex-col gap-2">
                 <label className="text-sm font-medium">
-                  Rejection Note (optional)
+                  Review reason
                 </label>
                 <textarea
                   className="flex min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-                  placeholder="Reason for rejection..."
-                  value={rejectionNote}
-                  onChange={(e) => setRejectionNote(e.target.value)}
+                  placeholder="Required reason for approval or rejection..."
+                  value={reviewReason}
+                  onChange={(e) => {
+                    setReviewReason(e.target.value);
+                    setPendingReviewStatus(null);
+                  }}
                 />
               </div>
 
+              {pendingReviewStatus && (
+                <div className="rounded-lg border p-3 text-sm">
+                  <p className="font-medium">
+                    Confirm {pendingReviewStatus === "VERIFIED" ? "approval" : "rejection"}
+                  </p>
+                  <p className="mt-1 text-muted-foreground">
+                    This will mark the masked {selectedDoc.type.toLowerCase().replace("_", " ")} submission as {pendingReviewStatus.toLowerCase()}.
+                  </p>
+                </div>
+              )}
+
               <div className="flex gap-3">
-                <Button
-                  onClick={() =>
-                    reviewMutation.mutate({
-                      documentId: selectedDoc.id,
-                      status: "VERIFIED",
-                    })
-                  }
-                  disabled={reviewMutation.isPending}
-                >
-                  {reviewMutation.isPending ? "Processing..." : "Verify"}
-                </Button>
-                <Button
-                  variant="destructive"
-                  onClick={() =>
-                    reviewMutation.mutate({
-                      documentId: selectedDoc.id,
-                      status: "REJECTED",
-                      rejectionNote,
-                    })
-                  }
-                  disabled={reviewMutation.isPending}
-                >
-                  Reject
-                </Button>
+                {pendingReviewStatus ? (
+                  <Button
+                    variant={pendingReviewStatus === "REJECTED" ? "destructive" : "default"}
+                    onClick={confirmReview}
+                    disabled={reviewMutation.isPending}
+                  >
+                    {reviewMutation.isPending ? "Processing..." : `Confirm ${pendingReviewStatus === "VERIFIED" ? "approval" : "rejection"}`}
+                  </Button>
+                ) : (
+                  <>
+                    <Button
+                      onClick={() => requestReview("VERIFIED")}
+                      disabled={reviewMutation.isPending}
+                    >
+                      Verify
+                    </Button>
+                    <Button
+                      variant="destructive"
+                      onClick={() => requestReview("REJECTED")}
+                      disabled={reviewMutation.isPending}
+                    >
+                      Reject
+                    </Button>
+                  </>
+                )}
                 <Button
                   variant="outline"
                   onClick={() => {
                     setSelectedDoc(null);
-                    setRejectionNote("");
+                    setReviewReason("");
+                    setPendingReviewStatus(null);
                   }}
                 >
                   Cancel
@@ -299,7 +351,7 @@ export default function AdminKycPage() {
             </CardContent>
           </Card>
         )}
-      </main>
-    </div>
+      </div>
+    </DashboardLayout>
   );
 }

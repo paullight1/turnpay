@@ -4,20 +4,22 @@ test.describe('TrustPay Landing Page', () => {
   test('should load homepage', async ({ page }) => {
     await page.goto('/');
     await expect(page).toHaveTitle(/TrustPay/i);
-    await expect(page.getByText(/Send Money/i)).toBeVisible();
-    await expect(page.getByText(/Buy Airtime/i)).toBeVisible();
-    await expect(page.getByText(/Pay Bills/i)).toBeVisible();
+    await expect(page.getByText(/Exchange money fast/i)).toBeVisible();
+    await expect(page.getByText('NGN + GHS')).toBeVisible();
+    await expect(page.getByText('Choose NGN or GHS')).toBeVisible();
   });
 
   test('should navigate to login', async ({ page }) => {
     await page.goto('/');
-    await page.click('text=Sign In');
-    await expect(page).toHaveURL(/login/);
+    const loginLink = page.locator('header a[href="/login"]:visible').first();
+    await expect(loginLink).toBeVisible();
+    await loginLink.click();
+    await expect(page).toHaveURL(/login/, { timeout: 20000 });
   });
 
   test('should navigate to register', async ({ page }) => {
     await page.goto('/');
-    await page.click('text=Get Started');
+    await page.getByRole('link', { name: /start exchange/i }).click();
     await expect(page).toHaveURL(/register/);
   });
 });
@@ -25,25 +27,25 @@ test.describe('TrustPay Landing Page', () => {
 test.describe('TrustPay Authentication', () => {
   test('login page renders correctly', async ({ page }) => {
     await page.goto('/login');
-    await expect(page.getByText(/Sign in/i)).toBeVisible();
-    await expect(page.getByLabelText(/email/i)).toBeVisible();
-    await expect(page.getByLabelText(/password/i)).toBeVisible();
+    await expect(page.getByText(/Welcome back/i)).toBeVisible();
+    await expect(page.getByLabel(/email/i)).toBeVisible();
+    await expect(page.getByLabel(/password/i)).toBeVisible();
     await expect(page.getByRole('button', { name: /sign in/i })).toBeVisible();
     await expect(page.getByText(/forgot password/i)).toBeVisible();
   });
 
   test('register page renders correctly', async ({ page }) => {
     await page.goto('/register');
-    await expect(page.getByText(/Create your account/i)).toBeVisible();
-    await expect(page.getByLabelText(/email/i)).toBeVisible();
-    await expect(page.getByLabelText(/phone/i)).toBeVisible();
-    await expect(page.getByLabelText(/password/i)).toBeVisible();
+    await expect(page.getByText(/Create your wallet/i)).toBeVisible();
+    await expect(page.getByLabel(/email/i)).toBeVisible();
+    await expect(page.getByLabel(/phone/i)).toBeVisible();
+    await expect(page.getByLabel(/password/i)).toBeVisible();
   });
 
   test('forgot password page renders correctly', async ({ page }) => {
     await page.goto('/forgot-password');
-    await expect(page.getByText(/Reset your password/i)).toBeVisible();
-    await expect(page.getByLabelText(/email/i)).toBeVisible();
+    await expect(page.getByText(/Reset access/i)).toBeVisible();
+    await expect(page.getByLabel(/email/i)).toBeVisible();
   });
 });
 
@@ -73,6 +75,6 @@ test.describe('TrustPay Mobile Responsive', () => {
   test('homepage is responsive', async ({ page }) => {
     await page.setViewportSize({ width: 375, height: 667 });
     await page.goto('/');
-    await expect(page.getByText(/TrustPay/i)).toBeVisible();
+    await expect(page.getByRole('link', { name: /TrustPay home/i })).toBeVisible();
   });
 });

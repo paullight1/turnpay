@@ -9,6 +9,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import Link from "next/link";
 import { toast } from "sonner";
 import { getErrorMessage } from "@/lib/errors";
+import { ShieldCheck } from "lucide-react";
 
 export default function ForgotPasswordPage() {
   const [email, setEmail] = useState("");
@@ -32,12 +33,16 @@ export default function ForgotPasswordPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-muted/50 px-4">
-      <Card className="w-full max-w-md">
+    <div className="relative isolate flex min-h-screen items-center justify-center overflow-hidden bg-[#050605] px-4 py-10 text-white">
+      <div className="absolute -left-28 -top-64 -z-10 h-[30rem] w-[calc(100%+14rem)] rounded-[0_0_100%_100%] bg-[radial-gradient(circle_at_45%_55%,#ffd36b_0%,#ff7a18_34%,#dc2f02_58%,rgba(5,6,5,0)_74%)] opacity-85 blur-[2px]" />
+      <Card className="w-full max-w-md border-white/10 bg-card/92 shadow-2xl shadow-black/40">
         <CardHeader className="text-center">
-          <CardTitle className="text-2xl font-bold">TrustPay</CardTitle>
+          <div className="mx-auto grid size-11 place-items-center rounded-lg bg-primary text-primary-foreground">
+            <ShieldCheck aria-hidden="true" className="size-5" />
+          </div>
+          <CardTitle className="text-3xl font-semibold">Reset access</CardTitle>
           <CardDescription>
-            {sent ? "Check your email" : "Reset your password"}
+            {sent ? "Check your email for the reset link." : "Enter your email to reset your password."}
           </CardDescription>
         </CardHeader>
         <CardContent>

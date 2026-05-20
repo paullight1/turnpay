@@ -1,4 +1,4 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
@@ -336,7 +336,8 @@ class _ProfileActionScreenState extends State<ProfileActionScreen> {
                           }),
                         );
                       }
-                      return _profileBodyFor(context, widget.kind, snapshot.data!);
+                      return _profileBodyFor(
+                          context, widget.kind, snapshot.data!);
                     },
                   ),
                 ],
@@ -617,18 +618,7 @@ Widget _profileBodyFor(
         ],
       );
     case ProfileActionKind.support:
-      return Column(
-        children: [
-          _DataPanel(
-            child: Text(
-              'Support inbox is not connected yet. For now, use admin operations to review account, payment, or KYC issues.',
-              style: TextStyle(color: AppColors.textSecondary),
-            ),
-          ),
-          _InfoRow(label: 'App', value: 'TRUSTPAY'),
-          _InfoRow(label: 'Support status', value: 'Setup required'),
-        ],
-      );
+      return const _SupportTicketPanel();
   }
 }
 
@@ -744,6 +734,353 @@ class _AppearanceSettingsPanel extends ConsumerWidget {
       ],
     );
   }
+}
+
+class _SupportTicketPanel extends StatefulWidget {
+  const _SupportTicketPanel();
+
+  @override
+  State<_SupportTicketPanel> createState() => _SupportTicketPanelState();
+}
+
+class _SupportTicketPanelState extends State<_SupportTicketPanel> {
+  final _service = HomeDataService();
+  final _referenceController = TextEditingController();
+  final _descriptionController = TextEditingController();
+  late Future<List<SupportTicket>> _ticketsFuture;
+  String _category = 'TRANSACTION';
+  bool _submitting = false;
+  String? _message;
+
+  static const _categories = [
+    'ACCOUNT',
+    'KYC',
+    'WALLET',
+    'TRANSACTION',
+    'WITHDRAWAL',
+    'EXCHANGE',
+    'VTU',
+    'OTHER',
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    _ticketsFuture = _service.fetchSupportTickets();
+  }
+
+  @override
+  void dispose() {
+    _referenceController.dispose();
+    _descriptionController.dispose();
+    super.dispose();
+  }
+
+  void _reloadTickets() {
+    setState(() {
+      _ticketsFuture = _service.fetchSupportTickets();
+    });
+  }
+
+  Future<void> _submitTicket() async {
+    final description = _descriptionController.text.trim();
+    if (description.length < 20) {
+      setState(() {
+        _message = 'Describe the issue in at least 20 characters.';
+      });
+      return;
+    }
+
+    setState(() {
+      _submitting = true;
+      _message = null;
+    });
+
+    try {
+      await _service.createSupportTicket(
+        category: _category,
+        description: description,
+        transactionReference: _referenceController.text.trim(),
+      );
+      _referenceController.clear();
+      _descriptionController.clear();
+      if (!mounted) return;
+      setState(() {
+        _message = 'Support case sent to customer care.';
+        _ticketsFuture = _service.fetchSupportTickets();
+      });
+    } on DioException catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _message = _readDioMessage(error) ?? 'Unable to send support case.';
+      });
+    } finally {
+      if (mounted) {
+        setState(() {
+          _submitting = false;
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        _DataPanel(
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(Icons.privacy_tip_rounded, color: AppColors.warning),
+              SizedBox(width: AppSpacing.md),
+              Expanded(
+                child: Text(
+                  'Customer care can trace wallet, payment, VTU, exchange, KYC, and withdrawal cases. Do not send OTPs, passwords, full card details, or full bank account numbers.',
+                  style: AppTextStyles.bodyM,
+                ),
+              ),
+            ],
+          ),
+        ),
+        _DataPanel(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Open a case', style: AppTextStyles.headingM),
+              SizedBox(height: AppSpacing.md),
+              DropdownButtonFormField<String>(
+                initialValue: _category,
+                items: _categories
+                    .map(
+                      (item) => DropdownMenuItem(
+                        value: item,
+                        child: Text(item.replaceAll('_', ' ')),
+                      ),
+                    )
+                    .toList(),
+                onChanged: _submitting
+                    ? null
+                    : (value) {
+                        if (value != null) {
+                          setState(() => _category = value);
+                        }
+                      },
+                dropdownColor: AppColors.surface,
+                decoration: _supportInputDecoration('Issue type'),
+                style: AppTextStyles.bodyM.copyWith(
+                  color: AppColors.textPrimary,
+                ),
+              ),
+              SizedBox(height: AppSpacing.md),
+              TextField(
+                controller: _referenceController,
+                enabled: !_submitting,
+                style: AppTextStyles.bodyM.copyWith(
+                  color: AppColors.textPrimary,
+                ),
+                decoration: _supportInputDecoration(
+                  'Transaction reference (optional)',
+                ),
+              ),
+              SizedBox(height: AppSpacing.md),
+              TextField(
+                controller: _descriptionController,
+                enabled: !_submitting,
+                minLines: 4,
+                maxLines: 6,
+                style: AppTextStyles.bodyM.copyWith(
+                  color: AppColors.textPrimary,
+                ),
+                decoration: _supportInputDecoration('What happened?'),
+              ),
+              if (_message != null) ...[
+                SizedBox(height: AppSpacing.md),
+                Text(_message!, style: AppTextStyles.bodyS),
+              ],
+              SizedBox(height: AppSpacing.md),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton.icon(
+                  onPressed: _submitting ? null : _submitTicket,
+                  icon: _submitting
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.support_agent_rounded),
+                  label: Text(_submitting ? 'Sending...' : 'Send to support'),
+                ),
+              ),
+            ],
+          ),
+        ),
+        FutureBuilder<List<SupportTicket>>(
+          future: _ticketsFuture,
+          builder: (context, snapshot) {
+            if (snapshot.connectionState == ConnectionState.waiting) {
+              return const _DataPanel(
+                child: Center(child: CircularProgressIndicator()),
+              );
+            }
+
+            if (snapshot.hasError) {
+              return _DataPanel(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Cases unavailable', style: AppTextStyles.headingM),
+                    SizedBox(height: AppSpacing.sm),
+                    Text(
+                      'Pull to refresh later or contact operations with your transaction reference.',
+                      style: AppTextStyles.bodyM,
+                    ),
+                  ],
+                ),
+              );
+            }
+
+            final tickets = snapshot.data ?? const <SupportTicket>[];
+            if (tickets.isEmpty) {
+              return const _EmptyPanel(
+                icon: Icons.support_agent_rounded,
+                title: 'No support cases',
+                detail: 'Cases you send to customer care will appear here.',
+              );
+            }
+
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        'Recent cases',
+                        style: AppTextStyles.headingM,
+                      ),
+                    ),
+                    IconButton(
+                      onPressed: _reloadTickets,
+                      icon: const Icon(Icons.refresh_rounded),
+                      color: AppColors.textSecondary,
+                    ),
+                  ],
+                ),
+                ...tickets.map((ticket) => _SupportTicketCard(ticket: ticket)),
+              ],
+            );
+          },
+        ),
+      ],
+    );
+  }
+
+  String? _readDioMessage(DioException error) {
+    final data = error.response?.data;
+    if (data is Map<String, dynamic>) {
+      final message = data['message'];
+      if (message is String) return message;
+      if (message is List && message.isNotEmpty) {
+        return message.first.toString();
+      }
+    }
+    return null;
+  }
+}
+
+class _SupportTicketCard extends StatelessWidget {
+  final SupportTicket ticket;
+
+  const _SupportTicketCard({required this.ticket});
+
+  @override
+  Widget build(BuildContext context) {
+    final date = ticket.createdAt == null
+        ? 'Pending'
+        : DateFormat('MMM d, y').format(ticket.createdAt!);
+
+    return _DataPanel(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(child: Text(ticket.type, style: AppTextStyles.labelM)),
+              _SupportStatusPill(status: ticket.status),
+            ],
+          ),
+          SizedBox(height: AppSpacing.xs),
+          Text(
+            ticket.transactionReference.isEmpty
+                ? date
+                : '${ticket.transactionReference} • $date',
+            style: AppTextStyles.bodyS,
+          ),
+          SizedBox(height: AppSpacing.sm),
+          Text(
+            ticket.description,
+            style: AppTextStyles.bodyM,
+            maxLines: 3,
+            overflow: TextOverflow.ellipsis,
+          ),
+          if (ticket.resolution.isNotEmpty) ...[
+            SizedBox(height: AppSpacing.md),
+            Text(ticket.resolution, style: AppTextStyles.bodyS),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _SupportStatusPill extends StatelessWidget {
+  final String status;
+
+  const _SupportStatusPill({required this.status});
+
+  @override
+  Widget build(BuildContext context) {
+    final color = switch (status) {
+      'RESOLVED' => AppColors.success,
+      'ESCALATED' || 'UNDER_REVIEW' => AppColors.warning,
+      'CLOSED' => AppColors.textHint,
+      _ => AppColors.primary,
+    };
+
+    return Container(
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.sm,
+        vertical: 4,
+      ),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.14),
+        borderRadius: BorderRadius.circular(AppRadius.full),
+        border: Border.all(color: color.withValues(alpha: 0.28)),
+      ),
+      child: Text(
+        status,
+        style: AppTextStyles.labelS.copyWith(color: color),
+      ),
+    );
+  }
+}
+
+InputDecoration _supportInputDecoration(String label) {
+  return InputDecoration(
+    labelText: label,
+    labelStyle: AppTextStyles.bodyM,
+    filled: true,
+    fillColor: AppColors.inputFill,
+    enabledBorder: OutlineInputBorder(
+      borderRadius: BorderRadius.circular(AppRadius.sm),
+      borderSide: BorderSide(color: AppColors.border),
+    ),
+    focusedBorder: OutlineInputBorder(
+      borderRadius: BorderRadius.circular(AppRadius.sm),
+      borderSide: BorderSide(color: AppColors.primary),
+    ),
+  );
 }
 
 class _ThemeModeChip extends StatelessWidget {
@@ -1741,8 +2078,7 @@ class _SessionExpiredScreen extends StatelessWidget {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(Icons.lock_outline_rounded,
-                      color: AppColors.primary),
+                  Icon(Icons.lock_outline_rounded, color: AppColors.primary),
                   SizedBox(height: AppSpacing.md),
                   Text(
                     'Please log in again to continue.',
@@ -1976,4 +2312,3 @@ String _titleCase(String value) {
       .map((part) => '${part[0].toUpperCase()}${part.substring(1)}')
       .join(' ');
 }
-

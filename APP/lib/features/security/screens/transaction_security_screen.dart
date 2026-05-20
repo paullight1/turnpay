@@ -129,7 +129,7 @@ class _TransactionSecurityScreenState extends State<TransactionSecurityScreen> {
                       ),
                       const SizedBox(height: AppSpacing.sm),
                       Text(
-                        'Protect withdrawals and exchange requests with a local PIN and optional biometric approval.',
+                        'Protect money actions with a temporary local PIN gate and optional biometric approval.',
                         style: AppTextStyles.bodyM,
                       ),
                       const SizedBox(height: AppSpacing.xl),
@@ -143,7 +143,8 @@ class _TransactionSecurityScreenState extends State<TransactionSecurityScreen> {
                       else if (!snapshot.hasData)
                         const _SecurityInfoPanel(
                           title: 'Unavailable',
-                          detail: 'Could not load transaction security settings.',
+                          detail:
+                              'Could not load transaction security settings.',
                           icon: Icons.lock_clock_rounded,
                         )
                       else ...[
@@ -155,7 +156,7 @@ class _TransactionSecurityScreenState extends State<TransactionSecurityScreen> {
                               : 'Create transaction PIN',
                           detail: config.hasPin
                               ? 'Your PIN is required before sensitive wallet actions.'
-                              : 'Set a local PIN for withdrawals and exchange approvals.',
+                              : 'Set a local PIN for money action approvals.',
                           icon: Icons.password_rounded,
                           cta: config.hasPin ? 'Change PIN' : 'Create PIN',
                           onTap: () => _openPinSetup(config),
@@ -188,7 +189,7 @@ class _TransactionSecurityScreenState extends State<TransactionSecurityScreen> {
                         const _SecurityInfoPanel(
                           title: 'Current behavior',
                           detail:
-                              'Withdraw and exchange routes will request your PIN before submission. Biometrics are offered only when enabled and supported.',
+                              'Money action routes request your PIN before submission. Biometrics are offered only when enabled and supported.',
                           icon: Icons.verified_user_outlined,
                         ),
                       ],
@@ -225,8 +226,7 @@ class TransactionPinScreen extends StatefulWidget {
       initialPinLength: initialPinLength,
       allowBiometric: false,
       title: 'Create transaction PIN',
-      subtitle:
-          'Set the code that will be required for withdrawals and exchange requests.',
+      subtitle: 'Set the code that will be required for money action requests.',
     );
   }
 
@@ -320,17 +320,20 @@ class _TransactionPinScreenState extends State<TransactionPinScreen> {
       return;
     }
 
-    final verified = await _securityService.verifyPin(pin);
+    final result = await _securityService.verifyPinWithLockout(pin);
     if (!mounted) return;
 
-    if (verified) {
+    if (result.approved) {
       Navigator.of(context).pop(true);
       return;
     }
 
+    final lockoutMessage = result.lockedUntil == null
+        ? null
+        : 'Too many incorrect attempts. Try again after ${TimeOfDay.fromDateTime(result.lockedUntil!.toLocal()).format(context)}.';
     setState(() {
       _buffer.clear();
-      _error = 'Incorrect PIN. Try again.';
+      _error = lockoutMessage ?? 'Incorrect PIN. Try again.';
     });
   }
 
@@ -353,7 +356,8 @@ class _TransactionPinScreenState extends State<TransactionPinScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final isCreateConfirm = widget.mode == PinScreenMode.create && _firstPin != null;
+    final isCreateConfirm =
+        widget.mode == PinScreenMode.create && _firstPin != null;
     final currentTitle = widget.mode == PinScreenMode.create
         ? (isCreateConfirm ? 'Confirm your PIN' : widget.title)
         : widget.title;
@@ -457,7 +461,17 @@ class _TransactionPinScreenState extends State<TransactionPinScreen> {
                 childAspectRatio: 1.35,
                 physics: const NeverScrollableScrollPhysics(),
                 children: [
-                  for (final digit in ['1', '2', '3', '4', '5', '6', '7', '8', '9'])
+                  for (final digit in [
+                    '1',
+                    '2',
+                    '3',
+                    '4',
+                    '5',
+                    '6',
+                    '7',
+                    '8',
+                    '9'
+                  ])
                     _KeypadButton(
                       label: digit,
                       onTap: () => _handleDigit(digit),
@@ -499,7 +513,7 @@ class _SecurityStatusHero extends StatelessWidget {
   Widget build(BuildContext context) {
     final status = config.hasPin ? 'Protected' : 'Action required';
     final detail = config.hasPin
-        ? 'Withdraw and exchange can require transaction approval.'
+        ? 'Money actions can require transaction approval.'
         : 'Create a PIN before sensitive transaction requests can be protected.';
 
     return Container(

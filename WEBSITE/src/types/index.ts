@@ -4,6 +4,7 @@ export interface User {
   phone: string;
   role: string;
   kycStatus: string;
+  isSuspended?: boolean;
 }
 
 export interface Wallet {
@@ -58,4 +59,34 @@ export interface ApiError {
   statusCode: number;
   message: string | string[];
   error?: string;
+}
+
+export interface SupportTicket {
+  id: string;
+  userId: string;
+  transactionId?: string | null;
+  type: string;
+  description: string;
+  status: string;
+  resolution?: string | null;
+  resolvedBy?: string | null;
+  resolvedAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  user?: {
+    id?: string;
+    email?: string;
+    phone?: string;
+    kycStatus?: string;
+    isSuspended?: boolean;
+  };
+  transaction?: {
+    id: string;
+    reference: string;
+    type: string;
+    amount: number | string;
+    currency: string;
+    status: string;
+    createdAt: string;
+  } | null;
 }

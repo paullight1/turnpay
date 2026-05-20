@@ -35,8 +35,8 @@ export default function SecurityPage() {
     <MarketingShell>
       <PageHero
         eyebrow="Security"
-        title="Trust language grounded in how financial software should behave."
-        description="Security copy now matches the project rules: protected actions, validation, idempotency, audit logging, and careful transaction records."
+        title="Security for every wallet action."
+        description="TrustPay protects sign in, wallet activity, payment retries, receipts, and admin actions with clear controls."
       >
         <Button asChild>
           <Link href="/register">
@@ -54,7 +54,7 @@ export default function SecurityPage() {
           <SectionHeading
             eyebrow="Controls"
             title="Security is a product surface, not footer fine print."
-            description="The page tells users what the product optimizes for while avoiding unsupported compliance claims."
+            description="Users should know how their account, money movement, and support records are protected."
           />
           <div className="grid gap-4 sm:grid-cols-2">
             {securityControls.map((control) => {
@@ -76,7 +76,7 @@ export default function SecurityPage() {
         </div>
       </section>
 
-      <section className="bg-foreground px-4 py-20 text-background sm:px-6 lg:px-8">
+      <section className="bg-[#0d100e] px-4 py-20 text-white sm:px-6 lg:px-8">
         <div className="mx-auto grid max-w-7xl gap-10 lg:grid-cols-[0.9fr_1.1fr] lg:items-start">
           <div className="flex flex-col gap-4">
             <Badge variant="secondary" className="w-fit">
@@ -86,14 +86,14 @@ export default function SecurityPage() {
               Every money movement should be traceable, retry-safe, and reversible when needed.
             </h2>
             <p className="text-base leading-7 text-background/72">
-              The public site now communicates the same discipline required by the backend:
-              no duplicate payments, no silent balance changes, and no vague outcomes.
+              TrustPay should prevent duplicate payments, avoid silent balance changes,
+              and show clear outcomes users can understand.
             </p>
           </div>
           <div className="grid gap-3">
             {securityChecklist.map((item) => (
-              <div key={item} className="flex items-center gap-3 rounded-lg border border-background/12 bg-background/8 p-4">
-                <CheckCircle2 aria-hidden="true" className="size-5 text-background" />
+              <div key={item} className="flex items-center gap-3 rounded-lg border border-white/10 bg-white/[0.06] p-4">
+                <CheckCircle2 aria-hidden="true" className="size-5 text-orange-300" />
                 <span className="text-sm font-medium">{item}</span>
               </div>
             ))}

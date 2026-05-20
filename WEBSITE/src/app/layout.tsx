@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
 import { AuthProvider } from "@/lib/auth-provider";
@@ -12,9 +12,13 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "TrustPay - NGN & GHS Wallets, Exchange & Bills",
+  title: "TrustPay Admin - Banking Operations Workspace",
   description:
-    "TrustPay brings NGN and GHS wallets, currency exchange, airtime, data, cable, electricity, withdrawals, and receipts into one focused app.",
+    "TrustPay Admin helps teams track wallets, KYC, transactions, provider health, reconciliation, and audit trails from one secure workspace.",
+};
+
+export const viewport: Viewport = {
+  themeColor: "#080a09",
 };
 
 export default function RootLayout({
@@ -23,8 +27,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className={inter.variable}>
-      <body className="min-h-screen font-sans antialiased">
+    <html lang="en" className={inter.variable} data-scroll-behavior="smooth">
+      <body className="min-h-screen bg-[#080a09] font-sans text-[#f7f3ec] antialiased">
         <QueryProvider>
           <AuthProvider>
             {children}

@@ -5,6 +5,8 @@ import { PrismaService } from '../prisma/prisma.service';
 import { RateService } from './providers/rate.service';
 import { RedisService } from '../redis/redis.service';
 import { PinoLogger } from 'nestjs-pino';
+import { LedgerService } from '../wallets/ledger.service';
+import { Decimal } from '@prisma/client/runtime/library';
 
 describe('ExchangeService', () => {
   let service: ExchangeService;
@@ -17,9 +19,20 @@ describe('ExchangeService', () => {
   };
 
   const mockPrisma = {
-    $transaction: jest.fn(),
-    wallet: { findFirst: jest.fn(), update: jest.fn() },
+    $transaction: jest.fn(async (fn: any) => fn(mockPrisma)),
+    wallet: {
+      findUnique: jest.fn(),
+      findFirst: jest.fn(),
+      update: jest.fn(),
+      updateMany: jest.fn(),
+      findUniqueOrThrow: jest.fn(),
+    },
     transaction: { create: jest.fn() },
+  };
+
+  const mockLedger = {
+    debitWallet: jest.fn(),
+    creditWallet: jest.fn(),
   };
 
   const mockRateService = {
@@ -50,6 +63,7 @@ describe('ExchangeService', () => {
         { provide: RateService, useValue: mockRateService },
         { provide: RedisService, useValue: mockRedis },
         { provide: PinoLogger, useValue: mockPinoLogger },
+        { provide: LedgerService, useValue: mockLedger },
       ],
     }).compile();
 
@@ -81,6 +95,87 @@ describe('ExchangeService', () => {
       expect(quote.amount).toBe(100);
       expect(quote.rate).toBeGreaterThan(0);
       expect(mockRedis.set).toHaveBeenCalled();
+    });
+  });
+
+  describe('executeQuote', () => {
+    it('posts exchange debit and credit through the ledger in one transaction', async () => {
+      const expiresAt = new Date(Date.now() + 60_000);
+      mockRedis.get.mockResolvedValue(
+        JSON.stringify({
+          id: 'quote-1',
+          userId: 'user-1',
+          from: 'NGN',
+          to: 'GHS',
+          amount: 100,
+          rate: 0.1,
+          markupPercent: 2.5,
+          fee: 2,
+          sendAmount: 102,
+          receiveAmount: 10,
+          expiresAt,
+          createdAt: new Date(),
+        }),
+      );
+      mockPrisma.wallet.findUnique
+        .mockResolvedValueOnce({
+          id: 'wallet-ngn',
+        })
+        .mockResolvedValueOnce({
+          id: 'wallet-ghs',
+        });
+      mockPrisma.wallet.updateMany.mockResolvedValue({ count: 1 });
+      mockPrisma.wallet.update.mockResolvedValue({
+        id: 'wallet-ghs',
+        balance: new Decimal(60),
+        currency: 'GHS',
+      });
+      mockPrisma.wallet.findUniqueOrThrow.mockResolvedValue({
+        id: 'wallet-ngn',
+        balance: new Decimal(898),
+        currency: 'NGN',
+      });
+      mockPrisma.transaction.create.mockResolvedValue({
+        id: 'tx-1',
+        reference: 'EXC-1',
+        type: 'EXCHANGE',
+        amount: new Decimal(100),
+        fee: new Decimal(2),
+        currency: 'NGN',
+        status: 'SUCCESS',
+        createdAt: new Date(),
+      });
+      mockLedger.debitWallet.mockResolvedValue({
+        walletId: 'wallet-ngn',
+        balanceAfter: new Decimal(898),
+      });
+      mockLedger.creditWallet.mockResolvedValue({
+        walletId: 'wallet-ghs',
+        balanceAfter: new Decimal(60),
+      });
+
+      await service.executeQuote('user-1', { quoteId: 'quote-1' });
+
+      expect(mockLedger.debitWallet).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userId: 'user-1',
+          currency: 'NGN',
+          amount: new Decimal(102),
+          transactionId: 'tx-1',
+          source: 'EXCHANGE_DEBIT',
+        }),
+        mockPrisma,
+      );
+      expect(mockLedger.creditWallet).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userId: 'user-1',
+          currency: 'GHS',
+          amount: new Decimal(10),
+          transactionId: 'tx-1',
+          source: 'EXCHANGE_CREDIT',
+        }),
+        mockPrisma,
+      );
     });
   });
 });

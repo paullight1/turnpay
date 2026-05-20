@@ -10,6 +10,8 @@ import { RedisService } from '../redis/redis.service';
 import { CreateQuoteDto, ExecuteQuoteDto } from './dto/exchange.dto';
 import { v4 as uuidv4 } from 'uuid';
 import { PinoLogger } from 'nestjs-pino';
+import { Decimal } from '@prisma/client/runtime/library';
+import { LedgerService } from '../wallets/ledger.service';
 
 export interface QuoteData {
   id: string;
@@ -37,6 +39,7 @@ export class ExchangeService {
     private readonly redis: RedisService,
     private readonly configService: ConfigService,
     private readonly logger: PinoLogger,
+    private readonly ledger: LedgerService,
   ) {
     this.transactionTimeout = 5000;
   }
@@ -60,11 +63,14 @@ export class ExchangeService {
     }
 
     const { rate, markup } = await this.rateService.getRate(dto.from, dto.to);
-    const effectiveRate = rate * (1 + markup / 100);
+    const effectiveRate = new Decimal(rate).mul(
+      new Decimal(1).plus(new Decimal(markup).div(100)),
+    );
 
     const fee = this.calculateFee(dto.amount, markup);
-    const sendAmount = dto.amount + fee;
-    const receiveAmount = dto.amount * effectiveRate;
+    const amount = new Decimal(dto.amount);
+    const sendAmount = amount.plus(fee);
+    const receiveAmount = amount.mul(effectiveRate);
 
     const quoteId = uuidv4();
     const quote: QuoteData = {
@@ -73,11 +79,11 @@ export class ExchangeService {
       from: dto.from,
       to: dto.to,
       amount: dto.amount,
-      rate: effectiveRate,
+      rate: effectiveRate.toNumber(),
       markupPercent: markup,
-      fee,
-      sendAmount,
-      receiveAmount,
+      fee: fee.toNumber(),
+      sendAmount: sendAmount.toNumber(),
+      receiveAmount: receiveAmount.toNumber(),
       expiresAt: new Date(Date.now() + this.quoteTtlSeconds * 1000),
       createdAt: new Date(),
     };
@@ -126,30 +132,35 @@ export class ExchangeService {
       );
     }
 
+    const amount = new Decimal(quote.amount);
+    const fee = new Decimal(quote.fee);
+    const sendAmount = new Decimal(quote.sendAmount);
+    const receiveAmount = new Decimal(quote.receiveAmount);
+
     const result = await this.prisma.$transaction(
       async (tx) => {
-        const sourceWallet = await tx.wallet.findFirst({
+        const sourceWallet = await tx.wallet.findUnique({
           where: {
-            userId,
-            currency: quote.from as 'NGN' | 'GHS',
+            userId_currency: {
+              userId,
+              currency: quote.from as 'NGN' | 'GHS',
+            },
           },
+          select: { id: true },
         });
 
         if (!sourceWallet) {
           throw new NotFoundException(`${quote.from} wallet not found`);
         }
 
-        if (sourceWallet.balance.lt(quote.sendAmount)) {
-          throw new BadRequestException(
-            `Insufficient ${quote.from} balance. Required: ${quote.sendAmount.toString()}, Available: ${sourceWallet.balance.toString()}`,
-          );
-        }
-
-        const targetWallet = await tx.wallet.findFirst({
+        const targetWallet = await tx.wallet.findUnique({
           where: {
-            userId,
-            currency: quote.to as 'NGN' | 'GHS',
+            userId_currency: {
+              userId,
+              currency: quote.to as 'NGN' | 'GHS',
+            },
           },
+          select: { id: true },
         });
 
         if (!targetWallet) {
@@ -158,38 +169,15 @@ export class ExchangeService {
 
         const reference = `EXC-${Date.now()}-${uuidv4().slice(0, 8)}`;
 
-        const deducted = await tx.wallet.updateMany({
-          where: {
-            id: sourceWallet.id,
-            balance: { gte: quote.sendAmount },
-          },
-          data: { balance: { decrement: quote.sendAmount } },
-        });
-
-        if (deducted.count !== 1) {
-          throw new BadRequestException(
-            `Insufficient ${quote.from} balance. Required: ${quote.sendAmount}`,
-          );
-        }
-
-        const creditedWallet = await tx.wallet.update({
-          where: { id: targetWallet.id },
-          data: { balance: { increment: quote.receiveAmount } },
-        });
-
-        const deductedWallet = await tx.wallet.findUniqueOrThrow({
-          where: { id: sourceWallet.id },
-        });
-
         const transaction = await tx.transaction.create({
           data: {
             userId,
             type: 'EXCHANGE',
-            amount: quote.amount,
+            amount,
             currency: quote.from as 'NGN' | 'GHS',
             status: 'SUCCESS',
             reference,
-            fee: quote.fee,
+            fee,
             metadata: {
               quoteId: quote.id,
               from: quote.from,
@@ -203,15 +191,49 @@ export class ExchangeService {
           },
         });
 
+        const sourceMovement = await this.ledger.debitWallet(
+          {
+            userId,
+            currency: quote.from as 'NGN' | 'GHS',
+            amount: sendAmount,
+            transactionId: transaction.id,
+            reference,
+            source: 'EXCHANGE_DEBIT',
+            metadata: {
+              quoteId: quote.id,
+              fee: fee.toString(),
+              targetCurrency: quote.to,
+            },
+          },
+          tx,
+        );
+
+        const targetMovement = await this.ledger.creditWallet(
+          {
+            userId,
+            currency: quote.to as 'NGN' | 'GHS',
+            amount: receiveAmount,
+            transactionId: transaction.id,
+            reference,
+            source: 'EXCHANGE_CREDIT',
+            metadata: {
+              quoteId: quote.id,
+              sourceCurrency: quote.from,
+              rate: quote.rate,
+            },
+          },
+          tx,
+        );
+
         return {
           transaction,
           sourceWallet: {
-            currency: deductedWallet.currency,
-            balance: deductedWallet.balance,
+            currency: quote.from,
+            balance: sourceMovement.balanceAfter,
           },
           targetWallet: {
-            currency: creditedWallet.currency,
-            balance: creditedWallet.balance,
+            currency: quote.to,
+            balance: targetMovement.balanceAfter,
           },
         };
       },
@@ -255,10 +277,14 @@ export class ExchangeService {
     };
   }
 
-  private calculateFee(amount: number, markupPercent: number): number {
+  private calculateFee(amount: number, markupPercent: number): Decimal {
     const baseFeePercent = 1.0;
-    const totalPercent = baseFeePercent + markupPercent / 2;
-    const fee = Number(amount) * (Number(totalPercent) / 100);
-    return Math.ceil(fee * 100) / 100;
+    const totalPercent = new Decimal(baseFeePercent).plus(
+      new Decimal(markupPercent).div(2),
+    );
+    return new Decimal(amount)
+      .mul(totalPercent)
+      .div(100)
+      .toDecimalPlaces(2, Decimal.ROUND_CEIL);
   }
 }

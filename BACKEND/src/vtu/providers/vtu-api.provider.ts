@@ -2,7 +2,6 @@ import { Injectable, Logger } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { ConfigService } from '@nestjs/config';
 import { firstValueFrom } from 'rxjs';
-import { v4 as uuidv4 } from 'uuid';
 
 export interface VtuProvider {
   id: string;
@@ -82,6 +81,7 @@ export class VtuApiProvider {
     provider: string;
     recipientNumber: string;
     amount: number;
+    reference: string;
     packageId?: string;
     smartCardNumber?: string;
     meterNumber?: string;
@@ -98,7 +98,7 @@ export class VtuApiProvider {
       package_id: params.packageId,
       smart_card_number: params.smartCardNumber,
       meter_number: params.meterNumber,
-      reference: uuidv4(),
+      reference: params.reference,
     };
 
     try {
@@ -228,9 +228,10 @@ export class VtuApiProvider {
     provider: string;
     recipientNumber: string;
     amount: number;
+    reference: string;
   }): { reference: string; status: string; message: string } {
     return {
-      reference: `VTU-${Date.now()}-${uuidv4().slice(0, 8)}`,
+      reference: params.reference,
       status: 'success',
       message: `${params.type} purchase simulated successfully`,
     };

@@ -42,8 +42,8 @@ export default function PricingPage() {
     <MarketingShell>
       <PageHero
         eyebrow="Pricing"
-        title="Clear pricing language for wallet, exchange, and payment flows."
-        description="This page sets expectations without inventing exact fee promises before provider pricing is finalized."
+        title="Simple fees before you confirm."
+        description="TrustPay shows the fee, rate, and final amount before you make an exchange, bill payment, or withdrawal."
       >
         <Button asChild>
           <Link href="/register">
@@ -61,7 +61,7 @@ export default function PricingPage() {
           <SectionHeading
             eyebrow="Plans"
             title="Start personal, grow into operational usage."
-            description="TrustPay can speak to individual users today and still leave room for business onboarding."
+            description="Use TrustPay for daily wallet activity, then grow into higher-volume business needs when you are ready."
           />
           <div className="grid gap-4 md:grid-cols-3">
             {pricingPlans.map((plan) => (
@@ -91,8 +91,8 @@ export default function PricingPage() {
         <div className="mx-auto grid max-w-7xl gap-10 lg:grid-cols-[0.8fr_1.2fr]">
           <SectionHeading
             eyebrow="Fee Clarity"
-            title="No surprise language."
-            description="The public page explains where fees appear while avoiding unsupported hardcoded provider rates."
+            title="Know the cost before you pay."
+            description="Each flow should show the amount, fee, and expected result before you confirm."
           />
           <Card className="rounded-lg">
             <CardContent className="pt-2">

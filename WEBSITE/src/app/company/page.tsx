@@ -59,7 +59,7 @@ export default function CompanyPage() {
           <SectionHeading
             eyebrow="What Matters"
             title="A sharper company story than generic fintech ambition."
-            description="The page now gives TrustPay a specific operating point of view: corridor-first, transparent, and disciplined around financial events."
+            description="TrustPay focuses on useful wallet tools, clear payment status, and practical money movement across Ghana and Nigeria."
           />
           <div className="grid gap-4 md:grid-cols-3">
             {companyValues.map((value) => {
@@ -85,8 +85,8 @@ export default function CompanyPage() {
         <div className="mx-auto grid max-w-7xl gap-10 lg:grid-cols-[0.8fr_1.2fr]">
           <SectionHeading
             eyebrow="Roadmap Narrative"
-            title="The public site now explains where the product is headed."
-            description="These milestones are written as product positioning, not engineering commitments."
+            title="Where the product is headed."
+            description="TrustPay is growing around wallet utility, bill payments, safe withdrawals, and better support records."
           />
           <div className="grid gap-4">
             {milestones.map((milestone, index) => (

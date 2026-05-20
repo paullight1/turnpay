@@ -37,8 +37,11 @@ export class PaymentController {
   }
 
   @Get('verify/:reference')
-  async verifyPayment(@Param('reference') reference: string) {
-    return this.paymentService.verifyPayment(reference);
+  async verifyPayment(
+    @CurrentUser() user: { userId: string },
+    @Param('reference') reference: string,
+  ) {
+    return this.paymentService.verifyPayment(reference, user.userId);
   }
 
   @Get('banks')

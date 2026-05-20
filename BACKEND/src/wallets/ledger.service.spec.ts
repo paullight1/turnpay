@@ -18,7 +18,8 @@ describe('LedgerService', () => {
   let service: LedgerService;
 
   beforeEach(() => {
-    jest.clearAllMocks();
+    jest.resetAllMocks();
+    prisma.$transaction.mockImplementation(async (fn: any) => fn(prisma));
     service = new LedgerService(prisma);
   });
 
@@ -46,7 +47,12 @@ describe('LedgerService', () => {
 
     expect(prisma.$transaction).toHaveBeenCalledTimes(1);
     expect(prisma.wallet.update).toHaveBeenCalledWith({
-      where: { id: 'wallet-1' },
+      where: {
+        userId_currency: {
+          userId: 'user-1',
+          currency: 'NGN',
+        },
+      },
       data: { balance: { increment: new Decimal(250) } },
     });
     expect(prisma.ledgerEntry.create).toHaveBeenCalledWith({
@@ -80,6 +86,7 @@ describe('LedgerService', () => {
   });
 
   it('rejects debit attempts that would overdraw the wallet', async () => {
+    prisma.wallet.updateMany.mockResolvedValue({ count: 0 });
     prisma.wallet.findUnique.mockResolvedValue({
       id: 'wallet-1',
       userId: 'user-1',
@@ -98,6 +105,44 @@ describe('LedgerService', () => {
       }),
     ).rejects.toBeInstanceOf(BadRequestException);
     expect(prisma.wallet.update).not.toHaveBeenCalled();
+    expect(prisma.ledgerEntry.create).not.toHaveBeenCalled();
+  });
+
+  it('records debit balance snapshots from the committed balance after atomic update', async () => {
+    prisma.wallet.updateMany.mockResolvedValue({ count: 1 });
+    prisma.wallet.findUnique.mockResolvedValue({
+      id: 'wallet-1',
+      userId: 'user-1',
+      currency: 'NGN',
+      balance: new Decimal(700),
+    });
+    prisma.ledgerEntry.create.mockResolvedValue({ id: 'ledger-1' });
+
+    const result = await service.debitWallet({
+      userId: 'user-1',
+      currency: 'NGN',
+      amount: new Decimal(100),
+      transactionId: 'tx-1',
+      reference: 'WD-1',
+      source: 'WITHDRAWAL',
+    });
+
+    expect(prisma.wallet.updateMany).toHaveBeenCalledWith({
+      where: {
+        userId: 'user-1',
+        currency: 'NGN',
+        balance: { gte: new Decimal(100) },
+      },
+      data: { balance: { decrement: new Decimal(100) } },
+    });
+    expect(prisma.ledgerEntry.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        balanceBefore: new Decimal(800),
+        balanceAfter: new Decimal(700),
+      }),
+    });
+    expect(result.balanceBefore.equals(800)).toBe(true);
+    expect(result.balanceAfter.equals(700)).toBe(true);
   });
 
   it('fails when the target wallet does not exist', async () => {

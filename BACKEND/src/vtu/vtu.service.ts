@@ -10,6 +10,9 @@ import { VtuApiProvider } from './providers/vtu-api.provider';
 import { PurchaseVtuDto } from './dto/vtu.dto';
 import { v4 as uuidv4 } from 'uuid';
 import { PinoLogger } from 'nestjs-pino';
+import { Decimal } from '@prisma/client/runtime/library';
+import { LedgerService } from '../wallets/ledger.service';
+import { maskAccountNumber, maskPhone } from '../common/utils/masking';
 
 @Injectable()
 export class VtuService {
@@ -18,6 +21,7 @@ export class VtuService {
     private readonly walletsService: WalletsService,
     private readonly vtuApi: VtuApiProvider,
     private readonly logger: PinoLogger,
+    private readonly ledger: LedgerService,
   ) {}
 
   async getProviders(type?: string) {
@@ -42,91 +46,71 @@ export class VtuService {
       throw new NotFoundException('NGN wallet not found');
     }
 
-    if (wallet.balance.lt(dto.amount)) {
+    const amount = new Decimal(dto.amount);
+    if (!amount.isFinite() || amount.lessThanOrEqualTo(0)) {
+      throw new BadRequestException('Amount must be positive');
+    }
+
+    if (new Decimal(wallet.balance).lessThan(amount)) {
       throw new BadRequestException(
         `Insufficient NGN balance. Required: ${dto.amount}`,
       );
     }
 
     const reference = `VTU-${Date.now()}-${uuidv4().slice(0, 8)}`;
+    const metadata = this.buildSafeMetadata(dto);
+
+    const transactionRecord = await this.prisma.$transaction(async (tx) => {
+      const transaction = await tx.transaction.create({
+        data: {
+          userId,
+          type: this.mapVtuType(dto.type),
+          amount,
+          currency: 'NGN',
+          status: 'PENDING',
+          reference,
+          walletId: wallet.id,
+          metadata,
+        },
+      });
+
+      await this.ledger.debitWallet(
+        {
+          userId,
+          currency: 'NGN',
+          amount,
+          transactionId: transaction.id,
+          reference,
+          source: 'VTU_PURCHASE',
+          metadata,
+        },
+        tx,
+      );
+
+      return { id: transaction.id, reference: transaction.reference };
+    });
 
     let purchaseResult: { reference: string; status: string; message: string };
 
     try {
-      await this.prisma.$transaction(async (tx) => {
-        const deducted = await tx.wallet.updateMany({
-          where: {
-            id: wallet.id,
-            balance: { gte: dto.amount },
-          },
-          data: { balance: { decrement: dto.amount } },
-        });
-
-        if (deducted.count !== 1) {
-          throw new BadRequestException(
-            `Insufficient NGN balance. Required: ${dto.amount}`,
-          );
-        }
-
-        await tx.transaction.create({
-          data: {
-            userId,
-            type: this.mapVtuType(dto.type),
-            amount: dto.amount,
-            currency: 'NGN',
-            status: 'PENDING',
-            reference,
-            walletId: wallet.id,
-            metadata: {
-              vtuType: dto.type,
-              provider: dto.provider,
-              recipientNumber: dto.recipientNumber,
-              packageId: dto.packageId,
-              smartCardNumber: dto.smartCardNumber,
-              meterNumber: dto.meterNumber,
-            },
-          },
-        });
-      });
-
       purchaseResult = await this.vtuApi.purchase({
         type: dto.type,
         provider: dto.provider,
         recipientNumber: dto.recipientNumber,
         amount: dto.amount,
+        reference,
         packageId: dto.packageId,
         smartCardNumber: dto.smartCardNumber,
         meterNumber: dto.meterNumber,
       });
-
-      if (purchaseResult.status === 'success') {
-        await this.prisma.transaction.update({
-          where: { reference },
-          data: { status: 'SUCCESS' },
-        });
-
-        this.logger.info(
-          {
-            userId,
-            reference,
-            type: dto.type,
-            provider: dto.provider,
-            amount: dto.amount,
-          },
-          'VTU purchase successful',
-        );
-      } else {
-        await this.reverseVtuPurchase(userId, reference, dto.amount);
-        throw new BadRequestException(
-          `VTU purchase failed: ${purchaseResult.message}`,
-        );
-      }
     } catch (error) {
-      if (error instanceof BadRequestException) {
-        throw error;
-      }
-
-      await this.reverseVtuPurchase(userId, reference, dto.amount);
+      await this.reverseVtuPurchase(
+        userId,
+        transactionRecord,
+        amount,
+        'Provider request failed',
+        metadata,
+      );
 
       this.logger.error(
         {
@@ -142,9 +126,49 @@ export class VtuService {
       );
     }
 
+    if (purchaseResult.status !== 'success') {
+      await this.reverseVtuPurchase(
+        userId,
+        transactionRecord,
+        amount,
+        purchaseResult.message,
+        {
+          ...metadata,
+          providerReference: purchaseResult.reference,
+          providerStatus: purchaseResult.status,
+        },
+      );
+      throw new BadRequestException(
+        `VTU purchase failed: ${purchaseResult.message}`,
+      );
+    }
+
+    await this.prisma.transaction.update({
+      where: { reference: transactionRecord.reference },
+      data: {
+        status: 'SUCCESS',
+        metadata: {
+          ...metadata,
+          providerReference: purchaseResult.reference,
+          providerStatus: purchaseResult.status,
+        },
+      },
+    });
+
+    this.logger.info(
+      {
+        userId,
+        reference,
+        type: dto.type,
+        provider: dto.provider,
+        amount: dto.amount,
+      },
+      'VTU purchase successful',
+    );
+
     return {
       success: true,
-      reference,
+      reference: transactionRecord.reference,
       message: purchaseResult.message,
       amount: dto.amount,
     };
@@ -152,31 +176,68 @@ export class VtuService {
 
   private async reverseVtuPurchase(
     userId: string,
-    reference: string,
-    amount: number,
+    transaction: { id: string; reference: string },
+    amount: Decimal,
+    reason: string,
+    metadata: Record<string, unknown>,
   ) {
     await this.prisma.$transaction(async (tx) => {
-      const wallet = await tx.wallet.findFirst({
-        where: { userId, currency: 'NGN' },
+      const existingReversal = await tx.ledgerEntry.findFirst({
+        where: {
+          transactionId: transaction.id,
+          source: 'VTU_REVERSAL',
+        },
       });
 
-      if (wallet) {
-        await tx.wallet.update({
-          where: { id: wallet.id },
-          data: { balance: { increment: amount } },
-        });
+      if (!existingReversal) {
+        await this.ledger.creditWallet(
+          {
+            userId,
+            currency: 'NGN',
+            amount,
+            transactionId: transaction.id,
+            reference: `${transaction.reference}-REVERSAL`,
+            source: 'VTU_REVERSAL',
+            metadata: {
+              ...metadata,
+              reversalReason: reason,
+            },
+          },
+          tx,
+        );
       }
 
       await tx.transaction.update({
-        where: { reference },
-        data: { status: 'FAILED' },
+        where: { reference: transaction.reference },
+        data: {
+          status: 'FAILED',
+          metadata: {
+            ...metadata,
+            reversalReason: reason,
+          },
+        },
       });
     });
 
     this.logger.info(
-      { userId, reference, amount },
+      { userId, reference: transaction.reference, amount: amount.toString() },
       'VTU purchase reversed, balance restored',
     );
+  }
+
+  private buildSafeMetadata(dto: PurchaseVtuDto) {
+    return {
+      vtuType: dto.type,
+      provider: dto.provider,
+      recipientNumberMasked: maskPhone(dto.recipientNumber),
+      packageId: dto.packageId,
+      smartCardNumberMasked: dto.smartCardNumber
+        ? maskAccountNumber(dto.smartCardNumber)
+        : undefined,
+      meterNumberMasked: dto.meterNumber
+        ? maskAccountNumber(dto.meterNumber)
+        : undefined,
+    };
   }
 
   private mapVtuType(type: string): TransactionType {

@@ -36,6 +36,56 @@ class HomeDataService {
         .map((item) => HomeTransaction.fromJson(_asMap(item)))
         .toList();
   }
+
+  Future<List<SupportTicket>> fetchSupportTickets({int limit = 10}) async {
+    final response = await _apiClient.client.get(
+      '/api/support/tickets',
+      queryParameters: {'limit': limit},
+    );
+
+    final data = response.data is Map<String, dynamic>
+        ? response.data as Map<String, dynamic>
+        : <String, dynamic>{};
+
+    return _asList(data['tickets'])
+        .map((item) => SupportTicket.fromJson(_asMap(item)))
+        .toList();
+  }
+
+  Future<SupportTicket> createSupportTicket({
+    required String category,
+    required String description,
+    String? transactionReference,
+  }) async {
+    final response = await _apiClient.client.post(
+      '/api/support/tickets',
+      data: {
+        'category': category,
+        'description': description,
+        if (transactionReference != null && transactionReference.isNotEmpty)
+          'transactionReference': transactionReference,
+      },
+    );
+
+    return SupportTicket.fromJson(_asMap(response.data));
+  }
+}
+
+class KycGatePolicy {
+  static const Set<String> blockedRoutesBeforeVerification = {
+    '/send',
+    '/withdraw',
+    '/exchange',
+    '/virtual-account',
+  };
+
+  static bool isBlocked({
+    required String route,
+    required String status,
+  }) {
+    return status.toUpperCase() != 'VERIFIED' &&
+        blockedRoutesBeforeVerification.contains(route);
+  }
 }
 
 class HomeDashboardData {
@@ -201,6 +251,40 @@ class HomeVirtualAccount {
       bankName: _asString(json['bankName']),
       currency: _asString(json['currency'], fallback: 'NGN'),
       status: _asString(json['status'], fallback: 'PENDING'),
+    );
+  }
+}
+
+class SupportTicket {
+  final String id;
+  final String type;
+  final String description;
+  final String status;
+  final String resolution;
+  final DateTime? createdAt;
+  final String transactionReference;
+
+  const SupportTicket({
+    required this.id,
+    required this.type,
+    required this.description,
+    required this.status,
+    required this.resolution,
+    required this.createdAt,
+    required this.transactionReference,
+  });
+
+  factory SupportTicket.fromJson(Map<String, dynamic> json) {
+    final transaction = _asMap(json['transaction']);
+
+    return SupportTicket(
+      id: _asString(json['id']),
+      type: _asString(json['type'], fallback: 'OTHER'),
+      description: _asString(json['description']),
+      status: _asString(json['status'], fallback: 'OPEN'),
+      resolution: _asString(json['resolution']),
+      createdAt: _asDate(json['createdAt']),
+      transactionReference: _asString(transaction['reference']),
     );
   }
 }

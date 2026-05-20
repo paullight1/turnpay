@@ -17,6 +17,8 @@ import {
   Smartphone,
 } from "lucide-react";
 import { Wallet as WalletType, Transaction } from "@/types";
+import { getMoneyActionGate } from "@/lib/account-status";
+import { maskEmail } from "@/lib/privacy";
 
 const quickActions = [
   {
@@ -144,7 +146,8 @@ function TransactionRow({ tx }: { tx: Transaction }) {
 }
 
 export default function DashboardPage() {
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
+  const moneyGate = getMoneyActionGate(profile);
 
   const { data: wallets, isLoading: walletsLoading } = useQuery({
     queryKey: ["wallets", user?.id],
@@ -174,12 +177,28 @@ export default function DashboardPage() {
       <div className="flex flex-col gap-6">
         <div>
           <h1 className="text-3xl font-bold">
-            Welcome back, {user?.email?.split("@")[0]}
+            Welcome back, {maskEmail(profile?.email ?? user?.email)}
           </h1>
           <p className="mt-1 text-muted-foreground">
             Manage your wallets and transactions
           </p>
         </div>
+
+        {moneyGate && (
+          <Card>
+            <CardHeader>
+              <CardTitle>{moneyGate.title}</CardTitle>
+            </CardHeader>
+            <CardContent className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+              <p className="text-sm text-muted-foreground">{moneyGate.message}</p>
+              {moneyGate.actionHref && moneyGate.actionLabel && (
+                <Link href={moneyGate.actionHref}>
+                  <Button variant="outline">{moneyGate.actionLabel}</Button>
+                </Link>
+              )}
+            </CardContent>
+          </Card>
+        )}
 
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
           <WalletCard

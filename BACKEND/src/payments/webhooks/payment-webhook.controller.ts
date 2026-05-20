@@ -113,10 +113,13 @@ export class WebhookController {
       });
     } else if (body.event === 'charge.success' && body.data?.reference) {
       await this.paymentService.processWebhookDeposit({
+        provider: 'paystack',
+        eventType: body.event,
         reference: body.data.reference,
         status: body.data.status,
         amount: body.data.amount / 100,
         currency: body.data.currency || 'NGN',
+        rawPayload: body as unknown as Record<string, unknown>,
       });
     }
 
@@ -144,7 +147,13 @@ export class WebhookController {
         throw new BadRequestException('Invalid signature');
       }
     } else if (verifHash) {
-      throw new BadRequestException('Missing webhook signature');
+      const isValid =
+        this.paymentService.verifyFlutterwaveSecretHash(verifHash);
+
+      if (!isValid) {
+        this.logger.warn('Invalid Flutterwave webhook secret hash');
+        throw new BadRequestException('Invalid signature');
+      }
     } else {
       throw new BadRequestException('Missing webhook verification headers');
     }
@@ -182,10 +191,13 @@ export class WebhookController {
       });
     } else if (body.event === 'charge.completed' && body.data?.tx_ref) {
       await this.paymentService.processWebhookDeposit({
+        provider: 'flutterwave',
+        eventType: body.event,
         reference: body.data.tx_ref,
         status: body.data.status,
         amount: body.data.amount,
         currency: body.data.currency,
+        rawPayload: body as unknown as Record<string, unknown>,
       });
     }
 

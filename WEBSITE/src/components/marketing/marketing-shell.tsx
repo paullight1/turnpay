@@ -1,24 +1,14 @@
 import Link from "next/link";
-import { ArrowRight, Menu, ShieldCheck } from "lucide-react";
+import { ArrowRight, ShieldCheck } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
-import {
-  Sheet,
-  SheetClose,
-  SheetContent,
-  SheetDescription,
-  SheetFooter,
-  SheetHeader,
-  SheetTitle,
-  SheetTrigger,
-} from "@/components/ui/sheet";
 import { footerGroups, navItems } from "@/lib/marketing";
 
 function BrandMark() {
   return (
     <span className="inline-flex min-w-0 items-center gap-2" translate="no">
-      <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-primary text-primary-foreground shadow-sm">
+      <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-orange-500 text-white shadow-sm shadow-orange-950/30">
         <ShieldCheck aria-hidden="true" className="size-5" />
       </span>
       <span className="min-w-0 text-lg font-semibold leading-none">TrustPay</span>
@@ -28,32 +18,32 @@ function BrandMark() {
 
 export function MarketingShell({ children }: { children: React.ReactNode }) {
   return (
-    <div className="min-h-screen overflow-x-hidden bg-background text-foreground">
+    <div className="min-h-screen overflow-x-hidden bg-[#080a09] text-[#f7f3ec] [color-scheme:dark]">
       <a
         href="#main"
-        className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:rounded-lg focus:bg-background focus:px-3 focus:py-2 focus:text-sm focus:shadow-lg focus-visible:ring-3 focus-visible:ring-ring/50"
+        className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:rounded-lg focus:bg-white focus:px-3 focus:py-2 focus:text-sm focus:text-black focus:shadow-lg focus-visible:ring-3 focus-visible:ring-orange-300/50"
       >
         Skip to Content
       </a>
-      <header className="fixed inset-x-0 top-0 z-40 border-b border-border/70 bg-background/88 backdrop-blur-xl">
+      <header className="fixed inset-x-0 top-0 z-40 border-b border-white/10 bg-[#080a09]/86 backdrop-blur-xl">
         <div className="mx-auto flex h-16 w-full max-w-7xl items-center justify-between gap-4 px-4 sm:px-6 lg:px-8">
           <Link
             href="/"
             aria-label="TrustPay home"
-            className="rounded-lg focus-visible:ring-3 focus-visible:ring-ring/50"
+            className="rounded-lg focus-visible:ring-3 focus-visible:ring-orange-300/50"
           >
             <BrandMark />
           </Link>
 
           <nav
             aria-label="Main navigation"
-            className="hidden items-center gap-1 rounded-lg border border-border/70 bg-background/70 p-1 md:flex"
+            className="hidden items-center gap-1 rounded-lg border border-white/10 bg-white/[0.05] p-1 md:flex"
           >
             {navItems.map((item) => (
               <Link
                 key={item.href}
                 href={item.href}
-                className="rounded-md px-3 py-1.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50"
+                className="rounded-md px-3 py-1.5 text-sm font-medium text-white/60 transition-colors hover:bg-white/10 hover:text-white focus-visible:ring-3 focus-visible:ring-orange-300/50"
               >
                 {item.label}
               </Link>
@@ -61,59 +51,21 @@ export function MarketingShell({ children }: { children: React.ReactNode }) {
           </nav>
 
           <div className="hidden items-center gap-2 md:flex">
-            <Button variant="ghost" asChild>
+            <Button variant="ghost" asChild className="text-white hover:bg-white/10 hover:text-white">
               <Link href="/login">Sign In</Link>
             </Button>
-            <Button asChild>
-              <Link href="/register">
-                Open Wallet
+            <Button asChild className="bg-orange-500 text-white hover:bg-orange-400">
+              <Link href="/login">
+                User Login
                 <ArrowRight data-icon="inline-end" aria-hidden="true" />
               </Link>
             </Button>
           </div>
 
           <div className="md:hidden">
-            <Sheet>
-              <SheetTrigger asChild>
-                <Button variant="ghost" size="icon-lg" aria-label="Open menu">
-                  <Menu aria-hidden="true" />
-                </Button>
-              </SheetTrigger>
-              <SheetContent side="right" className="w-[min(90vw,24rem)]">
-                <SheetHeader>
-                  <SheetTitle>
-                    <BrandMark />
-                  </SheetTitle>
-                  <SheetDescription>
-                    Wallets, exchange, airtime, and bill payments for the Ghana-Nigeria corridor.
-                  </SheetDescription>
-                </SheetHeader>
-                <nav aria-label="Mobile navigation" className="flex flex-col gap-1 px-4">
-                  {navItems.map((item) => (
-                    <SheetClose asChild key={item.href}>
-                      <Link
-                        href={item.href}
-                        className="rounded-lg px-3 py-3 text-sm font-medium transition-colors hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50"
-                      >
-                        {item.label}
-                      </Link>
-                    </SheetClose>
-                  ))}
-                </nav>
-                <SheetFooter>
-                  <SheetClose asChild>
-                    <Button asChild>
-                      <Link href="/register">Create Account</Link>
-                    </Button>
-                  </SheetClose>
-                  <SheetClose asChild>
-                    <Button variant="outline" asChild>
-                      <Link href="/login">Sign In</Link>
-                    </Button>
-                  </SheetClose>
-                </SheetFooter>
-              </SheetContent>
-            </Sheet>
+            <Button asChild className="min-h-11 bg-orange-500 px-4 text-white hover:bg-orange-400">
+              <Link href="/login">Login</Link>
+            </Button>
           </div>
         </div>
       </header>
@@ -122,19 +74,25 @@ export function MarketingShell({ children }: { children: React.ReactNode }) {
         {children}
       </main>
 
-      <footer className="border-t border-border/70 bg-muted/30">
+      <footer className="border-t border-white/10 bg-[#0d100e]">
         <div className="mx-auto grid w-full max-w-7xl gap-10 px-4 py-12 sm:px-6 lg:grid-cols-[1.3fr_2fr] lg:px-8">
           <div className="flex flex-col gap-4">
             <BrandMark />
-            <p className="max-w-md text-sm leading-6 text-muted-foreground">
-              A focused wallet experience for NGN and GHS exchange, VTU payments, withdrawals,
-              and financial activity tracking.
+            <p className="max-w-md text-sm leading-6 text-white/58">
+              A safer admin workspace for wallet support, KYC checks, provider
+              review, reconciliation, and audit trails.
             </p>
-            <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
-              <span className="rounded-full border border-border bg-background px-3 py-1">JWT-ready auth</span>
-              <span className="rounded-full border border-border bg-background px-3 py-1">Audit-aware flows</span>
-              <span className="rounded-full border border-border bg-background px-3 py-1">NGN + GHS</span>
+            <div className="flex flex-wrap gap-2 text-xs text-white/58">
+              <span className="rounded-full border border-white/10 bg-white/[0.06] px-3 py-1">Guarded admin routes</span>
+              <span className="rounded-full border border-white/10 bg-white/[0.06] px-3 py-1">Audit trails</span>
+              <span className="rounded-full border border-white/10 bg-white/[0.06] px-3 py-1">Masked bank data</span>
             </div>
+            <Link
+              href="/admin"
+              className="w-fit text-sm font-medium text-orange-300 transition-colors hover:text-orange-200 focus-visible:rounded-md focus-visible:ring-3 focus-visible:ring-orange-300/50"
+            >
+              Admin access
+            </Link>
           </div>
 
           <div className="grid gap-8 sm:grid-cols-3">
@@ -146,7 +104,7 @@ export function MarketingShell({ children }: { children: React.ReactNode }) {
                     <Link
                       key={link.href}
                       href={link.href}
-                      className="text-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:rounded-md focus-visible:ring-3 focus-visible:ring-ring/50"
+                      className="text-sm text-white/55 transition-colors hover:text-white focus-visible:rounded-md focus-visible:ring-3 focus-visible:ring-orange-300/50"
                     >
                       {link.label}
                     </Link>
@@ -156,10 +114,10 @@ export function MarketingShell({ children }: { children: React.ReactNode }) {
             ))}
           </div>
         </div>
-        <Separator />
-        <div className="mx-auto flex w-full max-w-7xl flex-col gap-3 px-4 py-5 text-xs text-muted-foreground sm:flex-row sm:items-center sm:justify-between sm:px-6 lg:px-8">
-          <p>© {new Date().getFullYear()} TrustPay. All rights reserved.</p>
-          <p>Built for clear money movement across Ghana and Nigeria.</p>
+        <Separator className="bg-white/10" />
+        <div className="mx-auto flex w-full max-w-7xl flex-col gap-3 px-4 py-5 text-xs text-white/48 sm:flex-row sm:items-center sm:justify-between sm:px-6 lg:px-8">
+          <p>Copyright {new Date().getFullYear()} TrustPay. All rights reserved.</p>
+          <p>Built for clear, safe banking operations.</p>
         </div>
       </footer>
     </div>

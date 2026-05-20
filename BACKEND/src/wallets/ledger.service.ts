@@ -42,59 +42,103 @@ export class LedgerService {
     this.assertPositiveAmount(input.amount);
 
     const execute = async (tx: LedgerClient) => {
-      const wallet = await tx.wallet.findUnique({
-        where: {
-          userId_currency: {
-            userId: input.userId,
-            currency: input.currency,
-          },
-        },
-      });
-
-      if (!wallet) {
-        throw new NotFoundException(`${input.currency} wallet not found`);
-      }
-
-      const balanceBefore = new Decimal(wallet.balance);
-
-      if (direction === 'DEBIT' && balanceBefore.lessThan(input.amount)) {
-        throw new BadRequestException(`Insufficient ${input.currency} balance`);
-      }
-
-      const balanceAfter =
-        direction === 'CREDIT'
-          ? balanceBefore.plus(input.amount)
-          : balanceBefore.minus(input.amount);
-
-      if (balanceAfter.isNegative()) {
-        throw new BadRequestException('Wallet balance cannot be negative');
-      }
+      let walletId: string;
+      let balanceBefore: Decimal;
+      let balanceAfter: Decimal;
 
       if (direction === 'DEBIT') {
         const debited = await tx.wallet.updateMany({
           where: {
-            id: wallet.id,
+            userId: input.userId,
+            currency: input.currency,
             balance: { gte: input.amount },
           },
           data: { balance: { decrement: input.amount } },
         });
 
         if (debited.count !== 1) {
+          const wallet = await tx.wallet.findUnique({
+            where: {
+              userId_currency: {
+                userId: input.userId,
+                currency: input.currency,
+              },
+            },
+          });
+
+          if (!wallet) {
+            throw new NotFoundException(`${input.currency} wallet not found`);
+          }
+
           throw new BadRequestException(
             `Insufficient ${input.currency} balance`,
           );
         }
-      } else {
-        await tx.wallet.update({
-          where: { id: wallet.id },
-          data: { balance: { increment: input.amount } },
+
+        const wallet = await tx.wallet.findUnique({
+          where: {
+            userId_currency: {
+              userId: input.userId,
+              currency: input.currency,
+            },
+          },
         });
+
+        if (!wallet) {
+          throw new NotFoundException(`${input.currency} wallet not found`);
+        }
+
+        walletId = wallet.id;
+        balanceAfter = new Decimal(wallet.balance);
+        balanceBefore = balanceAfter.plus(input.amount);
+      } else {
+        const existingWallet = await tx.wallet.findUnique({
+          where: {
+            userId_currency: {
+              userId: input.userId,
+              currency: input.currency,
+            },
+          },
+        });
+
+        if (!existingWallet) {
+          throw new NotFoundException(`${input.currency} wallet not found`);
+        }
+
+        try {
+          const wallet = await tx.wallet.update({
+            where: {
+              userId_currency: {
+                userId: input.userId,
+                currency: input.currency,
+              },
+            },
+            data: { balance: { increment: input.amount } },
+          });
+
+          walletId = wallet.id;
+          balanceAfter = new Decimal(wallet.balance);
+          balanceBefore = balanceAfter.minus(input.amount);
+        } catch (error: unknown) {
+          if (
+            error instanceof Prisma.PrismaClientKnownRequestError &&
+            error.code === 'P2025'
+          ) {
+            throw new NotFoundException(`${input.currency} wallet not found`);
+          }
+
+          throw error;
+        }
+      }
+
+      if (balanceBefore.isNegative() || balanceAfter.isNegative()) {
+        throw new BadRequestException('Wallet balance cannot be negative');
       }
 
       await tx.ledgerEntry.create({
         data: {
           transactionId: input.transactionId,
-          walletId: wallet.id,
+          walletId,
           direction,
           amount: input.amount,
           currency: input.currency,
@@ -107,7 +151,7 @@ export class LedgerService {
       });
 
       return {
-        walletId: wallet.id,
+        walletId,
         balanceBefore,
         balanceAfter,
       };

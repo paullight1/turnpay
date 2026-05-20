@@ -24,6 +24,7 @@ import {
   ClipboardList,
   FileCheck2,
   Landmark,
+  LifeBuoy,
   Menu,
   ShieldCheck,
   Smartphone,
@@ -49,11 +50,13 @@ const navItems: NavItem[] = [
     icon: ClipboardList,
   },
   { label: "KYC", href: "/dashboard/kyc", icon: BadgeCheck },
+  { label: "Support", href: "/dashboard/support", icon: LifeBuoy },
   { label: "Profile", href: "/dashboard/profile", icon: UserRound },
 ];
 
 const adminItems: NavItem[] = [
   { label: "Admin", href: "/admin", icon: ShieldCheck },
+  { label: "Support Queue", href: "/admin/support", icon: LifeBuoy },
   { label: "KYC Review", href: "/admin/kyc", icon: FileCheck2 },
 ];
 
@@ -70,8 +73,8 @@ function Sidebar({ items, pathname }: { items: NavItem[]; pathname: string }) {
             className={cn(
               "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
               pathname === item.href
-                ? "bg-primary text-primary-foreground"
-                : "hover:bg-muted",
+                ? "bg-primary text-primary-foreground shadow-sm shadow-orange-950/30"
+                : "text-muted-foreground hover:bg-muted hover:text-foreground",
             )}
           >
             <Icon className="size-4" />
@@ -101,7 +104,7 @@ export default function DashboardLayout({
 
   if (isLoading || !user) {
     return (
-      <div className="flex min-h-screen items-center justify-center">
+      <div className="flex min-h-screen items-center justify-center bg-background">
         <div className="animate-pulse text-lg text-muted-foreground">
           Loading...
         </div>
@@ -113,8 +116,8 @@ export default function DashboardLayout({
   const allItems = [...navItems, ...(user.role === "ADMIN" ? adminItems : [])];
 
   return (
-    <div className="flex min-h-screen flex-col">
-      <header className="border-b bg-background">
+    <div className="flex min-h-screen flex-col bg-background text-foreground">
+      <header className="border-b border-border bg-background/86 backdrop-blur-xl">
         <div className="container mx-auto flex h-16 items-center justify-between px-4">
           <div className="flex items-center gap-3">
             <Sheet open={open} onOpenChange={setOpen}>
@@ -132,8 +135,8 @@ export default function DashboardLayout({
                 <Sidebar items={allItems} pathname={pathname} />
               </SheetContent>
             </Sheet>
-            <span className="text-xl font-bold text-primary">TrustPay</span>
-            {user.role === "ADMIN" && <Badge variant="secondary">Admin</Badge>}
+            <span className="text-xl font-bold text-foreground">TrustPay</span>
+            {user.role === "ADMIN" && <Badge variant="secondary" className="border-white/10 bg-white/[0.06] text-orange-200">Admin</Badge>}
           </div>
           <div className="flex items-center gap-4">
             <DropdownMenu>
@@ -174,10 +177,10 @@ export default function DashboardLayout({
         </div>
       </header>
       <div className="flex flex-1">
-        <aside className="hidden w-64 border-r bg-muted/20 md:block">
+        <aside className="hidden w-64 border-r border-border bg-card/40 md:block">
           <Sidebar items={allItems} pathname={pathname} />
         </aside>
-        <main className="flex-1 p-6">{children}</main>
+        <main className="flex-1 bg-[radial-gradient(circle_at_20%_0%,rgba(255,107,10,0.12),transparent_26%),var(--background)] p-6">{children}</main>
       </div>
     </div>
   );

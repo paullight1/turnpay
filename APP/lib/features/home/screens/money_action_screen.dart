@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
+import 'package:dio/dio.dart';
 
 import '../../../core/router/app_router.dart';
 import '../../../core/theme/app_theme.dart';
@@ -42,6 +44,7 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
   final _accountNameController = TextEditingController();
   final _bankCodeController = TextEditingController();
   final _noteController = TextEditingController();
+  final _attemptIdempotency = MoneyAttemptIdempotency();
 
   String _currency = 'NGN';
   String _exchangeFrom = 'GHS';
@@ -70,32 +73,53 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
       return;
     }
 
-    final amount = double.tryParse(_amountController.text.trim());
-    if (amount == null || amount <= 0) {
-      setState(() => _message = 'Enter a valid amount.');
+    final amountResult = MoneyActionFormValidator.validateAmount(
+      _amountController.text,
+    );
+    if (amountResult.error != null) {
+      setState(() => _message = amountResult.error);
       return;
     }
+    final amount = amountResult.value!;
+
+    final fieldError = MoneyActionFormValidator.validateFields(
+      kind: widget.kind,
+      recipient: _recipientController.text,
+      accountNumber: _accountNumberController.text,
+      accountName: _accountNameController.text,
+      bankCode: _bankCodeController.text,
+      note: _noteController.text,
+    );
+    if (fieldError != null) {
+      setState(() => _message = fieldError);
+      return;
+    }
+
+    final confirmed = await _confirmSubmission(amount);
+    if (!confirmed) return;
 
     setState(() {
       _isSubmitting = true;
       _message = null;
     });
 
-    if (widget.kind == MoneyActionKind.withdraw) {
-      final approved = await _requireTransactionApproval(
-        title: 'Enter your transaction PIN',
-        subtitle: 'Approve this withdrawal before it is submitted.',
-      );
-      if (!approved) {
-        if (mounted) {
-          setState(() => _isSubmitting = false);
-        }
-        return;
+    final approved = await _requireTransactionApproval(
+      title: 'Approve ${_configFor(widget.kind).title.toLowerCase()}',
+      subtitle: 'Confirm this money action before it is submitted.',
+    );
+    if (!approved) {
+      if (mounted) {
+        setState(() => _isSubmitting = false);
       }
+      return;
     }
 
     try {
-      final response = await _request(amount);
+      final idempotencyKey = _attemptIdempotency.keyFor(
+        _attemptFingerprint(amount),
+      );
+      final response = await _request(amount, idempotencyKey);
+      _attemptIdempotency.markFinalOutcome();
       setState(() {
         _message = _successMessage(response.data);
       });
@@ -113,16 +137,22 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
   Future<void> _submitExchange() async {
     if (_isSubmitting) return;
 
-    final amount = double.tryParse(_amountController.text.trim());
-    if (amount == null || amount <= 0) {
-      setState(() => _message = 'Enter a valid amount to exchange.');
+    final amountResult = MoneyActionFormValidator.validateAmount(
+      _amountController.text,
+    );
+    if (amountResult.error != null) {
+      setState(() => _message = amountResult.error);
       return;
     }
+    final amount = amountResult.value!;
 
     if (_exchangeFrom == _exchangeTo) {
       setState(() => _message = 'Choose two different currencies.');
       return;
     }
+
+    final confirmed = await _confirmSubmission(amount);
+    if (!confirmed) return;
 
     setState(() {
       _isSubmitting = true;
@@ -143,12 +173,20 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
     try {
       final response = await _apiClient.client.post(
         '/api/exchange/quote',
+        options: Options(
+          headers: {
+            'Idempotency-Key': _attemptIdempotency.keyFor(
+              _attemptFingerprint(amount),
+            ),
+          },
+        ),
         data: {
           'from': _exchangeFrom,
           'to': _exchangeTo,
           'amount': amount,
         },
       );
+      _attemptIdempotency.markFinalOutcome();
 
       if (!mounted) return;
 
@@ -173,11 +211,14 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
     }
   }
 
-  Future<dynamic> _request(double amount) {
+  Future<dynamic> _request(String amount, String idempotencyKey) {
+    final options = Options(headers: {'Idempotency-Key': idempotencyKey});
+
     switch (widget.kind) {
       case MoneyActionKind.fund:
         return _apiClient.client.post(
           '/api/payments/fund',
+          options: options,
           data: {
             'amount': amount,
             'currency': _currency,
@@ -188,6 +229,7 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
       case MoneyActionKind.send:
         return _apiClient.client.post(
           '/api/transfers/internal',
+          options: options,
           data: {
             'recipientEmail': _recipientController.text.trim(),
             'amount': amount,
@@ -199,6 +241,7 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
       case MoneyActionKind.withdraw:
         return _apiClient.client.post(
           '/api/payments/withdraw',
+          options: options,
           data: {
             'amount': amount,
             'currency': _currency,
@@ -211,6 +254,7 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
       case MoneyActionKind.exchange:
         return _apiClient.client.post(
           '/api/exchange/quote',
+          options: options,
           data: {
             'from': _currency,
             'to': _currency == 'NGN' ? 'GHS' : 'NGN',
@@ -220,6 +264,7 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
       case MoneyActionKind.airtime:
         return _apiClient.client.post(
           '/api/vtu/purchase',
+          options: options,
           data: {
             'type': 'airtime',
             'provider': _vtuProvider,
@@ -230,6 +275,7 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
       case MoneyActionKind.data:
         return _apiClient.client.post(
           '/api/vtu/purchase',
+          options: options,
           data: {
             'type': 'data',
             'provider': _vtuProvider,
@@ -240,6 +286,7 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
       case MoneyActionKind.electricity:
         return _apiClient.client.post(
           '/api/vtu/purchase',
+          options: options,
           data: {
             'type': 'electricity',
             'provider': 'ikedc',
@@ -248,6 +295,115 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
             'amount': amount,
           },
         );
+    }
+  }
+
+  String _attemptFingerprint(String amount) {
+    return [
+      widget.kind.name,
+      amount,
+      _currency,
+      _exchangeFrom,
+      _exchangeTo,
+      _provider,
+      _vtuProvider,
+      _recipientController.text.trim().toLowerCase(),
+      _bankCodeController.text.trim(),
+      _accountNumberController.text.trim(),
+    ].join('|');
+  }
+
+  Future<bool> _confirmSubmission(String amount) async {
+    final config = _configFor(widget.kind);
+    final rows = _reviewRows(amount);
+
+    return await showDialog<bool>(
+          context: context,
+          builder: (dialogContext) {
+            return AlertDialog(
+              backgroundColor: AppColors.surface,
+              title: Text('Review ${config.title.toLowerCase()}',
+                  style: AppTextStyles.headingM),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  for (final row in rows)
+                    _ReviewDialogRow(label: row.label, value: row.value),
+                  const SizedBox(height: AppSpacing.sm),
+                  Text(
+                    'Only continue if these details are correct.',
+                    style: AppTextStyles.bodyS,
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(dialogContext).pop(false),
+                  child: Text(
+                    'Edit',
+                    style: AppTextStyles.labelM.copyWith(
+                      color: AppColors.textSecondary,
+                    ),
+                  ),
+                ),
+                FilledButton(
+                  onPressed: () => Navigator.of(dialogContext).pop(true),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: AppColors.primary,
+                    foregroundColor: Colors.white,
+                  ),
+                  child: const Text('Continue'),
+                ),
+              ],
+            );
+          },
+        ) ??
+        false;
+  }
+
+  List<_ReviewRowData> _reviewRows(String amount) {
+    switch (widget.kind) {
+      case MoneyActionKind.fund:
+        return [
+          _ReviewRowData('Amount', '$amount $_currency'),
+          _ReviewRowData('Provider', _provider),
+          const _ReviewRowData('Channel', 'card'),
+        ];
+      case MoneyActionKind.send:
+        return [
+          _ReviewRowData('Amount', '$amount $_currency'),
+          _ReviewRowData('Recipient', _recipientController.text.trim()),
+          if (_noteController.text.trim().isNotEmpty)
+            _ReviewRowData('Note', _noteController.text.trim()),
+        ];
+      case MoneyActionKind.withdraw:
+        return [
+          _ReviewRowData('Amount', '$amount $_currency'),
+          _ReviewRowData('Provider', _provider),
+          _ReviewRowData('Bank code', _bankCodeController.text.trim()),
+          _ReviewRowData(
+            'Account',
+            _maskAccountNumber(_accountNumberController.text.trim()),
+          ),
+          _ReviewRowData('Name', _accountNameController.text.trim()),
+        ];
+      case MoneyActionKind.exchange:
+        return [
+          _ReviewRowData('You send', '$amount $_exchangeFrom'),
+          _ReviewRowData('You receive', _exchangeTo),
+        ];
+      case MoneyActionKind.airtime:
+      case MoneyActionKind.data:
+        return [
+          _ReviewRowData('Amount', '$amount $_currency'),
+          _ReviewRowData('Network', _vtuProvider),
+          _ReviewRowData('Phone', _recipientController.text.trim()),
+        ];
+      case MoneyActionKind.electricity:
+        return [
+          _ReviewRowData('Amount', '$amount $_currency'),
+          _ReviewRowData('Meter', _recipientController.text.trim()),
+        ];
     }
   }
 
@@ -311,6 +467,9 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
                     label: 'Amount',
                     keyboardType:
                         const TextInputType.numberWithOptions(decimal: true),
+                    inputFormatters: [
+                      FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
+                    ],
                   ),
                   ..._extraFields(),
                   SizedBox(height: AppSpacing.lg),
@@ -490,7 +649,7 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
                 title:
                     Text('Set transaction PIN', style: AppTextStyles.headingM),
                 content: Text(
-                  'Withdraw and exchange require a transaction PIN. Set it up in Security & Limits first.',
+                  'Money actions require a transaction PIN. Set it up in Security & Limits first.',
                   style: AppTextStyles.bodyM,
                 ),
                 actions: [
@@ -726,11 +885,13 @@ class _InputField extends StatelessWidget {
   final TextEditingController controller;
   final String label;
   final TextInputType? keyboardType;
+  final List<TextInputFormatter>? inputFormatters;
 
   const _InputField({
     required this.controller,
     required this.label,
     this.keyboardType,
+    this.inputFormatters,
   });
 
   @override
@@ -738,10 +899,51 @@ class _InputField extends StatelessWidget {
     return TextField(
       controller: controller,
       keyboardType: keyboardType,
+      inputFormatters: inputFormatters,
       style: AppTextStyles.bodyM.copyWith(color: AppColors.textPrimary),
       decoration: _inputDecoration(label),
     );
   }
+}
+
+class _ReviewDialogRow extends StatelessWidget {
+  final String label;
+  final String value;
+
+  const _ReviewDialogRow({
+    required this.label,
+    required this.value,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 92,
+            child: Text(label, style: AppTextStyles.bodyS),
+          ),
+          Expanded(
+            child: Text(
+              value,
+              style: AppTextStyles.labelS,
+              textAlign: TextAlign.right,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ReviewRowData {
+  final String label;
+  final String value;
+
+  const _ReviewRowData(this.label, this.value);
 }
 
 class _InfoPanel extends StatelessWidget {
@@ -1149,6 +1351,9 @@ class _ExchangeLegCard extends StatelessWidget {
                   controller: amountController,
                   keyboardType:
                       const TextInputType.numberWithOptions(decimal: true),
+                  inputFormatters: [
+                    FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
+                  ],
                   textAlign: TextAlign.right,
                   style: AppTextStyles.displayMedium.copyWith(fontSize: 26),
                   decoration: InputDecoration(
@@ -1798,6 +2003,106 @@ String _successMessage(dynamic data) {
     return 'Request completed: $data';
   }
   return 'Request completed.';
+}
+
+class MoneyActionValidationResult {
+  final String? value;
+  final String? error;
+
+  const MoneyActionValidationResult._({
+    required this.value,
+    required this.error,
+  });
+
+  const MoneyActionValidationResult.valid(String value)
+      : this._(value: value, error: null);
+
+  const MoneyActionValidationResult.invalid(String error)
+      : this._(value: null, error: error);
+}
+
+class MoneyActionFormValidator {
+  static final RegExp _amountPattern = RegExp(r'^\d+(\.\d{1,2})?$');
+  static final RegExp _emailPattern = RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$');
+  static final RegExp _digitsPattern = RegExp(r'^\d+$');
+  static final RegExp _phonePattern = RegExp(r'^\+?[0-9]{7,15}$');
+
+  static MoneyActionValidationResult validateAmount(String raw) {
+    final value = raw.trim();
+    if (value.isEmpty) {
+      return const MoneyActionValidationResult.invalid('Enter a valid amount.');
+    }
+    if (!_amountPattern.hasMatch(value)) {
+      return const MoneyActionValidationResult.invalid(
+        'Enter an amount with up to 2 decimal places.',
+      );
+    }
+
+    final parts = value.split('.');
+    final whole = parts.first.replaceFirst(RegExp(r'^0+(?=\d)'), '');
+    final decimals = parts.length == 2 ? parts[1].padRight(2, '0') : '00';
+    final normalized = '$whole.$decimals';
+    if (RegExp(r'^0+\.0{2}$').hasMatch(normalized)) {
+      return const MoneyActionValidationResult.invalid(
+        'Enter an amount greater than zero.',
+      );
+    }
+
+    return MoneyActionValidationResult.valid(normalized);
+  }
+
+  static String? validateFields({
+    required MoneyActionKind kind,
+    String recipient = '',
+    String accountNumber = '',
+    String accountName = '',
+    String bankCode = '',
+    String note = '',
+  }) {
+    if (note.trim().length > 500) {
+      return 'Keep the note under 500 characters.';
+    }
+
+    switch (kind) {
+      case MoneyActionKind.send:
+        if (!_emailPattern.hasMatch(recipient.trim())) {
+          return 'Enter a valid recipient email.';
+        }
+        return null;
+      case MoneyActionKind.withdraw:
+        final account = accountNumber.trim();
+        if (bankCode.trim().isEmpty ||
+            account.length < 8 ||
+            account.length > 16 ||
+            !_digitsPattern.hasMatch(account)) {
+          return 'Enter a valid bank code and account number.';
+        }
+        if (accountName.trim().length < 2) {
+          return 'Enter the account name.';
+        }
+        return null;
+      case MoneyActionKind.airtime:
+      case MoneyActionKind.data:
+        if (!_phonePattern.hasMatch(recipient.trim())) {
+          return 'Enter a valid phone number.';
+        }
+        return null;
+      case MoneyActionKind.electricity:
+        final meter = recipient.trim();
+        if (meter.length < 6 || !_digitsPattern.hasMatch(meter)) {
+          return 'Enter a valid meter number.';
+        }
+        return null;
+      case MoneyActionKind.fund:
+      case MoneyActionKind.exchange:
+        return null;
+    }
+  }
+}
+
+String _maskAccountNumber(String value) {
+  if (value.length <= 4) return '****';
+  return '${'*' * (value.length - 4)}${value.substring(value.length - 4)}';
 }
 
 class _ActionConfig {
