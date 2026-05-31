@@ -1,9 +1,9 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useCallback, useEffect, useState } from "react";
 import DashboardLayout from "@/components/layout/dashboard-layout";
 import { useAuth } from "@/lib/auth-provider";
-import { userApi } from "@/services/api";
+import { authApi, userApi } from "@/services/api";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Separator } from "@/components/ui/separator";
@@ -85,7 +85,7 @@ export default function ProfilePage() {
     }
   };
 
-  const fetchSessions = async () => {
+  const fetchSessions = useCallback(async () => {
     setIsLoadingSessions(true);
     setSessionError(null);
     try {
@@ -124,7 +124,7 @@ export default function ProfilePage() {
     } finally {
       setIsLoadingSessions(false);
     }
-  };
+  }, []);
 
   const revokeSession = async (sessionId: string) => {
     setRevokingSessionId(sessionId);
@@ -140,10 +140,16 @@ export default function ProfilePage() {
   };
 
   useEffect(() => {
-    if (user) {
-      void fetchSessions();
+    if (!user) {
+      return;
     }
-  }, [user]);
+
+    const timeoutId = window.setTimeout(() => {
+      void fetchSessions();
+    }, 0);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [fetchSessions, user]);
 
   return (
     <DashboardLayout>

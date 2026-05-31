@@ -68,12 +68,6 @@ export function MarketingShell({ children }: { children: React.ReactNode }) {
           </div>
 
           <div className="flex items-center gap-2 md:hidden">
-            <Button
-              asChild
-              className="min-h-11 rounded-full bg-orange-500 px-4 text-white hover:bg-orange-400"
-            >
-              <Link href="/support">Contact</Link>
-            </Button>
             <details className="group relative">
               <summary
                 aria-label="Open menu"
@@ -94,6 +88,12 @@ export function MarketingShell({ children }: { children: React.ReactNode }) {
                     {item.label}
                   </Link>
                 ))}
+                <Link
+                  href="/login"
+                  className="rounded-lg px-3 py-2 text-sm font-semibold text-white/72 transition-colors hover:bg-orange-500/14 hover:text-orange-200 focus-visible:ring-3 focus-visible:ring-orange-300/50"
+                >
+                  Sign In
+                </Link>
                 <Link
                   href="/register"
                   className="mt-1 rounded-lg bg-orange-500 px-3 py-2 text-sm font-semibold text-white transition-colors hover:bg-orange-400 focus-visible:ring-3 focus-visible:ring-orange-300/50"

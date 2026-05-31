@@ -21,12 +21,8 @@ function resolveApiUrl() {
     return configured;
   }
 
-  if (typeof window === "undefined") {
-    return "http://localhost:3000";
-  }
-
   if (process.env.NODE_ENV === "production") {
-    throw new Error("NEXT_PUBLIC_API_URL is required in production");
+    return "";
   }
 
   return "http://localhost:3000";

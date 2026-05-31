@@ -4,7 +4,7 @@ type ErrorPayload = {
   message?: unknown;
 };
 
-function getAuthErrorFallback(path?: string, fallback?: string) {
+function getAuthErrorFallback(path: string | undefined, fallback: string) {
   if (!path?.includes("/api/auth/")) {
     return fallback;
   }

@@ -33,12 +33,8 @@ function resolveApiUrl() {
     return configured;
   }
 
-  if (typeof window === "undefined") {
-    return "http://localhost:3000";
-  }
-
   if (process.env.NODE_ENV === "production") {
-    throw new Error("NEXT_PUBLIC_API_URL is required in production");
+    return "";
   }
 
   return "http://localhost:3000";
@@ -100,7 +96,7 @@ const refreshSessionWithBackend = async (
 ) => {
   const supabase = createClient();
   const { data } = await axios.post<RefreshSessionResponse>(
-    `${API_URL}/api/auth/refresh`,
+    `${API_URL || ""}/api/auth/refresh`,
     { refreshToken, deviceName },
     {
       headers: {
