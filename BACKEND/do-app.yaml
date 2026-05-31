@@ -1,0 +1,247 @@
+# =============================================================================
+# TRUSTPAY — DigitalOcean App Platform Configuration
+# =============================================================================
+# Deploys backend (NestJS) + website (Next.js) to DO App Platform (Lagos).
+# Managed PostgreSQL + Redis are provisioned separately (see 16-PROVISIONING-GUIDE.md).
+#
+# Deploy:  doctl apps create --spec BACKEND/do-app.yaml
+# Update:  doctl apps update YOUR_APP_ID --spec BACKEND/do-app.yaml
+# =============================================================================
+
+alerts:
+  - rule: DEPLOYMENT_FAILED
+  - rule: DOMAIN_FAILED
+  - rule: HEALTH_CHECK_FAILED
+
+# ─── Services ───────────────────────────────────────────────────────────────
+services:
+  # Backend API (NestJS)
+  - name: trustpay-backend
+    environment_slug: node-js
+    instance_count: 1                # Set to 2 for HA
+    instance_size_slug: basic-xxs    # 512MB / 1 vCPU — upgrade for production
+
+    git:
+      branch: main
+      repo_clone_url: https://github.com/your-org/trustpay.git
+
+    source_dir: BACKEND
+    dockerfile_path: Dockerfile
+    http_port: 3000
+
+    health_check:
+      http_path: /api/health
+      initial_delay_seconds: 30
+      period_seconds: 30
+      timeout_seconds: 10
+      healthy_threshold: 2
+      unhealthy_threshold: 5
+
+    envs:
+      # Application
+      - key: NODE_ENV
+        value: production
+        scope: RUN_TIME
+      - key: PORT
+        value: "3000"
+        scope: RUN_TIME
+
+      # Database (references managed DO database — set via dashboard or doctl)
+      - key: DATABASE_URL
+        value: ${trustpay-db.DATABASE_URL}?sslmode=require&schema=public
+        scope: RUN_TIME
+        type: SECRET
+
+      # Redis (references managed DO Redis)
+      - key: REDIS_HOST
+        value: ${trustpay-redis.HOSTNAME}
+        scope: RUN_TIME
+      - key: REDIS_PORT
+        value: ${trustpay-redis.PORT}
+        scope: RUN_TIME
+      - key: REDIS_PASSWORD
+        value: ${trustpay-redis.PASSWORD}
+        scope: RUN_TIME
+        type: SECRET
+
+      # Supabase
+      - key: SUPABASE_URL
+        value: https://your-project.supabase.co
+        scope: RUN_TIME
+      - key: SUPABASE_PUBLISHABLE_KEY
+        value: sb_publishable_your_key
+        scope: RUN_TIME
+      - key: SUPABASE_ANON_KEY
+        value: sb_anon_your_key
+        scope: RUN_TIME
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        value: sb_service_role_your_key
+        scope: RUN_TIME
+        type: SECRET
+      - key: SUPABASE_JWT_SECRET
+        value: your-jwt-secret
+        scope: RUN_TIME
+        type: SECRET
+
+      # JWT
+      - key: JWT_SECRET
+        value: GENERATE_AND_REPLACE
+        scope: RUN_TIME
+        type: SECRET
+      - key: JWT_REFRESH_SECRET
+        value: GENERATE_AND_REPLACE
+        scope: RUN_TIME
+        type: SECRET
+
+      # Banking
+      - key: BANKING_ENABLED
+        value: "true"
+        scope: RUN_TIME
+      - key: VIRTUAL_ACCOUNTS_ENABLED
+        value: "true"
+        scope: RUN_TIME
+      - key: BANKING_SANDBOX_MODE
+        value: "false"
+        scope: RUN_TIME
+      - key: BANKING_PROVIDER_PRIMARY
+        value: monnify
+        scope: RUN_TIME
+
+      # Monnify
+      - key: MONNIFY_API_KEY
+        value: MK_PROD_REPLACE
+        scope: RUN_TIME
+        type: SECRET
+      - key: MONNIFY_SECRET_KEY
+        value: REPLACE
+        scope: RUN_TIME
+        type: SECRET
+      - key: MONNIFY_CONTRACT_CODE
+        value: REPLACE
+        scope: RUN_TIME
+        type: SECRET
+      - key: MONNIFY_BASE_URL
+        value: https://api.monnify.com
+        scope: RUN_TIME
+
+      # Paystack
+      - key: PAYSTACK_SECRET_KEY
+        value: sk_live_REPLACE
+        scope: RUN_TIME
+        type: SECRET
+      - key: PAYSTACK_PUBLIC_KEY
+        value: pk_live_REPLACE
+        scope: RUN_TIME
+      - key: PAYSTACK_WEBHOOK_SECRET
+        value: whsec_REPLACE
+        scope: RUN_TIME
+        type: SECRET
+
+      # Flutterwave
+      - key: FLUTTERWAVE_SECRET_KEY
+        value: FLWSECK_REPLACE
+        scope: RUN_TIME
+        type: SECRET
+      - key: FLUTTERWAVE_PUBLIC_KEY
+        value: FLWPUBK_REPLACE
+        scope: RUN_TIME
+      - key: FLUTTERWAVE_ENCRYPTION_KEY
+        value: REPLACE
+        scope: RUN_TIME
+        type: SECRET
+      - key: FLUTTERWAVE_SECRET_HASH
+        value: REPLACE
+        scope: RUN_TIME
+        type: SECRET
+
+      # Encryption
+      - key: PII_ENCRYPTION_KEY
+        value: GENERATE_WITH_OPENSSL_RAND_HEX_32
+        scope: RUN_TIME
+        type: SECRET
+      - key: BANK_ACCOUNT_ENCRYPTION_KEY
+        value: GENERATE_WITH_OPENSSL_RAND_HEX_32
+        scope: RUN_TIME
+        type: SECRET
+
+      # VTU
+      - key: VTU_PROVIDER
+        value: vtpass
+        scope: RUN_TIME
+      - key: VTPASS_BASE_URL
+        value: https://api-service.vtpass.com
+        scope: RUN_TIME
+      - key: VTPASS_API_KEY
+        value: REPLACE
+        scope: RUN_TIME
+        type: SECRET
+      - key: VTPASS_PUBLIC_KEY
+        value: PK_REPLACE
+        scope: RUN_TIME
+        type: SECRET
+      - key: VTPASS_SECRET_KEY
+        value: SK_REPLACE
+        scope: RUN_TIME
+        type: SECRET
+
+      # URLs
+      - key: WEB_URL
+        value: ${APP_URL}
+        scope: RUN_TIME
+      - key: ADMIN_URL
+        value: ${APP_URL}/admin
+        scope: RUN_TIME
+
+      # Feature Flags
+      - key: TRANSACTION_PIN_REQUIRED
+        value: "true"
+        scope: RUN_TIME
+      - key: ENABLE_SWAGGER
+        value: "false"
+        scope: RUN_TIME
+
+  # Website (Next.js Frontend)
+  - name: trustpay-website
+    environment_slug: node-js
+    instance_count: 1
+    instance_size_slug: basic-xxs
+
+    git:
+      branch: main
+      repo_clone_url: https://github.com/your-org/trustpay.git
+
+    source_dir: WEBSITE
+    dockerfile_path: Dockerfile
+    http_port: 3001
+
+    health_check:
+      http_path: /
+      initial_delay_seconds: 30
+      period_seconds: 30
+      timeout_seconds: 10
+      healthy_threshold: 2
+      unhealthy_threshold: 5
+
+    envs:
+      - key: NODE_ENV
+        value: production
+        scope: RUN_TIME
+      - key: NEXT_PUBLIC_API_URL
+        value: ${trustpay-backend.APP_URL}
+        scope: RUN_TIME
+      - key: NEXT_PUBLIC_SUPABASE_URL
+        value: https://your-project.supabase.co
+        scope: RUN_TIME
+      - key: NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
+        value: sb_publishable_your_key
+        scope: RUN_TIME
+
+# ─── Region ─────────────────────────────────────────────────────────────────
+region: lag
+
+# ─── Domains (configure after first deploy) ─────────────────────────────────
+# domains:
+#   - domain: api.trustpay.xyz
+#     type: PRIMARY
+#   - domain: trustpay.xyz
+#     type: PRIMARY

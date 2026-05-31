@@ -1,0 +1,86 @@
+# TRUSTPAY Backend — Fly.io Deployment Configuration
+# Docs: https://fly.io/docs/reference/configuration/
+# Generated: 2026-05-31 | Stream: STREAM-INFRA Phase 1.4
+
+app = "trustpay-backend"
+primary_region = "jnb"  # Johannesburg — closest to West African users
+
+[build]
+  dockerfile = "Dockerfile"
+  build-target = "production"
+
+# ─── Environment ────────────────────────────────────────────────
+[env]
+  NODE_ENV = "production"
+  PORT = "3000"
+  ENABLE_SWAGGER = "false"
+
+# ─── Networking ─────────────────────────────────────────────────
+[[services]]
+  protocol = "tcp"
+  internal_port = 3000
+  force_https = true
+  auto_stop_machines = "stop"    # Stop idle machines to save cost
+  auto_start_machines = true     # Auto-start on incoming requests
+  min_machines_running = 1       # Keep at least 1 running (set to 2 for HA)
+
+  # HTTP health check — must match the NestJS health controller
+  [[services.ports]]
+    port = 80
+    handlers = ["http"]
+    force_https = true
+
+  [[services.ports]]
+    port = 443
+    handlers = ["tls", "http"]
+    force_https = true
+
+  [[services.http_checks]]
+    interval = "15s"
+    timeout = "5s"
+    grace_period = "30s"
+    method = "get"
+    path = "/api/health"
+    protocol = "http"
+    tls_skip_verify = false
+    headers = {}
+
+  [[services.http_checks]]
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "5s"
+    method = "get"
+    path = "/api/health"
+    protocol = "http"
+    tls_skip_verify = false
+    headers = {}
+
+# ─── Concurrency & Resources ────────────────────────────────────
+[[services.concurrency]]
+  type = "requests"
+  hard_limit = 50      # Max concurrent requests per machine
+  soft_limit = 35      # Start throttling at this level
+
+# ─── VM Resources ───────────────────────────────────────────────
+# Increase for production — 256MB is bare minimum
+# Recommended for production: shared-cpu-1x with 512MB or 1GB
+[[vm]]
+  cpu_kind = "shared"
+  cpus = 1
+  memory_mb = 512
+
+# ─── Metrics ────────────────────────────────────────────────────
+[metrics]
+  port = 3000
+  path = "/api/health"
+
+# ─── Filesystem (for uploads, if needed) ────────────────────────
+# Uncomment if the app needs persistent disk storage
+# [[mounts]]
+#   source = "trustpay_data"
+#   destination = "/data"
+
+# ─── Deploy Strategy ────────────────────────────────────────────
+[deploy]
+  strategy = "rolling"          # Rolling deploys for zero-downtime
+  max_unavailable = "25%"       # Keep 75%+ capacity during deploy

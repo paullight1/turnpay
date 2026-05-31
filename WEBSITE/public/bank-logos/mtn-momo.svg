@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="220" height="80" viewBox="0 0 220 80" role="img" aria-label="MTN MoMo logo">
+  <rect width="220" height="80" rx="18" fill="#ffcc00"/>
+  <ellipse cx="62" cy="40" rx="42" ry="24" fill="none" stroke="#111111" stroke-width="5"/>
+  <text x="62" y="47" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="25" font-weight="800" fill="#111111">MTN</text>
+  <text x="126" y="36" font-family="Arial, Helvetica, sans-serif" font-size="18" font-weight="800" fill="#111111">MoMo</text>
+  <text x="126" y="56" font-family="Arial, Helvetica, sans-serif" font-size="12" font-weight="700" fill="#111111">Mobile Money</text>
+</svg>
