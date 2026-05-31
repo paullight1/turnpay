@@ -73,11 +73,5 @@
       "source": "/api/:path*",
       "destination": "https://api.trustpay.xyz/api/:path*"
     }
-  ],
-
-  "functions": {
-    "src/middleware.ts": {
-      "runtime": "edge"
-    }
-  }
+  ]
 }
