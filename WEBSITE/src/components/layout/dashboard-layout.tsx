@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useAuth } from "@/lib/auth-provider";
 import { usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
+import { TrustPayLogo } from "@/components/brand/trustpay-logo";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -91,8 +92,8 @@ function Sidebar({
             className={cn(
               "group/nav relative flex min-h-10 items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-[background-color,color,transform,box-shadow]",
               active
-                ? "bg-primary text-primary-foreground shadow-sm shadow-orange-950/30"
-                : "text-muted-foreground hover:translate-x-0.5 hover:bg-muted hover:text-foreground",
+                ? "bg-orange-500 text-white shadow-sm shadow-orange-950/30"
+                : "text-white/58 hover:translate-x-0.5 hover:bg-white/[0.06] hover:text-white",
             )}
           >
             <Icon className="size-4 transition-transform group-hover/nav:scale-110" />
@@ -123,9 +124,9 @@ export default function DashboardLayout({
 
   if (isLoading || !user) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-background trustpay-ledger-bg">
-        <div className="flex flex-col items-center gap-3 text-muted-foreground">
-          <div className="size-10 rounded-full border-2 border-primary/20 border-t-primary animate-spin" />
+      <div className="dark flex min-h-screen items-center justify-center bg-[#050505] text-white">
+        <div className="flex flex-col items-center gap-3 text-white/58">
+          <div className="size-10 rounded-full border-2 border-orange-500/20 border-t-orange-500 animate-spin" />
           <p className="text-sm">Preparing your workspace...</p>
         </div>
       </div>
@@ -146,8 +147,8 @@ export default function DashboardLayout({
   };
 
   return (
-    <div className="flex min-h-screen flex-col bg-background text-foreground">
-      <header className="sticky top-0 z-30 border-b border-border bg-background/86 backdrop-blur-xl">
+    <div className="dark flex min-h-screen flex-col bg-[#050505] text-white">
+      <header className="sticky top-0 z-30 border-b border-white/10 bg-black/88 backdrop-blur-xl">
         <div className="container mx-auto flex h-16 items-center justify-between px-4">
           <div className="flex items-center gap-3">
             <Sheet open={open} onOpenChange={setOpen}>
@@ -161,10 +162,10 @@ export default function DashboardLayout({
                   <Menu className="size-5" />
                 </Button>
               </SheetTrigger>
-              <SheetContent side="left" className="w-72 p-0">
-                <div className="border-b border-border px-4 py-4">
-                  <p className="text-sm font-semibold">TrustPay</p>
-                  <p className="mt-1 text-xs text-muted-foreground">
+              <SheetContent side="left" className="dark w-72 border-white/10 bg-[#050505] p-0 text-white">
+                <div className="border-b border-white/10 px-4 py-4">
+                  <TrustPayLogo imageClassName="size-10" textClassName="text-base font-bold" />
+                  <p className="mt-1 text-xs text-white/48">
                     Wallet operations
                   </p>
                 </div>
@@ -175,9 +176,9 @@ export default function DashboardLayout({
                 />
               </SheetContent>
             </Sheet>
-            <span className="text-xl font-bold text-foreground">TrustPay</span>
+            <TrustPayLogo imageClassName="size-10" textClassName="text-xl font-bold" />
             {user.role === "ADMIN" && (
-              <Badge variant="secondary" className="border-border">
+              <Badge variant="secondary" className="border-orange-400/20 bg-orange-500/10 text-orange-200">
                 Admin
               </Badge>
             )}
@@ -226,10 +227,10 @@ export default function DashboardLayout({
         </div>
       </header>
       <div className="flex flex-1">
-        <aside className="hidden w-64 border-r border-border bg-card/40 md:block">
+        <aside className="hidden w-64 border-r border-white/10 bg-[#0b0b0b] md:block">
           <Sidebar items={allItems} pathname={pathname} />
         </aside>
-        <main className="trustpay-dashboard-motion flex-1 bg-[linear-gradient(135deg,rgba(255,107,10,0.08),rgba(16,185,129,0.045),transparent_42%),var(--background)] p-4 sm:p-6">
+        <main className="trustpay-dashboard-motion flex-1 bg-[radial-gradient(circle_at_0%_0%,rgba(255,107,10,0.12),transparent_28%),#050505] p-4 sm:p-6">
           {children}
         </main>
       </div>

@@ -41,14 +41,12 @@ export default function Error({
           home and continue from a fresh session.
         </p>
         <div className="mt-8 flex flex-col justify-center gap-3 sm:flex-row">
-          <Button onClick={reset} className="rounded-full bg-orange-500 px-6 text-white hover:bg-orange-400">
+          <Button onClick={reset} className="h-12 w-full rounded-full bg-orange-500 px-6 text-white hover:bg-orange-400 sm:w-40">
             Try Again
           </Button>
-          <Link href="/">
-            <Button variant="outline" className="rounded-full border-white/12 bg-white/[0.04] px-6 text-white hover:bg-white hover:text-black">
-              Go Home
-            </Button>
-          </Link>
+          <Button asChild className="h-12 w-full rounded-full bg-orange-500 px-6 text-white hover:bg-orange-400 sm:w-40">
+            <Link href="/">Go Home</Link>
+          </Button>
         </div>
       </div>
     </div>

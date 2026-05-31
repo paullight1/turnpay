@@ -8,8 +8,6 @@ import {
   Headphones,
   ShieldCheck,
   Star,
-  UsersRound,
-  Zap,
 } from "lucide-react";
 
 import { MarketingShell } from "@/components/marketing/marketing-shell";
@@ -58,28 +56,6 @@ const timeline = [
   ["01", "Wallet Rails", "NGN and GHS wallets became the base for account activity."],
   ["02", "Secure Controls", "KYC, auth, and payment checks became core product surfaces."],
   ["03", "VTU Expansion", "Airtime, data, TV, and electricity joined the wallet workflow."],
-];
-
-const team = [
-  ["Sarah Vitoro", "Product Manager"],
-  ["Robert Downey", "CEO of TrustPay"],
-  ["Amanda Rio", "Product Designer"],
-  ["William Jack", "Developer"],
-  ["Lucie Christine", "Marketing Manager"],
-  ["Robert Mangau", "UX Designer"],
-];
-
-const roles = [
-  ["UI/UX Designer", "Craft clean transaction and support journeys for mobile and web users."],
-  ["Product Designer", "Design payment flows where rate, fee, amount, and status are obvious."],
-  ["Developer", "Build reliable wallet, exchange, support, and admin surfaces."],
-  ["Financial Integrity Analyst", "Review money movement states, references, and reconciliation signals."],
-];
-
-const plans = [
-  ["Basic plan", "₦19.99", ["Full platform access", "Flexible subscription", "24/7 support"]],
-  ["Pro plan", "₦29.99", ["Full platform access", "Flexible subscription", "TrustPay insights"]],
-  ["Expert plan", "₦39.99", ["Full platform access", "Wallet controls", "Premium support"]],
 ];
 
 function TickerStrip() {
@@ -239,38 +215,6 @@ function StoryTimeline() {
   );
 }
 
-function TeamSection() {
-  return (
-    <section className="bg-[#050505] px-4 py-20 sm:px-6 lg:px-8">
-      <SectionTitle
-        title="Meet our incredible team"
-        text="Introducing the builders, operators, and designers shaping the future of wallet movement."
-      />
-      <div className="mx-auto mt-10 grid max-w-5xl grid-cols-2 gap-4 md:grid-cols-3">
-        {team.map(([name, role], index) => (
-          <div
-            key={name}
-            className={`rounded-xl p-4 text-center text-black ${index % 2 === 0 ? "bg-gradient-to-br from-orange-300 to-white" : "bg-[#171717] text-white"}`}
-          >
-            <div className="mx-auto grid size-20 place-items-center rounded-full bg-black/10 text-xl font-black">
-              {name.split(" ").map((part) => part[0]).join("")}
-            </div>
-            <p className="mt-4 text-sm font-black">{name}</p>
-            <p className={`text-xs ${index % 2 === 0 ? "text-black/60" : "text-white/50"}`}>{role}</p>
-            <div className="mt-4 flex justify-center gap-2">
-              {[UsersRound, CircleDollarSign, ShieldCheck].map((Icon, iconIndex) => (
-                <span key={iconIndex} className="grid size-6 place-items-center rounded-full bg-black text-white">
-                  <Icon aria-hidden="true" className="size-3" />
-                </span>
-              ))}
-            </div>
-          </div>
-        ))}
-      </div>
-    </section>
-  );
-}
-
 function InsightSection() {
   return (
     <section className="bg-[#050505] px-4 py-16 sm:px-6 lg:px-8">
@@ -332,70 +276,6 @@ function TestimonialSection() {
   );
 }
 
-function JobsAndPlans() {
-  return (
-    <section className="bg-[#050505] px-4 py-20 sm:px-6 lg:px-8">
-      <div className="mx-auto max-w-6xl rounded-xl border border-white/8 bg-[#1a1a1a] p-5 md:p-8">
-        <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
-          <div>
-            <h2 className="text-3xl font-black text-white">Join our team today</h2>
-            <p className="mt-3 max-w-lg text-sm leading-6 text-white/50">
-              Build practical wallet, exchange, and support tools with a small team.
-            </p>
-          </div>
-          <Button asChild className="w-fit rounded-full bg-orange-500 text-white hover:bg-orange-400">
-            <Link href="/support">View All</Link>
-          </Button>
-        </div>
-        <div className="mt-8 grid gap-4 md:grid-cols-2">
-          {roles.map(([role, text]) => (
-            <div key={role} className="rounded-lg bg-black p-5">
-              <p className="font-semibold text-white">{role}</p>
-              <p className="mt-1 text-xs text-orange-300">Full Time</p>
-              <p className="mt-4 text-sm leading-6 text-white/48">{text}</p>
-              <Button asChild variant="outline" className="mt-5 rounded-full border-orange-400/30 bg-transparent text-orange-200 hover:bg-orange-500 hover:text-white">
-                <Link href="/support">Apply Now</Link>
-              </Button>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      <div className="mx-auto mt-20 max-w-6xl">
-        <SectionTitle
-          title="Our Best Pricing Plan"
-          text="Discover flexible plans for teams that need better wallet, payment, and support records."
-        />
-        <div className="mt-10 grid gap-4 md:grid-cols-3">
-          {plans.map(([name, price, features]) => (
-            <div key={name as string} className="rounded-xl border border-white/8 bg-[#151515] p-5">
-              <div className="grid size-10 place-items-center rounded-full bg-orange-500 text-white">
-                <Zap aria-hidden="true" className="size-5" />
-              </div>
-              <p className="mt-4 text-sm text-white/52">{name as string}</p>
-              <p className="mt-1 text-2xl font-black text-white">
-                {price as string}
-                <span className="text-xs font-medium text-white/40"> / month</span>
-              </p>
-              <div className="mt-5 space-y-3 text-sm text-white/62">
-                {(features as string[]).map((feature) => (
-                  <p key={feature} className="flex items-center gap-2">
-                    <span className="size-2 rounded-full bg-orange-400" />
-                    {feature}
-                  </p>
-                ))}
-              </div>
-              <Button asChild variant="outline" className="mt-6 w-full rounded-full border-orange-400/30 bg-transparent text-orange-200 hover:bg-orange-500 hover:text-white">
-                <Link href="/register">Apply Now</Link>
-              </Button>
-            </div>
-          ))}
-        </div>
-      </div>
-    </section>
-  );
-}
-
 export default function AboutPage() {
   return (
     <MarketingShell>
@@ -424,10 +304,8 @@ export default function AboutPage() {
       <MissionSection />
       <FeatureCards />
       <StoryTimeline />
-      <TeamSection />
       <InsightSection />
       <TestimonialSection />
-      <JobsAndPlans />
     </MarketingShell>
   );
 }

@@ -162,7 +162,7 @@ export default function RegisterPage() {
       subtitle={currentStep.description}
       maxWidth="max-w-lg"
     >
-      <CardHeader className="space-y-5">
+      <CardHeader className="space-y-7 px-6 pt-6 sm:px-7 sm:pt-7">
         <div className="flex items-center justify-between gap-4">
           <Button
             type="button"
@@ -175,18 +175,18 @@ export default function RegisterPage() {
           >
             <ChevronLeft className="size-4" />
           </Button>
-          <div className="rounded-full border border-border px-3 py-1 text-xs font-medium text-muted-foreground">
+          <div className="rounded-full border border-white/10 bg-white/[0.04] px-4 py-2 text-xs font-medium text-white/58">
             Step {step + 1} of {REGISTER_STEPS.length}
           </div>
         </div>
 
-        <div className="space-y-3 text-left">
+        <div className="space-y-4 text-left">
           <div className="flex size-11 items-center justify-center rounded-md border border-primary/20 bg-primary/10 text-primary">
             <StepIcon className="size-5" />
           </div>
           <div>
-            <CardTitle className="text-2xl font-semibold">{currentStep.cardTitle}</CardTitle>
-            <CardDescription className="mt-2">{currentStep.cardDescription}</CardDescription>
+            <CardTitle className="text-3xl font-black text-white">{currentStep.cardTitle}</CardTitle>
+            <CardDescription className="mt-3 text-base leading-7 text-white/58">{currentStep.cardDescription}</CardDescription>
           </div>
         </div>
 
@@ -202,12 +202,12 @@ export default function RegisterPage() {
         </div>
       </CardHeader>
 
-      <CardContent>
-        <form onSubmit={handleSubmit} className="flex flex-col gap-4" aria-busy={isLoading}>
+      <CardContent className="px-6 pb-6 sm:px-7 sm:pb-7">
+        <form onSubmit={handleSubmit} className="flex flex-col gap-5" aria-busy={isLoading}>
           {step === 0 ? (
             <>
               <div className="flex flex-col gap-2">
-                <Label htmlFor="fullName">Full name</Label>
+                <Label htmlFor="fullName" className="text-white/80">Full name</Label>
                 <Input
                   id="fullName"
                   type="text"
@@ -217,10 +217,11 @@ export default function RegisterPage() {
                   onChange={(e) => setFullName(e.target.value)}
                   maxLength={120}
                   required
+                  className="h-12 border-white/10 bg-black/35 text-white placeholder:text-white/30"
                 />
               </div>
               <div className="flex flex-col gap-2">
-                <Label htmlFor="email">Email</Label>
+                <Label htmlFor="email" className="text-white/80">Email</Label>
                 <Input
                   id="email"
                   type="email"
@@ -229,10 +230,11 @@ export default function RegisterPage() {
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   required
+                  className="h-12 border-white/10 bg-black/35 text-white placeholder:text-white/30"
                 />
               </div>
               <div className="flex flex-col gap-2">
-                <Label htmlFor="phone">Phone number</Label>
+                <Label htmlFor="phone" className="text-white/80">Phone number</Label>
                 <Input
                   id="phone"
                   type="tel"
@@ -243,6 +245,7 @@ export default function RegisterPage() {
                   value={phone}
                   onChange={(e) => setPhone(e.target.value)}
                   required
+                  className="h-12 border-white/10 bg-black/35 text-white placeholder:text-white/30"
                 />
               </div>
             </>
@@ -250,7 +253,7 @@ export default function RegisterPage() {
 
           {step === 1 ? (
             <div className="flex flex-col gap-2">
-              <Label htmlFor="password">Password</Label>
+              <Label htmlFor="password" className="text-white/80">Password</Label>
               <div className="relative">
                 <Input
                   id="password"
@@ -262,7 +265,7 @@ export default function RegisterPage() {
                   required
                   minLength={8}
                   aria-invalid={password.length > 0 && !hasStrongPassword}
-                  className="pr-10"
+                  className="h-12 border-white/10 bg-black/35 pr-10 text-white placeholder:text-white/30"
                 />
                 <Button
                   type="button"
@@ -283,7 +286,7 @@ export default function RegisterPage() {
 
           {step === 2 ? (
             <div className="flex flex-col gap-2">
-              <Label htmlFor="transactionPin">Transaction PIN</Label>
+              <Label htmlFor="transactionPin" className="text-white/80">Transaction PIN</Label>
               <Input
                 id="transactionPin"
                 type="password"
@@ -297,6 +300,7 @@ export default function RegisterPage() {
                 maxLength={6}
                 autoComplete="new-password"
                 aria-invalid={transactionPin.length > 0 && !hasValidPin}
+                className="h-12 border-white/10 bg-black/35 text-white placeholder:text-white/30"
               />
               <p className={`text-xs ${hasValidPin ? "text-emerald-600 dark:text-emerald-300" : "text-muted-foreground"}`}>
                 {hasValidPin ? "PIN length looks good" : "Use digits only"}
@@ -307,7 +311,7 @@ export default function RegisterPage() {
           {step === 3 ? (
             <>
               <div className="flex flex-col gap-2">
-                <Label htmlFor="confirmTransactionPin">Confirm PIN</Label>
+                <Label htmlFor="confirmTransactionPin" className="text-white/80">Confirm PIN</Label>
                 <Input
                   id="confirmTransactionPin"
                   type="password"
@@ -321,26 +325,27 @@ export default function RegisterPage() {
                   maxLength={6}
                   autoComplete="new-password"
                   aria-invalid={confirmTransactionPin.length > 0 && !pinsMatch}
+                  className="h-12 border-white/10 bg-black/35 text-white placeholder:text-white/30"
                 />
                 <p className={`text-xs ${pinsMatch ? "text-emerald-600 dark:text-emerald-300" : "text-muted-foreground"}`}>
                   {pinsMatch ? "PINs match" : "Repeat your transaction PIN"}
                 </p>
               </div>
 
-              <div className="rounded-md border bg-muted/60 p-4 text-sm">
-                <p className="font-medium text-foreground">Account owner</p>
-                <dl className="mt-3 grid gap-2 text-muted-foreground">
+              <div className="rounded-lg border border-white/10 bg-black/35 p-4 text-sm">
+                <p className="font-medium text-white">Account owner</p>
+                <dl className="mt-3 grid gap-2 text-white/54">
                   <div className="flex justify-between gap-4">
                     <dt>Name</dt>
-                    <dd className="text-right font-medium text-foreground">{fullName.trim()}</dd>
+                    <dd className="text-right font-medium text-white">{fullName.trim()}</dd>
                   </div>
                   <div className="flex justify-between gap-4">
                     <dt>Email</dt>
-                    <dd className="text-right font-medium text-foreground">{email.trim()}</dd>
+                    <dd className="text-right font-medium text-white">{email.trim()}</dd>
                   </div>
                   <div className="flex justify-between gap-4">
                     <dt>Phone</dt>
-                    <dd className="text-right font-medium text-foreground">{normalizedPhone}</dd>
+                    <dd className="text-right font-medium text-white">{normalizedPhone}</dd>
                   </div>
                 </dl>
               </div>
@@ -348,25 +353,28 @@ export default function RegisterPage() {
           ) : null}
 
           {isLastStep ? (
-            <Button type="submit" disabled={isLoading} className="mt-2 w-full">
+            <Button type="submit" disabled={isLoading} className="mt-3 h-12 w-full rounded-full bg-orange-500 text-white hover:bg-orange-400">
               {isLoading ? <Loader2 aria-hidden="true" className="size-4 animate-spin" /> : null}
               {isLoading ? "Creating account..." : currentStep.action}
             </Button>
           ) : (
-            <Button type="button" disabled={isLoading} className="mt-2 w-full" onClick={goNext}>
+            <Button type="button" disabled={isLoading} className="mt-3 h-12 w-full rounded-full bg-orange-500 text-white hover:bg-orange-400" onClick={goNext}>
               {currentStep.action}
             </Button>
           )}
         </form>
 
         {step === 0 ? (
-          <p className="mt-4 text-center text-sm text-muted-foreground">
+          <p className="mt-6 text-center text-sm text-white/54">
             Already have an account?{" "}
-            <Link href="/login" className="text-primary hover:underline">
+            <Link href="/login" className="font-semibold text-orange-300 hover:text-orange-200">
               Sign in
             </Link>
           </p>
         ) : null}
+        <p className="mt-5 border-t border-white/10 pt-4 text-center text-xs leading-5 text-white/40">
+          Keep your OTP, password, and transaction PIN private.
+        </p>
       </CardContent>
     </AuthShell>
   );

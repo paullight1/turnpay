@@ -1,21 +1,13 @@
 import Link from "next/link";
-import { ArrowRight, Facebook, Instagram, Linkedin, Menu, Send, ShieldCheck, Twitter } from "lucide-react";
+import { ArrowRight, Facebook, Instagram, Linkedin, Menu, Send, Twitter } from "lucide-react";
 
+import { TrustPayLogo } from "@/components/brand/trustpay-logo";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { footerGroups, navItems } from "@/lib/marketing";
 
 function BrandMark() {
-  return (
-    <span className="inline-flex min-w-0 items-center gap-2" translate="no">
-      <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-orange-500 text-white shadow-sm shadow-orange-950/30">
-        <ShieldCheck aria-hidden="true" className="size-5" />
-      </span>
-      <span className="min-w-0 text-lg font-semibold leading-none">
-        TrustPay
-      </span>
-    </span>
-  );
+  return <TrustPayLogo imageClassName="size-10" />;
 }
 
 export function MarketingShell({ children }: { children: React.ReactNode }) {

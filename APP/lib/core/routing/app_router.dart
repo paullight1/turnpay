@@ -3,7 +3,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../theme/app_theme.dart';
-import '../widgets/trustpay_lottie.dart';
 
 final appRouterProvider = Provider<GoRouter>((ref) {
   return GoRouter(
@@ -16,9 +15,11 @@ final appRouterProvider = Provider<GoRouter>((ref) {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const TrustPayLottie(
-                  variant: TrustPayAnimationVariant.loading,
-                  size: 72,
+                Image.asset(
+                  'assets/icons/trustpay-logo.png',
+                  width: 96,
+                  height: 96,
+                  fit: BoxFit.contain,
                 ),
                 const SizedBox(height: 16),
                 Text(

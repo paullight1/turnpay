@@ -22,7 +22,6 @@ import {
 
 import { Button } from "@/components/ui/button";
 import { marketingImages } from "@/lib/marketing";
-import { TrustpayChoicePanel } from "@/components/marketing/trustpay-choice-panel";
 
 const brandStrip = [
   "TrustFlow",
@@ -47,25 +46,6 @@ const trustedBanks = [
   { name: "Absa Ghana", src: "/bank-logos-real/absa.svg", market: "Ghana" },
   { name: "Stanbic Ghana", src: "/bank-logos/stanbic-gh.svg", market: "Ghana" },
   { name: "Access Bank", src: "/bank-logos-real/access.png", market: "Africa" },
-];
-
-const quickFeatures = [
-  {
-    icon: WalletCards,
-    title: "NGN & GHS wallets",
-  },
-  {
-    icon: ReceiptText,
-    title: "Instant receipts",
-  },
-  {
-    icon: Banknote,
-    title: "Clear exchange rates",
-  },
-  {
-    icon: MessageCircle,
-    title: "Payment support",
-  },
 ];
 
 const stats = [
@@ -124,8 +104,6 @@ const fastServiceWords = [
   "Fast receipts",
 ];
 
-const heroMoneyWords = ["Money", "Naira", "Cedis", "Currencies"];
-
 const portfolioSteps = [
   ["01", "Verify your identity", "Complete KYC so wallet limits and review rules are clear."],
   ["02", "Fund your account", "Add money once and move between exchange and utility payments."],
@@ -133,12 +111,30 @@ const portfolioSteps = [
 ];
 
 const faqs = [
-  "How do I create an account on TrustPay?",
-  "How can I fund my account for bill trading?",
-  "What services are supported on the TrustPay platform?",
-  "Does TrustPay show receipts for every money movement?",
-  "How does the advanced algorithm work to optimize wallet trades?",
-  "Can I use TrustPay on mobile devices?",
+  {
+    question: "How do I create an account on TrustPay?",
+    answer: "Tap Get Started, add your details, verify your phone, and your NGN and GHS wallet setup can begin.",
+  },
+  {
+    question: "How can I fund my account for bill trading?",
+    answer: "Use bank transfer, mobile money, or a supported wallet route. TrustPay keeps the funding record clear before you move money.",
+  },
+  {
+    question: "What services are supported on the TrustPay platform?",
+    answer: "TrustPay supports NGN to GHS exchange, wallet funding, airtime, data, bills, receipts, and payment tracking.",
+  },
+  {
+    question: "Does TrustPay show receipts for every money movement?",
+    answer: "Yes. Each completed payment or exchange keeps a receipt and reference so you can review it later.",
+  },
+  {
+    question: "How does the advanced algorithm work to optimize wallet trades?",
+    answer: "It helps present clear rates, fees, and payment status so users can review the transaction before confirming.",
+  },
+  {
+    question: "Can I use TrustPay on mobile devices?",
+    answer: "Yes. TrustPay is designed for mobile users, with app download options and responsive wallet flows.",
+  },
 ];
 
 function GlowToken({
@@ -292,16 +288,10 @@ function HeroSection() {
           Secure NGN, GHS, and VTU payments
         </p>
         <h1 className="mx-auto mt-6 max-w-4xl text-5xl font-black leading-[0.96] tracking-[-0.02em] text-white md:text-7xl">
-          Trusted Secure{" "}
-          <span className="trustpay-hero-words text-orange-400" aria-label="Money, Naira, Cedis, Currencies">
-            {heroMoneyWords.map((word) => (
-              <span key={word}>{word}</span>
-            ))}
-          </span>
+          Naira To <em className="text-orange-400">Cedis</em> Made Simple
         </h1>
         <p className="mx-auto mt-5 max-w-2xl text-sm leading-6 text-white/58 md:text-base">
-          Experience precise exchange, wallet movement, and bill payments with
-          status, receipts, and safe retries built into every transaction.
+          Exchange money and manage payments with a wallet built for you.
         </p>
         <div className="mt-7 flex items-center justify-center gap-3">
           <Button asChild className="h-10 rounded-full bg-orange-500 px-4 text-white hover:bg-orange-400 sm:px-5">
@@ -417,7 +407,7 @@ function ExchangePlusSection() {
         <div className="rounded-lg bg-gradient-to-br from-orange-300 via-orange-400 to-white p-5 text-black">
           <p className="text-2xl font-black leading-tight">TrustPay app</p>
           <p className="mt-2 text-xs font-semibold text-black/68">
-            Swap money, buy airtime, pay bills, and keep your receipts in one simple app.
+            Swap money, buy airtime, pay bills, and get a virtual account in one simple app.
           </p>
           <Button asChild className="mt-5 rounded-full bg-white text-black hover:bg-black hover:text-white">
             <Link href="/download">Download</Link>
@@ -428,7 +418,7 @@ function ExchangePlusSection() {
             ["01", "Swap money", "Change naira to cedis and see the rate first."],
             ["02", "Buy airtime & data", "Top up your phone for MTN, Airtel, Glo, and more."],
             ["03", "Pay bills", "Pay electricity and other bills from your wallet."],
-            ["04", "Keep receipts", "Find proof for every payment when you need it."],
+            ["04", "Get virtual account", "Receive money into your TrustPay wallet."],
           ].map(([number, title, text]) => (
             <div key={number} className="flex gap-3 rounded-lg bg-white/[0.03] p-4">
               <span className="grid size-9 shrink-0 place-items-center rounded-full bg-black text-sm font-bold text-white">
@@ -441,31 +431,6 @@ function ExchangePlusSection() {
             </div>
           ))}
         </div>
-      </div>
-    </section>
-  );
-}
-
-function FeatureSection() {
-  return (
-    <section className="bg-[#0a0a0a] px-4 py-20 sm:px-6 lg:px-8">
-      <SectionTitle
-        title="The best payment features you won't find anywhere else"
-        text="Simple tools for safer everyday money movement."
-      />
-      <div className="mx-auto mt-10 grid max-w-6xl grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
-        {quickFeatures.map((feature) => {
-          const Icon = feature.icon;
-
-          return (
-            <div key={feature.title} className="rounded-lg border border-white/8 bg-[#1d1d2a] p-4 text-center sm:p-6">
-              <span className="mx-auto grid size-20 place-items-center rounded-2xl bg-orange-500/12 text-orange-400 ring-1 ring-orange-300/20 sm:size-24">
-                <Icon aria-hidden="true" className="size-11 sm:size-12" strokeWidth={1.8} />
-              </span>
-              <h3 className="mt-4 text-base font-black leading-tight text-white sm:text-lg">{feature.title}</h3>
-            </div>
-          );
-        })}
       </div>
     </section>
   );
@@ -485,9 +450,9 @@ function StatsSection() {
           </p>
           <div className="mt-8 space-y-4">
             {stats.map(([value, label]) => (
-              <div key={label} className="grid grid-cols-[80px_1fr] items-center gap-4">
-                <span className="text-2xl font-black text-orange-300">{value}</span>
-                <span className="border-b border-white/10 pb-2 text-xs text-white/56">{label}</span>
+              <div key={label} className="grid grid-cols-[120px_1fr] items-center gap-4 sm:grid-cols-[150px_1fr]">
+                <span className="text-4xl font-black leading-none text-orange-300 sm:text-5xl">{value}</span>
+                <span className="border-b border-white/10 pb-3 text-sm text-white/56 sm:text-base">{label}</span>
               </div>
             ))}
           </div>
@@ -524,39 +489,20 @@ function WorksSection() {
         title="How It Works"
         text="Discover how TrustPay simplifies money trading through user-friendly interfaces, secure transactions, and real-time wallet insights."
       />
-      <div className="relative mx-auto mt-10 grid max-w-5xl gap-4 overflow-hidden rounded-xl border border-white/8 bg-[#080908] p-4 md:grid-cols-[280px_1fr] md:bg-white/[0.05]">
-        <Image
-          src={marketingImages.mobilePayment.src}
-          alt=""
-          fill
-          sizes="100vw"
-          className="object-cover opacity-24 md:hidden"
-        />
-        <div className="absolute inset-0 bg-black/76 md:hidden" />
-        <div className="relative hidden min-h-[360px] overflow-hidden rounded-lg bg-gradient-to-br from-orange-300 via-orange-500 to-white md:block">
-          <Image
-            src={marketingImages.mobilePayment.src}
-            alt="A phone payment interface"
-            fill
-            sizes="(min-width: 768px) 280px, 100vw"
-            className="object-cover mix-blend-multiply opacity-80"
-          />
-        </div>
-        <div className="relative z-10 grid grid-cols-2 gap-3 sm:gap-4">
-          {workSteps.map((step) => {
-            const Icon = step.icon;
+      <div className="mx-auto mt-10 grid max-w-3xl gap-3 sm:gap-4">
+        {workSteps.map((step) => {
+          const Icon = step.icon;
 
-            return (
-              <div key={step.title} className="rounded-lg border border-white/10 bg-black/48 p-3 backdrop-blur-sm sm:p-5 md:bg-white/[0.06]">
-                <span className="grid size-9 place-items-center rounded-full bg-orange-500 text-white sm:size-10">
-                  <Icon aria-hidden="true" className="size-4 sm:size-5" />
-                </span>
-                <h3 className="mt-4 text-sm font-semibold leading-tight text-white sm:text-base">{step.title}</h3>
-                <p className="mt-2 text-[11px] leading-5 text-white/56 sm:text-xs md:text-white/48">{step.text}</p>
-              </div>
-            );
-          })}
-        </div>
+          return (
+            <div key={step.title} className="rounded-lg border border-white/10 bg-[#071c2d] p-3 sm:p-5">
+              <span className="grid size-9 place-items-center rounded-full bg-orange-500 text-white sm:size-10">
+                <Icon aria-hidden="true" className="size-4 sm:size-5" />
+              </span>
+              <h3 className="mt-4 text-sm font-semibold leading-tight text-white sm:text-base">{step.title}</h3>
+              <p className="mt-2 text-[11px] leading-5 text-white/56 sm:text-xs">{step.text}</p>
+            </div>
+          );
+        })}
       </div>
     </section>
   );
@@ -565,7 +511,7 @@ function WorksSection() {
 function MiniFlag({ type }: { type: string }) {
   if (type === "ghana") {
     return (
-      <span className="grid size-9 overflow-hidden rounded-full border border-white/20">
+      <span className="grid size-12 overflow-hidden rounded-2xl border border-white/20 shadow-[inset_0_2px_8px_rgba(255,255,255,0.28),0_12px_28px_rgba(0,0,0,0.38)]">
         <span className="bg-[#ef3340]" />
         <span className="bg-[#fcd116]" />
         <span className="bg-[#009739]" />
@@ -575,7 +521,7 @@ function MiniFlag({ type }: { type: string }) {
 
   if (type === "nigeria") {
     return (
-      <span className="grid size-9 grid-cols-3 overflow-hidden rounded-full border border-white/20">
+      <span className="grid size-12 grid-cols-3 overflow-hidden rounded-2xl border border-white/20 shadow-[inset_0_2px_8px_rgba(255,255,255,0.28),0_12px_28px_rgba(0,0,0,0.38)]">
         <span className="bg-[#008751]" />
         <span className="bg-white" />
         <span className="bg-[#008751]" />
@@ -583,16 +529,32 @@ function MiniFlag({ type }: { type: string }) {
     );
   }
 
-  const symbols: Record<string, string> = {
-    euro: "€",
-    gbp: "£",
-    usd: "$",
-    wallet: "VA",
+  const currencyTiles: Record<string, { symbol: string; className: string }> = {
+    euro: {
+      symbol: "€",
+      className: "border-blue-200/30 bg-[linear-gradient(145deg,#1f6cff_0%,#1737a8_58%,#071a55_100%)] text-yellow-300",
+    },
+    gbp: {
+      symbol: "£",
+      className: "border-red-200/30 bg-[linear-gradient(145deg,#ffffff_0%,#2458b8_42%,#c8102e_100%)] text-white",
+    },
+    usd: {
+      symbol: "$",
+      className: "border-emerald-200/30 bg-[linear-gradient(145deg,#ffffff_0%,#2f9d67_46%,#113d2b_100%)] text-white",
+    },
+    wallet: {
+      symbol: "VA",
+      className: "border-cyan-200/25 bg-[linear-gradient(145deg,#eef7ff_0%,#264a73_46%,#081829_100%)] text-white",
+    },
+  };
+  const tile = currencyTiles[type] ?? {
+    symbol: "TP",
+    className: "border-white/20 bg-[linear-gradient(145deg,#f8fafc_0%,#334155_52%,#020617_100%)] text-white",
   };
 
   return (
-    <span className="grid size-9 place-items-center rounded-full border border-orange-300/30 bg-orange-500 text-xs font-black text-white">
-      {symbols[type] ?? "TP"}
+    <span className={`grid size-12 place-items-center rounded-2xl border text-xl font-black shadow-[inset_0_2px_8px_rgba(255,255,255,0.35),0_14px_28px_rgba(0,0,0,0.38)] ${tile.className}`}>
+      <span className="drop-shadow-[0_2px_2px_rgba(0,0,0,0.35)]">{tile.symbol}</span>
     </span>
   );
 }
@@ -603,7 +565,7 @@ function CurrencyServicePill({
   service: (typeof currencyServices)[number];
 }) {
   return (
-    <div className="flex min-w-[230px] items-center gap-3 rounded-full border border-white/8 bg-[#121512] px-4 py-3 shadow-[0_18px_50px_rgba(0,0,0,0.25)]">
+    <div className="flex min-w-[250px] items-center gap-4 rounded-full border border-white/8 bg-[#121512] px-4 py-3 shadow-[0_18px_50px_rgba(0,0,0,0.25)]">
       <MiniFlag type={service.flag} />
       <span>
         <span className="block text-sm font-black text-white">{service.label}</span>
@@ -620,7 +582,7 @@ function NetworkServicePill({
 }) {
   return (
     <div className="flex min-w-[220px] items-center gap-3 rounded-full border border-white/8 bg-[#141421] px-4 py-3 shadow-[0_18px_50px_rgba(0,0,0,0.25)]">
-      <span className={`grid size-10 place-items-center rounded-full text-xs font-black ${service.tone}`}>
+      <span className={`grid size-12 place-items-center rounded-2xl text-xs font-black shadow-[inset_0_2px_8px_rgba(255,255,255,0.22),0_12px_26px_rgba(0,0,0,0.35)] ${service.tone}`}>
         {service.label}
       </span>
       <span>
@@ -652,35 +614,35 @@ function ServicesSection() {
         <div className="relative mt-4 overflow-hidden">
           <div className="pointer-events-none absolute inset-y-0 left-0 z-10 w-12 bg-gradient-to-r from-[#080908] to-transparent" />
           <div className="pointer-events-none absolute inset-y-0 right-0 z-10 w-12 bg-gradient-to-l from-[#080908] to-transparent" />
-          <div className="animate-trustpay-marquee flex w-max gap-4 pr-4 [animation-direction:reverse] [animation-duration:28s]">
+          <div className="animate-trustpay-marquee-reverse flex w-max gap-4 pr-4 [animation-duration:28s]">
             {[...networkServices, ...networkServices].map((service, index) => (
               <NetworkServicePill key={`${service.label}-${index}`} service={service} />
             ))}
           </div>
         </div>
+      </div>
 
-        <div className="mx-4 mt-5 rounded-xl border border-orange-400/20 bg-[radial-gradient(circle_at_20%_0%,rgba(255,107,10,0.20),transparent_30%),#111411] p-5 text-center md:mx-5">
-          <span className="mx-auto grid size-12 place-items-center rounded-full bg-orange-500 text-white shadow-[0_0_30px_rgba(255,107,10,0.35)]">
-            <Landmark aria-hidden="true" className="size-5" />
+      <div className="mx-auto mt-8 max-w-3xl rounded-xl border border-orange-400/20 bg-[radial-gradient(circle_at_50%_0%,rgba(255,107,10,0.18),transparent_34%),#090b09] p-6 text-center sm:p-8">
+        <span className="mx-auto grid size-12 place-items-center rounded-full bg-orange-500 text-white shadow-[0_0_30px_rgba(255,107,10,0.35)]">
+          <Landmark aria-hidden="true" className="size-5" />
+        </span>
+        <p className="mt-4 text-xs font-semibold uppercase tracking-[0.18em] text-orange-300">
+          Always ready
+        </p>
+        <h3 className="mt-2 text-2xl font-black text-white">
+          <span className="trustpay-fast-words" aria-label="Fast withdrawal, fast transfer, fast airtime, fast data, fast receipts">
+            {fastServiceWords.map((word) => (
+              <span key={word}>{word}</span>
+            ))}
           </span>
-          <p className="mt-4 text-xs font-semibold uppercase tracking-[0.18em] text-orange-300">
-            Always ready
-          </p>
-          <h3 className="mt-2 text-2xl font-black text-white">
-            <span className="trustpay-fast-words" aria-label="Fast withdrawal, fast transfer, fast airtime, fast data, fast receipts">
-              {fastServiceWords.map((word) => (
-                <span key={word}>{word}</span>
-              ))}
-            </span>
-          </h3>
-          <p className="mx-auto mt-4 max-w-lg text-sm leading-6 text-white/52">
-            Withdrawals stay steady while the service promise changes around the
-            user: transfer, airtime, data, and receipt flows all stay quick.
-          </p>
-          <Button asChild variant="outline" className="mt-5 rounded-full border-orange-400/30 bg-transparent text-orange-200 hover:bg-orange-500 hover:text-white">
-            <Link href="/register">Start now</Link>
-          </Button>
-        </div>
+        </h3>
+        <p className="mx-auto mt-4 max-w-lg text-sm leading-6 text-white/52">
+          Withdrawals stay steady while the service promise changes around the
+          user: transfer, airtime, data, and receipt flows all stay quick.
+        </p>
+        <Button asChild variant="outline" className="mt-5 rounded-full border-orange-400/30 bg-transparent text-orange-200 hover:bg-orange-500 hover:text-white">
+          <Link href="/register">Start now</Link>
+        </Button>
       </div>
     </section>
   );
@@ -708,15 +670,6 @@ function PortfolioSection() {
           <DashboardPreview />
         </div>
       </div>
-    </section>
-  );
-}
-
-function ChoiceSection() {
-  return (
-    <section className="bg-[#050505] px-4 py-20 sm:px-6 lg:px-8">
-      <SectionTitle title="Your Money...Your Choice" text="Empower yourself with TrustPay's secure payments and wallet experience." />
-      <TrustpayChoicePanel />
     </section>
   );
 }
@@ -786,14 +739,19 @@ function FaqSection() {
         title="Frequently Asked Questions"
         text="Find answers to common questions in our comprehensive FAQ section, providing clarity and support for your payment journey."
       />
-      <div className="mx-auto mt-8 grid max-w-5xl gap-3 md:grid-cols-2">
+      <div className="mx-auto mt-8 grid max-w-5xl gap-4 md:grid-cols-2">
         {faqs.map((faq) => (
-          <div key={faq} className="flex items-center justify-between rounded-lg border border-white/8 bg-[#181824] px-4 py-3 text-sm text-white">
-            <span>{faq}</span>
-            <span className="grid size-5 shrink-0 place-items-center rounded-full bg-orange-500 text-xs text-white">
-              +
-            </span>
-          </div>
+          <details key={faq.question} className="group rounded-lg border border-white/8 bg-[#181824] text-sm leading-6 text-white sm:text-base">
+            <summary className="flex min-h-[72px] cursor-pointer list-none items-center justify-between gap-4 px-5 py-5 marker:hidden sm:min-h-[84px] sm:px-6 [&::-webkit-details-marker]:hidden">
+              <span className="min-w-0">{faq.question}</span>
+              <span className="grid size-7 shrink-0 place-items-center rounded-full bg-orange-500 text-sm text-white transition-transform duration-200 group-open:rotate-45">
+                +
+              </span>
+            </summary>
+            <p className="border-t border-white/8 px-5 pb-5 pt-4 text-white/56 sm:px-6">
+              {faq.answer}
+            </p>
+          </details>
         ))}
       </div>
     </section>
@@ -803,30 +761,28 @@ function FaqSection() {
 function DownloadSection() {
   return (
     <section className="bg-[#050505] px-4 pb-20 sm:px-6 lg:px-8">
-      <div className="mx-auto grid max-w-5xl overflow-hidden rounded-xl bg-gradient-to-br from-orange-300 via-orange-500 to-white text-black md:grid-cols-[0.9fr_1.1fr]">
+      <div className="mx-auto grid max-w-5xl overflow-hidden rounded-xl border border-white/10 bg-[#07131f] text-white md:grid-cols-[0.9fr_1.1fr]">
         <div className="relative min-h-[320px]">
           <Image
             src={marketingImages.exchangeApp.src}
             alt="TrustPay mobile experience"
             fill
             sizes="(min-width: 768px) 40vw, 100vw"
-            className="object-cover mix-blend-multiply opacity-80"
+            className="object-cover opacity-70"
           />
+          <div className="absolute inset-0 bg-black/28" />
         </div>
         <div className="p-8 md:p-12">
           <h2 className="text-4xl font-black leading-tight">
             Download and enjoy the experience
           </h2>
-          <p className="mt-4 text-sm leading-6 text-black/68">
+          <p className="mt-4 text-sm leading-6 text-white/60">
             Do not miss out. Download our app and simplify your exchange, wallet,
             and bill payments in seconds.
           </p>
           <div className="mt-7 flex flex-wrap gap-3">
-            <Button asChild className="rounded-full bg-black px-5 text-white hover:bg-white hover:text-black">
-              <Link href="/register">App Store</Link>
-            </Button>
-            <Button asChild className="rounded-full bg-black px-5 text-white hover:bg-white hover:text-black">
-              <Link href="/register">Google Play</Link>
+            <Button asChild className="rounded-full bg-orange-500 px-5 text-white hover:bg-orange-400">
+              <Link href="/download">Download</Link>
             </Button>
           </div>
         </div>
@@ -842,12 +798,10 @@ export function LandingPage() {
       <BrandStrip />
       <TrustedBanksSection />
       <ExchangePlusSection />
-      <FeatureSection />
       <StatsSection />
       <WorksSection />
       <ServicesSection />
       <PortfolioSection />
-      <ChoiceSection />
       <TestimonialSection />
       <IntegrationsSection />
       <FaqSection />
