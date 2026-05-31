@@ -1,18 +1,18 @@
-import { Injectable, Logger } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
+import { Injectable } from "@nestjs/common";
+import { ConfigService } from "@nestjs/config";
 import {
   createClient,
   SupabaseClient,
   User as SupabaseUser,
-} from '@supabase/supabase-js';
-import { WalletCurrency } from '@prisma/client';
-import { PrismaService } from '../prisma/prisma.service';
+} from "@supabase/supabase-js";
+import { WalletCurrency } from "@prisma/client";
+import { PinoLogger } from "nestjs-pino";
+import { PrismaService } from "../prisma/prisma.service";
 
-type TrustPaySupabaseClient = SupabaseClient<any, any, 'public', any, any>;
+type TrustPaySupabaseClient = SupabaseClient<any, any, "public", any, any>;
 
 @Injectable()
 export class SupabaseService {
-  private readonly logger = new Logger(SupabaseService.name);
   public client: TrustPaySupabaseClient;
   public authClient: TrustPaySupabaseClient;
   public adminClient?: TrustPaySupabaseClient;
@@ -20,13 +20,14 @@ export class SupabaseService {
   constructor(
     private readonly configService: ConfigService,
     private readonly prisma: PrismaService,
+    private readonly logger: PinoLogger,
   ) {
-    const supabaseUrl = this.configService.getOrThrow<string>('SUPABASE_URL');
+    const supabaseUrl = this.configService.getOrThrow<string>("SUPABASE_URL");
     const supabaseKey =
-      this.configService.get<string>('SUPABASE_PUBLISHABLE_KEY') ||
-      this.configService.getOrThrow<string>('SUPABASE_ANON_KEY');
+      this.configService.get<string>("SUPABASE_PUBLISHABLE_KEY") ||
+      this.configService.getOrThrow<string>("SUPABASE_ANON_KEY");
     const supabaseServiceKey = this.configService.get<string>(
-      'SUPABASE_SERVICE_ROLE_KEY',
+      "SUPABASE_SERVICE_ROLE_KEY",
     );
 
     this.authClient = createClient(supabaseUrl, supabaseKey, {
@@ -47,7 +48,7 @@ export class SupabaseService {
       });
     }
 
-    this.logger.log('Supabase client initialized');
+    this.logger.info({}, "Supabase client initialized");
   }
 
   async verifyToken(accessToken: string) {
@@ -61,10 +62,10 @@ export class SupabaseService {
   }
 
   createUserScopedClient(accessToken: string) {
-    const supabaseUrl = this.configService.getOrThrow<string>('SUPABASE_URL');
+    const supabaseUrl = this.configService.getOrThrow<string>("SUPABASE_URL");
     const supabaseKey =
-      this.configService.get<string>('SUPABASE_PUBLISHABLE_KEY') ||
-      this.configService.getOrThrow<string>('SUPABASE_ANON_KEY');
+      this.configService.get<string>("SUPABASE_PUBLISHABLE_KEY") ||
+      this.configService.getOrThrow<string>("SUPABASE_ANON_KEY");
 
     return createClient(supabaseUrl, supabaseKey, {
       auth: {
@@ -82,14 +83,42 @@ export class SupabaseService {
   getAdminClient() {
     if (!this.adminClient) {
       throw new Error(
-        'SUPABASE_SERVICE_ROLE_KEY is required for admin auth operations',
+        "SUPABASE_SERVICE_ROLE_KEY is required for admin auth operations",
       );
     }
 
     return this.adminClient;
   }
 
-  async setAuthAppRole(userId: string, role: 'USER' | 'ADMIN') {
+  async createSignedUploadUrl(bucket: string, objectKey: string) {
+    const { data, error } = await this.getAdminClient()
+      .storage.from(bucket)
+      .createSignedUploadUrl(objectKey, { upsert: false });
+
+    if (error) {
+      throw new Error(error.message);
+    }
+
+    return data;
+  }
+
+  async createSignedReadUrl(
+    bucket: string,
+    objectKey: string,
+    expiresInSeconds: number,
+  ) {
+    const { data, error } = await this.getAdminClient()
+      .storage.from(bucket)
+      .createSignedUrl(objectKey, expiresInSeconds);
+
+    if (error) {
+      throw new Error(error.message);
+    }
+
+    return data.signedUrl;
+  }
+
+  async setAuthAppRole(userId: string, role: "USER" | "ADMIN") {
     const { error } = await this.getAdminClient().auth.admin.updateUserById(
       userId,
       {
@@ -106,12 +135,12 @@ export class SupabaseService {
     const email = supabaseUser.email;
 
     if (!email) {
-      throw new Error('Supabase user is missing an email address');
+      throw new Error("Supabase user is missing an email address");
     }
 
     const phone = this.resolvePhone(supabaseUser);
     const fullName = this.resolveFullName(supabaseUser);
-    const currencies: WalletCurrency[] = ['NGN', 'GHS'];
+    const currencies: WalletCurrency[] = ["NGN", "GHS"];
 
     return this.prisma.$transaction(async (tx) => {
       const existing = await tx.user.findFirst({
@@ -127,7 +156,7 @@ export class SupabaseService {
               email,
               phone:
                 existing.phone.length === 0 ||
-                existing.phone.startsWith('supabase:')
+                existing.phone.startsWith("supabase:")
                   ? phone
                   : existing.phone,
               fullName: existing.fullName || fullName,
@@ -139,9 +168,9 @@ export class SupabaseService {
               email,
               phone,
               fullName,
-              password: '',
-              role: 'USER',
-              kycStatus: 'PENDING',
+              password: "",
+              role: "USER",
+              kycStatus: "PENDING",
             },
           });
 
@@ -182,7 +211,7 @@ export class SupabaseService {
       | undefined;
     const metadataPhone = metadata?.phone;
     const phone =
-      typeof metadataPhone === 'string' && metadataPhone.trim().length > 0
+      typeof metadataPhone === "string" && metadataPhone.trim().length > 0
         ? metadataPhone.trim()
         : supabaseUser.phone?.trim();
 
@@ -196,7 +225,7 @@ export class SupabaseService {
     >;
     const fullName = metadata.fullName || metadata.full_name || metadata.name;
 
-    return typeof fullName === 'string' && fullName.trim().length > 0
+    return typeof fullName === "string" && fullName.trim().length > 0
       ? fullName.trim()
       : undefined;
   }

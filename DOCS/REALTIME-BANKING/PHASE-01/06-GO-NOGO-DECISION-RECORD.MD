@@ -8,6 +8,8 @@ Current status: `NOT READY FOR SANDBOX IMPLEMENTATION`
 
 Reason: this document defines the readiness gates, but provider dashboard access, KYC field confirmation, sandbox credential setup, and admin audit decisions still need owner confirmation.
 
+Implementation checkpoint as of May 21, 2026: backend banking foundations have been implemented in later phase files and code, including ledger records, virtual-account APIs, internal transfers, beneficiary storage, withdrawals, provider events, idempotency records, and admin banking endpoints. This does not change the Phase 1 decision. Sandbox provider execution and any live provider configuration remain blocked until the go criteria and required signoffs below are completed.
+
 ## Go Criteria
 
 Provider:

@@ -1,11 +1,11 @@
-import { Injectable } from '@nestjs/common';
-import { HttpService } from '@nestjs/axios';
-import { ConfigService } from '@nestjs/config';
-import { firstValueFrom } from 'rxjs';
+import { Injectable } from "@nestjs/common";
+import { HttpService } from "@nestjs/axios";
+import { ConfigService } from "@nestjs/config";
+import { firstValueFrom } from "rxjs";
 import {
   ProviderVirtualAccount,
   ProvisionVirtualAccountInput,
-} from './banking-provider.types';
+} from "./banking-provider.types";
 
 interface PaystackAssignDvaResponse {
   status: boolean;
@@ -29,7 +29,7 @@ interface PaystackAssignDvaResponse {
 
 @Injectable()
 export class PaystackVirtualAccountProvider {
-  private readonly baseUrl = 'https://api.paystack.co';
+  private readonly baseUrl = "https://api.paystack.co";
   private readonly secretKey: string;
 
   constructor(
@@ -37,7 +37,7 @@ export class PaystackVirtualAccountProvider {
     private readonly configService: ConfigService,
   ) {
     this.secretKey = this.configService.getOrThrow<string>(
-      'PAYSTACK_SECRET_KEY',
+      "PAYSTACK_SECRET_KEY",
     );
   }
 
@@ -51,8 +51,8 @@ export class PaystackVirtualAccountProvider {
       last_name: input.lastName,
       phone: input.phone,
       preferred_bank:
-        this.configService.get<string>('PAYSTACK_DVA_PREFERRED_BANK') ||
-        'test-bank',
+        this.configService.get<string>("PAYSTACK_DVA_PREFERRED_BANK") ||
+        "test-bank",
       country: input.country,
     };
 
@@ -69,7 +69,7 @@ export class PaystackVirtualAccountProvider {
         {
           headers: {
             Authorization: `Bearer ${this.secretKey}`,
-            'Content-Type': 'application/json',
+            "Content-Type": "application/json",
           },
         },
       ),
@@ -78,15 +78,15 @@ export class PaystackVirtualAccountProvider {
     const data = response.data.data;
 
     return {
-      provider: 'paystack',
+      provider: "paystack",
       providerAccountId: data?.id ? String(data.id) : undefined,
       providerCustomerId: data?.customer?.customer_code,
-      accountNumber: data?.account_number || '',
-      accountName: data?.account_name || '',
-      bankName: data?.bank?.name || '',
+      accountNumber: data?.account_number || "",
+      accountName: data?.account_name || "",
+      bankName: data?.bank?.name || "",
       bankCode: data?.bank?.slug,
-      currency: (data?.currency as 'NGN' | 'GHS') || input.currency,
-      status: data?.active && data?.assigned ? 'ACTIVE' : 'PENDING',
+      currency: (data?.currency as "NGN" | "GHS") || input.currency,
+      status: data?.active && data?.assigned ? "ACTIVE" : "PENDING",
       raw: response.data as unknown as Record<string, unknown>,
     };
   }

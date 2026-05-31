@@ -9,9 +9,9 @@ import React, {
   useState,
 } from "react";
 import { useRouter } from "next/navigation";
-import { createClient } from "@/lib/supabase";
+import { createClient, isSupabaseConfigured } from "@/lib/supabase";
 import type { Session, User as SupabaseUser } from "@supabase/supabase-js";
-import { authApi } from "@/services/api";
+import { authApi, getAuthDeviceName } from "@/services/api";
 import type { User as TrustPayUser, Wallet } from "@/types";
 
 type AuthUser = SupabaseUser & {
@@ -24,13 +24,33 @@ type BootstrapResponse = {
   wallets: Wallet[];
 };
 
+type RegisterResponse = {
+  user: TrustPayUser;
+  session: Session | null;
+};
+
+type LoginResponse = {
+  user: TrustPayUser;
+  session: Session | null;
+};
+
+type RefreshResponse = {
+  session: Session | null;
+};
+
 interface AuthContextType {
   user: AuthUser | null;
   profile: TrustPayUser | null;
   session: Session | null;
   isLoading: boolean;
   signIn: (email: string, password: string) => Promise<void>;
-  signUp: (email: string, password: string, phone: string) => Promise<void>;
+  signUp: (
+    email: string,
+    password: string,
+    phone: string,
+    fullName: string,
+    transactionPin: string,
+  ) => Promise<void>;
   signOut: () => Promise<void>;
   refreshSession: () => Promise<void>;
   resetPassword: (email: string) => Promise<void>;
@@ -43,9 +63,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [profile, setProfile] = useState<TrustPayUser | null>(null);
   const [session, setSession] = useState<Session | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(isSupabaseConfigured);
   const router = useRouter();
-  const supabase = useMemo(() => createClient(), []);
+  const supabase = useMemo(
+    () => (isSupabaseConfigured ? createClient() : null),
+    [],
+  );
 
   const applySession = useCallback(
     (nextSession: Session | null, nextProfile?: TrustPayUser | null) => {
@@ -75,6 +98,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   );
 
   useEffect(() => {
+    if (!supabase) {
+      return;
+    }
+
     let isMounted = true;
 
     const initializeSession = async () => {
@@ -114,40 +141,75 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       isMounted = false;
       subscription.unsubscribe();
     };
-  }, [applySession, bootstrapSession, supabase.auth]);
+  }, [applySession, bootstrapSession, supabase]);
+
+  const requireSupabase = useCallback(() => {
+    if (!supabase) {
+      throw new Error(
+        "Supabase is not configured. Add the website Supabase environment variables to use authentication.",
+      );
+    }
+
+    return supabase;
+  }, [supabase]);
 
   const signIn = async (email: string, password: string) => {
-    const { data, error } = await supabase.auth.signInWithPassword({
+    const authClient = requireSupabase();
+    const { data } = await authApi.login(
       email,
       password,
-    });
+      getAuthDeviceName(),
+    );
+    const login = data as LoginResponse;
 
+    if (!login.session?.access_token || !login.session.refresh_token) {
+      throw new Error("Invalid login response");
+    }
+
+    const { data: sessionData, error } = await authClient.auth.setSession({
+      access_token: login.session.access_token,
+      refresh_token: login.session.refresh_token,
+    });
     if (error) throw error;
 
-    if (data.session) {
-      await bootstrapSession(data.session);
+    if (sessionData.session) {
+      await bootstrapSession(sessionData.session);
+    } else {
+      applySession(login.session, login.user);
     }
 
     router.push("/dashboard");
   };
 
-  const signUp = async (email: string, password: string, phone: string) => {
-    const { data, error } = await supabase.auth.signUp({
+  const signUp = async (
+    email: string,
+    password: string,
+    phone: string,
+    fullName: string,
+    transactionPin: string,
+  ) => {
+    const authClient = requireSupabase();
+    const { data } = await authApi.register({
       email,
+      phone,
       password,
-      options: {
-        data: { phone },
-        emailRedirectTo:
-          typeof window === "undefined"
-            ? undefined
-            : `${window.location.origin}/dashboard`,
-      },
+      fullName: fullName.trim() || undefined,
+      transactionPin,
+      deviceName: getAuthDeviceName(),
     });
+    const registered = data as RegisterResponse;
 
-    if (error) throw error;
-
-    if (data.session) {
-      await bootstrapSession(data.session);
+    if (registered.session?.access_token && registered.session.refresh_token) {
+      const { data: sessionData, error } = await authClient.auth.setSession({
+        access_token: registered.session.access_token,
+        refresh_token: registered.session.refresh_token,
+      });
+      if (error) throw error;
+      if (sessionData.session) {
+        await bootstrapSession(sessionData.session);
+      } else {
+        applySession(registered.session, registered.user);
+      }
       router.push("/dashboard");
       return;
     }
@@ -158,28 +220,54 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const signOut = async () => {
     try {
       if (session) {
-        await authApi.logout();
+        await authApi.logout(session.refresh_token);
       }
     } finally {
-      await supabase.auth.signOut();
+      if (supabase) {
+        await supabase.auth.signOut();
+      }
       applySession(null);
       router.push("/login");
     }
   };
 
   const refreshSession = async () => {
-    const { data, error } = await supabase.auth.refreshSession();
-    if (error) throw error;
+    const authClient = requireSupabase();
+    const {
+      data: { session: currentSession },
+    } = await authClient.auth.getSession();
 
-    if (data.session) {
-      await bootstrapSession(data.session);
+    if (!currentSession?.refresh_token) {
+      applySession(null);
+      return;
+    }
+
+    const { data } = await authApi.refresh(
+      currentSession.refresh_token,
+      getAuthDeviceName(),
+    );
+    const refreshed = data as RefreshResponse;
+
+    if (refreshed.session?.access_token && refreshed.session.refresh_token) {
+      const { data: sessionData, error } = await authClient.auth.setSession({
+        access_token: refreshed.session.access_token,
+        refresh_token: refreshed.session.refresh_token,
+      });
+      if (error) throw error;
+
+      if (sessionData.session) {
+        await bootstrapSession(sessionData.session);
+      } else {
+        applySession(refreshed.session);
+      }
     } else {
       applySession(null);
     }
   };
 
   const resetPassword = async (email: string) => {
-    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+    const authClient = requireSupabase();
+    const { error } = await authClient.auth.resetPasswordForEmail(email, {
       redirectTo: `${window.location.origin}/reset-password`,
     });
 
@@ -187,7 +275,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const updatePassword = async (password: string) => {
-    const { error } = await supabase.auth.updateUser({ password });
+    const authClient = requireSupabase();
+    const { error } = await authClient.auth.updateUser({ password });
     if (error) throw error;
   };
 

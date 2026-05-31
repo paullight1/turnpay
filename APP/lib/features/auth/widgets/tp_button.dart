@@ -1,5 +1,6 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../core/widgets/trustpay_lottie.dart';
 
 /// Primary CTA button used across all auth screens.
 /// Features coral fill, loading spinner, and disabled state.
@@ -51,13 +52,10 @@ class TpButton extends StatelessWidget {
         ),
         child: Center(
           child: isLoading
-              ? SizedBox(
-                  width: 22,
-                  height: 22,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2.5,
-                    valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                  ),
+              ? const TrustPayLottie(
+                  variant: TrustPayAnimationVariant.loading,
+                  size: 30,
+                  semanticsLabel: 'Loading',
                 )
               : Text(
                   label,
@@ -72,4 +70,3 @@ class TpButton extends StatelessWidget {
     );
   }
 }
-

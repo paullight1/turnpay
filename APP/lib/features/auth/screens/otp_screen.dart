@@ -1,8 +1,9 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/theme/app_theme.dart';
+import '../../../core/widgets/trustpay_lottie.dart';
 import '../../../services/auth_service.dart';
 import '../widgets/tp_button.dart';
 
@@ -238,18 +239,12 @@ class _OtpScreenState extends State<OtpScreen> {
               SizedBox(height: AppSpacing.xl),
 
               // â”€â”€ Icon â”€â”€
-              Container(
-                width: 56,
-                height: 56,
-                decoration: BoxDecoration(
-                  color: AppColors.primary.withOpacity(0.15),
-                  borderRadius: BorderRadius.circular(AppRadius.md),
-                ),
-                child: Icon(
-                  Icons.chat_bubble_outline_rounded,
-                  color: AppColors.primary,
-                  size: 26,
-                ),
+              TrustPayLottie(
+                variant: _isLoading
+                    ? TrustPayAnimationVariant.loading
+                    : TrustPayAnimationVariant.send,
+                size: 72,
+                semanticsLabel: 'OTP verification',
               ),
 
               SizedBox(height: AppSpacing.lg),
@@ -409,4 +404,3 @@ class _OtpBox extends StatelessWidget {
     );
   }
 }
-

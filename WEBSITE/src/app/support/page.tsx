@@ -3,7 +3,6 @@ import Link from "next/link";
 import {
   ArrowRight,
   BadgeCheck,
-  Banknote,
   Clock3,
   FileCheck2,
   HelpCircle,
@@ -14,7 +13,7 @@ import {
   RefreshCw,
   ShieldAlert,
   Smartphone,
-  WalletCards,
+  Wifi,
 } from "lucide-react";
 
 import { MarketingShell } from "@/components/marketing/marketing-shell";
@@ -23,7 +22,7 @@ import { Button } from "@/components/ui/button";
 export const metadata: Metadata = {
   title: "Support | TrustPay",
   description:
-    "Get simple TrustPay help for account access, KYC, wallets, exchange, VTU, withdrawals, transaction status, and receipts.",
+    "Get simple TrustPay help for account access, KYC, exchange, VTU, transaction status, and receipts.",
 };
 
 const supportPaths = [
@@ -40,28 +39,28 @@ const supportPaths = [
     action: "Review KYC",
   },
   {
-    icon: WalletCards,
-    title: "Wallet funding",
-    text: "Trace card, bank, or provider funding when a wallet credit is pending.",
-    action: "Trace funding",
-  },
-  {
-    icon: Banknote,
-    title: "Withdrawals",
-    text: "Check payout status, bank details, holds, failed transfers, and reversals.",
-    action: "Check payout",
-  },
-  {
-    icon: Smartphone,
-    title: "Airtime and bills",
-    text: "Get help with airtime, data, cable, and electricity orders.",
-    action: "Find order",
-  },
-  {
     icon: RefreshCw,
     title: "Exchange",
     text: "Check rate, source wallet, target wallet, fee, and final status.",
     action: "View exchange",
+  },
+  {
+    icon: Smartphone,
+    title: "Airtime",
+    text: "Get help with a phone top-up or pending airtime order.",
+    action: "Find order",
+  },
+  {
+    icon: Wifi,
+    title: "Data bundles",
+    text: "Check a data bundle, provider status, or delivery issue.",
+    action: "Find order",
+  },
+  {
+    icon: ReceiptText,
+    title: "TV and power",
+    text: "Trace cable, TV, electricity, token, and receipt issues.",
+    action: "Check bill",
   },
 ];
 
@@ -96,8 +95,8 @@ const detailsToShare = [
   "Transaction reference, like TPY-REF-84A2",
   "Amount and currency, like NGN 75,000 or GHS 420",
   "Date and time of the payment",
-  "Service type: funding, exchange, VTU, or withdrawal",
-  "Masked bank account or phone number, never full secret details",
+  "Service type: exchange, airtime, data, TV, or electricity",
+  "Masked phone, meter, or customer number, never full secret details",
 ];
 
 const faqs = [
@@ -125,24 +124,24 @@ const faqs = [
 
 function SupportHero() {
   return (
-    <section className="relative isolate overflow-hidden bg-[#080a09] px-4 pb-16 pt-28 text-white sm:px-6 lg:px-8">
-      <div className="absolute inset-0 -z-10 bg-[radial-gradient(circle_at_20%_25%,rgba(249,115,22,0.25),transparent_26%),radial-gradient(circle_at_75%_10%,rgba(34,197,94,0.18),transparent_24%),radial-gradient(circle_at_80%_80%,rgba(14,165,233,0.16),transparent_22%)]" />
+    <section className="relative isolate overflow-hidden bg-[#080a09] px-4 pb-16 pt-28 text-white trustpay-ledger-bg sm:px-6 lg:px-8">
+      <div className="absolute inset-x-0 top-0 -z-10 h-52 bg-[linear-gradient(180deg,rgba(255,107,10,0.24),rgba(16,185,129,0.08),transparent)]" />
       <div className="mx-auto grid max-w-7xl gap-10 lg:grid-cols-[0.88fr_1.12fr] lg:items-center">
         <div className="flex flex-col gap-6">
-          <div className="flex w-fit items-center gap-2 rounded-full border border-white/12 bg-white/[0.06] px-3 py-1.5 text-sm text-white/70">
+          <div className="flex w-fit items-center gap-2 rounded-full border border-white/12 bg-white/[0.06] px-3 py-1.5 text-sm text-white/70 animate-trustpay-fade-up">
             <LifeBuoy aria-hidden="true" className="size-4 text-orange-300" />
             TrustPay help center
           </div>
           <div className="flex flex-col gap-4">
-            <h1 className="text-5xl font-semibold leading-[1.04] text-balance md:text-7xl">
+            <h1 className="text-5xl font-semibold leading-[1.04] text-balance animate-trustpay-fade-up md:text-7xl" style={{ animationDelay: "80ms" }}>
               Get help without guessing.
             </h1>
-            <p className="max-w-2xl text-base leading-7 text-white/66 md:text-lg">
-              Find the right help for wallets, KYC, exchange, VTU, withdrawals,
-              and transaction status. Bring your reference so support can trace it fast.
+            <p className="max-w-2xl text-base leading-7 text-white/66 animate-trustpay-fade-up md:text-lg" style={{ animationDelay: "150ms" }}>
+              Find the right help for KYC, exchange, VTU, and transaction status.
+              Bring your reference so support can trace it fast.
             </p>
           </div>
-          <div className="flex flex-col gap-3 sm:flex-row">
+          <div className="flex flex-col gap-3 animate-trustpay-fade-up sm:flex-row" style={{ animationDelay: "220ms" }}>
             <Button size="lg" asChild className="bg-orange-500 text-white shadow-lg shadow-orange-950/25 hover:bg-orange-400">
               <Link href="/login">
                 Sign in for support
@@ -160,11 +159,11 @@ function SupportHero() {
           </div>
         </div>
 
-        <div className="rounded-[1.25rem] border border-white/10 bg-white/[0.06] p-5 shadow-2xl shadow-black/35">
+        <div className="rounded-[1.25rem] border border-white/10 bg-white/[0.06] p-5 shadow-2xl shadow-black/35 animate-trustpay-fade-up" style={{ animationDelay: "280ms" }}>
           <div className="flex items-start justify-between gap-4 border-b border-white/10 pb-4">
             <div>
               <p className="text-xs text-white/60">SUPPORT CASE</p>
-              <h2 className="mt-1 text-2xl font-semibold">Withdrawal is pending</h2>
+              <h2 className="mt-1 text-2xl font-semibold">Exchange is pending</h2>
             </div>
             <span className="rounded-full border border-amber-300/30 bg-amber-300/12 px-3 py-1 text-xs font-medium text-amber-100">
               Pending
@@ -173,8 +172,8 @@ function SupportHero() {
           <div className="mt-5 grid gap-3">
             {[
               ["Reference", "TPY-REF-84A2"],
-              ["Amount", "NGN 75,000"],
-              ["Bank account", "****2190"],
+              ["Amount", "GHS 420"],
+              ["Service", "GHS to NGN"],
               ["Next step", "Provider check"],
             ].map(([label, value]) => (
               <div key={label} className="flex items-center justify-between rounded-lg border border-white/10 bg-[#090c0a]/80 p-3 text-sm">

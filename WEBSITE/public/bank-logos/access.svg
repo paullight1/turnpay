@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="220" height="80" viewBox="0 0 220 80" role="img" aria-label="Access Bank logo">
+  <rect width="220" height="80" rx="18" fill="#f58220"/>
+  <path d="M35 52 62 25l16 16-11 11-5-5-15 15z" fill="#0b4ea2"/>
+  <text x="88" y="39" font-family="Arial, Helvetica, sans-serif" font-size="20" font-weight="900" fill="#ffffff">Access</text>
+  <text x="88" y="56" font-family="Arial, Helvetica, sans-serif" font-size="14" font-weight="800" fill="#ffffff">Bank</text>
+</svg>

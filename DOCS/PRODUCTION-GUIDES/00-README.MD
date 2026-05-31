@@ -11,7 +11,7 @@ Do not treat sandbox success as launch approval. Every money movement path must 
 | `01-AUTH-SUPABASE.MD` | Supabase project, auth keys, JWT mode, OTP/SMS, web and mobile auth config |
 | `02-DATABASE-REDIS.MD` | PostgreSQL, Prisma migrations, Redis, backups, TLS, operational checks |
 | `03-PAYMENTS-FUNDING.MD` | Card/payment-link funding through Paystack or Flutterwave and webhook crediting |
-| `04-VIRTUAL-ACCOUNTS.MD` | Paystack-first dedicated virtual accounts and deposit reconciliation |
+| `04-VIRTUAL-ACCOUNTS.MD` | Historical virtual-account planning; current active path is Monnify-only in guide 13 |
 | `05-WITHDRAWALS.MD` | Beneficiaries, bank resolution, payouts, reversals, and admin verification |
 | `06-INTERNAL-TRANSFERS.MD` | TRUSTPAY user-to-user wallet transfers and ledger invariants |
 | `07-EXCHANGE.MD` | NGN/GHS exchange, rate feeds, quotes, execution, and limits |
@@ -19,6 +19,9 @@ Do not treat sandbox success as launch approval. Every money movement path must 
 | `09-ADMIN-OPS.MD` | Admin launch controls, review queues, permissions, audit and support operations |
 | `10-RECONCILIATION.MD` | Daily provider, ledger, wallet, webhook, and settlement reconciliation |
 | `11-MOBILE-WEB-DEPLOYMENT.MD` | Backend, web, admin, Flutter, stores, monitoring, rollback |
+| `12-TEST-LINT-MOCK-TYPING.MD` | Test/lint status and remaining typed-mock cleanup |
+| `13-MONNIFY-ONLY-VIRTUAL-ACCOUNTS-STATUS.MD` | Current Monnify-only NGN virtual-account decision and activation checklist |
+| `14-MANUAL-EXCHANGE-RECEIPT-FLOW.MD` | Manual and Monnify-verified exchange deposit review flow |
 
 ## Production Env Groups
 
@@ -35,6 +38,7 @@ Keep live values in the deployment secret manager, not in committed files. Use d
 | OTP/SMS | `OTP_EXPIRES_IN`, `OTP_LENGTH`, `OTP_DEV_CODE`, `SMS_PROVIDER`, `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_PHONE_NUMBER` |
 | Paystack | `PAYSTACK_SECRET_KEY`, `PAYSTACK_PUBLIC_KEY`, `PAYSTACK_WEBHOOK_URL`, `PAYSTACK_WEBHOOK_SECRET`, `PAYSTACK_DVA_PREFERRED_BANK`, `PAYSTACK_TRANSFER_SOURCE` |
 | Flutterwave | `FLUTTERWAVE_SECRET_KEY`, `FLUTTERWAVE_PUBLIC_KEY`, `FLUTTERWAVE_ENCRYPTION_KEY`, `FLUTTERWAVE_SECRET_HASH`, `FLUTTERWAVE_WEBHOOK_URL` |
+| Monnify | `MONNIFY_BASE_URL`, `MONNIFY_API_KEY`, `MONNIFY_SECRET_KEY`, `MONNIFY_CONTRACT_CODE`, `MONNIFY_WEBHOOK_SECRET`, `MONNIFY_WEBHOOK_URL`, `MONNIFY_EXCHANGE_COLLECTION_ACCOUNT_NUMBER`, `MONNIFY_GET_ALL_AVAILABLE_BANKS`, `MONNIFY_RESTRICT_PAYMENT_SOURCE` |
 | Banking flags | `BANKING_ENABLED`, `VIRTUAL_ACCOUNTS_ENABLED`, `WITHDRAWALS_ENABLED`, `BANKING_PROVIDER_PRIMARY`, `BANKING_PROVIDER_FALLBACK`, `SUPPORTED_BANKING_CURRENCIES`, `BANKING_SANDBOX_MODE` |
 | Privacy | `PII_ENCRYPTION_KEY`, `PII_KEY_VERSION`, `BANK_ACCOUNT_ENCRYPTION_KEY` |
 | Jobs | `RECONCILIATION_CRON`, `WEBHOOK_QUEUE_NAME`, `DLQ_NAME`, `ADMIN_REVIEW_WEBHOOK_ALERT_CHANNEL` |
@@ -51,6 +55,18 @@ Keep live values in the deployment secret manager, not in committed files. Use d
 6. Switch to live keys in the production secret manager only after provider approval and compliance sign-off.
 7. Set `BANKING_SANDBOX_MODE=false`, then enable only the approved feature flag.
 8. Run a low-value live smoke test and reconcile it before increasing limits.
+
+## Current Active Banking Decision
+
+As of 2026-05-22, TRUSTPAY's active virtual-account path is:
+
+- Monnify only.
+- NGN only.
+- No Nomba.
+- No Paystack dedicated virtual accounts.
+- Admin review required before Monnify-verified NGN exchange deposits credit GHS.
+
+Treat older Paystack-first virtual-account notes as historical planning unless a later signed product decision updates this direction.
 
 ## Global Verification Checklist
 

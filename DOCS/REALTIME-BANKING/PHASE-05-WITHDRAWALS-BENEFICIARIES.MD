@@ -72,6 +72,6 @@ Remaining blockers before launch:
 - Add signed Paystack `transfer.success`, `transfer.failed`, and `transfer.reversed` webhook handling with provider-event idempotency.
 - Add Flutterwave transfer webhook/status verification handling before enabling Flutterwave payout fallback.
 - Make withdrawal reversal exactly-once at the database level for duplicate webhooks/admin retries.
-- Add durable DB-backed withdrawal idempotency beyond Redis response caching.
+- Harden withdrawal idempotency recovery for provider-side effects that may succeed before local completion is recorded.
 - Add admin pending-withdrawal queue, provider verify/retry actions, hold/release controls, and `AuditLog` writes.
 - Add E2E coverage for beneficiary ownership, deleted-beneficiary rejection, duplicate withdrawal keys, timeout-as-pending, and duplicate webhook reversal replay.

@@ -13,6 +13,9 @@ import '../../features/home/screens/dashboard_detail_screen.dart';
 import '../../features/home/screens/home_task_screen.dart';
 import '../../features/home/screens/money_action_screen.dart';
 import '../../features/security/screens/transaction_security_screen.dart';
+import '../../features/wallet/screens/wallet_detail_screen.dart';
+import '../../features/wallet/screens/receive_money_screen.dart';
+import '../../features/transactions/screens/transaction_detail_screen.dart';
 
 // ─── ROUTE NAMES ──────────────────────────────────────────────────────────────
 class AppRoutes {
@@ -37,12 +40,28 @@ class AppRoutes {
   static const wallets = '/wallets';
   static const virtualAccount = '/virtual-account';
   static const activity = '/activity';
+  static const vtuOrder = '/vtu/order/:reference';
   static const more = '/more';
   static const profileAccount = '/profile/account';
   static const profileAppearance = '/profile/appearance';
   static const profileSecurity = '/profile/security';
   static const transactionSecurity = '/profile/security/transaction-security';
   static const profileSupport = '/profile/support';
+  static const walletDetail = '/wallet/:currency';
+  static const receiveMoney = '/receive-money';
+  static const transactionDetail = '/transaction/:reference';
+
+  static String vtuOrderFor(String reference) {
+    return '/vtu/order/${Uri.encodeComponent(reference)}';
+  }
+
+  static String walletDetailFor(String currency) {
+    return '/wallet/${Uri.encodeComponent(currency)}';
+  }
+
+  static String transactionDetailFor(String reference) {
+    return '/transaction/${Uri.encodeComponent(reference)}';
+  }
 }
 
 // ─── ROUTER ───────────────────────────────────────────────────────────────────
@@ -195,6 +214,17 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         ),
       ),
       GoRoute(
+        path: AppRoutes.vtuOrder,
+        pageBuilder: (context, state) => _slideTransition(
+          state,
+          VtuOrderDetailScreen(
+            reference: Uri.decodeComponent(
+              state.pathParameters['reference'] ?? '',
+            ),
+          ),
+        ),
+      ),
+      GoRoute(
         path: AppRoutes.more,
         pageBuilder: (context, state) => _slideTransition(
           state,
@@ -240,6 +270,35 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         pageBuilder: (context, state) => _slideTransition(
           state,
           const ForgotPasswordScreen(),
+        ),
+      ),
+      GoRoute(
+        path: AppRoutes.walletDetail,
+        pageBuilder: (context, state) => _slideTransition(
+          state,
+          WalletDetailScreen(
+            currency: Uri.decodeComponent(
+              state.pathParameters['currency'] ?? 'NGN',
+            ),
+          ),
+        ),
+      ),
+      GoRoute(
+        path: AppRoutes.receiveMoney,
+        pageBuilder: (context, state) => _slideTransition(
+          state,
+          const ReceiveMoneyScreen(),
+        ),
+      ),
+      GoRoute(
+        path: AppRoutes.transactionDetail,
+        pageBuilder: (context, state) => _slideTransition(
+          state,
+          TransactionDetailScreen(
+            reference: Uri.decodeComponent(
+              state.pathParameters['reference'] ?? '',
+            ),
+          ),
         ),
       ),
     ],

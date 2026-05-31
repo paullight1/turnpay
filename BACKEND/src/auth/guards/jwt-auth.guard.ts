@@ -4,8 +4,8 @@ import {
   ForbiddenException,
   Injectable,
   UnauthorizedException,
-} from '@nestjs/common';
-import { SupabaseService } from '../../supabase/supabase.service';
+} from "@nestjs/common";
+import { SupabaseService } from "../../supabase/supabase.service";
 
 type RequestWithUser = {
   headers: {
@@ -26,20 +26,20 @@ export class JwtAuthGuard implements CanActivate {
     const request = context.switchToHttp().getRequest<RequestWithUser>();
     const authHeader = request.headers.authorization;
 
-    if (!authHeader?.startsWith('Bearer ')) {
-      throw new UnauthorizedException('Missing bearer token');
+    if (!authHeader?.startsWith("Bearer ")) {
+      throw new UnauthorizedException("Missing bearer token");
     }
 
-    const accessToken = authHeader.slice('Bearer '.length).trim();
+    const accessToken = authHeader.slice("Bearer ".length).trim();
     if (!accessToken) {
-      throw new UnauthorizedException('Missing bearer token');
+      throw new UnauthorizedException("Missing bearer token");
     }
 
     const supabaseUser = await this.supabaseService.verifyToken(accessToken);
     const user = await this.supabaseService.syncUser(supabaseUser);
 
     if (user.isSuspended) {
-      throw new ForbiddenException('Account suspended');
+      throw new ForbiddenException("Account suspended");
     }
 
     request.user = {

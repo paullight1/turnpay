@@ -1,13 +1,13 @@
-import { Injectable } from '@nestjs/common';
-import { HttpService } from '@nestjs/axios';
-import { ConfigService } from '@nestjs/config';
-import { firstValueFrom } from 'rxjs';
-import { createHmac } from 'crypto';
-import { PinoLogger } from 'nestjs-pino';
+import { Injectable } from "@nestjs/common";
+import { HttpService } from "@nestjs/axios";
+import { ConfigService } from "@nestjs/config";
+import { firstValueFrom } from "rxjs";
+import { createHmac } from "crypto";
+import { PinoLogger } from "nestjs-pino";
 
 @Injectable()
 export class FlutterwaveProvider {
-  private readonly baseUrl = 'https://api.flutterwave.com/v3';
+  private readonly baseUrl = "https://api.flutterwave.com/v3";
   private readonly secretKey: string;
 
   constructor(
@@ -16,19 +16,19 @@ export class FlutterwaveProvider {
     private readonly logger: PinoLogger,
   ) {
     this.secretKey = this.configService.getOrThrow<string>(
-      'FLUTTERWAVE_SECRET_KEY',
+      "FLUTTERWAVE_SECRET_KEY",
     );
   }
 
   private get headers() {
     return {
       Authorization: `Bearer ${this.secretKey}`,
-      'Content-Type': 'application/json',
+      "Content-Type": "application/json",
     };
   }
 
   async initializePayment(params: {
-    amount: number;
+    amount: string;
     email: string;
     currency: string;
     txRef: string;
@@ -39,7 +39,7 @@ export class FlutterwaveProvider {
       amount: params.amount,
       currency: params.currency.toUpperCase(),
       redirect_url:
-        params.redirectUrl || 'https://trustpay.com/payment/callback',
+        params.redirectUrl || "https://trustpay.com/payment/callback",
       customer: { email: params.email },
     };
 
@@ -60,7 +60,7 @@ export class FlutterwaveProvider {
         amount: params.amount,
         currency: params.currency,
       },
-      'Flutterwave payment initialized',
+      "Flutterwave payment initialized",
     );
 
     return {
@@ -90,7 +90,7 @@ export class FlutterwaveProvider {
   }
 
   async initiateTransfer(params: {
-    amount: number;
+    amount: string;
     bankCode: string;
     accountNumber: string;
     currency: string;
@@ -102,7 +102,7 @@ export class FlutterwaveProvider {
       amount: params.amount,
       currency: params.currency.toUpperCase(),
       reference: params.reference,
-      narration: 'TrustPay withdrawal',
+      narration: "TrustPay withdrawal",
     };
 
     const response = await firstValueFrom(
@@ -119,7 +119,7 @@ export class FlutterwaveProvider {
 
     this.logger.info(
       { reference: params.reference, amount: params.amount },
-      'Flutterwave transfer initiated',
+      "Flutterwave transfer initiated",
     );
 
     return {
@@ -151,9 +151,9 @@ export class FlutterwaveProvider {
   }
 
   verifySignature(payload: string, signature: string): boolean {
-    const hash = createHmac('sha256', this.secretKey)
+    const hash = createHmac("sha256", this.secretKey)
       .update(payload)
-      .digest('hex');
+      .digest("hex");
     return hash === signature;
   }
 }

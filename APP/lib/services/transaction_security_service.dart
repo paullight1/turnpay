@@ -9,31 +9,30 @@ import 'package:local_auth/local_auth.dart';
 class TransactionSecurityConfig {
   final bool hasPin;
   final int pinLength;
-  final bool faceIdEnabled;
-  final bool fingerprintEnabled;
+  final bool biometricEnabled;
   final bool canUseBiometrics;
-  final bool hasFaceId;
-  final bool hasFingerprint;
+  final bool hasBiometric;
+  final String biometricLabel;
 
   const TransactionSecurityConfig({
     required this.hasPin,
     required this.pinLength,
-    required this.faceIdEnabled,
-    required this.fingerprintEnabled,
+    required this.biometricEnabled,
     required this.canUseBiometrics,
-    required this.hasFaceId,
-    required this.hasFingerprint,
+    required this.hasBiometric,
+    required this.biometricLabel,
   });
 
   bool get shouldOfferBiometrics =>
-      canUseBiometrics &&
-      ((hasFaceId && faceIdEnabled) || (hasFingerprint && fingerprintEnabled));
+      canUseBiometrics && hasBiometric && biometricEnabled;
 }
 
 class TransactionSecurityService {
   static const _storage = FlutterSecureStorage();
   static const _pinHashKey = 'trustpay_tx_pin_hash';
+  static const _pinValueKey = 'trustpay_tx_pin_value';
   static const _pinLengthKey = 'trustpay_tx_pin_length';
+  static const _biometricKey = 'trustpay_tx_biometric_enabled';
   static const _faceIdKey = 'trustpay_tx_face_id_enabled';
   static const _fingerprintKey = 'trustpay_tx_fingerprint_enabled';
   static const _pinFailedAttemptsKey = 'trustpay_tx_pin_failed_attempts';
@@ -52,46 +51,46 @@ class TransactionSecurityService {
       return TransactionSecurityConfig(
         hasPin: pinHash != null && pinHash.isNotEmpty,
         pinLength: pinLength,
-        faceIdEnabled: false,
-        fingerprintEnabled: false,
+        biometricEnabled: false,
         canUseBiometrics: false,
-        hasFaceId: false,
-        hasFingerprint: false,
+        hasBiometric: false,
+        biometricLabel: 'Biometric approval',
       );
     }
 
     bool canAuthenticate = false;
-    bool hasFaceId = false;
-    bool hasFingerprint = false;
+    bool hasBiometric = false;
+    String biometricLabel = 'Biometric approval';
 
     try {
       canAuthenticate = await _localAuth.canCheckBiometrics ||
           await _localAuth.isDeviceSupported();
       final available = await _localAuth.getAvailableBiometrics();
-      hasFaceId = available.contains(BiometricType.face) ||
-          available.contains(BiometricType.strong);
-      hasFingerprint = available.contains(BiometricType.fingerprint) ||
-          available.contains(BiometricType.weak);
+      hasBiometric = canAuthenticate && available.isNotEmpty;
+      biometricLabel = _biometricLabel(available);
     } catch (_) {
       canAuthenticate = false;
     }
 
+    final biometricEnabled =
+        (await _storage.read(key: _biometricKey)) == 'true' ||
+            (await _storage.read(key: _faceIdKey)) == 'true' ||
+            (await _storage.read(key: _fingerprintKey)) == 'true';
+
     return TransactionSecurityConfig(
       hasPin: pinHash != null && pinHash.isNotEmpty,
       pinLength: pinLength,
-      faceIdEnabled: (await _storage.read(key: _faceIdKey)) == 'true',
-      fingerprintEnabled: (await _storage.read(key: _fingerprintKey)) == 'true',
+      biometricEnabled: biometricEnabled,
       canUseBiometrics: canAuthenticate,
-      hasFaceId: hasFaceId,
-      hasFingerprint: hasFingerprint,
+      hasBiometric: hasBiometric,
+      biometricLabel: biometricLabel,
     );
   }
 
   Future<void> savePin(String pin, {required int pinLength}) async {
-    // Temporary local gate only: the backend should eventually verify
-    // transaction PINs server-side before any debit/money mutation is accepted.
     final digest = sha256.convert(utf8.encode(pin)).toString();
     await _storage.write(key: _pinHashKey, value: digest);
+    await _storage.write(key: _pinValueKey, value: pin);
     await _storage.write(key: _pinLengthKey, value: '$pinLength');
     await _clearPinFailures();
   }
@@ -143,12 +142,10 @@ class TransactionSecurityService {
     );
   }
 
-  Future<void> setFaceIdEnabled(bool enabled) async {
-    await _storage.write(key: _faceIdKey, value: '$enabled');
-  }
-
-  Future<void> setFingerprintEnabled(bool enabled) async {
-    await _storage.write(key: _fingerprintKey, value: '$enabled');
+  Future<void> setBiometricEnabled(bool enabled) async {
+    await _storage.write(key: _biometricKey, value: '$enabled');
+    await _storage.delete(key: _faceIdKey);
+    await _storage.delete(key: _fingerprintKey);
   }
 
   Future<bool> authenticateBiometric({
@@ -169,6 +166,22 @@ class TransactionSecurityService {
     }
   }
 
+  Future<String?> unlockPinWithBiometric({
+    required String reason,
+  }) async {
+    final approved = await authenticateBiometric(reason: reason);
+    if (!approved) {
+      return null;
+    }
+
+    final pin = await _storage.read(key: _pinValueKey);
+    if (pin == null || !RegExp(r'^\d{4,6}$').hasMatch(pin)) {
+      return null;
+    }
+
+    return pin;
+  }
+
   Future<DateTime?> _readLockedUntil() async {
     final raw = await _storage.read(key: _pinLockedUntilKey);
     if (raw == null || raw.isEmpty) return null;
@@ -178,6 +191,19 @@ class TransactionSecurityService {
   Future<void> _clearPinFailures() async {
     await _storage.delete(key: _pinFailedAttemptsKey);
     await _storage.delete(key: _pinLockedUntilKey);
+  }
+
+  String _biometricLabel(List<BiometricType> available) {
+    if (defaultTargetPlatform == TargetPlatform.iOS) {
+      return 'Face ID';
+    }
+    if (available.contains(BiometricType.face)) {
+      return 'Face ID';
+    }
+    if (available.contains(BiometricType.fingerprint)) {
+      return 'Fingerprint';
+    }
+    return 'Biometric approval';
   }
 }
 

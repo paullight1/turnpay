@@ -6,11 +6,9 @@ import {
   Cable,
   CircleDollarSign,
   Clock3,
-  CreditCard,
   FileCheck2,
   Headphones,
   IdCard,
-  Landmark,
   LockKeyhole,
   MessageSquareText,
   Radar,
@@ -31,24 +29,43 @@ export type MarketingItem = {
 };
 
 export const navItems = [
-  { label: "Features", href: "/features" },
-  { label: "Pricing", href: "/pricing" },
-  { label: "Security", href: "/security" },
-  { label: "Company", href: "/company" },
-  { label: "Support", href: "/support" },
+  { label: "Download", href: "/download" },
+  { label: "About", href: "/about" },
+  { label: "Contact Us", href: "/support" },
 ];
+
+export const marketingImages = {
+  mobilePayment: {
+    src: "https://images.unsplash.com/photo-1743696398209-6b693d480862?auto=format&fit=crop&q=80&w=1800",
+    alt: "A mobile payment being made with a smartphone",
+    credit: "Photo by Vagaro on Unsplash",
+    href: "https://unsplash.com/photos/mobile-payment-is-being-made-with-a-smartphone-cUxf_E0824k",
+  },
+  exchangeApp: {
+    src: "https://images.unsplash.com/photo-1761198879998-6bb91fd6797c?auto=format&fit=crop&q=80&w=1600",
+    alt: "A hand holding a phone with a mobile service app",
+    credit: "Photo by Airalo on Unsplash",
+    href: "https://unsplash.com/photos/hand-holding-a-smartphone-displaying-currency-exchange-rates-DqE4GfQMVxk",
+  },
+  dataApp: {
+    src: "https://images.unsplash.com/photo-1760532081949-d4b9b707b33f?auto=format&fit=crop&q=80&w=1600",
+    alt: "A phone showing mobile data plans",
+    credit: "Photo by Airalo on Unsplash",
+    href: "https://unsplash.com/photos/person-holding-a-smartphone-with-currency-exchange-app-vSb7TaP2EWs",
+  },
+} as const;
 
 export const heroStats = [
   { label: "Supported Currencies", value: "NGN + GHS" },
   { label: "Wallet Availability", value: "24/7" },
-  { label: "Payment Categories", value: "4+" },
+  { label: "Core Services", value: "2" },
 ];
 
 export const liveRails = [
   "Accra to Lagos exchange settled",
   "MTN data bundle delivered",
-  "DStv bill queued for receipt",
-  "Wallet funding verified",
+  "GHS to NGN quote created",
+  "Electricity token delivered",
   "Airtime top-up completed",
 ];
 
@@ -56,87 +73,75 @@ export const productFeatures: MarketingItem[] = [
   {
     title: "Multi-Currency Wallets",
     description:
-      "Hold dedicated NGN and GHS balances with clear available balance, transaction references, and receipts.",
+      "Keep NGN and GHS balances in one account.",
     icon: WalletCards,
   },
   {
     title: "Currency Exchange",
     description:
-      "Convert between Ghanaian cedis and Nigerian naira with visible rates before users confirm.",
+      "Swap cedis and naira after you see the rate.",
     icon: ArrowLeftRight,
   },
   {
     title: "Airtime & Data",
     description:
-      "Buy mobile airtime and data bundles from one wallet flow without switching providers.",
+      "Buy airtime and data from the same wallet.",
     icon: Smartphone,
   },
   {
     title: "Cable & Utilities",
     description:
-      "Pay cable TV and electricity bills from the same balance used for everyday transfers.",
+      "Pay TV and power bills without changing apps.",
     icon: Cable,
   },
   {
     title: "Receipts & Timeline",
     description:
-      "Give users a searchable activity trail with status, reference, amount, and currency context.",
+      "See status, amount, date, and reference in one list.",
     icon: ReceiptText,
   },
   {
     title: "Risk-Aware Controls",
     description:
-      "Shape every critical action around validation, idempotency, audit trails, and protected routes.",
+      "Check risky actions before money moves.",
     icon: ShieldCheck,
   },
 ];
 
 export const serviceRows = [
   {
-    title: "Fund Wallet",
-    description: "Card, bank, and provider-ready wallet funding flows.",
-    icon: CreditCard,
-    metric: "Fast Funding",
-  },
-  {
     title: "Exchange",
-    description: "Two-way NGN and GHS exchange with quoted rates.",
+    description: "Swap NGN and GHS with a clear quote.",
     icon: CircleDollarSign,
-    metric: "Clear Rates",
+    metric: "Main Service",
   },
   {
     title: "VTU",
-    description: "Airtime, data, cable, and electricity payments.",
+    description: "Airtime, data, TV, and power payments.",
     icon: Zap,
-    metric: "Instant Orders",
-  },
-  {
-    title: "Withdraw",
-    description: "Move funds back to verified bank destinations.",
-    icon: Landmark,
-    metric: "Verified Payouts",
+    metric: "Utility Service",
   },
 ];
 
 export const corridorSteps = [
   {
     title: "Create Your Wallet",
-    description: "Register, verify your phone, and provision NGN and GHS balances.",
+    description: "Sign up and get NGN and GHS balances.",
     icon: IdCard,
   },
   {
     title: "Choose a Service",
-    description: "Fund, exchange, withdraw, or buy digital services from the same dashboard.",
+    description: "Exchange money or pay a VTU bill.",
     icon: Sparkles,
   },
   {
     title: "Confirm With Clarity",
-    description: "Review fees, amount, destination, and reference before every transaction.",
+    description: "Check fee, amount, and destination first.",
     icon: FileCheck2,
   },
   {
     title: "Track the Outcome",
-    description: "Follow pending, successful, failed, and reversed transactions in one timeline.",
+    description: "See if it is pending, done, failed, or reversed.",
     icon: Radar,
   },
 ];
@@ -145,66 +150,78 @@ export const securityControls: MarketingItem[] = [
   {
     title: "Short-Lived Sessions",
     description:
-      "Access and refresh flows are designed for rotation, expiry, and device visibility.",
+      "Sessions expire so old access cannot stay open.",
     icon: Clock3,
   },
   {
     title: "Protected Financial Actions",
     description:
-      "Sensitive routes and wallet operations are designed to be guarded and rate limited.",
+      "Wallet actions use checks and limits.",
     icon: LockKeyhole,
   },
   {
     title: "Transaction Idempotency",
     description:
-      "Repeated requests can return the original result instead of creating duplicate charges.",
+      "Retries should not create duplicate charges.",
     icon: BadgeCheck,
   },
   {
     title: "Audit-Ready Records",
     description:
-      "Financial events and admin actions are structured for traceability and investigation.",
+      "Money and admin actions keep a clear trail.",
     icon: FileCheck2,
   },
 ];
 
 export const pricingPlans = [
   {
-    title: "Starter",
-    description: "For personal wallets and early users testing the corridor.",
+    title: "Basic",
+    description: "For simple wallet use and everyday payments.",
     price: "Free",
-    points: ["NGN and GHS wallets", "Airtime and data top-ups", "Transaction history"],
+    points: [
+      "Create NGN and GHS wallets",
+      "Buy airtime and data",
+      "Keep payment receipts",
+    ],
   },
   {
-    title: "Everyday",
-    description: "For active users sending, exchanging, and paying bills often.",
-    price: "Low Fee",
-    points: ["Transparent exchange quote", "Bill payment receipts", "Priority support queue"],
+    title: "Pro",
+    description: "For frequent exchange and bill payments.",
+    price: "Pay as you go",
+    points: [
+      "Clear exchange quotes",
+      "Withdrawal status tracking",
+      "Priority transaction support",
+    ],
   },
   {
     title: "Business",
-    description: "For merchants, teams, and high-volume wallet operations.",
+    description: "For teams that need stronger money operations.",
     price: "Custom",
-    points: ["Higher review limits", "Admin reporting", "Dedicated onboarding"],
+    points: [
+      "Higher-volume support",
+      "Operational reports",
+      "Business onboarding help",
+    ],
   },
 ];
 
 export const testimonials = [
   {
     quote:
-      "The product finally puts exchange, bill payments, and wallet activity in one clean workflow.",
+      "I can exchange, pay bills, and see wallet activity in one place.",
     name: "Nana K.",
     role: "Small Business Owner",
   },
   {
     quote:
-      "The receipt trail matters. I can see references, statuses, and what happened without guessing.",
+      "The receipts help. I can see what happened without guessing.",
     name: "Chidinma A.",
     role: "Frequent Sender",
   },
   {
     quote:
-      "It feels built for everyday West African payments rather than a generic wallet clone.",
+      "It feels made for the payments we do every day.",
     name: "Kojo M.",
     role: "Operations Lead",
   },
@@ -213,22 +230,22 @@ export const testimonials = [
 export const supportChannels: MarketingItem[] = [
   {
     title: "Account Help",
-    description: "Get help with login, verification, wallets, and profile changes.",
+    description: "Get help with login, ID checks, wallets, and profile changes.",
     icon: Headphones,
   },
   {
     title: "Transaction Checks",
-    description: "Use references and receipts to trace pending or failed transactions.",
+    description: "Use a reference to check a pending or failed payment.",
     icon: ReceiptText,
   },
   {
     title: "Business Support",
-    description: "Talk through onboarding, limits, reporting, and operational workflows.",
+    description: "Ask about setup, limits, reports, and team use.",
     icon: Building2,
   },
   {
     title: "Product Questions",
-    description: "Understand pricing, supported services, and upcoming payment providers.",
+    description: "Learn about exchange, VTU, and payment providers.",
     icon: MessageSquareText,
   },
 ];
@@ -237,19 +254,19 @@ export const companyValues: MarketingItem[] = [
   {
     title: "Built for the Corridor",
     description:
-      "TrustPay focuses on practical payment habits across Ghana and Nigeria first.",
+      "TrustPay starts with Ghana and Nigeria money needs.",
     icon: UsersRound,
   },
   {
     title: "Clear Money Movement",
     description:
-      "Users should always know the source balance, destination, rate, fee, and status.",
+      "Users should see balance, rate, fee, and status.",
     icon: TrendingUp,
   },
   {
     title: "Operational Discipline",
     description:
-      "Financial flows are designed around validation, auditability, and failure recovery.",
+      "Money flows need checks, records, and clear fixes.",
     icon: ShieldCheck,
   },
 ];
@@ -258,22 +275,22 @@ export const faqItems = [
   {
     question: "Which currencies does TrustPay support?",
     answer:
-      "The current product focus is NGN and GHS wallets, exchange, wallet funding, withdrawals, and VTU-style payments.",
+      "TrustPay supports NGN and GHS wallets, exchange, funding, withdrawals, and bill payments.",
   },
   {
     question: "Can I pay bills from the same wallet?",
     answer:
-      "Yes. The public product flow is built around airtime, data, cable TV, and electricity payments from wallet balances.",
+      "Yes. You can pay airtime, data, TV, and power bills from your wallet.",
   },
   {
     question: "How does TrustPay prevent duplicate payments?",
     answer:
-      "Payment-style actions are designed to use unique request references so retries can be recognized safely.",
+      "Each payment gets a unique reference. That helps retries stay safe.",
   },
   {
     question: "Is this for personal or business use?",
     answer:
-      "The first experience supports personal wallets, with business onboarding and reporting positioned for higher-volume users.",
+      "It starts with personal wallets. Business setup is for teams and larger use.",
   },
 ];
 
@@ -281,16 +298,14 @@ export const footerGroups = [
   {
     title: "Product",
     links: [
-      { label: "Features", href: "/features" },
-      { label: "Pricing", href: "/pricing" },
-      { label: "Security", href: "/security" },
+      { label: "Download", href: "/download" },
     ],
   },
   {
     title: "Company",
     links: [
-      { label: "About", href: "/company" },
-      { label: "Support", href: "/support" },
+      { label: "About", href: "/about" },
+      { label: "Contact Us", href: "/support" },
       { label: "Dashboard", href: "/dashboard" },
     ],
   },

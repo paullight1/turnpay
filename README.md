@@ -31,6 +31,29 @@
 
 ---
 
+## Current Implementation Status
+
+Date updated: 2026-05-22
+
+TRUSTPAY is in active development and is **not ready for real-money launch yet**. The backend, web/admin, and Flutter app foundations are implemented, but production activation still requires staging migrations, live secrets, Supabase storage buckets, Monnify KYB/credentials, HTTPS webhook registration, sandbox/live provider validation, reconciliation checks, and launch sign-off.
+
+Current banking direction:
+
+- Monnify only for Nigerian NGN virtual accounts.
+- Nomba is not active.
+- Paystack dedicated virtual accounts are not active.
+- Paystack/Flutterwave provider code exists, but the active virtual-account path is Monnify.
+- Monnify-verified NGN exchange deposits require admin approval before GHS wallet credit.
+
+Primary status docs:
+
+- `DOCS/TASKS.MD`
+- `DOCS/CODEBASE-STATUS-REVIEW.MD`
+- `DOCS/PRODUCTION-GUIDES/13-MONNIFY-ONLY-VIRTUAL-ACCOUNTS-STATUS.MD`
+- `DOCS/PRODUCTION-GUIDES/14-MANUAL-EXCHANGE-RECEIPT-FLOW.MD`
+
+---
+
 ## 📸 App Screenshots
 
 <p align="center">
@@ -66,10 +89,11 @@
 
 ### 💰 Wallet & Payments
 - [x] Multi-currency wallet (NGN, GHS)
-- [x] Fund wallet via Flutterwave / Paystack
+- [x] Receive NGN through Monnify virtual accounts
+- [x] Admin-reviewed NGN to GHS exchange deposit flow
 - [x] Bank transfer withdrawals
 - [x] Secure balance transactions (no negative balances)
-- [x] Real-time transaction notifications
+- [ ] Production transaction notifications
 
 ### 🔐 Security & Auth
 - [x] JWT authentication (15m access / 7d refresh tokens)
@@ -164,7 +188,7 @@ graph TB
 | **Database** | [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-316192?style=flat-square&logo=postgresql&logoColor=white)](https://postgresql.org) | ACID compliance for financial data |
 | **Cache** | [![Redis](https://img.shields.io/badge/Redis-DC382D?style=flat-square&logo=redis&logoColor=white)](https://redis.io) | Fast rate caching, session storage |
 | **Auth** | JWT + OTP | Secure, industry standard |
-| **Payments** | Flutterwave / Paystack | African payment infrastructure |
+| **Payments** | Monnify active for NGN virtual accounts; Paystack/Flutterwave code present but not active DVA path | African payment infrastructure |
 | **CI/CD** | [![GitHub Actions](https://img.shields.io/badge/GitHub_Actions-2088FF?style=flat-square&logo=github-actions&logoColor=white)](https://github.com/features/actions) | Automated testing & deployment |
 
 ---

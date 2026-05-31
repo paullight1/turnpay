@@ -19,7 +19,7 @@ export function SectionHeading({
   return (
     <div
       className={cn(
-        "flex max-w-3xl flex-col gap-3",
+        "flex max-w-3xl flex-col gap-3 animate-trustpay-reveal-up",
         align === "center" && "mx-auto items-center text-center",
         className
       )}

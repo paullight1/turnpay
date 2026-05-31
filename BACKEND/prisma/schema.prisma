@@ -19,12 +19,33 @@ enum KYCStatus {
   REJECTED
 }
 
+enum KYCTier {
+  TIER_0
+  TIER_1
+  TIER_2
+  TIER_3
+}
+
 enum KYCType {
   BVN
   NIN
   PASSPORT
   DRIVERS_LICENSE
   VOTERS_CARD
+}
+
+enum KycVerificationProvider {
+  MANUAL_REVIEW
+  NIBSS
+  MONNIFY
+}
+
+enum KycVerificationStatus {
+  PENDING
+  REVIEW_REQUIRED
+  VERIFIED
+  REJECTED
+  FAILED
 }
 
 enum DisputeStatus {
@@ -58,9 +79,28 @@ enum WalletCurrency {
   GHS
 }
 
+enum ExchangeReceiptStatus {
+  SUBMITTED
+  UNDER_REVIEW
+  APPROVED
+  CREDITED
+  REJECTED
+  NEEDS_MORE_INFO
+}
+
+enum ExchangePayoutStatus {
+  PENDING_APPROVAL
+  APPROVED
+  PROCESSING
+  SENT
+  FAILED
+  REVERSED
+}
+
 enum PaymentProvider {
   PAYSTACK
   FLUTTERWAVE
+  MONNIFY
 }
 
 enum VirtualAccountStatus {
@@ -91,62 +131,108 @@ enum TransferAttemptStatus {
   REVERSED
 }
 
-model User {
-  id                  String          @id @default(uuid())
-  email               String          @unique
-  phone               String          @unique
-  fullName            String?
-  password            String
-  role                UserRole        @default(USER)
-  kycStatus           KYCStatus       @default(PENDING)
-  dailyWithdrawLimit  Decimal         @default(500000) @db.Decimal(15, 2)
-  monthlyWithdrawLimit Decimal        @default(5000000) @db.Decimal(15, 2)
-  dailyWithdrawn      Decimal         @default(0) @db.Decimal(15, 2)
-  monthlyWithdrawn    Decimal         @default(0) @db.Decimal(15, 2)
-  limitResetDate      DateTime?
-  isSuspended         Boolean         @default(false)
-  failedAttempts      Int             @default(0)
-  lockedUntil         DateTime?
-  createdAt           DateTime        @default(now())
-  updatedAt           DateTime        @updatedAt
+enum InternalTransferAttemptStatus {
+  SUCCESS
+  FAILED
+}
 
-  wallets             Wallet[]
-  transactions        Transaction[]
-  refreshTokens       RefreshToken[]
-  kycDocuments        KycDocument[]
-  disputes            Dispute[]
-  virtualAccounts     VirtualAccount[]
-  bankAccounts        BankAccount[]
-  auditLogs           AuditLog[]
+enum TransferLimitPeriod {
+  DAILY
+  MONTHLY
+}
+
+enum VtuOrderProvider {
+  GENERIC
+  VTPASS
+  RELOADLY
+}
+
+enum VtuOrderScope {
+  LOCAL
+  INTERNATIONAL
+}
+
+enum VtuOrderStatus {
+  PENDING
+  PROCESSING
+  SUCCESS
+  FAILED
+  REVERSED
+  UNKNOWN
+}
+
+model User {
+  id                   String    @id @default(uuid())
+  email                String    @unique
+  phone                String    @unique
+  fullName             String?
+  password             String
+  role                 UserRole  @default(USER)
+  kycStatus            KYCStatus @default(PENDING)
+  kycTier              KYCTier   @default(TIER_0)
+  dailyWithdrawLimit   Decimal   @default(500000) @db.Decimal(15, 2)
+  monthlyWithdrawLimit Decimal   @default(5000000) @db.Decimal(15, 2)
+  dailyWithdrawn       Decimal   @default(0) @db.Decimal(15, 2)
+  monthlyWithdrawn     Decimal   @default(0) @db.Decimal(15, 2)
+  limitResetDate       DateTime?
+  isSuspended          Boolean   @default(false)
+  failedAttempts       Int       @default(0)
+  lockedUntil          DateTime?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  wallets                    Wallet[]
+  transactions               Transaction[]
+  internalTransferAttempts   InternalTransferAttempt[]
+  internalTransferLimitUsage InternalTransferLimitUsage[]
+  refreshTokens              RefreshToken[]
+  kycDocuments               KycDocument[]
+  kycVerifications           KycVerification[]
+  disputes                   Dispute[]
+  virtualAccounts            VirtualAccount[]
+  bankAccounts               BankAccount[]
+  auditLogs                  AuditLog[]
+  exchangeReceipts           ExchangeReceipt[]
+  exchangePayouts           ExchangePayout[]
+  rateOverridesRequested    RateOverride[]     @relation("RequestedOverrides")
+  rateOverridesApproved     RateOverride[]     @relation("ApprovedOverrides")
+  rateAlerts                RateAlert[]
 
   @@map("users")
 }
 
 model RefreshToken {
-  id        String   @id @default(uuid())
-  userId    String
-  tokenHash String
-  createdAt DateTime @default(now())
-  expiresAt DateTime
-  revokedAt DateTime?
+  id                String    @id @default(uuid())
+  userId            String
+  tokenHash         String    @unique
+  deviceId          String
+  deviceName        String?
+  userAgent         String?
+  ipAddress         String?
+  lastUsedAt        DateTime  @default(now())
+  expiresAt         DateTime
+  revokedAt         DateTime?
+  replacedByTokenId String?
+  createdAt         DateTime  @default(now())
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
-  @@index([tokenHash])
+  @@index([userId, revokedAt, expiresAt])
+  @@index([deviceId])
   @@map("refresh_tokens")
 }
 
 model Wallet {
-  id        String        @id @default(uuid())
+  id        String         @id @default(uuid())
   userId    String
   currency  WalletCurrency
-  balance   Decimal       @default(0) @db.Decimal(15, 2)
-  createdAt DateTime      @default(now())
-  updatedAt DateTime      @updatedAt
+  balance   Decimal        @default(0) @db.Decimal(15, 2)
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
 
-  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
-  transactions Transaction[]
+  user          User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  transactions  Transaction[]
   ledgerEntries LedgerEntry[]
 
   @@unique([userId, currency])
@@ -154,29 +240,95 @@ model Wallet {
 }
 
 model Transaction {
-  id          String            @id @default(uuid())
-  userId      String
-  walletId    String?
-  type        TransactionType
-  amount      Decimal           @db.Decimal(15, 2)
-  currency    WalletCurrency
-  status      TransactionStatus @default(PENDING)
-  reference   String            @unique
-  fee         Decimal           @default(0) @db.Decimal(15, 2)
-  metadata    Json?
-  createdAt   DateTime          @default(now())
-  updatedAt   DateTime          @updatedAt
+  id        String            @id @default(uuid())
+  userId    String
+  walletId  String?
+  type      TransactionType
+  amount    Decimal           @db.Decimal(15, 2)
+  currency  WalletCurrency
+  status    TransactionStatus @default(PENDING)
+  reference String            @unique
+  fee       Decimal           @default(0) @db.Decimal(15, 2)
+  metadata  Json?
+  createdAt DateTime          @default(now())
+  updatedAt DateTime          @updatedAt
 
-  user    User     @relation(fields: [userId], references: [id])
-  wallet  Wallet?  @relation(fields: [walletId], references: [id])
-  disputes Dispute[]
-  ledgerEntries LedgerEntry[]
+  user             User              @relation(fields: [userId], references: [id])
+  wallet           Wallet?           @relation(fields: [walletId], references: [id])
+  disputes         Dispute[]
+  ledgerEntries    LedgerEntry[]
   transferAttempts TransferAttempt[]
+  vtuOrders        VtuOrder[]
+  exchangeReceipt  ExchangeReceipt?
+  exchangePayout   ExchangePayout?
 
   @@index([userId, status])
   @@index([userId, createdAt(sort: Desc)])
   @@index([type, status])
   @@map("transactions")
+}
+
+model ExchangeReceipt {
+  id                   String                @id @default(uuid())
+  userId               String
+  transactionId        String                @unique
+  sourceCurrency       WalletCurrency        @default(NGN)
+  targetCurrency       WalletCurrency        @default(GHS)
+  amount               Decimal               @db.Decimal(15, 2)
+  expectedCreditAmount Decimal               @db.Decimal(15, 2)
+  rate                 Decimal               @db.Decimal(18, 6)
+  markupPercent        Decimal               @default(0) @db.Decimal(5, 2)
+  bankReference        String                @unique
+  senderName           String
+  senderBankName       String?
+  receiptUrl           String
+  status               ExchangeReceiptStatus @default(SUBMITTED)
+  adminId              String?
+  reviewReason         String?
+  creditedAt           DateTime?
+  reviewedAt           DateTime?
+  metadata             Json?
+  createdAt            DateTime              @default(now())
+  updatedAt            DateTime              @updatedAt
+
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  transaction Transaction @relation(fields: [transactionId], references: [id])
+
+  @@index([status, createdAt])
+  @@index([userId, status])
+  @@map("exchange_receipts")
+}
+
+model ExchangePayout {
+  id                      String               @id @default(uuid())
+  userId                  String
+  transactionId           String               @unique
+  sourceCurrency          WalletCurrency       @default(NGN)
+  destinationCurrency     WalletCurrency       @default(GHS)
+  sourceAmount            Decimal              @db.Decimal(15, 2)
+  destinationAmount       Decimal              @db.Decimal(15, 2)
+  rate                    Decimal              @db.Decimal(18, 6)
+  fee                     Decimal              @default(0) @db.Decimal(15, 2)
+  destinationBankName     String
+  destinationBankCode     String?
+  destinationAccountNumber String
+  destinationAccountName  String
+  status                  ExchangePayoutStatus @default(PENDING_APPROVAL)
+  adminId                 String?
+  adminNote               String?
+  adminPaymentReceipt     String?
+  notificationSent        Boolean              @default(false)
+  reviewedAt              DateTime?
+  sentAt                  DateTime?
+  createdAt               DateTime             @default(now())
+  updatedAt               DateTime             @updatedAt
+
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  transaction Transaction @relation(fields: [transactionId], references: [id])
+
+  @@index([status, createdAt])
+  @@index([userId, status])
+  @@map("exchange_payouts")
 }
 
 model LedgerEntry {
@@ -196,26 +348,72 @@ model LedgerEntry {
   transaction Transaction @relation(fields: [transactionId], references: [id])
   wallet      Wallet      @relation(fields: [walletId], references: [id])
 
+  @@unique([transactionId, source])
   @@index([walletId, createdAt(sort: Desc)])
   @@index([transactionId])
   @@index([reference])
-  @@unique([transactionId, source])
   @@map("ledger_entries")
 }
 
+model InternalTransferAttempt {
+  id                        String                        @id @default(uuid())
+  userId                    String
+  recipientUserId           String?
+  transferReference         String?
+  senderTransactionId       String?
+  recipientTransactionId    String?
+  status                    InternalTransferAttemptStatus
+  amount                    Decimal?                      @db.Decimal(15, 2)
+  currency                  WalletCurrency?
+  recipientIdentifierType   String?
+  recipientMaskedIdentifier String?
+  failureCode               String?
+  failureMessage            String?
+  metadata                  Json?
+  createdAt                 DateTime                      @default(now())
+  updatedAt                 DateTime                      @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([status, createdAt])
+  @@index([transferReference])
+  @@map("internal_transfer_attempts")
+}
+
+model InternalTransferLimitUsage {
+  id          String              @id @default(uuid())
+  userId      String
+  currency    WalletCurrency
+  period      TransferLimitPeriod
+  periodStart DateTime
+  amount      Decimal             @default(0) @db.Decimal(15, 2)
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, currency, period, periodStart])
+  @@index([userId, currency, period])
+  @@index([periodStart])
+  @@map("internal_transfer_limit_usage")
+}
+
 model IdempotencyRecord {
-  id          String   @id @default(uuid())
-  scope       String
-  key         String
-  method      String
-  path        String
-  requestHash String
-  status      String   @default("IN_PROGRESS")
-  response    Json?
-  errorMessage String?
-  expiresAt   DateTime
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id            String   @id @default(uuid())
+  scope         String
+  key           String
+  method        String
+  path          String
+  requestHash   String
+  status        String   @default("IN_PROGRESS")
+  response      Json?
+  httpStatus    Int?
+  errorResponse Json?
+  errorMessage  String?
+  expiresAt     DateTime
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 
   @@unique([scope, key])
   @@index([expiresAt])
@@ -249,7 +447,7 @@ model VirtualAccount {
 }
 
 model BankAccount {
-  id                     String          @id @default(uuid())
+  id                     String           @id @default(uuid())
   userId                 String
   provider               PaymentProvider?
   bankCode               String
@@ -258,10 +456,10 @@ model BankAccount {
   accountNumberEncrypted String
   accountNumberMasked    String
   currency               WalletCurrency
-  isDeleted              Boolean         @default(false)
+  isDeleted              Boolean          @default(false)
   metadata               Json?
-  createdAt              DateTime        @default(now())
-  updatedAt              DateTime        @updatedAt
+  createdAt              DateTime         @default(now())
+  updatedAt              DateTime         @updatedAt
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -310,6 +508,66 @@ model TransferAttempt {
   @@map("transfer_attempts")
 }
 
+model VtuOrder {
+  id                    String           @id @default(uuid())
+  transactionId         String           @unique
+  provider              VtuOrderProvider
+  scope                 VtuOrderScope
+  serviceType           TransactionType
+  countryCode           String?
+  localProvider         String?
+  operatorId            String?
+  providerRequestId     String
+  providerTransactionId String?
+  providerStatus        String?
+  status                VtuOrderStatus   @default(PENDING)
+  amount                Decimal          @db.Decimal(15, 2)
+  currency              WalletCurrency
+  targetMasked          String?
+  costAmount            Decimal?         @db.Decimal(15, 2)
+  fee                   Decimal?         @db.Decimal(15, 2)
+  margin                Decimal?         @db.Decimal(15, 2)
+  rawResponse           Json?
+  metadata              Json?
+  requeryAttempts       Int              @default(0)
+  lastRequeryAt         DateTime?
+  nextRequeryAt         DateTime?
+  completedAt           DateTime?
+  failedAt              DateTime?
+  createdAt             DateTime         @default(now())
+  updatedAt             DateTime         @updatedAt
+
+  transaction Transaction @relation(fields: [transactionId], references: [id])
+
+  @@unique([provider, providerRequestId])
+  @@index([provider, status])
+  @@index([status, nextRequeryAt])
+  @@index([countryCode, serviceType])
+  @@map("vtu_orders")
+}
+
+model VtuPricingRule {
+  id            String           @id @default(uuid())
+  countryCode   String?
+  serviceType   TransactionType?
+  provider      String?
+  scope         VtuOrderScope?
+  fixedMargin   Decimal          @default(0) @db.Decimal(15, 2)
+  percentMargin Decimal          @default(0) @db.Decimal(7, 4)
+  minAmount     Decimal?         @db.Decimal(15, 2)
+  maxAmount     Decimal?         @db.Decimal(15, 2)
+  priority      Int              @default(0)
+  isActive      Boolean          @default(true)
+  metadata      Json?
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+
+  @@index([isActive, priority], map: "vtu_pricing_rules_active_priority_idx")
+  @@index([countryCode, serviceType, provider, scope, isActive], map: "vtu_pricing_rules_match_idx")
+  @@index([serviceType, scope, isActive], map: "vtu_pricing_rules_service_scope_idx")
+  @@map("vtu_pricing_rules")
+}
+
 model AuditLog {
   id         String   @id @default(uuid())
   adminId    String?
@@ -332,50 +590,123 @@ model AuditLog {
 }
 
 model Rate {
-  id         String   @id @default(uuid())
+  id         String    @id @default(uuid())
   from       String
   to         String
-  rate       Decimal  @db.Decimal(10, 4)
-  markup     Decimal  @default(0) @db.Decimal(5, 2)
-  source     String   @default("system")
+  rate       Decimal   @db.Decimal(10, 4)
+  markup     Decimal   @default(0) @db.Decimal(5, 2)
+  source     String    @default("system")
   validUntil DateTime?
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @default(now()) @updatedAt
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @default(now()) @updatedAt
 
   @@unique([from, to])
   @@map("rates")
 }
 
+enum RateOverrideStatus {
+  PENDING_APPROVAL
+  APPROVED
+  REJECTED
+}
+
+model RateOverride {
+  id               String             @id @default(uuid())
+  requestedById    String
+  fromCurrency     String
+  toCurrency       String
+  proposedRate     Decimal            @db.Decimal(10, 4)
+  proposedMarkup   Decimal            @db.Decimal(5, 2)
+  currentRate      Decimal            @db.Decimal(10, 4)
+  deviationPercent Decimal            @db.Decimal(6, 2)
+  reason           String
+  status           RateOverrideStatus @default(PENDING_APPROVAL)
+  approvedById     String?
+  reviewReason     String?
+  reviewedAt       DateTime?
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+
+  requestedBy User  @relation("RequestedOverrides", fields: [requestedById], references: [id])
+  approvedBy  User? @relation("ApprovedOverrides", fields: [approvedById], references: [id])
+
+  @@index([status, createdAt])
+  @@map("rate_overrides")
+}
+
+model RateAlert {
+  id            String    @id @default(uuid())
+  userId        String
+  fromCurrency  String
+  toCurrency    String
+  targetRate    Decimal   @db.Decimal(10, 4)
+  direction     String    @default("ABOVE")
+  isActive      Boolean   @default(true)
+  triggeredAt   DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, isActive])
+  @@index([isActive])
+  @@map("rate_alerts")
+}
+
 model Service {
-  id          String   @id @default(uuid())
-  name        String
-  type        String
-  provider    String
-  isActive    Boolean  @default(true)
-  metadata    Json?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id        String   @id @default(uuid())
+  name      String
+  type      String
+  provider  String
+  isActive  Boolean  @default(true)
+  metadata  Json?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@map("services")
 }
 
 model KycDocument {
-  id           String   @id @default(uuid())
-  userId       String
-  type         KYCType
-  documentUrl  String
-  idNumber     String
-  status       KYCStatus @default(PENDING)
+  id            String    @id @default(uuid())
+  userId        String
+  type          KYCType
+  documentUrl   String
+  idNumber      String
+  status        KYCStatus @default(PENDING)
   rejectionNote String?
-  reviewedBy   String?
-  reviewedAt   DateTime?
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  reviewedBy    String?
+  reviewedAt    DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user          User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  verifications KycVerification[]
 
   @@index([userId, status])
   @@map("kyc_documents")
+}
+
+model KycVerification {
+  id           String                  @id @default(uuid())
+  userId       String
+  documentId   String
+  provider     KycVerificationProvider
+  status       KycVerificationStatus   @default(PENDING)
+  reference    String
+  checks       Json?
+  responseHash String?
+  errorMessage String?
+  createdAt    DateTime                @default(now())
+  updatedAt    DateTime                @updatedAt
+
+  user     User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  document KycDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, reference])
+  @@index([userId, status])
+  @@index([documentId])
+  @@index([provider, status])
+  @@map("kyc_verifications")
 }
 
 model Dispute {

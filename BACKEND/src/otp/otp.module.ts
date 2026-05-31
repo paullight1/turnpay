@@ -1,5 +1,5 @@
-import { Module } from '@nestjs/common';
-import { OtpService } from './otp.service';
+import { Module } from "@nestjs/common";
+import { OtpService } from "./otp.service";
 
 @Module({
   providers: [OtpService],

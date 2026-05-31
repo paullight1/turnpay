@@ -2,15 +2,15 @@ import {
   BadRequestException,
   Injectable,
   NotFoundException,
-} from '@nestjs/common';
-import { Prisma } from '@prisma/client';
-import { PinoLogger } from 'nestjs-pino';
-import { PrismaService } from '../prisma/prisma.service';
+} from "@nestjs/common";
+import { Prisma } from "@prisma/client";
+import { PinoLogger } from "nestjs-pino";
+import { PrismaService } from "../prisma/prisma.service";
 import {
   CreateSupportTicketDto,
   ResolveSupportTicketDto,
   SupportTicketStatus,
-} from './dto/support.dto';
+} from "./dto/support.dto";
 
 @Injectable()
 export class SupportService {
@@ -22,7 +22,7 @@ export class SupportService {
   async createTicket(userId: string, dto: CreateSupportTicketDto) {
     if (dto.transactionId && dto.transactionReference) {
       throw new BadRequestException(
-        'Provide either transactionId or transactionReference, not both',
+        "Provide either transactionId or transactionReference, not both",
       );
     }
 
@@ -37,7 +37,7 @@ export class SupportService {
       });
 
       if (!transaction || transaction.userId !== userId) {
-        throw new NotFoundException('Transaction not found');
+        throw new NotFoundException("Transaction not found");
       }
 
       transactionId = transaction.id;
@@ -55,7 +55,7 @@ export class SupportService {
 
     this.logger.info(
       { userId, ticketId: ticket.id, category: dto.category },
-      'Support ticket created',
+      "Support ticket created",
     );
 
     return ticket;
@@ -78,7 +78,7 @@ export class SupportService {
         where,
         skip,
         take: limit,
-        orderBy: { createdAt: 'desc' },
+        orderBy: { createdAt: "desc" },
         include: this.ticketInclude,
       }),
       this.prisma.dispute.count({ where }),
@@ -106,7 +106,7 @@ export class SupportService {
         where,
         skip,
         take: limit,
-        orderBy: { createdAt: 'desc' },
+        orderBy: { createdAt: "desc" },
         include: this.adminTicketInclude,
       }),
       this.prisma.dispute.count({ where }),
@@ -133,11 +133,11 @@ export class SupportService {
     });
 
     if (!existing) {
-      throw new NotFoundException('Support ticket not found');
+      throw new NotFoundException("Support ticket not found");
     }
 
-    if (['RESOLVED', 'CLOSED'].includes(existing.status)) {
-      throw new BadRequestException('Support ticket is already terminal');
+    if (["RESOLVED", "CLOSED"].includes(existing.status)) {
+      throw new BadRequestException("Support ticket is already terminal");
     }
 
     const updated = await this.prisma.$transaction(async (tx) => {
@@ -155,8 +155,8 @@ export class SupportService {
       await tx.auditLog.create({
         data: {
           adminId,
-          action: 'SUPPORT_TICKET_RESOLVE',
-          targetType: 'Dispute',
+          action: "SUPPORT_TICKET_RESOLVE",
+          targetType: "Dispute",
           targetId: ticketId,
           reference: ticketId,
           reason: dto.reason,
@@ -182,7 +182,7 @@ export class SupportService {
 
     this.logger.info(
       { adminId, ticketId, status: updated.status },
-      'Support ticket resolved by admin',
+      "Support ticket resolved by admin",
     );
 
     return updated;
@@ -191,7 +191,7 @@ export class SupportService {
   private assertReason(reason: string) {
     if (!reason || reason.trim().length < 10) {
       throw new BadRequestException(
-        'A reason of at least 10 characters is required',
+        "A reason of at least 10 characters is required",
       );
     }
   }

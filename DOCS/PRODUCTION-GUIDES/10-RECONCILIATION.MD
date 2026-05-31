@@ -2,7 +2,7 @@
 
 ## Scope
 
-Use this guide for daily and intra-day reconciliation of wallets, ledger entries, provider events, payment settlements, virtual account deposits, withdrawals, VTU purchases, and exchange execution. Local checks can validate formulas, but production requires provider reports and real settlement data.
+Use this guide for daily and intra-day reconciliation of wallets, ledger entries, provider events, payment settlements, Monnify virtual account deposits, withdrawals, VTU purchases, exchange execution, and manual NGN to GHS receipt credits. Local checks can validate formulas, but production requires provider reports and real settlement data.
 
 ## Required Env Vars
 
@@ -21,11 +21,12 @@ FX_RATE_API_KEY=
 
 ## Sandbox Steps
 
-1. Generate test funding, DVA deposit, withdrawal, internal transfer, exchange, and VTU records.
+1. Generate test funding, Monnify virtual-account deposit, withdrawal, internal transfer, exchange, manual receipt credit, and VTU records.
 2. Run reconciliation and confirm no unmatched ledger entries.
 3. Replay a webhook and confirm reconciliation still sees one provider event and one wallet effect.
 4. Create a deliberate mismatch and confirm it appears in admin review.
 5. Confirm dead-letter events are visible and retryable by authorized admins only.
+6. Approve one manual NGN to GHS receipt and confirm the GHS ledger credit ties to the submitted bank reference, receipt URL, admin audit log, and bank or Monnify settlement evidence.
 
 ## Live Steps
 
@@ -41,6 +42,7 @@ FX_RATE_API_KEY=
 - [ ] Sum of wallet balances equals expected ledger balance by currency.
 - [ ] Every wallet balance mutation has ledger evidence.
 - [ ] Every provider success maps to exactly one TRUSTPAY transaction.
+- [ ] Every manual receipt credit maps to one bank statement or Monnify settlement evidence item and one admin audit log.
 - [ ] Every failed provider transaction has no wallet credit or has a documented reversal.
 - [ ] Pending transactions older than SLA are surfaced to admin review.
 - [ ] Provider fees and TRUSTPAY fees are separately identifiable.
@@ -51,6 +53,7 @@ FX_RATE_API_KEY=
 
 - Provider reports are unavailable or inaccessible to finance owners.
 - Wallet, ledger, transaction, and provider totals cannot be tied out.
+- Manual NGN to GHS receipt credits cannot be tied to bank reference, receipt evidence, admin reviewer, and settlement record.
 - Reconciliation job fails silently.
 - No process exists for unmatched deposits, duplicate webhooks, stuck withdrawals, or VTU timeouts.
 - No audit retention policy for reconciliation evidence.

@@ -7,26 +7,36 @@ import {
   Param,
   Query,
   UseGuards,
-} from '@nestjs/common';
-import { Throttle } from '@nestjs/throttler';
-import { KycService } from './kyc.service';
-import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
-import { RolesGuard } from '../common/guards/roles.guard';
-import { Roles } from '../common/decorators/roles.decorator';
-import { CurrentUser } from '../common/decorators/current-user.decorator';
+} from "@nestjs/common";
+import { Throttle } from "@nestjs/throttler";
+import { KycService } from "./kyc.service";
+import { JwtAuthGuard } from "../auth/guards/jwt-auth.guard";
+import { RolesGuard } from "../common/guards/roles.guard";
+import { Roles } from "../common/decorators/roles.decorator";
+import { CurrentUser } from "../common/decorators/current-user.decorator";
 import {
+  CreateKycUploadDto,
   SubmitKycDto,
   ReviewKycDto,
   CreateDisputeDto,
   ResolveDisputeDto,
-} from './dto/kyc.dto';
+} from "./dto/kyc.dto";
 
-@Controller('kyc')
+@Controller("kyc")
 @UseGuards(JwtAuthGuard)
 export class KycController {
   constructor(private readonly kycService: KycService) {}
 
-  @Post('submit')
+  @Post("document-upload-url")
+  @Throttle({ default: { limit: 5, ttl: 600000 } })
+  async createDocumentUploadUrl(
+    @CurrentUser() user: { userId: string },
+    @Body() dto: CreateKycUploadDto,
+  ) {
+    return this.kycService.createDocumentUploadUrl(user.userId, dto);
+  }
+
+  @Post("submit")
   @Throttle({ default: { limit: 3, ttl: 86400000 } })
   async submitKyc(
     @CurrentUser() user: { userId: string },
@@ -35,12 +45,12 @@ export class KycController {
     return this.kycService.submitKyc(user.userId, dto);
   }
 
-  @Get('documents')
+  @Get("documents")
   async getUserKyc(@CurrentUser() user: { userId: string }) {
     return this.kycService.getUserKyc(user.userId);
   }
 
-  @Post('disputes')
+  @Post("disputes")
   @Throttle({ default: { limit: 5, ttl: 86400000 } })
   async createDispute(
     @CurrentUser() user: { userId: string },
@@ -49,11 +59,11 @@ export class KycController {
     return this.kycService.createDispute(user.userId, dto);
   }
 
-  @Get('disputes')
+  @Get("disputes")
   async getUserDisputes(
     @CurrentUser() user: { userId: string },
-    @Query('page') page = '1',
-    @Query('limit') limit = '20',
+    @Query("page") page = "1",
+    @Query("limit") limit = "20",
   ) {
     return this.kycService.getUserDisputes(
       user.userId,
@@ -63,34 +73,45 @@ export class KycController {
   }
 }
 
-@Controller('admin/kyc')
+@Controller("admin/kyc")
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles('ADMIN')
+@Roles("ADMIN")
 export class AdminKycController {
   constructor(private readonly kycService: KycService) {}
 
-  @Get('pending')
-  async getPendingKyc(@Query('page') page = '1', @Query('limit') limit = '20') {
+  @Get("pending")
+  async getPendingKyc(@Query("page") page = "1", @Query("limit") limit = "20") {
     return this.kycService.getAllPendingKyc(
       Math.max(1, parseInt(page, 10)),
       Math.min(100, Math.max(1, parseInt(limit, 10))),
     );
   }
 
-  @Put(':documentId/review')
+  @Post(":documentId/document-url")
+  async createDocumentReviewUrl(
+    @CurrentUser() user: { userId: string },
+    @Param("documentId") documentId: string,
+  ) {
+    return this.kycService.createAdminDocumentReviewUrl(
+      documentId,
+      user.userId,
+    );
+  }
+
+  @Put(":documentId/review")
   async reviewKyc(
     @CurrentUser() user: { userId: string },
-    @Param('documentId') documentId: string,
+    @Param("documentId") documentId: string,
     @Body() dto: ReviewKycDto,
   ) {
     return this.kycService.reviewKyc(documentId, dto, user.userId);
   }
 
-  @Get('disputes')
+  @Get("disputes")
   async getAllDisputes(
-    @Query('page') page = '1',
-    @Query('limit') limit = '20',
-    @Query('status') status?: string,
+    @Query("page") page = "1",
+    @Query("limit") limit = "20",
+    @Query("status") status?: string,
   ) {
     return this.kycService.getAllDisputes(
       Math.max(1, parseInt(page, 10)),
@@ -99,10 +120,10 @@ export class AdminKycController {
     );
   }
 
-  @Put('disputes/:disputeId/resolve')
+  @Put("disputes/:disputeId/resolve")
   async resolveDispute(
     @CurrentUser() user: { userId: string },
-    @Param('disputeId') disputeId: string,
+    @Param("disputeId") disputeId: string,
     @Body() dto: ResolveDisputeDto,
   ) {
     return this.kycService.resolveDispute(disputeId, dto, user.userId);

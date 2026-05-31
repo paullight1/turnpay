@@ -1,12 +1,10 @@
-version: '3.8'
-
 services:
   postgres:
     image: postgres:16-alpine
     container_name: trustpay-postgres
     restart: unless-stopped
-    ports:
-      - '5432:5432'
+    expose:
+      - '5432'
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-trustpay}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
@@ -25,13 +23,15 @@ services:
     image: redis:7-alpine
     container_name: trustpay-redis
     restart: unless-stopped
-    ports:
-      - '6379:6379'
-    command: redis-server --requirepass ${REDIS_PASSWORD:-}
+    expose:
+      - '6379'
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD}
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
     volumes:
       - redis_data:/data
     healthcheck:
-      test: ['CMD', 'redis-cli', 'ping']
+      test: ['CMD-SHELL', 'redis-cli -a "$$REDIS_PASSWORD" ping']
       interval: 10s
       timeout: 5s
       retries: 5
@@ -40,7 +40,7 @@ services:
 
   backend:
     build:
-      context: ./backend
+      context: ./BACKEND
       dockerfile: Dockerfile
     container_name: trustpay-backend
     restart: unless-stopped
@@ -52,15 +52,24 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER:-trustpay}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-trustpay_db}?schema=public
       REDIS_HOST: redis
       REDIS_PORT: 6379
-      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
-      JWT_SECRET: ${JWT_SECRET}
-      JWT_EXPIRES_IN: 15m
-      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET}
-      JWT_REFRESH_EXPIRES_IN: 7d
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
       WEB_URL: ${WEB_URL}
       ADMIN_URL: ${ADMIN_URL}
+      SUPABASE_URL: ${SUPABASE_URL}
+      SUPABASE_PUBLISHABLE_KEY: ${SUPABASE_PUBLISHABLE_KEY}
+      SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY}
+      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY}
+      SUPABASE_JWT_SECRET: ${SUPABASE_JWT_SECRET}
       PAYSTACK_SECRET_KEY: ${PAYSTACK_SECRET_KEY}
+      PAYSTACK_PUBLIC_KEY: ${PAYSTACK_PUBLIC_KEY}
+      PAYSTACK_WEBHOOK_SECRET: ${PAYSTACK_WEBHOOK_SECRET}
       FLUTTERWAVE_SECRET_KEY: ${FLUTTERWAVE_SECRET_KEY}
+      FLUTTERWAVE_PUBLIC_KEY: ${FLUTTERWAVE_PUBLIC_KEY}
+      FLUTTERWAVE_ENCRYPTION_KEY: ${FLUTTERWAVE_ENCRYPTION_KEY}
+      FLUTTERWAVE_SECRET_HASH: ${FLUTTERWAVE_SECRET_HASH}
+      PII_ENCRYPTION_KEY: ${PII_ENCRYPTION_KEY}
+      BANK_ACCOUNT_ENCRYPTION_KEY: ${BANK_ACCOUNT_ENCRYPTION_KEY}
+      TRANSACTION_PIN_REQUIRED: ${TRANSACTION_PIN_REQUIRED:-true}
     depends_on:
       postgres:
         condition: service_healthy
@@ -71,14 +80,16 @@ services:
 
   website:
     build:
-      context: ./website
+      context: ./WEBSITE
       dockerfile: Dockerfile
     container_name: trustpay-website
     restart: unless-stopped
     ports:
       - '3001:3001'
     environment:
-      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:3000}
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
+      NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL}
+      NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY}
       NODE_ENV: production
     depends_on:
       - backend

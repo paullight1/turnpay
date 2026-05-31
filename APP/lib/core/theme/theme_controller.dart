@@ -8,7 +8,7 @@ final themeModeProvider =
 });
 
 class ThemeModeController extends StateNotifier<ThemeMode> {
-  ThemeModeController() : super(ThemeMode.dark);
+  ThemeModeController() : super(ThemeMode.light);
 
   static const _storage = FlutterSecureStorage();
   static const _storageKey = 'trustpay_theme_mode';
@@ -20,7 +20,7 @@ class ThemeModeController extends StateNotifier<ThemeMode> {
       return;
     }
 
-    state = ThemeMode.dark;
+    state = ThemeMode.light;
   }
 
   Future<void> setMode(ThemeMode mode) async {

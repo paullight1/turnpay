@@ -1,5 +1,6 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../core/widgets/trustpay_lottie.dart';
 
 /// Horizontal scrolling row of wallet/card items.
 /// Shows a "+" add button followed by gradient wallet cards for GHS and NGN.
@@ -14,12 +15,15 @@ class WalletCardsRow extends StatelessWidget {
       children: [
         Row(
           children: [
-            Padding(
-              padding: const EdgeInsets.only(right: AppSpacing.lg),
-              child: Text(
-                'Wallets',
-                style: AppTextStyles.headingM,
-              ),
+            const TrustPayLottie(
+              variant: TrustPayAnimationVariant.loading,
+              size: 26,
+              semanticsLabel: 'Wallets',
+            ),
+            const SizedBox(width: AppSpacing.sm),
+            Text(
+              'Wallets',
+              style: AppTextStyles.headingM,
             ),
           ],
         ),
@@ -45,10 +49,10 @@ class WalletCardsRow extends StatelessWidget {
                       width: 1.5,
                     ),
                   ),
-                  child: Icon(
-                    Icons.add_rounded,
-                    color: AppColors.textSecondary,
-                    size: 26,
+                  child: const TrustPayLottie(
+                    variant: TrustPayAnimationVariant.send,
+                    size: 32,
+                    semanticsLabel: 'Add wallet',
                   ),
                 ),
               ),
@@ -207,4 +211,3 @@ class _WalletCard extends StatelessWidget {
     return '$symbol${amount.toStringAsFixed(2)}';
   }
 }
-

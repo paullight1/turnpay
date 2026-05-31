@@ -3,6 +3,7 @@
 import { useRef, useState } from "react";
 import Link from "next/link";
 import DashboardLayout from "@/components/layout/dashboard-layout";
+import { TrustPayAnimation } from "@/components/animations/trustpay-animation";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -24,6 +25,7 @@ export default function WithdrawPage() {
   const [bankCode, setBankCode] = useState("");
   const [accountNumber, setAccountNumber] = useState("");
   const [accountName, setAccountName] = useState("");
+  const [transactionPin, setTransactionPin] = useState("");
   const [isResolving, setIsResolving] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [isConfirming, setIsConfirming] = useState(false);
@@ -81,6 +83,11 @@ export default function WithdrawPage() {
       return;
     }
 
+    if (!/^\d{4,6}$/.test(transactionPin)) {
+      toast.error("Enter your 4 to 6 digit transaction PIN");
+      return;
+    }
+
     if (!isConfirming) {
       setIsConfirming(true);
       return;
@@ -99,12 +106,14 @@ export default function WithdrawPage() {
         bankCode,
         accountNumber,
         accountName,
+        transactionPin,
       }, idempotencyKey);
       toast.success("Withdrawal initiated successfully");
       setAmount("");
       setAccountNumber("");
       setAccountName("");
       setBankCode("");
+      setTransactionPin("");
       resetAttempt();
     } catch (error: unknown) {
       toast.error(getErrorMessage(error, "Withdrawal failed"));
@@ -117,9 +126,16 @@ export default function WithdrawPage() {
   return (
     <DashboardLayout>
       <div className="max-w-lg mx-auto flex flex-col gap-6">
-        <div>
-          <h1 className="text-3xl font-bold">Withdraw</h1>
-          <p className="text-muted-foreground mt-1">Send money to your bank account</p>
+        <div className="flex items-center gap-4">
+          <TrustPayAnimation
+            variant={isLoading ? "loading" : "send"}
+            className="size-16 shrink-0"
+            label={isLoading ? "Processing withdrawal" : "Withdraw money"}
+          />
+          <div>
+            <h1 className="text-3xl font-bold">Withdraw</h1>
+            <p className="text-muted-foreground mt-1">Send money to your bank account</p>
+          </div>
         </div>
 
         {moneyGate && (
@@ -214,12 +230,34 @@ export default function WithdrawPage() {
 
             {isConfirming && (
               <div className="rounded-lg border p-3 text-sm">
-                <p className="font-medium">Review withdrawal</p>
-                <p className="mt-1 text-muted-foreground">
-                  Confirm {currency} {Number(amount || 0).toFixed(2)} to {accountName} ({maskAccountNumber(accountNumber)}).
-                </p>
+                <div className="flex gap-3">
+                  <TrustPayAnimation
+                    variant="send"
+                    className="size-12 shrink-0"
+                    label="Review withdrawal"
+                  />
+                  <div>
+                    <p className="font-medium">Review withdrawal</p>
+                    <p className="mt-1 text-muted-foreground">
+                      Confirm {currency} {Number(amount || 0).toFixed(2)} to {accountName} ({maskAccountNumber(accountNumber)}).
+                    </p>
+                  </div>
+                </div>
               </div>
             )}
+
+            <div className="flex flex-col gap-2">
+              <Label>Transaction PIN</Label>
+              <Input
+                type="password"
+                inputMode="numeric"
+                placeholder="4 to 6 digits"
+                value={transactionPin}
+                onChange={(e) => { setTransactionPin(e.target.value.replace(/\D/g, "").slice(0, 6)); resetAttempt(); }}
+                minLength={4}
+                maxLength={6}
+              />
+            </div>
 
             <Button onClick={handleWithdraw} disabled={isLoading || !!moneyGate} className="w-full" size="lg">
               {isLoading ? "Processing..." : isConfirming ? "Confirm Withdrawal" : "Review Withdrawal"}

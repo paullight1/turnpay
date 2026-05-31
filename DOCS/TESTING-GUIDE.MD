@@ -35,6 +35,13 @@ Complete testing strategy for the TRUSTPAY fintech platform.
 - **Integration tests:** All critical paths (auth, payments, exchange)
 - **E2E tests:** All user-facing flows
 
+### Current Manual Receipt And Monnify Status
+
+- Monnify-only NGN virtual account provisioning and deposit webhook crediting are implemented backend paths.
+- Manual NGN to GHS receipt submission and admin review are implemented backend/admin paths under `/api/exchange/receipts` and `/api/admin/exchange/receipts/:receiptId/review`.
+- Remaining test gaps: backend e2e coverage for the manual receipt flow, receipt upload/proof URL authorization, duplicate `Idempotency-Key` behavior, duplicate admin review attempts, non-admin denial, missing idempotency keys, and duplicate Monnify webhook replay.
+- Remaining production gaps that tests should not hide: private receipt bucket setup, live environment setup, collection-account display configuration, and reconciliation against bank or Monnify settlement evidence.
+
 ---
 
 ## Backend Unit Testing
@@ -105,7 +112,8 @@ describe('ExchangeService', () => {
 |--------|-----------|
 | **AuthService** | Register (success, duplicate email, duplicate phone), Login (success, wrong password, locked account), Refresh tokens (valid, expired, revoked), Change password (valid, wrong current) |
 | **WalletsService** | Provision wallets (success, already exists), Get balances, Get single wallet |
-| **ExchangeService** | Create quote (valid, same currency), Execute quote (valid, expired, insufficient balance, wrong user) |
+| **ExchangeService** | Create quote (valid, same currency), Execute quote (valid, expired, insufficient balance, wrong user), Upload manual receipt proof (valid, KYC failure, invalid file type/size), Submit manual receipt (valid, KYC failure, duplicate bank reference, invalid receipt proof), Admin review receipt (approve-and-credit, reject, needs more info, terminal-state retry) |
+| **BankingService** | Provision Monnify virtual account (success, KYC failure, suspended user, unsupported provider), Process Monnify webhook (valid, invalid signature, duplicate reference, amount/currency mismatch) |
 | **PaymentService** | Fund wallet (Paystack, Flutterwave), Verify payment, Webhook processing (idempotency, amount mismatch), Withdraw (success, insufficient balance, transfer failure, reversal) |
 | **VtuService** | Purchase (success, insufficient balance, provider failure, reversal) |
 | **OtpService** | Send OTP, Verify (valid, expired, max attempts, wrong code) |
@@ -187,7 +195,8 @@ describe('AuthController (integration)', () => {
 |------|------|
 | **Auth Flow** | Register → Login → Refresh → Change Password → Logout |
 | **Wallet Flow** | Register → Verify wallets created → Check balances |
-| **Exchange Flow** | Fund → Get quote → Execute → Verify balances updated |
+| **Exchange Flow** | Submit manual NGN receipt → Admin approve-and-credit → Verify GHS ledger credit and audit log |
+| **Monnify Virtual Account Flow** | Provision Monnify account → Simulate signed webhook → Verify one NGN wallet credit → Replay webhook → Verify no duplicate credit |
 | **Payment Flow** | Initiate payment → Webhook simulation → Verify wallet credited |
 | **VTU Flow** | Fund → Purchase airtime → Verify balance deducted → Failure reversal |
 | **Admin Flow** | Login as admin → Get users → Update user → Get stats |
@@ -204,10 +213,36 @@ Uses Jest + Supertest with full NestJS app.
 test/
   auth.e2e-spec.ts
   exchange.e2e-spec.ts
+  exchange-receipts.e2e-spec.ts
+  banking-monnify.e2e-spec.ts
   payments.e2e-spec.ts
   vtu.e2e-spec.ts
   admin.e2e-spec.ts
 ```
+
+### Monnify-Verified Exchange Deposit E2E Cases Still Required
+
+| Flow | Expected Coverage |
+|------|-------------------|
+| **User deposit instruction** | Authenticated Tier 2 user calls `POST /api/exchange/monnify-deposit-intents` with amount and `Idempotency-Key`; response includes pending receipt, generated reference, collection/virtual-account details, fixed rate, and expected GHS credit |
+| **Monnify match** | Valid signed Monnify webhook with matching amount/reference marks the receipt provider verified and does not credit NGN or GHS automatically |
+| **Monnify fallback** | Valid signed Monnify webhook that does not match an exchange intent continues to normal NGN wallet funding when it maps to a user virtual account |
+| **Duplicate submit** | Reusing the same `Idempotency-Key` returns the original response; reusing the same bank reference cannot create a second creditable receipt |
+| **Admin credit verified** | Admin with role guard credits a Monnify verified deposit with reason and `Idempotency-Key`; receipt becomes `CREDITED`, transaction becomes `SUCCESS`, GHS wallet is credited once, and audit log is written |
+| **Duplicate admin review** | Reusing the same review key returns the original response; a different review attempt after terminal status is rejected and does not credit again |
+| **Reject / needs more info** | Admin reason is stored, user-visible status changes, and no wallet credit occurs |
+| **Auth boundaries** | Missing token, user token on admin route, and missing/short reason are rejected |
+| **Credit guard** | A Monnify exchange deposit cannot be credited while provider verification is missing or mismatched |
+| **Proof access** | Owner can open proof through `GET /api/exchange/receipts/:receiptId/proof-url`; admin can open proof through audited `POST /api/admin/exchange/receipts/:receiptId/proof-url`; another user cannot open it |
+
+### Monnify E2E Cases Still Required
+
+| Flow | Expected Coverage |
+|------|-------------------|
+| **Provisioning** | Verified, active user provisions a Monnify-only NGN virtual account; unsupported providers are rejected |
+| **Signed webhook credit** | Valid Monnify webhook creates one provider event, transaction, ledger entry, and NGN wallet credit |
+| **Webhook replay** | Duplicate Monnify reference or replayed webhook does not duplicate wallet credit |
+| **Webhook rejection** | Invalid signature, wrong currency, and amount mismatch are rejected or routed to review without wallet credit |
 
 ### Example: E2E Auth Flow
 ```typescript
@@ -426,7 +461,7 @@ test('user can register and see dashboard', async ({ page }) => {
   await expect(page.getByText(/welcome back/i)).toBeVisible();
 });
 
-test('exchange flow works', async ({ page }) => {
+test('exchange quote renders', async ({ page }) => {
   // Login first
   await page.goto('/login');
   await page.fill('input[type="email"]', 'test@example.com');
@@ -445,13 +480,11 @@ test('exchange flow works', async ({ page }) => {
   // Should show quote details
   await expect(page.getByText(/you send/i)).toBeVisible();
   await expect(page.getByText(/exchange rate/i)).toBeVisible();
-
-  // Confirm exchange
-  await page.click('text=Confirm Exchange');
-
-  // Should show success
-  await expect(page.getByText(/exchange completed/i)).toBeVisible();
 });
+
+// TODO: add customer manual receipt submission E2E. It should upload proof,
+// submit with one stable Idempotency-Key, and show submitted/reviewed receipt
+// states.
 
 test('mobile navigation works', async ({ page }) => {
   await page.setViewportSize({ width: 375, height: 667 });

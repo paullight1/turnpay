@@ -2,7 +2,7 @@
 
 ## Scope
 
-Use this guide for wallet funding through Paystack or Flutterwave payment links, checkout, and webhook crediting. Local tests cannot prove live card acceptance, provider settlement, chargeback handling, or webhook delivery from provider dashboards.
+Use this guide for wallet funding through Paystack or Flutterwave payment links, checkout, and webhook crediting. This is separate from Monnify-only virtual accounts, which are covered in `04-VIRTUAL-ACCOUNTS.MD`.
 
 ## Required Env Vars
 
@@ -17,8 +17,8 @@ FLUTTERWAVE_ENCRYPTION_KEY=
 FLUTTERWAVE_SECRET_HASH=
 FLUTTERWAVE_WEBHOOK_URL=
 BANKING_ENABLED=false
-BANKING_PROVIDER_PRIMARY=paystack
-BANKING_PROVIDER_FALLBACK=flutterwave
+BANKING_PROVIDER_PRIMARY=monnify
+BANKING_PROVIDER_FALLBACK=
 BANKING_SANDBOX_MODE=true
 WEB_URL=
 ADMIN_URL=
@@ -40,8 +40,8 @@ ADMIN_URL=
 2. Replace sandbox keys with live keys in the production secret manager.
 3. Register the production HTTPS webhook URL.
 4. Confirm webhook signature verification with a live provider event.
-5. Keep `BANKING_ENABLED=false` until a low-value live funding smoke test is scheduled.
-6. Enable `BANKING_ENABLED=true` for a limited user/admin cohort.
+5. Keep `VIRTUAL_ACCOUNTS_ENABLED=false` unless testing the Monnify virtual-account path.
+6. Enable checkout funding for a limited user/admin cohort.
 7. Reconcile the first live payment through provider dashboard, database transaction, ledger entry, wallet balance, and settlement report.
 
 ## Verification Checklist

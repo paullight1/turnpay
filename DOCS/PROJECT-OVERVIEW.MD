@@ -17,12 +17,14 @@ TrustPay is a **fintech application** for the African market enabling:
 | Phase 0 | Project Setup & Infrastructure | ✅ Complete |
 | Phase 1 | Core Backend Foundation | ✅ Complete |
 | Phase 2 | Exchange Engine | ✅ Complete |
-| Phase 3 | External Payments & VTU | ✅ Complete |
-| Phase 4 | Frontend Development | ✅ Complete |
-| Phase 5 | Admin Panel + Security | ✅ Complete |
-| Phase 6 | Missing Core Features | ✅ Complete |
-| Phase 7 | Infrastructure & CI/CD | ✅ Complete |
+| Phase 3 | Monnify NGN Virtual Accounts + Webhooks | ✅ Implemented, needs sandbox/live validation |
+| Phase 4 | Exchange Deposit Review Flow | ✅ Implemented, needs provider replay/e2e validation |
+| Phase 5 | Web Dashboard + Admin Operations | ✅ Implemented, needs operations hardening |
+| Phase 6 | Flutter Mobile App | 🟡 Functional foundation, needs wallet UI parity and QA |
+| Phase 7 | Security, Reconciliation, CI/CD | 🟡 Partially complete |
 | Phase 8 | Production Deployment | ⏳ Pending |
+
+Current launch position: **not ready for real-money launch yet**. The codebase is ready for staging validation once migrations, production-like secrets, Supabase buckets, Monnify sandbox credentials, and public HTTPS webhook URLs are configured.
 
 ---
 
@@ -47,7 +49,7 @@ TRUSTPAY/
 | Web/Admin | Next.js 16 + shadcn/ui + TanStack Query |
 | Backend | NestJS + Prisma + PostgreSQL + Redis |
 | Auth | JWT (15m access / 7d refresh) + OTP |
-| Payments | Flutterwave / Paystack |
+| Payments | Monnify for NGN virtual accounts; Paystack/Flutterwave provider code present but not the active virtual-account path |
 
 ---
 
@@ -57,10 +59,11 @@ TRUSTPAY/
 
 | Service | Purpose | Integration Status |
 |---------|---------|-------------------|
-| **Flutterwave** or **Paystack** | Payment processing, bank transfers, funding wallets | 📦 Providers coded, need API keys |
-| **VTU Aggregator** (Reloadly / TopUp / Shago) | Airtime, data, cable TV, electricity APIs | 📦 Provider coded, need API key |
-| **FX Rate API** (Wise / ExchangeRate-API) | Live currency exchange rates (GHS ⇄ NGN) | 📦 Rate service coded, need API key |
-| **SMS Provider** (Twilio / Africa's Talking) | OTP delivery for phone verification | 📦 OTP service coded, need API key |
+| **Monnify** | NGN virtual accounts, deposit webhooks, exchange deposit verification | ✅ Code implemented; KYB, credentials, webhook dashboard setup, and sandbox/live validation still required |
+| **VTU Aggregator** (VTpass / Reloadly / approved provider) | Airtime, data, cable TV, electricity APIs | 📦 Providers coded; live provider credentials and market-by-market validation still required |
+| **FX Rate API or Admin Rate Ops** | GHS ⇄ NGN rates and quote control | 📦 Rate service/admin paths present; production source and approval workflow still required |
+| **SMS Provider** (Twilio / Africa's Talking or Supabase-supported OTP provider) | OTP delivery for phone verification | 📦 OTP service/auth flow present; production provider config required |
+| **KYC Provider** (NIBSS/NIMC/approved vendor) | Identity verification beyond manual review | 🟡 Manual review gateway present; approved provider onboarding still required |
 
 ### Infrastructure (For Local Development)
 
@@ -74,9 +77,9 @@ TRUSTPAY/
 
 | Service | Purpose | Status |
 |---------|---------|--------|
-| **GitHub** | Code hosting, CI/CD (Actions) | ✅ Connected |
+| **GitHub** | Code hosting / CI/CD | 🔜 CI workflows still need finalization |
 | **Vercel** | Web app + admin panel hosting | 🔜 Needed for Phase 8 |
-| **AWS / DigitalOcean** | Backend API + database hosting | 🔜 Needed for Phase 8 |
+| **AWS / DigitalOcean / Render / Fly.io** | Backend API + managed database hosting | 🔜 Needed for Phase 8 |
 | **Sentry.io** | Error tracking & crash analytics | 🔜 Recommended |
 | **Playwright MCP** | E2E browser testing automation | ✅ Installed |
 
@@ -183,9 +186,22 @@ REDIS_URL="redis://localhost:6379"
 JWT_SECRET="your-secret-here"
 JWT_REFRESH_SECRET="your-refresh-secret-here"
 
-# Payment Gateway (pick one)
-FLUTTERWAVE_SECRET_KEY="sk_xxx"
-PAYSTACK_SECRET_KEY="sk_xxx"
+# Monnify NGN virtual accounts
+BANKING_ENABLED="true"
+VIRTUAL_ACCOUNTS_ENABLED="true"
+BANKING_PROVIDER_PRIMARY="monnify"
+BANKING_PROVIDER_FALLBACK=""
+SUPPORTED_BANKING_CURRENCIES="NGN"
+MONNIFY_BASE_URL="https://sandbox.monnify.com"
+MONNIFY_API_KEY="xxx"
+MONNIFY_SECRET_KEY="xxx"
+MONNIFY_CONTRACT_CODE="xxx"
+MONNIFY_WEBHOOK_SECRET="xxx"
+MONNIFY_EXCHANGE_COLLECTION_ACCOUNT_NUMBER="xxx"
+
+# Optional payment providers if enabled later
+FLUTTERWAVE_SECRET_KEY=""
+PAYSTACK_SECRET_KEY=""
 
 # VTU Provider
 VTU_API_KEY="xxx"
@@ -228,6 +244,13 @@ API_URL="http://localhost:3000"
 ```
 
 ---
+
+## Current Reference Docs
+
+- `DOCS/TASKS.MD` — current task status and remaining work.
+- `DOCS/CODEBASE-STATUS-REVIEW.MD` — codebase status review.
+- `DOCS/PRODUCTION-GUIDES/13-MONNIFY-ONLY-VIRTUAL-ACCOUNTS-STATUS.MD` — Monnify-only decision and operational checklist.
+- `DOCS/PRODUCTION-GUIDES/14-MANUAL-EXCHANGE-RECEIPT-FLOW.MD` — exchange deposit review flow.
 
 ## GitHub Repository
 

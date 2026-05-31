@@ -4,6 +4,8 @@
 
 Use this guide for NGN/GHS quotes, rate sourcing, quote expiry, execution, fees, and wallet settlement. Local tests can validate arithmetic, but production launch requires live rate source, treasury policy, limits, and reconciliation.
 
+For the first operations-controlled NGN to GHS launch, the backend/admin manual receipt flow is implemented under `POST /api/exchange/receipts` and `POST /api/admin/exchange/receipts/:receiptId/review`. Users deposit NGN externally, submit receipt evidence, and finance credits GHS only after verification. See `14-MANUAL-EXCHANGE-RECEIPT-FLOW.MD`.
+
 ## Required Env Vars
 
 ```env
@@ -25,6 +27,14 @@ REDIS_PASSWORD=
 4. Confirm source wallet debit and target wallet credit happen in one Prisma transaction.
 5. Attempt expired quote, changed rate, insufficient balance, unsupported pair, and duplicate execution cases.
 6. Confirm the user sees the locked quote and final settled values.
+
+For manual NGN to GHS receipts:
+
+1. Upload proof through the signed receipt upload URL, then submit a receipt with a stable `Idempotency-Key`, amount, bank reference, sender details, and the managed receipt object key.
+2. Confirm the receipt starts in `SUBMITTED` with a pending exchange transaction.
+3. Approve as finance admin with a separate `Idempotency-Key` and review reason.
+4. Confirm the GHS ledger credit, transaction success status, audit log, and receipt `CREDITED` status.
+5. Repeat submit/review idempotency keys and confirm no duplicate receipt or wallet credit.
 
 ## Live Steps
 
@@ -53,3 +63,5 @@ REDIS_PASSWORD=
 - Client-supplied fee or rate can override server calculation.
 - Source debit and target credit can diverge.
 - Exchange limits and AML thresholds are undefined.
+- Manual receipt upload/proof URL e2e coverage and private production bucket setup are still required.
+- Manual receipt credits cannot be reconciled to bank statement or Monnify settlement evidence.

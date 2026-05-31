@@ -1,71 +1,57 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
+
+import '../../../core/router/app_router.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../core/widgets/trustpay_lottie.dart';
+import '../../../services/auth_service.dart';
+import '../../../services/home_data_service.dart';
 
-// â”€â”€â”€ MOCK DATA â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-class _Recipient {
-  final String name;
-  final String initials;
-  final Color avatarColor;
-  final String shortDate;
-  final double lastAmount;
-  final String currency;
-
-  const _Recipient({
-    required this.name,
-    required this.initials,
-    required this.avatarColor,
-    required this.shortDate,
-    required this.lastAmount,
-    required this.currency,
-  });
-}
-
-final _mockRecipients = [
-  const _Recipient(
-    name: 'Kwame Asante',
-    initials: 'KA',
-    avatarColor: Color(0xFF7C3AED),
-    shortDate: '5 May',
-    lastAmount: 1200.00,
-    currency: 'GHâ‚µ',
-  ),
-  const _Recipient(
-    name: 'Fatima Bello',
-    initials: 'FB',
-    avatarColor: Color(0xFF2563EB),
-    shortDate: '4 May',
-    lastAmount: 50000,
-    currency: 'â‚¦',
-  ),
-  const _Recipient(
-    name: 'Ama Kofie',
-    initials: 'AK',
-    avatarColor: Color(0xFF059669),
-    shortDate: '3 May',
-    lastAmount: 340.00,
-    currency: 'GHâ‚µ',
-  ),
-];
-
-// â”€â”€â”€ RECENT RECIPIENTS WIDGET â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-/// 2Ã—2 grid of recent beneficiaries + "Add More" cell.
-/// Matches the reference design exactly.
 class RecentRecipients extends StatelessWidget {
   const RecentRecipients({super.key});
 
   @override
   Widget build(BuildContext context) {
+    return const _RecentRecipientsContent();
+  }
+}
+
+class _RecentRecipientsContent extends StatefulWidget {
+  const _RecentRecipientsContent();
+
+  @override
+  State<_RecentRecipientsContent> createState() => _RecentRecipientsContentState();
+}
+
+class _RecentRecipientsContentState extends State<_RecentRecipientsContent> {
+  final _service = HomeDataService();
+  late Future<List<HomeBeneficiary>> _future;
+
+  @override
+  void initState() {
+    super.initState();
+    _future = _service.fetchBeneficiaries();
+  }
+
+  void _reload() {
+    setState(() {
+      _future = _service.fetchBeneficiaries();
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
     return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // â”€â”€ Section Header â”€â”€
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
             Text('Recipients', style: AppTextStyles.headingM),
             GestureDetector(
-              onTap: () {},
+              onTap: () => context.push(AppRoutes.withdraw),
               child: Text(
-                'See all',
+                'Add',
                 style: AppTextStyles.labelM.copyWith(
                   color: AppColors.primary,
                   fontWeight: FontWeight.w600,
@@ -74,137 +60,162 @@ class RecentRecipients extends StatelessWidget {
             ),
           ],
         ),
+        const SizedBox(height: AppSpacing.md),
+        FutureBuilder<List<HomeBeneficiary>>(
+          future: _future,
+          builder: (context, snapshot) {
+            if (snapshot.connectionState == ConnectionState.waiting) {
+              return const _RecipientsLoadingState();
+            }
 
-        SizedBox(height: AppSpacing.md),
+            if (snapshot.hasError) {
+              return _RecipientsMessage(
+                title: authErrorMessage(
+                  snapshot.error ?? 'Could not load recipients',
+                  'Could not load recipients',
+                ),
+                actionLabel: 'Retry',
+                onAction: _reload,
+              );
+            }
 
-        // â”€â”€ 2Ã—2 Grid â”€â”€
-        GridView.count(
-          crossAxisCount: 2,
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          crossAxisSpacing: AppSpacing.sm,
-          mainAxisSpacing: AppSpacing.sm,
-          childAspectRatio: 1.55,
-          children: [
-            ..._mockRecipients.map((r) => _RecipientCard(recipient: r)),
-            _AddMoreCard(onTap: () {}),
-          ],
+            final recipients = snapshot.data ?? const <HomeBeneficiary>[];
+            if (recipients.isEmpty) {
+              return _RecipientsMessage(
+                title: 'No recent recipients yet',
+                detail: 'Save a withdrawal beneficiary to show it here.',
+                actionLabel: 'Withdraw',
+                onAction: () => context.push(AppRoutes.withdraw),
+              );
+            }
+
+            return Column(
+              children: recipients.map(_RecipientRow.new).toList(),
+            );
+          },
         ),
       ],
     );
   }
 }
 
-// â”€â”€â”€ INDIVIDUAL RECIPIENT CARD â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-class _RecipientCard extends StatelessWidget {
-  final _Recipient recipient;
+class _RecipientsLoadingState extends StatelessWidget {
+  const _RecipientsLoadingState();
 
-  const _RecipientCard({required this.recipient});
+  @override
+  Widget build(BuildContext context) {
+    return const TrustPayAnimatedState(
+      variant: TrustPayAnimationVariant.loading,
+      title: 'Loading recent recipients',
+      detail: 'Pulling your saved beneficiaries.',
+      animationSize: 62,
+    );
+  }
+}
+
+class _RecipientsMessage extends StatelessWidget {
+  final String title;
+  final String? detail;
+  final String actionLabel;
+  final VoidCallback onAction;
+
+  const _RecipientsMessage({
+    required this.title,
+    this.detail,
+    required this.actionLabel,
+    required this.onAction,
+  });
 
   @override
   Widget build(BuildContext context) {
     return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(AppSpacing.lg),
       decoration: BoxDecoration(
         color: AppColors.surfaceVariant,
         borderRadius: BorderRadius.circular(AppRadius.lg),
+        border: Border.all(color: AppColors.border),
       ),
-      padding: const EdgeInsets.all(AppSpacing.md),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Avatar circle
-          Container(
-            width: 36,
-            height: 36,
-            decoration: BoxDecoration(
-              color: recipient.avatarColor,
-              shape: BoxShape.circle,
+          TrustPayLottie(
+            variant: detail == null
+                ? TrustPayAnimationVariant.send
+                : TrustPayAnimationVariant.loading,
+            size: 60,
+            semanticsLabel: title,
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          Text(title, style: AppTextStyles.labelM, textAlign: TextAlign.center),
+          if (detail != null) ...[
+            const SizedBox(height: AppSpacing.xs),
+            Text(
+              detail!,
+              style: AppTextStyles.bodyS,
+              textAlign: TextAlign.center,
             ),
-            child: Center(
-              child: Text(
-                recipient.initials,
-                style: TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w700,
-                  fontSize: 13,
-                ),
-              ),
-            ),
-          ),
-          const Spacer(),
-          Text(
-            recipient.name,
-            style: AppTextStyles.labelM.copyWith(fontSize: 13),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-          ),
-          SizedBox(height: 2),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(
-                recipient.shortDate,
-                style: AppTextStyles.bodyS.copyWith(fontSize: 11),
-              ),
-              Text(
-                '${recipient.currency}${recipient.lastAmount.toStringAsFixed(0)}',
-                style: AppTextStyles.bodyS.copyWith(
-                  color: AppColors.textPrimary,
-                  fontWeight: FontWeight.w600,
-                  fontSize: 11,
-                ),
-              ),
-            ],
-          ),
+          ],
+          const SizedBox(height: AppSpacing.md),
+          TextButton(onPressed: onAction, child: Text(actionLabel)),
         ],
       ),
     );
   }
 }
 
-// â”€â”€â”€ ADD MORE CARD â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-class _AddMoreCard extends StatelessWidget {
-  final VoidCallback onTap;
-  const _AddMoreCard({required this.onTap});
+class _RecipientRow extends StatelessWidget {
+  final HomeBeneficiary beneficiary;
+
+  const _RecipientRow(this.beneficiary);
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        decoration: BoxDecoration(
-          color: AppColors.surfaceVariant,
-          borderRadius: BorderRadius.circular(AppRadius.lg),
-          border: Border.all(color: AppColors.border, width: 1.5),
-        ),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Container(
-              width: 36,
-              height: 36,
-              decoration: BoxDecoration(
-                color: AppColors.inputFill,
-                shape: BoxShape.circle,
-                border: Border.all(color: AppColors.border, width: 1.5),
-              ),
-              child: Icon(
-                Icons.add_rounded,
-                color: AppColors.textSecondary,
-                size: 20,
-              ),
+    return Container(
+      margin: const EdgeInsets.only(bottom: AppSpacing.sm),
+      padding: const EdgeInsets.all(AppSpacing.md),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceVariant,
+        borderRadius: BorderRadius.circular(AppRadius.lg),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(
+              color: AppColors.inputFill,
+              shape: BoxShape.circle,
+              border: Border.all(color: AppColors.border),
             ),
-            SizedBox(height: AppSpacing.xs),
-            Text(
-              'Add More',
-              style: AppTextStyles.labelS.copyWith(
-                color: AppColors.textSecondary,
-              ),
+            child: Icon(
+              Icons.account_balance_outlined,
+              color: AppColors.textSecondary,
+              size: 22,
             ),
-          ],
-        ),
+          ),
+          const SizedBox(width: AppSpacing.md),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(beneficiary.accountName, style: AppTextStyles.labelM),
+                const SizedBox(height: 2),
+                Text(
+                  '${beneficiary.bankName} • ${beneficiary.accountNumberMasked}',
+                  style: AppTextStyles.bodyS,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ),
+          ),
+          Text(
+            beneficiary.currency,
+            style: AppTextStyles.bodyS,
+            textAlign: TextAlign.right,
+          ),
+        ],
       ),
     );
   }
 }
-

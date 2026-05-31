@@ -1,232 +1,178 @@
-# 📋 TRUSTPAY: Comprehensive Task Checklist
+# TRUSTPAY Task Status And Remaining Work
 
-This document breaks down the high-level BUILDPLAN into an extremely granular, actionable task list. Every phase is strictly sequenced to ensure maximum security, scalability, and ease of development.
+Date updated: 2026-05-22
 
----
+This checklist reflects the current codebase after the Monnify-only virtual-account work, exchange deposit review flow, admin finance updates, and dashboard wallet UI improvements. It replaces the older bootstrap checklist that still showed already-implemented foundations as pending.
 
-## 🟢 PHASE 0: PROJECT SETUP & INFRASTRUCTURE FOUNDATION
+## Current Build Snapshot
 
-### 1. Repository & Version Control
-- [ ] Initialize Git repositories (or Monorepo via Nx/Turborepo) for `mobile`, `web`, and `backend`.
-- [ ] Configure Git branch strategy (e.g., `main`, `staging`, `dev`, `feature/*`, `hotfix/*`).
-- [ ] Setup standard `.gitignore` rules for Node, Flutter, Next.js, and OS files.
-- [ ] Implement pre-commit hooks (Husky) to enforce linting and formatting before commits.
+### Implemented In Code
 
-### 2. Backend Engine Initialization (NestJS)
-- [ ] Bootstrap NestJS application base (`nest new trustpay-api`).
-- [ ] Install and configure `@nestjs/config` for strict environment variable validation (Joi or Zod).
-- [ ] Set up Docker and `docker-compose.yml` for local development (PostgreSQL + Redis).
-- [ ] Configure ESLint and Prettier for strict TypeScript formatting.
-- [ ] Setup global Exception Filter to capture and standardise all HTTP error responses.
-- [ ] Setup global Validation Pipe with `class-validator` and `class-transformer`.
-- [ ] Configure Pino or Winston for structured JSON logging.
+- [x] NestJS backend with strict config validation, global DTO validation, global exception filter, Pino logging, Helmet, CORS allowlist, throttling, Swagger in non-production, and graceful shutdown.
+- [x] Prisma/PostgreSQL schema for users, wallets, transactions, ledger entries, idempotency records, provider events, virtual accounts, bank beneficiaries, transfer attempts, VTU orders, pricing rules, audit logs, KYC documents, KYC verifications, support disputes, rates, and webhook logs.
+- [x] Global idempotency interceptor for mutation endpoints and provider-specific idempotent webhook handling.
+- [x] Auth, users, wallets, transactions, support, KYC, transfers, exchange, payments, banking, VTU, admin, Redis, reconciliation, circuit-breaker, and transaction PIN modules.
+- [x] KYC tiering and manual-review provider gateway with signed upload flows for private KYC documents.
+- [x] Tier 2 gating for deposits, virtual accounts, withdrawals, beneficiaries, VTU, transfers, and exchange money movement.
+- [x] Monnify-only NGN virtual-account provisioning path.
+- [x] Monnify webhook signature verification, provider-event storage, duplicate replay protection, and wallet funding credit path.
+- [x] Monnify-verified NGN to GHS exchange deposit intent path with admin review before GHS credit.
+- [x] Manual exchange receipt upload/review path with signed proof URL support.
+- [x] Wallet ledger service for append-only balance movement records.
+- [x] Internal transfers with transaction PIN support.
+- [x] Withdrawal initiation, beneficiary storage, bank resolution/listing, transfer attempts, and admin verification endpoints.
+- [x] Paystack and Flutterwave provider code and webhook controllers remain present, but they are not the active virtual-account direction.
+- [x] VTU provider abstraction with generic, VTpass, and Reloadly paths, Reloadly signed webhook controller, order requery, reversals, and admin VTU operations.
+- [x] Admin operations API for users, stats, transactions, virtual accounts, provider events, pending transfers, reconciliation, VTU health, stale VTU orders, VTU pricing, support, KYC, audit logs, and exchange receipt review.
+- [x] Next.js website/admin with auth, dashboard, wallet detail screen, Monnify account funding screen, exchange screen, KYC, withdraw, VTU, transactions, support, profile, admin finance, admin KYC, admin support, and admin VTU pages.
+- [x] Dashboard wallet cards now expose `Send Money` and `Receive Money`, and click through to wallet detail/history screens.
+- [x] Flutter app shell, auth screens, dashboard/home, money actions, VTU service client, transaction security service, biometrics/PIN support, profile, analytics, and transactions screens.
+- [x] Focused backend unit coverage for wallets, ledger, idempotency, auth, KYC, banking, beneficiaries, exchange, payments, support, transfers, VTU, Reloadly webhook/provider, reconciliation, and admin service.
+- [x] Web lint/build currently passes with placeholder environment values.
 
-### 3. Frontend Initialization (Web/Admin - Next.js)
-- [ ] Bootstrap Next.js 14+ with App Router (`npx create-next-app`).
-- [ ] Integrate Tailwind CSS and setup global variables (colors, fonts, spacing).
-- [ ] Setup a UI component library (e.g., shadcn/ui or Radix UI) for robust accessible components.
-- [ ] Configure standard Next.js directory structure (`app`, `components`, `lib`, `hooks`, `store`).
-- [ ] Setup API client (Axios or native fetch with TanStack Query).
+### Verified Recently
 
-### 4. Mobile Initialization (Flutter)
-- [ ] Create Flutter project base.
-- [ ] Configure build environments/flavors (Dev, Staging, Prod) for iOS and Android.
-- [ ] Establish directory architecture (`screens`, `widgets`, `services`, `models`, `providers`).
-- [ ] Setup State Management framework (Riverpod or BLoC).
-- [ ] Configure HTTP client package (e.g., `dio` or `http`) with global interceptors.
+- [x] `WEBSITE npm run lint`
+- [x] `WEBSITE npm run build`
+- [x] Backend exchange service tests passed during Monnify exchange work.
+- [x] Backend build passed during Monnify exchange work.
 
----
+## Active Product Direction
 
-## 🟢 PHASE 1: CORE BACKEND FOUNDATION
+- [x] Use Monnify only for Nigerian NGN virtual accounts.
+- [x] Do not activate Nomba.
+- [x] Do not activate Paystack dedicated virtual accounts unless a later product decision reverses this.
+- [x] Admin review remains required before a Monnify-verified exchange deposit credits a user's GHS wallet.
+- [x] One provider inflow must never credit both NGN wallet funding and GHS exchange settlement.
 
-### 1. Database Schema & ORM Setup
-- [ ] Initialize PostgreSQL Database.
-- [ ] Configure ORM (Prisma/TypeORM) connection pooling.
-- [ ] Design and migrate `Users` table (id, email, password, role, phone, KYC status).
-- [ ] Design and migrate `Wallets` table for user balances (id, user_id, currency, balance).
-- [ ] Design and migrate `Transactions` table (id, user_id, type, amount, status, reference, metadata).
-- [ ] Design and migrate `Rates` table for historical tracking of FX conversions.
-- [ ] Design and migrate `Services` table (cable, data, airtime providers).
-- [ ] Generate typed ORM client.
+## P0 Launch Blockers
 
-### 2. Authentication & Identity Service
-- [ ] Create `AuthModule` and `UsersModule`.
-- [ ] Implement user registration endpoint `/auth/register` (with password hashing using Argon2/Bcrypt).
-- [ ] Implement login endpoint `/auth/login`.
-- [ ] Setup Passport.js or native JWT generation with strict expiration times (e.g., 15m access, 7d refresh).
-- [ ] Implement refresh token rotation mechanism.
-- [ ] Create JWT validation Guards (`@UseGuards(JwtAuthGuard)`).
-- [ ] Implement Role-Based Access Control (RBAC) decorators (`@Roles('ADMIN')`).
-- [ ] Integrate SMS provider (e.g., Twilio / Africa's Talking) for OTP delivery.
-- [ ] Implement OTP verification flow for signup and password reset.
+These must be completed before real-money launch.
 
-### 3. User Profile & Basic Wallet Service
-- [ ] Create endpoint to fetch current user profile (`GET /users/me`).
-- [ ] Create endpoint to update user details (`PATCH /users/me`).
-- [ ] Create trigger/service to automatically provision an empty NGN & GHS Wallet on user registration.
-- [ ] Endpoint to fetch wallet balances (`GET /wallets`).
+- [ ] Apply all Prisma migrations in staging, then production: `cd BACKEND && npx prisma migrate deploy`.
+- [ ] Generate Prisma client in each deploy environment: `cd BACKEND && npx prisma generate`.
+- [ ] Create private Supabase buckets:
+  - [ ] `kyc-documents`
+  - [ ] `exchange-receipts`
+  - [ ] enforce MIME restrictions and max upload sizes.
+- [ ] Configure production secrets only in the deployment secret manager:
+  - [ ] Supabase URL, publishable/anon key, service role key, JWT secret.
+  - [ ] PostgreSQL URL with SSL/TLS.
+  - [ ] Redis host, port, password, TLS/private network rules.
+  - [ ] PII and bank-account encryption keys.
+  - [ ] Monnify API key, secret key, contract code, webhook secret, base URL, exchange collection account.
+  - [ ] VTU provider credentials if VTU will launch.
+  - [ ] Sentry DSN or equivalent monitoring key.
+- [ ] Complete Monnify KYB and obtain sandbox/live credentials.
+- [ ] Register public HTTPS webhook URLs:
+  - [ ] `POST /api/webhooks/monnify`
+  - [ ] Reloadly/VTU webhook only if Reloadly launches.
+- [ ] Run Monnify sandbox reserved-account creation with a verified Tier 2 user.
+- [ ] Run Monnify sandbox wallet funding:
+  - [ ] low-value transfer succeeds.
+  - [ ] duplicate webhook replay does not double-credit.
+  - [ ] amount/currency/reference mismatches do not credit.
+  - [ ] provider event and ledger entries reconcile.
+- [ ] Run Monnify sandbox exchange deposit:
+  - [ ] user creates deposit intent.
+  - [ ] payment enters the admin queue as provider verified.
+  - [ ] admin approval credits GHS exactly once.
+  - [ ] rejection does not credit.
+  - [ ] duplicate review and duplicate webhook do not double-credit.
+- [ ] Define live go/no-go approval with named owner for compliance, operations, engineering, and finance.
+- [ ] Create production rollback steps for backend, website/admin, database migration, and provider flags.
 
----
+## P1 Security And Financial Controls
 
-## 🟢 PHASE 2: EXCHANGE ENGINE
+- [ ] Add backend e2e tests for Monnify duplicate webhook replay.
+- [ ] Add backend e2e tests for manual receipt duplicate submit/review attempts.
+- [ ] Add backend e2e tests for withdrawal pending/success/failure/reversal provider states.
+- [ ] Add backend e2e tests for transaction PIN failure, lockout, and successful money movement.
+- [ ] Add concurrency tests for wallet debit/credit paths that attempt simultaneous debits.
+- [ ] Review every financial mutation endpoint for explicit `Idempotency-Key` behavior and document any intentional exception.
+- [ ] Confirm all admin financial actions write audit logs with actor, reason, before/after, target, and reference.
+- [ ] Add dual-control approval for high-value exchange credits and high-value withdrawals.
+- [ ] Add configurable transaction limits by KYC tier, currency, route, and time window.
+- [ ] Ensure withdrawal limit counters update atomically in the same transaction that reserves/debits funds.
+- [ ] Add reconciliation dashboards or exports for:
+  - [ ] wallet balance totals.
+  - [ ] ledger totals.
+  - [ ] Monnify provider events.
+  - [ ] exchange deposit receipts.
+  - [ ] VTU orders.
+  - [ ] pending withdrawals.
+- [ ] Add dead-letter or retry queue visibility for provider events that fail processing.
 
-### 1. FX Rate Management
-- [ ] Integrate third-party FX API (e.g., ExchangeRate-API, Wise, or custom admin inputs).
-- [ ] Create CRON job service `@nestjs/schedule` to fetch and update live rates hourly.
-- [ ] Implement Redis caching layer to cache the current exchange rates (GHS ⇄ NGN) to reduce external API hits.
-- [ ] Build internal endpoint to fetch live conversion rate `GET /exchange/rate?from=GHS&to=NGN`.
+## P1 Admin And Operations
 
-### 2. Conversion & Fee Logic
-- [ ] Create internal formula/service to calculate conversion with application percentage markup.
-- [ ] Build "Quote" endpoint: `POST /exchange/quote` -> Returns 'You Send', 'They Receive', 'Fees', 'Rate', and 'Quote Expiry'.
-- [ ] Cache generated quotes in Redis with a TTL (e.g., 10 minutes) so users pay the exact quoted amount.
+- [ ] Finish admin UI coverage for pending withdrawals and transfer attempts.
+- [ ] Add transaction detail views that show masked provider metadata, ledger entries, provider events, and audit trail.
+- [ ] Add user detail view with wallets, virtual accounts, KYC, support tickets, limits, and account status.
+- [ ] Add export/download for reconciliation reports with date filters.
+- [ ] Add admin role segmentation beyond `ADMIN` if operations grows:
+  - [ ] support.
+  - [ ] finance.
+  - [ ] compliance.
+  - [ ] super admin.
+- [ ] Add admin action confirmation flows for high-risk operations.
+- [ ] Add support runbooks for stuck provider events, pending transfers, failed VTU orders, and disputed deposits.
 
-### 3. Internal Transfer / Exchange Execution
-- [ ] Create endpoint `POST /exchange/execute` utilizing the locked quote ID.
-- [ ] Implement ACID-compliant Database Transactions:
-    - Deduct from Source Wallet (GHS).
-    - Add to Target Wallet (NGN).
-    - Deduct system fee.
-    - Write Transaction Record (Status: success).
+## P1 Web And Mobile Product Work
 
----
+- [ ] Run manual QA for dashboard wallet UI at mobile, tablet, and desktop sizes.
+- [ ] Add web e2e smoke coverage for:
+  - [ ] login/dashboard load.
+  - [ ] wallet card click-through to `/dashboard/wallet/ngn`.
+  - [ ] receive-money path.
+  - [ ] Monnify exchange deposit intent path.
+  - [ ] admin exchange queue review path.
+- [ ] Align Flutter mobile dashboard with the web wallet changes:
+  - [ ] show Receive Money instead of Add/Fund wording where applicable.
+  - [ ] remove duplicated money action shortcuts from lower sections.
+  - [ ] add wallet detail screen with account number and history.
+- [ ] Replace remaining mock mobile recipients/transactions with API-backed data or explicit empty states.
+- [ ] Run Flutter analyzer and widget tests after mobile parity changes.
+- [ ] Review visible copy for regulated-money clarity:
+  - [ ] no promise of instant credit where admin review is required.
+  - [ ] provider and processing states are explicit.
+  - [ ] masked sensitive data is used by default.
 
-## 🟢 PHASE 3: EXTERNAL PAYMENTS & VTU INTEGRATION
+## P2 Provider And Feature Expansion
 
-### 1. Payment Gateway Inlets (Funding)
-- [ ] Integrate Flutterwave/Paystack initialization API.
-- [ ] Create `POST /payments/fund` logic to generate payment link / virtual account.
-- [ ] Create specialized Webhook listener `POST /webhooks/paystack` / `flutterwave`.
-- **[CRITICAL]** Implement Webhook cryptographic signature verification.
-- **[CRITICAL]** Implement Idempotency (prevent duplicate credit if webhook is sent twice via unique transaction IDs).
-- [ ] On successful webhook, credit user's database Wallet.
+- [ ] Decide whether Paystack/Flutterwave remain only card/payment-link providers or should be disabled until needed.
+- [ ] If Paystack/Flutterwave stay enabled:
+  - [ ] complete sandbox webhook replay tests.
+  - [ ] confirm settlement account, transfer permission, and reversal behavior.
+  - [ ] update docs to describe their exact production scope.
+- [ ] Complete VTU launch readiness:
+  - [ ] select live VTU provider per market.
+  - [ ] configure credentials.
+  - [ ] run low-value airtime/data/electricity/cable sandbox tests.
+  - [ ] verify provider refund/requery paths.
+- [ ] Select Ghana bill-pay provider for ECG/NEDCo or keep Ghana utility payments marked coming soon.
+- [ ] Replace manual KYC provider with approved NIBSS/NIMC/identity provider after compliance onboarding.
+- [ ] Add live FX-rate provider or admin-controlled rate operations with change approval.
 
-### 2. Payouts (Bank Transfers)
-- [ ] Integrate Flutterwave/Paystack Transfer API.
-- [ ] Build endpoint to resolve/validate bank account numbers `GET /payments/banks/resolve`.
-- [ ] Build endpoint to list all supported banks `GET /payments/banks`.
-- [ ] Build endpoint to initiate withdrawal/payout `POST /payments/withdraw`.
-- [ ] Implement pending state and update on `transfer.successful` or `transfer.failed` webhook.
+## P2 Infrastructure And Release
 
-### 3. VTU Integration (Airtime / Data / Electricity / Cable)
-- [ ] Identify and integrate VTU aggregators APIs (e.g. Reloadly, TopUp, Shago).
-- [ ] Build `GET /vtu/providers` (Fetch MTN, Airtel, DSTV, etc.).
-- [ ] Build `GET /vtu/packages?provider=xxx`.
-- [ ] Build validation for Smart Card numbers / Meter numbers.
-- [ ] Build `POST /vtu/purchase`.
-    - Check user wallet balance -> Deduct Wallet -> Call VTU API -> If Fail, Reverse Wallet -> Update Transaction object.
+- [ ] Provision managed PostgreSQL with SSL/TLS, backups, and restore testing.
+- [ ] Provision managed Redis with auth and private-network access.
+- [ ] Deploy backend behind HTTPS with health checks.
+- [ ] Deploy website/admin with production `NEXT_PUBLIC_API_URL`.
+- [ ] Configure Sentry or equivalent for backend, web, and mobile.
+- [ ] Add CI jobs for:
+  - [ ] backend lint/build/test.
+  - [ ] website lint/build/e2e smoke.
+  - [ ] Flutter analyze/test.
+  - [ ] Prisma migration validation.
+- [ ] Add dependency vulnerability scanning.
+- [ ] Add environment-specific feature flags for banking, virtual accounts, withdrawals, VTU, exchange review, and admin high-value approvals.
 
----
+## Reference Docs
 
-## 🟢 PHASE 4: FRONTEND DEVELOPMENT (MOBILE)
+- Codebase review: `DOCS/CODEBASE-STATUS-REVIEW.MD`
+- Security rules: `DOCS/SECURITY-RULES.MD`
+- Monnify status: `DOCS/PRODUCTION-GUIDES/13-MONNIFY-ONLY-VIRTUAL-ACCOUNTS-STATUS.MD`
+- Manual exchange flow: `DOCS/PRODUCTION-GUIDES/14-MANUAL-EXCHANGE-RECEIPT-FLOW.MD`
+- Testing guide: `DOCS/TESTING-GUIDE.MD`
 
-### 1. Core Structure & Onboarding
-- [ ] Setup app routing (e.g. `go_router` or `auto_route`).
-- [ ] Build Splash Screen (Loading states).
-- [ ] Build Onboarding screens (Swipeable carousel explaining features).
-- [ ] Build Login / Register Screens with Form Validation.
-- [ ] Build OTP Verification Screen.
-- [ ] Implement Secure Auth Service (Storing JWT safely with secure storage layer).
-
-### 2. Dashboard / Home 
-- [ ] Develop Main App Shell / Bottom Navigation Bar.
-- [ ] Build Dashboard Screen UI (Show Balance, Quick actions, Recent transactions).
-- [ ] Integrate `GET /wallets` and `GET /transactions` via Riverpod/BLoC.
-- [ ] Build pull-to-refresh logic for the dashboard.
-
-### 3. Exchange Flow (GHS ⇄ NGN)
-- [ ] Build Currency Exchange screen (From / To inputs).
-- [ ] Implement active debouncing for typing to call `GET /exchange/quote` seamlessly.
-- [ ] Build 'Transaction Review / Confirmation' slide-up modal or screen.
-- [ ] Build Success / Lottie Animation screen upon completion.
-
-### 4. VTU & Bills Flow
-- [ ] Build Services Grid (Airtime, Data, TV, Electricity).
-- [ ] Build Data/Airtime selection pages.
-- [ ] Build TV/Energy input forms with dynamic validation loaders (validating customer name).
-- [ ] Implement Checkout flow using local Wallet balance.
-
-### 5. Profile & Settings
-- [ ] Build User Profile visualization.
-- [ ] Build 'Change Password' / 'Security' settings.
-- [ ] Build Help / Contact Support links.
-- [ ] Implement Logout methodology (clearing secure storage + resetting state).
-
----
-
-## 🟢 PHASE 5: ADMIN PANEL (Next.js)
-
-### 1. Authentication & System Access
-- [ ] Setup Next.js Auth flow (restricted to User role = ADMIN).
-- [ ] Create login page for admins.
-- [ ] Setup App Router protected layouts.
-
-### 2. Dashboard Overviews
-- [ ] Build high-level metrics dashboard: Total Volume, Active Users, Revenue from Fees.
-- [ ] Implement dynamic charts (e.g., using Recharts or Chart.js).
-
-### 3. Transaction Management
-- [ ] Build complete Transactions Data Table (Server-side pagination, sorting, filtering by Date/Status).
-- [ ] Build Transaction Details modal (View Webhook logs, raw JSON payloads).
-- [ ] Implement manual retry buttons for stuck transactions (Call specific Admin backend APIs).
-
-### 4. User & Rate Management
-- [ ] Build Users list with suspension functionality.
-- [ ] Build 'Manual FX Rate Override' form.
-- [ ] Build logs page for system flags (failed webhook tracking).
-
----
-
-## 🟢 PHASE 6: SECURITY & SYSTEM STABILITY
-
-### 1. Attack Mitigations
-- [ ] Configure `helmet` in NestJS to set secure HTTP headers.
-- [ ] Implement CORS cleanly (only allow Web URL and Admin URL origin).
-- [ ] Install and configure `nestjs/throttler` (Rate limiter) across Auth and Payment initiation endpoints (e.g., Max 5 OTPs per hour).
-- [ ] Audit user inputs against SQLi and XSS (sanitization pipes).
-
-### 2. Logging & Monitoring
-- [ ] Set up Sentry.io wrapper for both Backend error tracking and Frontend crash analytics.
-- [ ] Inject raw request logging (IP, Route, Status, Latency) to identify bottlenecks.
-- [ ] Enable Dead Letter Queues (DLQ) if using microservices or background jobs.
-
----
-
-## 🟢 PHASE 7: QA & TESTING
-
-### 1. Automated Testing (Backend)
-- [ ] Write Unit tests (Jest) for Currency Conversion math logic.
-- [ ] Write Unit tests for VTU deduction logic (ensuring negative balances are impossible).
-- [ ] Write E2E integration tests for Authentication flow and Wallet provisioning.
-- [ ] Write E2E simulated tests for dummy Webhooks hitting the system.
-
-### 2. Manual & Edge Case Testing (Mobile/Web)
-- [ ] Test on varying screen sizes (iOS small screens vs Android tablets).
-- [ ] Simulate network failures during payments (Handling timeouts gracefully).
-- [ ] Stress-test duplicate requests (mashing the 'Pay' button 10 times quickly to ensure idempotency holds).
-- [ ] Test the exact behavior of expired JWT tokens and the auto-refresh flow.
-
----
-
-## 🟢 PHASE 8: CLOUD DEPLOYMENT & LAUNCH
-
-### 1. Server Configuration
-- [ ] Provision AWS RDS / DigitalOcean Managed Database (PostgreSQL).
-- [ ] Provision managed Redis instance.
-- [ ] Deploy NestJS backend (Using AWS ECS, Elastic Beanstalk, or DO App Platform).
-- [ ] Issue HTTPS / SSL Certificates.
-- [ ] Bind custom Domain (api.trustpay.com).
-
-### 2. Frontend Deployment
-- [ ] Deploy Next.js Web App and Admin Dashboard to Vercel (or AWS Amplify).
-- [ ] Bind domains (admin.trustpay.com, trustpay.com). 
-
-### 3. App Stores
-- [ ] Configure App Store provisioning profiles and certificates.
-- [ ] Configure Google Play Console Keystores.
-- [ ] Verify App Permissions (Internet, Biometrics).
-- [ ] Submit TestFlight (iOS) and Internal Testing (Android) builds.
-- [ ] Final compliance check and live store submission.
-
----
-**END OF DOCUMENT**

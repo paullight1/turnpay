@@ -1,18 +1,19 @@
 import {
   IsIn,
   IsEmail,
-  IsNumber,
   IsOptional,
   IsString,
-  Max,
   MaxLength,
   Matches,
   ValidateIf,
-} from 'class-validator';
-import { Type } from 'class-transformer';
+} from "class-validator";
+import { Transform } from "class-transformer";
+import {
+  MONEY_AMOUNT_PATTERN,
+  normalizeDecimalInput,
+} from "../../common/dto/query.dto";
 
-const SUPPORTED_CURRENCIES = ['NGN', 'GHS'] as const;
-const MAX_AMOUNT = 10_000_000;
+const SUPPORTED_CURRENCIES = ["NGN", "GHS"] as const;
 
 export class InternalTransferDto {
   @ValidateIf(
@@ -38,10 +39,12 @@ export class InternalTransferDto {
   @Matches(/^\+?[1-9]\d{1,14}$/)
   recipientPhone?: string;
 
-  @IsNumber({ maxDecimalPlaces: 2 })
-  @Type(() => Number)
-  @Max(MAX_AMOUNT)
-  amount: number;
+  @Transform(({ value }) => normalizeDecimalInput(value))
+  @IsString()
+  @Matches(MONEY_AMOUNT_PATTERN, {
+    message: "amount must be a positive decimal with at most 2 decimal places",
+  })
+  amount: string;
 
   @IsString()
   @IsIn(SUPPORTED_CURRENCIES)
@@ -51,4 +54,9 @@ export class InternalTransferDto {
   @IsString()
   @MaxLength(120)
   note?: string;
+
+  @IsOptional()
+  @IsString()
+  @Matches(/^\d{4,6}$/)
+  transactionPin?: string;
 }

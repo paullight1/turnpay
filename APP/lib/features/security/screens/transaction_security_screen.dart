@@ -3,6 +3,8 @@ import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/theme/app_theme.dart';
+import '../../../core/widgets/trustpay_lottie.dart';
+import '../../../services/auth_service.dart';
 import '../../../services/transaction_security_service.dart';
 
 class TransactionSecurityScreen extends StatefulWidget {
@@ -44,7 +46,7 @@ class _TransactionSecurityScreenState extends State<TransactionSecurityScreen> {
     }
   }
 
-  Future<void> _toggleFaceId(
+  Future<void> _toggleBiometric(
     TransactionSecurityConfig config,
     bool enabled,
   ) async {
@@ -52,30 +54,29 @@ class _TransactionSecurityScreenState extends State<TransactionSecurityScreen> {
       _showToast('Set your transaction PIN first.');
       return;
     }
-    if (!config.hasFaceId) {
-      _showToast('Face ID is not available on this device/build.');
+    if (!config.canUseBiometrics || !config.hasBiometric) {
+      _showToast('${config.biometricLabel} is not available on this device.');
       return;
     }
 
-    await _securityService.setFaceIdEnabled(enabled);
+    if (enabled) {
+      final approved = await _securityService.authenticateBiometric(
+        reason: 'Enable ${config.biometricLabel} for TRUSTPAY transactions',
+      );
+      if (!approved) {
+        _showToast('${config.biometricLabel} setup was not completed.');
+        return;
+      }
+    }
+
+    await _securityService.setBiometricEnabled(enabled);
     _reload();
   }
 
-  Future<void> _toggleFingerprint(
-    TransactionSecurityConfig config,
-    bool enabled,
-  ) async {
-    if (!config.hasPin) {
-      _showToast('Set your transaction PIN first.');
-      return;
-    }
-    if (!config.hasFingerprint) {
-      _showToast('Fingerprint is not available on this device/build.');
-      return;
-    }
-
-    await _securityService.setFingerprintEnabled(enabled);
-    _reload();
+  IconData _biometricIcon(TransactionSecurityConfig config) {
+    return config.biometricLabel == 'Face ID'
+        ? Icons.face_retouching_natural_rounded
+        : Icons.fingerprint_rounded;
   }
 
   void _showToast(String message) {
@@ -129,7 +130,7 @@ class _TransactionSecurityScreenState extends State<TransactionSecurityScreen> {
                       ),
                       const SizedBox(height: AppSpacing.sm),
                       Text(
-                        'Protect money actions with a temporary local PIN gate and optional biometric approval.',
+                        'Protect money actions with a transaction PIN and optional biometric approval.',
                         style: AppTextStyles.bodyM,
                       ),
                       const SizedBox(height: AppSpacing.xl),
@@ -137,7 +138,13 @@ class _TransactionSecurityScreenState extends State<TransactionSecurityScreen> {
                         const Center(
                           child: Padding(
                             padding: EdgeInsets.all(AppSpacing.xl),
-                            child: CircularProgressIndicator(),
+                            child: TrustPayAnimatedState(
+                              variant: TrustPayAnimationVariant.loading,
+                              title: 'Checking security',
+                              detail:
+                                  'Loading your transaction PIN and biometric settings.',
+                              animationSize: 72,
+                            ),
                           ),
                         )
                       else if (!snapshot.hasData)
@@ -156,40 +163,27 @@ class _TransactionSecurityScreenState extends State<TransactionSecurityScreen> {
                               : 'Create transaction PIN',
                           detail: config.hasPin
                               ? 'Your PIN is required before sensitive wallet actions.'
-                              : 'Set a local PIN for money action approvals.',
+                              : 'Set the PIN used for money action approvals.',
                           icon: Icons.password_rounded,
                           cta: config.hasPin ? 'Change PIN' : 'Create PIN',
                           onTap: () => _openPinSetup(config),
                         ),
                         const SizedBox(height: AppSpacing.md),
                         _BiometricTogglePanel(
-                          title: 'Face ID',
-                          detail: config.hasFaceId
-                              ? 'Allow face authentication before sensitive transactions.'
-                              : 'Not available on this device or current build.',
-                          icon: Icons.face_retouching_natural_rounded,
-                          value: config.faceIdEnabled && config.hasFaceId,
-                          enabled: config.hasFaceId,
-                          onChanged: (value) => _toggleFaceId(config, value),
-                        ),
-                        const SizedBox(height: AppSpacing.md),
-                        _BiometricTogglePanel(
-                          title: 'Fingerprint',
-                          detail: config.hasFingerprint
-                              ? 'Allow fingerprint approval as a faster alternative to your PIN.'
-                              : 'Not available on this device or current build.',
-                          icon: Icons.fingerprint_rounded,
-                          value: config.fingerprintEnabled &&
-                              config.hasFingerprint,
-                          enabled: config.hasFingerprint,
-                          onChanged: (value) =>
-                              _toggleFingerprint(config, value),
+                          title: config.biometricLabel,
+                          detail: config.hasBiometric
+                              ? 'Use ${config.biometricLabel} to approve sensitive transactions after your PIN is set.'
+                              : '${config.biometricLabel} is not available on this device or current build.',
+                          icon: _biometricIcon(config),
+                          value: config.biometricEnabled && config.hasBiometric,
+                          enabled: config.hasBiometric,
+                          onChanged: (value) => _toggleBiometric(config, value),
                         ),
                         const SizedBox(height: AppSpacing.md),
                         const _SecurityInfoPanel(
                           title: 'Current behavior',
                           detail:
-                              'Money action routes request your PIN before submission. Biometrics are offered only when enabled and supported.',
+                              'Money action routes request your PIN before submission. Biometrics can unlock your PIN only when enabled and supported.',
                           icon: Icons.verified_user_outlined,
                         ),
                       ],
@@ -209,6 +203,7 @@ class TransactionPinScreen extends StatefulWidget {
   final PinScreenMode mode;
   final int initialPinLength;
   final bool allowBiometric;
+  final String biometricLabel;
   final String title;
   final String subtitle;
 
@@ -216,6 +211,7 @@ class TransactionPinScreen extends StatefulWidget {
     required this.mode,
     required this.initialPinLength,
     required this.allowBiometric,
+    required this.biometricLabel,
     required this.title,
     required this.subtitle,
   });
@@ -225,6 +221,7 @@ class TransactionPinScreen extends StatefulWidget {
       mode: PinScreenMode.create,
       initialPinLength: initialPinLength,
       allowBiometric: false,
+      biometricLabel: 'Biometric approval',
       title: 'Create transaction PIN',
       subtitle: 'Set the code that will be required for money action requests.',
     );
@@ -233,6 +230,7 @@ class TransactionPinScreen extends StatefulWidget {
   factory TransactionPinScreen.verify({
     required int pinLength,
     required bool allowBiometric,
+    required String biometricLabel,
     required String title,
     required String subtitle,
   }) {
@@ -240,6 +238,7 @@ class TransactionPinScreen extends StatefulWidget {
       mode: PinScreenMode.verify,
       initialPinLength: pinLength,
       allowBiometric: allowBiometric,
+      biometricLabel: biometricLabel,
       title: title,
       subtitle: subtitle,
     );
@@ -251,6 +250,7 @@ class TransactionPinScreen extends StatefulWidget {
 
 class _TransactionPinScreenState extends State<TransactionPinScreen> {
   final _securityService = TransactionSecurityService();
+  final _authService = AuthService();
   final StringBuffer _buffer = StringBuffer();
   String? _firstPin;
   String? _error;
@@ -314,7 +314,20 @@ class _TransactionPinScreenState extends State<TransactionPinScreen> {
         return;
       }
 
-      await _securityService.savePin(pin, pinLength: _pinLength);
+      try {
+        await _authService.setTransactionPin(pin);
+        await _securityService.savePin(pin, pinLength: _pinLength);
+      } catch (error) {
+        setState(() {
+          _buffer.clear();
+          _firstPin = null;
+          _error = authErrorMessage(
+            error,
+            'Could not save transaction PIN. Try again.',
+          );
+        });
+        return;
+      }
       if (!mounted) return;
       Navigator.of(context).pop(true);
       return;
@@ -324,7 +337,7 @@ class _TransactionPinScreenState extends State<TransactionPinScreen> {
     if (!mounted) return;
 
     if (result.approved) {
-      Navigator.of(context).pop(true);
+      Navigator.of(context).pop(pin);
       return;
     }
 
@@ -338,14 +351,14 @@ class _TransactionPinScreenState extends State<TransactionPinScreen> {
   }
 
   Future<void> _useBiometric() async {
-    final approved = await _securityService.authenticateBiometric(
-      reason: 'Approve this TRUSTPAY transaction',
+    final pin = await _securityService.unlockPinWithBiometric(
+      reason: 'Approve this TRUSTPAY transaction with ${widget.biometricLabel}',
     );
 
     if (!mounted) return;
 
-    if (approved) {
-      Navigator.of(context).pop(true);
+    if (pin != null) {
+      Navigator.of(context).pop(pin);
       return;
     }
 
@@ -433,16 +446,22 @@ class _TransactionPinScreenState extends State<TransactionPinScreen> {
                 textAlign: TextAlign.center,
               ),
               const SizedBox(height: AppSpacing.xl),
+              TrustPayLottie(
+                variant: widget.mode == PinScreenMode.create
+                    ? TrustPayAnimationVariant.success
+                    : TrustPayAnimationVariant.send,
+                size: 72,
+                repeat: widget.mode != PinScreenMode.create,
+                semanticsLabel: currentTitle,
+              ),
+              const SizedBox(height: AppSpacing.md),
               Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: List.generate(
                   _pinLength,
                   (index) => _PinDot(
                     filled: index < _buffer.length,
-                    obscured: widget.mode == PinScreenMode.verify,
-                    value: index < _buffer.length
-                        ? _buffer.toString()[index]
-                        : null,
+                    value: index < _buffer.length ? '*' : null,
                   ),
                 ),
               ),
@@ -478,7 +497,9 @@ class _TransactionPinScreenState extends State<TransactionPinScreen> {
                     ),
                   _KeypadIconButton(
                     icon: widget.allowBiometric
-                        ? Icons.fingerprint_rounded
+                        ? widget.biometricLabel == 'Face ID'
+                            ? Icons.face_retouching_natural_rounded
+                            : Icons.fingerprint_rounded
                         : Icons.circle_outlined,
                     enabled: widget.allowBiometric,
                     onTap: widget.allowBiometric ? _useBiometric : null,
@@ -533,19 +554,16 @@ class _SecurityStatusHero extends StatelessWidget {
       ),
       child: Row(
         children: [
-          Container(
-            width: 56,
-            height: 56,
-            decoration: BoxDecoration(
-              color: config.hasPin
-                  ? AppColors.success.withValues(alpha: 0.16)
-                  : AppColors.warning.withValues(alpha: 0.16),
-              borderRadius: BorderRadius.circular(AppRadius.md),
-            ),
-            child: Icon(
-              config.hasPin ? Icons.lock_rounded : Icons.lock_open_rounded,
-              color: config.hasPin ? AppColors.success : AppColors.warning,
-              size: 28,
+          SizedBox(
+            width: 68,
+            height: 68,
+            child: TrustPayLottie(
+              variant: config.hasPin
+                  ? TrustPayAnimationVariant.success
+                  : TrustPayAnimationVariant.loading,
+              size: 68,
+              repeat: !config.hasPin,
+              semanticsLabel: status,
             ),
           ),
           const SizedBox(width: AppSpacing.md),
@@ -756,12 +774,10 @@ class _PinLengthChip extends StatelessWidget {
 
 class _PinDot extends StatelessWidget {
   final bool filled;
-  final bool obscured;
   final String? value;
 
   const _PinDot({
     required this.filled,
-    required this.obscured,
     required this.value,
   });
 
@@ -781,7 +797,7 @@ class _PinDot extends StatelessWidget {
       ),
       alignment: Alignment.center,
       child: Text(
-        filled ? (obscured ? '*' : value ?? '') : '',
+        filled ? value ?? '*' : '',
         style: AppTextStyles.headingM.copyWith(color: AppColors.textPrimary),
       ),
     );

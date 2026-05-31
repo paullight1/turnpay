@@ -1,9 +1,9 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useCallback, useEffect, useState } from "react";
 import DashboardLayout from "@/components/layout/dashboard-layout";
 import { useAuth } from "@/lib/auth-provider";
-import { userApi } from "@/services/api";
+import { authApi, userApi } from "@/services/api";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Separator } from "@/components/ui/separator";
@@ -22,12 +22,27 @@ interface UserProfile {
   kycStatus: string;
 }
 
+type AuthSession = {
+  id: string;
+  deviceId: string;
+  deviceName: string | null;
+  userAgent: string | null;
+  ipAddress: string | null;
+  lastUsedAt: string;
+  expiresAt: string;
+  createdAt: string;
+};
+
 export default function ProfilePage() {
   const { user, signOut, updatePassword } = useAuth();
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [isChangingPassword, setIsChangingPassword] = useState(false);
+  const [sessions, setSessions] = useState<AuthSession[]>([]);
+  const [isLoadingSessions, setIsLoadingSessions] = useState(false);
+  const [sessionError, setSessionError] = useState<string | null>(null);
+  const [revokingSessionId, setRevokingSessionId] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchProfile = async () => {
@@ -69,6 +84,72 @@ export default function ProfilePage() {
       setIsChangingPassword(false);
     }
   };
+
+  const fetchSessions = useCallback(async () => {
+    setIsLoadingSessions(true);
+    setSessionError(null);
+    try {
+      const response = await authApi.sessions();
+      const sessionsPayload = response.data as {
+        sessions?: Array<{
+          id: string;
+          deviceId?: string;
+          deviceName?: string | null;
+          userAgent?: string | null;
+          ipAddress?: string | null;
+          lastUsedAt?: string;
+          expiresAt?: string;
+          createdAt?: string;
+        }>;
+      };
+
+      const mapped = (sessionsPayload.sessions ?? [])
+        .filter((entry): entry is NonNullable<typeof sessionsPayload.sessions>[number] =>
+          Boolean(entry && typeof entry.id === "string"),
+        )
+        .map((entry) => ({
+          id: entry.id,
+          deviceId: entry.deviceId ?? "Unknown device",
+          deviceName: entry.deviceName ?? null,
+          userAgent: entry.userAgent ?? null,
+          ipAddress: entry.ipAddress ?? null,
+          lastUsedAt: entry.lastUsedAt ?? "",
+          expiresAt: entry.expiresAt ?? "",
+          createdAt: entry.createdAt ?? "",
+        }));
+      setSessions(mapped);
+    } catch (error: unknown) {
+      setSessionError(getErrorMessage(error, "Unable to load active sessions"));
+      setSessions([]);
+    } finally {
+      setIsLoadingSessions(false);
+    }
+  }, []);
+
+  const revokeSession = async (sessionId: string) => {
+    setRevokingSessionId(sessionId);
+    try {
+      await authApi.revokeSession(sessionId);
+      setSessions((existing) => existing.filter((session) => session.id !== sessionId));
+      toast.success("Session revoked");
+    } catch (error: unknown) {
+      toast.error(getErrorMessage(error, "Unable to revoke session"));
+    } finally {
+      setRevokingSessionId(null);
+    }
+  };
+
+  useEffect(() => {
+    if (!user) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      void fetchSessions();
+    }, 0);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [fetchSessions, user]);
 
   return (
     <DashboardLayout>
@@ -156,6 +237,65 @@ export default function ProfilePage() {
                 {isChangingPassword ? "Updating..." : "Update Password"}
               </Button>
             </form>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Active Sessions</CardTitle>
+            <CardDescription>Devices currently signed in to your account</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex justify-between items-center">
+              <p className="text-sm text-muted-foreground">
+                {isLoadingSessions
+                  ? "Loading sessions..."
+                  : `${sessions.length} session(s) active`}
+              </p>
+              <Button variant="outline" onClick={() => void fetchSessions()}>
+                Refresh sessions
+              </Button>
+            </div>
+            {sessionError ? (
+              <p className="text-sm text-destructive">{sessionError}</p>
+            ) : null}
+            {sessions.length === 0 && !isLoadingSessions ? (
+              <p className="text-sm text-muted-foreground">No active sessions found.</p>
+            ) : (
+              <div className="space-y-3">
+                {sessions.map((session) => (
+                  <div
+                    key={session.id}
+                    className="rounded-md border border-border p-3"
+                  >
+                    <div className="flex justify-between gap-3">
+                      <div className="space-y-1">
+                        <p className="text-sm font-medium">
+                          {session.deviceName || session.deviceId}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          IP: {session.ipAddress || "unknown"} · {session.userAgent || "unknown agent"}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          Last used: {session.lastUsedAt || "unknown"}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          Expires: {session.expiresAt || "unknown"}
+                        </p>
+                      </div>
+                      <Button
+                        variant="destructive"
+                        size="sm"
+                        onClick={() => void revokeSession(session.id)}
+                        disabled={revokingSessionId === session.id}
+                      >
+                        {revokingSessionId === session.id ? "Revoking..." : "Revoke"}
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </CardContent>
         </Card>
 

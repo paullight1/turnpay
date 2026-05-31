@@ -1,43 +1,25 @@
-# Dependencies
 node_modules/
 **/node_modules/
 
-# Environment files
-.env
-.env.local
-.env.*.local
-**/.env
+.tooling/
+.claude/settings.local.json
+.dart_tool/
+**/.dart_tool/
+**/.playwright-cli/
 
-# Build outputs
 dist/
 **/dist/
 build/
 **/build/
-
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Flutter
-**/flutter/
-*.iml
-
-# Generated
-**/generated/
-
-# Logs
-*.log
-logs/
-
-# Coverage
+.next/
+**/.next/
 coverage/
 **/coverage/
 
-# Prisma
-prisma/migrations/
+.env
+.env.*
+!.env.example
+
+*.log
+*.tsbuildinfo
+.DS_Store

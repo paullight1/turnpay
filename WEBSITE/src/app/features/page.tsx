@@ -18,7 +18,7 @@ import { corridorSteps, productFeatures, serviceRows } from "@/lib/marketing";
 export const metadata: Metadata = {
   title: "Features | TrustPay",
   description:
-    "Explore TrustPay wallets, currency exchange, VTU payments, withdrawals, receipts, and risk-aware financial workflows.",
+    "Explore TrustPay exchange, VTU payments, receipts, and risk-aware wallet workflows.",
 };
 
 export default function FeaturesPage() {
@@ -26,12 +26,12 @@ export default function FeaturesPage() {
     <MarketingShell>
       <PageHero
         eyebrow="Features"
-        title="Wallets, exchange, VTU, and receipts in one practical surface."
-        description="TrustPay is structured around the jobs users repeat: fund, exchange, pay, withdraw, and understand what happened."
+        title="One wallet for common money jobs."
+        description="Exchange NGN and GHS, pay VTU bills, and track each receipt."
       >
         <Button asChild>
           <Link href="/register">
-            Start With a Wallet
+            Create wallet
             <ArrowRight data-icon="inline-end" aria-hidden="true" />
           </Link>
         </Button>
@@ -44,8 +44,8 @@ export default function FeaturesPage() {
         <div className="mx-auto flex max-w-7xl flex-col gap-10">
           <SectionHeading
             eyebrow="Core Capabilities"
-            title="The wallet tools users need every day."
-            description="Fund your balance, exchange NGN and GHS, pay bills, complete KYC, withdraw, and track each receipt."
+            title="The tools you use most."
+            description="Swap currency, pay airtime, buy data, pay TV or power, verify ID, and see proof."
           />
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
             {productFeatures.map((feature) => {
@@ -71,8 +71,8 @@ export default function FeaturesPage() {
         <div className="mx-auto grid max-w-7xl gap-10 lg:grid-cols-[0.9fr_1.1fr]">
           <SectionHeading
             eyebrow="Service Map"
-            title="Four public journeys, one wallet center."
-            description="Every service has a concise promise users can understand before they sign in."
+            title="Two service paths from one wallet."
+            description="Exchange is the main path. VTU covers everyday utility payments."
           />
           <div className="grid gap-4 sm:grid-cols-2">
             {serviceRows.map((service) => {
@@ -101,8 +101,8 @@ export default function FeaturesPage() {
         <div className="mx-auto flex max-w-7xl flex-col gap-10">
           <SectionHeading
             eyebrow="User Flow"
-            title="From signup to receipt without losing context."
-            description="A complete money movement should make the source, rate, fee, destination, and status easy to scan."
+            title="From sign up to receipt."
+            description="A money move should show source, rate, fee, destination, and status."
             align="center"
           />
           <div className="grid gap-4 md:grid-cols-4">

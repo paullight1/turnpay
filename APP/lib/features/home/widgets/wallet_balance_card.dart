@@ -1,6 +1,7 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../core/widgets/trustpay_lottie.dart';
 
 /// Large wallet balance section.
 /// Shows "Wallet Balance" label, huge amount in GHS, and eye toggle icon.
@@ -28,11 +29,21 @@ class WalletBalanceCard extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          'Wallet Balance',
-          style: AppTextStyles.bodyM.copyWith(
-            color: AppColors.textSecondary,
-          ),
+        Row(
+          children: [
+            const TrustPayLottie(
+              variant: TrustPayAnimationVariant.send,
+              size: 22,
+              semanticsLabel: 'Wallet balance',
+            ),
+            const SizedBox(width: AppSpacing.xs),
+            Text(
+              'Wallet Balance',
+              style: AppTextStyles.bodyM.copyWith(
+                color: AppColors.textSecondary,
+              ),
+            ),
+          ],
         ),
         SizedBox(height: AppSpacing.xs),
         Row(
@@ -76,4 +87,3 @@ class WalletBalanceCard extends StatelessWidget {
     );
   }
 }
-

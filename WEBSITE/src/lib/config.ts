@@ -1,5 +1,10 @@
 const env = {
   apiUrl: resolveApiUrl(),
+  manualExchangeAccount: {
+    bankName: process.env.NEXT_PUBLIC_MANUAL_EXCHANGE_BANK_NAME || "",
+    accountName: process.env.NEXT_PUBLIC_MANUAL_EXCHANGE_ACCOUNT_NAME || "",
+    accountNumber: process.env.NEXT_PUBLIC_MANUAL_EXCHANGE_ACCOUNT_NUMBER || "",
+  },
 };
 
 function resolveApiUrl() {
@@ -16,12 +21,8 @@ function resolveApiUrl() {
     return configured;
   }
 
-  if (typeof window === "undefined") {
-    return "http://localhost:3000";
-  }
-
   if (process.env.NODE_ENV === "production") {
-    throw new Error("NEXT_PUBLIC_API_URL is required in production");
+    return "";
   }
 
   return "http://localhost:3000";
@@ -44,4 +45,5 @@ export const config = {
     baseUrl: env.apiUrl,
     timeout: 30000,
   },
+  manualExchangeAccount: env.manualExchangeAccount,
 } as const;

@@ -7,8 +7,11 @@ import 'package:dio/dio.dart';
 import '../../../core/router/app_router.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/theme/theme_controller.dart';
+import '../../../core/widgets/trustpay_lottie.dart';
 import '../../../services/auth_service.dart';
 import '../../../services/home_data_service.dart';
+import '../../../services/api_client.dart';
+import '../../../services/vtu_service.dart';
 
 enum DashboardDetailKind {
   wallets,
@@ -35,6 +38,143 @@ class DashboardDetailScreen extends StatefulWidget {
 
   @override
   State<DashboardDetailScreen> createState() => _DashboardDetailScreenState();
+}
+
+class VtuOrderDetailScreen extends StatefulWidget {
+  final String reference;
+
+  const VtuOrderDetailScreen({
+    super.key,
+    required this.reference,
+  });
+
+  @override
+  State<VtuOrderDetailScreen> createState() => _VtuOrderDetailScreenState();
+}
+
+class _VtuOrderDetailScreenState extends State<VtuOrderDetailScreen> {
+  final _attemptIdempotency = MoneyAttemptIdempotency();
+  late final VtuService _vtuService;
+  late Future<VtuOrderStatus> _future;
+  bool _isChecking = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _vtuService = VtuService(apiClient: ApiClient());
+    _future = _vtuService.getOrderStatus(widget.reference);
+  }
+
+  void _reload() {
+    setState(() {
+      _future = _vtuService.getOrderStatus(widget.reference);
+    });
+  }
+
+  Future<void> _requery() async {
+    if (_isChecking) return;
+    setState(() => _isChecking = true);
+    try {
+      final order = await _vtuService.requeryOrder(
+        widget.reference,
+        idempotencyKey: _attemptIdempotency.keyFor(
+          'vtu-history-requery|${widget.reference}',
+        ),
+      );
+      _attemptIdempotency.markFinalOutcome();
+      if (!mounted) return;
+      setState(() {
+        _future = Future.value(order);
+      });
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            authErrorMessage(error, 'Unable to refresh VTU order status'),
+          ),
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _isChecking = false);
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: AppColors.background,
+      body: SafeArea(
+        child: FutureBuilder<VtuOrderStatus>(
+          future: _future,
+          builder: (context, snapshot) {
+            final children = <Widget>[
+              Row(
+                children: [
+                  _IconButton(
+                    icon: Icons.arrow_back_ios_new_rounded,
+                    onTap: () => context.pop(),
+                  ),
+                  SizedBox(width: AppSpacing.md),
+                  Expanded(
+                    child: Text('VTU order', style: AppTextStyles.headingXL),
+                  ),
+                  _IconButton(icon: Icons.refresh_rounded, onTap: _reload),
+                ],
+              ),
+              SizedBox(height: AppSpacing.sm),
+              Text(
+                'Track provider confirmation and refresh pending bill payments.',
+                style: AppTextStyles.bodyM,
+              ),
+              SizedBox(height: AppSpacing.xl),
+            ];
+
+            if (snapshot.connectionState == ConnectionState.waiting) {
+              children.add(const _LoadingPanel());
+            } else if (snapshot.hasError || !snapshot.hasData) {
+              children.add(
+                _ErrorPanel(
+                  message: authErrorMessage(
+                    snapshot.error ?? 'Could not load VTU order',
+                    'Could not load VTU order',
+                  ),
+                  onRetry: _reload,
+                ),
+              );
+            } else {
+              children.add(
+                _VtuOrderBody(
+                  order: snapshot.data!,
+                  isChecking: _isChecking,
+                  onCheckStatus: _requery,
+                ),
+              );
+            }
+
+            return CustomScrollView(
+              physics: const AlwaysScrollableScrollPhysics(
+                parent: BouncingScrollPhysics(),
+              ),
+              slivers: [
+                SliverPadding(
+                  padding: const EdgeInsets.fromLTRB(
+                    AppSpacing.lg,
+                    AppSpacing.md,
+                    AppSpacing.lg,
+                    AppSpacing.xxl,
+                  ),
+                  sliver: SliverList.list(children: children),
+                ),
+              ],
+            );
+          },
+        ),
+      ),
+    );
+  }
 }
 
 class _DashboardDetailScreenState extends State<DashboardDetailScreen> {
@@ -168,7 +308,14 @@ class _DashboardProfileScreenState extends State<DashboardProfileScreen> {
               return Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('Profile', style: AppTextStyles.headingXL),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text('Profile', style: AppTextStyles.headingXL),
+                      ),
+                      const _ProfileThemeQuickToggle(),
+                    ],
+                  ),
                   SizedBox(height: AppSpacing.xl),
                   Row(
                     children: [
@@ -569,6 +716,7 @@ Widget _bodyFor(DashboardDetailKind kind, HomeDashboardData data) {
     case DashboardDetailKind.notifications:
       return const _EmptyPanel(
         icon: Icons.notifications_none_rounded,
+        animation: TrustPayAnimationVariant.loading,
         title: 'No notifications',
         detail: 'Security, wallet, KYC, and transfer alerts will appear here.',
       );
@@ -606,7 +754,7 @@ Widget _profileBodyFor(
           _ProfileActionRow(
             icon: Icons.password_rounded,
             label: 'Transaction approvals',
-            detail: 'PIN, Face ID, and fingerprint for withdraw and exchange',
+            detail: 'PIN and available biometric approval for money actions',
             onTap: () => context.push(AppRoutes.transactionSecurity),
           ),
           _DataPanel(
@@ -615,6 +763,7 @@ Widget _profileBodyFor(
               style: AppTextStyles.bodyM,
             ),
           ),
+          const _ActiveSessionsPanel(),
         ],
       );
     case ProfileActionKind.support:
@@ -732,6 +881,44 @@ class _AppearanceSettingsPanel extends ConsumerWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+class _ProfileThemeQuickToggle extends ConsumerWidget {
+  const _ProfileThemeQuickToggle();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final themeMode = ref.watch(themeModeProvider);
+    final controller = ref.read(themeModeProvider.notifier);
+    final isLight = themeMode == ThemeMode.light;
+
+    return Semantics(
+      button: true,
+      label: isLight ? 'Switch to dark mode' : 'Switch to light mode',
+      child: Material(
+        color: AppColors.surfaceVariant,
+        borderRadius: BorderRadius.circular(AppRadius.full),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(AppRadius.full),
+          onTap: () => controller.setMode(
+            isLight ? ThemeMode.dark : ThemeMode.light,
+          ),
+          child: Container(
+            width: 46,
+            height: 46,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(AppRadius.full),
+              border: Border.all(color: AppColors.border),
+            ),
+            child: Icon(
+              isLight ? Icons.dark_mode_rounded : Icons.light_mode_rounded,
+              color: AppColors.primary,
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
@@ -903,10 +1090,10 @@ class _SupportTicketPanelState extends State<_SupportTicketPanel> {
                 child: FilledButton.icon(
                   onPressed: _submitting ? null : _submitTicket,
                   icon: _submitting
-                      ? const SizedBox(
-                          width: 16,
-                          height: 16,
-                          child: CircularProgressIndicator(strokeWidth: 2),
+                      ? const TrustPayLottie(
+                          variant: TrustPayAnimationVariant.loading,
+                          size: 22,
+                          semanticsLabel: 'Sending support case',
                         )
                       : const Icon(Icons.support_agent_rounded),
                   label: Text(_submitting ? 'Sending...' : 'Send to support'),
@@ -920,7 +1107,14 @@ class _SupportTicketPanelState extends State<_SupportTicketPanel> {
           builder: (context, snapshot) {
             if (snapshot.connectionState == ConnectionState.waiting) {
               return const _DataPanel(
-                child: Center(child: CircularProgressIndicator()),
+                child: Center(
+                  child: TrustPayAnimatedState(
+                    variant: TrustPayAnimationVariant.loading,
+                    title: 'Loading support cases',
+                    detail: 'Fetching the latest support history.',
+                    animationSize: 72,
+                  ),
+                ),
               );
             }
 
@@ -1401,6 +1595,9 @@ class _VirtualAccountBody extends StatelessWidget {
       final verified = kycStatus.toUpperCase() == 'VERIFIED';
       return _EmptyPanel(
         icon: Icons.account_balance_outlined,
+        animation: verified
+            ? TrustPayAnimationVariant.success
+            : TrustPayAnimationVariant.loading,
         title: verified ? 'Ready to provision' : 'KYC required',
         detail: verified
             ? 'Provisioning will create a partner bank account through the backend provider flow.'
@@ -1448,6 +1645,110 @@ class _ActivityBody extends StatelessWidget {
     return _TransactionsHistoryBody(
       transactions: transactions,
       compactTopSpacing: true,
+    );
+  }
+}
+
+class _VtuOrderBody extends StatelessWidget {
+  final VtuOrderStatus order;
+  final bool isChecking;
+  final VoidCallback onCheckStatus;
+
+  const _VtuOrderBody({
+    required this.order,
+    required this.isChecking,
+    required this.onCheckStatus,
+  });
+
+  bool get _isTerminal {
+    return ['SUCCESS', 'FAILED', 'REVERSED'].contains(order.orderStatus);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final statusTone = _statusTone(order.orderStatus);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(AppSpacing.lg),
+          decoration: BoxDecoration(
+            color: AppColors.surface,
+            borderRadius: BorderRadius.circular(26),
+            border: Border.all(color: AppColors.border),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    width: 48,
+                    height: 48,
+                    decoration: BoxDecoration(
+                      color: statusTone.background,
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(
+                      statusTone.icon,
+                      color: statusTone.foreground,
+                    ),
+                  ),
+                  SizedBox(width: AppSpacing.md),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          order.orderStatus,
+                          style: AppTextStyles.headingM.copyWith(
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                        Text(
+                          order.provider,
+                          style: AppTextStyles.bodyM,
+                        ),
+                      ],
+                    ),
+                  ),
+                  _StatusPill(label: order.transactionStatus),
+                ],
+              ),
+              SizedBox(height: AppSpacing.lg),
+              _InfoRow(label: 'Reference', value: order.reference),
+              _InfoRow(
+                label: 'Amount',
+                value: '${order.currency} ${order.amount}',
+              ),
+              if (order.targetMasked != null)
+                _InfoRow(label: 'Recipient', value: order.targetMasked!),
+              _InfoRow(label: 'Order ID', value: order.orderId),
+              if (order.nextRequeryAt != null)
+                _InfoRow(label: 'Next auto-check', value: order.nextRequeryAt!),
+            ],
+          ),
+        ),
+        SizedBox(height: AppSpacing.lg),
+        FilledButton.icon(
+          onPressed: isChecking || _isTerminal ? null : onCheckStatus,
+          style: FilledButton.styleFrom(
+            backgroundColor: AppColors.primary,
+            foregroundColor: Colors.white,
+            minimumSize: const Size.fromHeight(54),
+          ),
+          icon: isChecking
+              ? const TrustPayLottie(
+                  variant: TrustPayAnimationVariant.loading,
+                  size: 22,
+                  semanticsLabel: 'Checking VTU status',
+                )
+              : const Icon(Icons.refresh_rounded),
+          label: Text(isChecking ? 'Checking...' : 'Check status'),
+        ),
+      ],
     );
   }
 }
@@ -1616,105 +1917,114 @@ class _TransactionHistoryCard extends StatelessWidget {
     final amountText = _money(transaction.currency, transaction.amount);
     final signedAmount =
         '${_isCreditType(transaction.type) ? '+' : '-'} $amountText';
+    final canTrackVtu = _isVtuTransaction(transaction);
 
     return Padding(
       padding: const EdgeInsets.only(bottom: AppSpacing.md),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 220),
-        curve: Curves.easeOut,
-        padding: const EdgeInsets.all(AppSpacing.md),
-        decoration: BoxDecoration(
-          color: AppColors.surface,
-          borderRadius: BorderRadius.circular(26),
-          border: Border.all(color: AppColors.border),
-          boxShadow: [
-            BoxShadow(
-              color: AppColors.overlayLight,
-              blurRadius: 18,
-              offset: const Offset(0, 8),
-            ),
-          ],
-        ),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            Container(
-              width: 54,
-              height: 54,
-              decoration: BoxDecoration(
-                color: tone.background,
-                shape: BoxShape.circle,
+      child: GestureDetector(
+        onTap: canTrackVtu
+            ? () => context.push(AppRoutes.vtuOrderFor(transaction.reference))
+            : null,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 220),
+          curve: Curves.easeOut,
+          padding: const EdgeInsets.all(AppSpacing.md),
+          decoration: BoxDecoration(
+            color: AppColors.surface,
+            borderRadius: BorderRadius.circular(26),
+            border: Border.all(color: AppColors.border),
+            boxShadow: [
+              BoxShadow(
+                color: AppColors.overlayLight,
+                blurRadius: 18,
+                offset: const Offset(0, 8),
               ),
-              child: Icon(
-                tone.icon,
-                color: tone.foreground,
-                size: 24,
+            ],
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Container(
+                width: 54,
+                height: 54,
+                decoration: BoxDecoration(
+                  color: tone.background,
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(
+                  tone.icon,
+                  color: tone.foreground,
+                  size: 24,
+                ),
               ),
-            ),
-            SizedBox(width: AppSpacing.md),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+              SizedBox(width: AppSpacing.md),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      _transactionTitle(transaction),
+                      style: AppTextStyles.headingM.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    SizedBox(height: 4),
+                    Row(
+                      children: [
+                        Container(
+                          width: 9,
+                          height: 9,
+                          decoration: BoxDecoration(
+                            color: AppColors.primary,
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                        SizedBox(width: 4),
+                        Container(
+                          width: 9,
+                          height: 9,
+                          decoration: BoxDecoration(
+                            color: AppColors.warning,
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                        SizedBox(width: AppSpacing.sm),
+                        Expanded(
+                          child: Text(
+                            _transactionSubtitle(transaction),
+                            style: AppTextStyles.bodyM,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              SizedBox(width: AppSpacing.md),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
                   Text(
-                    _transactionTitle(transaction),
+                    signedAmount,
                     style: AppTextStyles.headingM.copyWith(
-                      fontWeight: FontWeight.w700,
+                      color: tone.amountColor,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 0,
                     ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
                   ),
                   SizedBox(height: 4),
-                  Row(
-                    children: [
-                      Container(
-                        width: 9,
-                        height: 9,
-                        decoration: BoxDecoration(
-                          color: AppColors.primary,
-                          shape: BoxShape.circle,
-                        ),
-                      ),
-                      SizedBox(width: 4),
-                      Container(
-                        width: 9,
-                        height: 9,
-                        decoration: BoxDecoration(
-                          color: AppColors.warning,
-                          shape: BoxShape.circle,
-                        ),
-                      ),
-                      SizedBox(width: AppSpacing.sm),
-                      Expanded(
-                        child: Text(
-                          _transactionSubtitle(transaction),
-                          style: AppTextStyles.bodyM,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                    ],
+                  Text(
+                    canTrackVtu ? 'Track order' : date,
+                    style: AppTextStyles.bodyS,
                   ),
                 ],
               ),
-            ),
-            SizedBox(width: AppSpacing.md),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                Text(
-                  signedAmount,
-                  style: AppTextStyles.headingM.copyWith(
-                    color: tone.amountColor,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: 0,
-                  ),
-                ),
-                SizedBox(height: 4),
-                Text(date, style: AppTextStyles.bodyS),
-              ],
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -1738,18 +2048,10 @@ class _HistoryEmptyState extends StatelessWidget {
       ),
       child: Column(
         children: [
-          Container(
-            width: 64,
-            height: 64,
-            decoration: BoxDecoration(
-              color: AppColors.surfaceVariant,
-              shape: BoxShape.circle,
-            ),
-            child: Icon(
-              Icons.history_toggle_off_rounded,
-              color: AppColors.textHint,
-              size: 32,
-            ),
+          const TrustPayLottie(
+            variant: TrustPayAnimationVariant.send,
+            size: 74,
+            semanticsLabel: 'No transaction history',
           ),
           SizedBox(height: AppSpacing.md),
           Text('No ${filter.label.toLowerCase()} yet',
@@ -1939,13 +2241,55 @@ class _DataPanel extends StatelessWidget {
   }
 }
 
+class _ActiveSessionsPanel extends StatelessWidget {
+  const _ActiveSessionsPanel();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(bottom: AppSpacing.sm),
+      padding: const EdgeInsets.all(AppSpacing.md),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceVariant,
+        borderRadius: BorderRadius.circular(AppRadius.sm),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Active Sessions',
+            style: AppTextStyles.bodyM,
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          Row(
+            children: [
+              Icon(Icons.phone_iphone_rounded, size: 16, color: AppColors.textSecondary),
+              const SizedBox(width: AppSpacing.xs),
+              Expanded(
+                child: Text(
+                  'This device · Last active: just now',
+                  style: AppTextStyles.caption,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _EmptyPanel extends StatelessWidget {
   final IconData icon;
+  final TrustPayAnimationVariant? animation;
   final String title;
   final String detail;
 
   const _EmptyPanel({
     required this.icon,
+    this.animation,
     required this.title,
     required this.detail,
   });
@@ -1955,7 +2299,14 @@ class _EmptyPanel extends StatelessWidget {
     return _DataPanel(
       child: Column(
         children: [
-          Icon(icon, color: AppColors.textHint, size: 36),
+          animation == null
+              ? Icon(icon, color: AppColors.textHint, size: 36)
+              : TrustPayLottie(
+                  variant: animation!,
+                  size: 72,
+                  repeat: animation != TrustPayAnimationVariant.success,
+                  semanticsLabel: title,
+                ),
           SizedBox(height: AppSpacing.md),
           Text(title, style: AppTextStyles.headingM),
           SizedBox(height: AppSpacing.xs),
@@ -1971,10 +2322,15 @@ class _LoadingPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Center(
+    return const Center(
       child: Padding(
         padding: EdgeInsets.all(AppSpacing.xl),
-        child: CircularProgressIndicator(color: AppColors.primary),
+        child: TrustPayAnimatedState(
+          variant: TrustPayAnimationVariant.loading,
+          title: 'Loading details',
+          detail: 'Fetching the latest wallet and transaction records.',
+          animationSize: 72,
+        ),
       ),
     );
   }
@@ -2045,13 +2401,10 @@ class _UnauthorizedPanelState extends State<_UnauthorizedPanel> {
                   },
             style: FilledButton.styleFrom(backgroundColor: AppColors.primary),
             child: _isRefreshing
-                ? SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      color: AppColors.textPrimary,
-                    ),
+                ? const TrustPayLottie(
+                    variant: TrustPayAnimationVariant.loading,
+                    size: 22,
+                    semanticsLabel: 'Refreshing session',
                   )
                 : const Text('Refresh session'),
           ),
@@ -2265,6 +2618,33 @@ _TransactionTone _transactionTone(HomeTransaction transaction) {
   }
 }
 
+_TransactionTone _statusTone(String status) {
+  switch (status.toUpperCase()) {
+    case 'SUCCESS':
+      return _TransactionTone(
+        icon: Icons.check_rounded,
+        foreground: AppColors.success,
+        background: AppColors.success.withValues(alpha: 0.10),
+        amountColor: AppColors.success,
+      );
+    case 'FAILED':
+    case 'REVERSED':
+      return _TransactionTone(
+        icon: Icons.close_rounded,
+        foreground: AppColors.error,
+        background: AppColors.error.withValues(alpha: 0.10),
+        amountColor: AppColors.error,
+      );
+    default:
+      return _TransactionTone(
+        icon: Icons.hourglass_top_rounded,
+        foreground: AppColors.warning,
+        background: AppColors.warning.withValues(alpha: 0.10),
+        amountColor: AppColors.warning,
+      );
+  }
+}
+
 String _transactionTitle(HomeTransaction transaction) {
   final type = transaction.type.toUpperCase();
   switch (type) {
@@ -2288,6 +2668,14 @@ String _transactionTitle(HomeTransaction transaction) {
     default:
       return _titleCase(transaction.type);
   }
+}
+
+bool _isVtuTransaction(HomeTransaction transaction) {
+  final type = transaction.type.toUpperCase();
+  return type == 'AIRTIME' ||
+      type == 'DATA' ||
+      type == 'CABLE' ||
+      type == 'ELECTRICITY';
 }
 
 String _transactionSubtitle(HomeTransaction transaction) {

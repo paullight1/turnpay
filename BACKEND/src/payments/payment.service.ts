@@ -3,26 +3,33 @@ import {
   ForbiddenException,
   Injectable,
   NotFoundException,
-} from '@nestjs/common';
-import { HttpService } from '@nestjs/axios';
-import { ConfigService } from '@nestjs/config';
-import { PrismaService } from '../prisma/prisma.service';
-import { WalletsService } from '../wallets/wallets.service';
-import { PaystackProvider } from './providers/paystack.provider';
-import { FlutterwaveProvider } from './providers/flutterwave.provider';
-import { FundWalletDto, WithdrawDto, ResolveBankDto } from './dto/payment.dto';
-import { v4 as uuidv4 } from 'uuid';
-import { createHmac, timingSafeEqual } from 'crypto';
-import { PinoLogger } from 'nestjs-pino';
-import { UsersService } from '../users/users.service';
-import { Prisma, Transaction, TransactionStatus } from '@prisma/client';
-import { Decimal } from '@prisma/client/runtime/library';
-import { LedgerService } from '../wallets/ledger.service';
-import { decryptSensitiveValue } from '../common/utils/encryption';
-import { maskAccountNumber } from '../common/utils/masking';
+} from "@nestjs/common";
+import { HttpService } from "@nestjs/axios";
+import { ConfigService } from "@nestjs/config";
+import { PrismaService } from "../prisma/prisma.service";
+import { WalletsService } from "../wallets/wallets.service";
+import { PaystackProvider } from "./providers/paystack.provider";
+import { FlutterwaveProvider } from "./providers/flutterwave.provider";
+import { FundWalletDto, WithdrawDto, ResolveBankDto } from "./dto/payment.dto";
+import { v4 as uuidv4 } from "uuid";
+import { createHmac, timingSafeEqual } from "crypto";
+import { PinoLogger } from "nestjs-pino";
+import { UsersService } from "../users/users.service";
+import { Prisma, Transaction, TransactionStatus } from "@prisma/client";
+import { Decimal } from "@prisma/client/runtime/library";
+import { LedgerService } from "../wallets/ledger.service";
+import { decryptSensitiveValue } from "../common/utils/encryption";
+import { maskAccountNumber } from "../common/utils/masking";
+import { TransactionPinService } from "../common/services/transaction-pin.service";
+import { formatKycTier, isKycTierAtLeast } from "../common/utils/kyc-tier";
+import {
+  fromMinorUnit,
+  toMinorUnit,
+  toProviderDecimalString,
+} from "./utils/provider-amount";
 
-type WithdrawalProvider = 'paystack' | 'flutterwave';
-type PaymentProviderName = 'paystack' | 'flutterwave';
+type WithdrawalProvider = "paystack" | "flutterwave";
+type PaymentProviderName = "paystack" | "flutterwave";
 
 interface WithdrawalDestination {
   beneficiaryId?: string;
@@ -46,17 +53,37 @@ export class PaymentService {
     private readonly logger: PinoLogger,
     private readonly httpService: HttpService,
     private readonly ledger: LedgerService,
+    private readonly transactionPin: TransactionPinService,
   ) {}
 
   async fundWallet(userId: string, dto: FundWalletDto) {
     const user = await this.usersService.findOne(userId);
     const reference = `FUND-${Date.now()}-${uuidv4().slice(0, 8)}`;
     const provider = dto.provider || this.getDefaultProvider(dto.currency);
+    const amount = new Decimal(dto.amount);
+    this.assertAmountWithinLimit(amount);
 
     const email = dto.email || user.email;
-    const callbackUrl =
-      dto.callbackUrl ||
-      `${process.env.WEB_URL || 'http://localhost:3001'}/payment/callback`;
+    const callbackUrl = this.buildPaymentCallbackUrl();
+    const channel = dto.channel || "card";
+    const initialMetadata = {
+      provider,
+      channel,
+      callbackUrl,
+      providerInitStatus: "PENDING",
+    };
+
+    await this.prisma.transaction.create({
+      data: {
+        userId,
+        type: "FUND",
+        amount,
+        currency: dto.currency,
+        status: "PENDING",
+        reference,
+        metadata: initialMetadata,
+      },
+    });
 
     let paymentResult: {
       paymentUrl: string;
@@ -64,47 +91,67 @@ export class PaymentService {
       providerTransactionId?: number;
     };
 
-    if (provider === 'paystack') {
-      const result = await this.paystack.initializePayment({
-        amount: dto.amount,
-        email,
-        currency: dto.currency,
-        reference,
-        callbackUrl,
+    try {
+      if (provider === "paystack") {
+        const result = await this.paystack.initializePayment({
+          amountMinor: toMinorUnit(amount),
+          email,
+          currency: dto.currency,
+          reference,
+          callbackUrl,
+        });
+        paymentResult = {
+          paymentUrl: result.data.authorization_url,
+          reference: result.data.reference,
+        };
+      } else {
+        const result = await this.flutterwave.initializePayment({
+          amount: toProviderDecimalString(amount),
+          email,
+          currency: dto.currency,
+          txRef: reference,
+          redirectUrl: callbackUrl,
+        });
+        paymentResult = {
+          paymentUrl: result.paymentUrl,
+          reference,
+          providerTransactionId: result.transactionId,
+        };
+      }
+    } catch (error: unknown) {
+      await this.prisma.transaction.update({
+        where: { reference },
+        data: {
+          status: "FAILED",
+          metadata: this.mergeJsonMetadata(initialMetadata, {
+            providerInitStatus: "FAILED",
+            providerErrorCode: "PROVIDER_INITIALIZATION_FAILED",
+          }) as Prisma.InputJsonValue,
+        },
       });
-      paymentResult = {
-        paymentUrl: result.data.authorization_url,
-        reference: result.data.reference,
-      };
-    } else {
-      const result = await this.flutterwave.initializePayment({
-        amount: dto.amount,
-        email,
-        currency: dto.currency,
-        txRef: reference,
-        redirectUrl: callbackUrl,
-      });
-      paymentResult = {
-        paymentUrl: result.paymentUrl,
-        reference,
-        providerTransactionId: result.transactionId,
-      };
+
+      this.logger.warn(
+        {
+          userId,
+          reference,
+          provider,
+          error: error instanceof Error ? error.message : "Unknown error",
+        },
+        "Fund wallet provider initialization failed",
+      );
+
+      throw error;
     }
 
-    await this.prisma.transaction.create({
+    await this.prisma.transaction.update({
+      where: { reference },
       data: {
-        userId,
-        type: 'FUND',
-        amount: dto.amount,
-        currency: dto.currency,
-        status: 'PENDING',
-        reference,
-        metadata: {
-          provider,
-          channel: dto.channel || 'card',
+        metadata: this.mergeJsonMetadata(initialMetadata, {
+          providerInitStatus: "INITIALIZED",
           paymentUrl: paymentResult.paymentUrl,
+          providerReference: paymentResult.reference,
           providerTransactionId: paymentResult.providerTransactionId,
-        },
+        }) as Prisma.InputJsonValue,
       },
     });
 
@@ -112,17 +159,17 @@ export class PaymentService {
       {
         userId,
         reference,
-        amount: dto.amount,
+        amount: amount.toString(),
         currency: dto.currency,
         provider,
       },
-      'Fund wallet initiated',
+      "Fund wallet initiated",
     );
 
     return {
       reference,
       paymentUrl: paymentResult.paymentUrl,
-      message: 'Complete payment to fund your wallet',
+      message: "Complete payment to fund your wallet",
     };
   }
 
@@ -132,10 +179,10 @@ export class PaymentService {
     });
 
     if (!transaction || (userId && transaction.userId !== userId)) {
-      throw new NotFoundException('Transaction not found');
+      throw new NotFoundException("Transaction not found");
     }
 
-    if (transaction.status !== 'PENDING') {
+    if (transaction.status !== "PENDING") {
       return {
         status: transaction.status,
         message: `Transaction already ${transaction.status.toLowerCase()}`,
@@ -144,34 +191,34 @@ export class PaymentService {
 
     const metadata = transaction.metadata as Record<string, unknown>;
     const provider = this.normalizePaymentProvider(
-      (metadata?.provider as string) || 'paystack',
+      (metadata?.provider as string) || "paystack",
     );
     const providerTxId = metadata?.providerTransactionId as number;
 
-    if (provider === 'paystack') {
+    if (provider === "paystack") {
       const verification = await this.paystack.verifyPayment(reference);
 
-      if (verification.status === 'success') {
+      if (verification.status === "success") {
         await this.processVerifiedDeposit(transaction, {
           provider,
           reference: verification.reference,
           status: verification.status,
-          amount: new Decimal(verification.amount).div(100),
+          amount: fromMinorUnit(verification.amount),
           currency: verification.currency,
-          source: 'PAYSTACK_VERIFY',
+          source: "PAYSTACK_VERIFY",
         });
       }
     } else if (providerTxId) {
       const verification = await this.flutterwave.verifyPayment(providerTxId);
 
-      if (verification.status === 'successful') {
+      if (verification.status === "successful") {
         await this.processVerifiedDeposit(transaction, {
           provider,
           reference: verification.tx_ref,
           status: verification.status,
           amount: new Decimal(verification.amount),
           currency: verification.currency,
-          source: 'FLUTTERWAVE_VERIFY',
+          source: "FLUTTERWAVE_VERIFY",
         });
       }
     }
@@ -201,15 +248,15 @@ export class PaymentService {
       if (!transaction) {
         this.logger.info(
           { reference: data.reference },
-          'Webhook: Transaction not found',
+          "Webhook: Transaction not found",
         );
         return { received: true, processed: false };
       }
 
-      if (transaction.status !== 'PENDING') {
+      if (transaction.status !== "PENDING") {
         this.logger.info(
           { reference: data.reference },
-          'Webhook: Already processed',
+          "Webhook: Already processed",
         );
         return { received: true, processed: false };
       }
@@ -218,9 +265,9 @@ export class PaymentService {
       const provider = data.provider
         ? this.normalizePaymentProvider(data.provider)
         : this.normalizePaymentProvider(
-            (metadata?.provider as string) || 'paystack',
+            (metadata?.provider as string) || "paystack",
           );
-      const eventType = data.eventType || 'payment.webhook';
+      const eventType = data.eventType || "payment.webhook";
       const rawPayload: Record<string, unknown> = data.rawPayload ?? {
         reference: data.reference,
         status: data.status,
@@ -233,13 +280,13 @@ export class PaymentService {
           provider,
           eventType,
           providerReference: data.reference,
-          status: 'IGNORED',
+          status: "IGNORED",
           rawPayload,
           errorMessage: `Ignoring non-success payment status: ${data.status}`,
         });
         await tx.transaction.update({
           where: { id: transaction.id },
-          data: { status: 'FAILED' },
+          data: { status: "FAILED" },
         });
         return { received: true, processed: false };
       }
@@ -259,19 +306,19 @@ export class PaymentService {
             webhookCurrency: currency,
             storedCurrency: transaction.currency,
           },
-          'Webhook: Deposit verification mismatch',
+          "Webhook: Deposit verification mismatch",
         );
         await this.createFundingProviderEvent(tx, {
           provider,
           eventType,
           providerReference: data.reference,
-          status: 'FAILED',
+          status: "FAILED",
           rawPayload,
-          errorMessage: 'Provider amount or currency mismatch',
+          errorMessage: "Provider amount or currency mismatch",
         });
         await tx.transaction.update({
           where: { id: transaction.id },
-          data: { status: 'FAILED' },
+          data: { status: "FAILED" },
         });
         return { received: true, processed: false };
       }
@@ -280,7 +327,7 @@ export class PaymentService {
         provider,
         eventType,
         providerReference: data.reference,
-        status: 'PROCESSING',
+        status: "PROCESSING",
         rawPayload,
       });
 
@@ -291,10 +338,10 @@ export class PaymentService {
       const updated = await tx.transaction.updateMany({
         where: {
           reference: data.reference,
-          status: 'PENDING',
+          status: "PENDING",
         },
         data: {
-          status: 'SUCCESS',
+          status: "SUCCESS",
           metadata: this.mergeJsonMetadata(transaction.metadata, {
             providerEventId: providerEvent.id,
             providerStatus: data.status,
@@ -305,7 +352,7 @@ export class PaymentService {
       if (updated.count === 0) {
         this.logger.info(
           { reference: data.reference },
-          'Webhook: Already processed or not found',
+          "Webhook: Already processed or not found",
         );
         return { received: true, processed: false };
       }
@@ -317,7 +364,7 @@ export class PaymentService {
           amount: webhookAmount,
           transactionId: transaction.id,
           reference: transaction.reference,
-          source: 'PAYMENT_DEPOSIT',
+          source: "PAYMENT_DEPOSIT",
           metadata: {
             provider: provider.toUpperCase(),
             providerStatus: data.status,
@@ -330,7 +377,7 @@ export class PaymentService {
       await tx.providerEvent.update({
         where: { id: providerEvent.id },
         data: {
-          status: 'PROCESSED',
+          status: "PROCESSED",
           processedAt: new Date(),
         },
       });
@@ -340,7 +387,7 @@ export class PaymentService {
           reference: transaction.reference,
           amount: webhookAmount.toString(),
         },
-        'Deposit processed successfully',
+        "Deposit processed successfully",
       );
 
       return { received: true, processed: true };
@@ -350,12 +397,17 @@ export class PaymentService {
   }
 
   async withdraw(userId: string, dto: WithdrawDto) {
+    await this.transactionPin.verifyRequired(userId, dto.transactionPin);
+
     const wallet = await this.walletsService.getWallet(userId, dto.currency);
     if (!wallet) {
       throw new NotFoundException(`${dto.currency} wallet not found`);
     }
 
-    if (wallet.balance.lt(dto.amount)) {
+    const amount = new Decimal(dto.amount);
+    this.assertAmountWithinLimit(amount);
+
+    if (wallet.balance.lt(amount)) {
       throw new BadRequestException(`Insufficient ${dto.currency} balance`);
     }
 
@@ -363,6 +415,7 @@ export class PaymentService {
       where: { id: userId },
       select: {
         kycStatus: true,
+        kycTier: true,
         isSuspended: true,
         dailyWithdrawLimit: true,
         monthlyWithdrawLimit: true,
@@ -373,15 +426,21 @@ export class PaymentService {
     });
 
     if (!user) {
-      throw new BadRequestException('User not found');
+      throw new BadRequestException("User not found");
     }
 
     if (user.isSuspended) {
-      throw new ForbiddenException('Account is suspended');
+      throw new ForbiddenException("Account is suspended");
     }
 
-    if (user.kycStatus !== 'VERIFIED') {
-      throw new ForbiddenException('KYC verification is required');
+    if (user.kycStatus !== "VERIFIED") {
+      throw new ForbiddenException("KYC verification is required");
+    }
+
+    if (!isKycTierAtLeast(user.kycTier, "TIER_2")) {
+      throw new ForbiddenException(
+        `KYC ${formatKycTier("TIER_2")} is required for withdrawals`,
+      );
     }
 
     const destination = await this.resolveWithdrawalDestination(userId, dto);
@@ -389,14 +448,31 @@ export class PaymentService {
       dto.provider ||
       destination.provider ||
       this.getDefaultProvider(dto.currency);
-    const reference = `WD-${Date.now()}-${uuidv4().slice(0, 8)}`;
-    const amount = new Decimal(dto.amount);
+    if (provider !== "paystack" && provider !== "flutterwave") {
+      throw new BadRequestException("Unsupported withdrawal provider");
+    }
 
-    let transferStatus = 'pending';
+    const reference = `WD-${Date.now()}-${uuidv4().slice(0, 8)}`;
+    let transferStatus = "pending";
     let providerTransferId: number | undefined;
     let transferRequestSent = false;
 
     const transactionRecord = await this.prisma.$transaction(async (tx) => {
+      const now = new Date();
+      const nextResetDate = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+
+      await tx.user.updateMany({
+        where: {
+          id: userId,
+          OR: [{ limitResetDate: null }, { limitResetDate: { lt: now } }],
+        },
+        data: {
+          dailyWithdrawn: new Decimal(0),
+          monthlyWithdrawn: new Decimal(0),
+          limitResetDate: nextResetDate,
+        },
+      });
+
       const limitUser = await tx.user.findUnique({
         where: { id: userId },
         select: {
@@ -409,30 +485,11 @@ export class PaymentService {
       });
 
       if (!limitUser) {
-        throw new BadRequestException('User not found');
+        throw new BadRequestException("User not found");
       }
 
-      const now = new Date();
-      const needsReset =
-        !limitUser.limitResetDate || limitUser.limitResetDate < now;
-
-      if (needsReset) {
-        await tx.user.update({
-          where: { id: userId },
-          data: {
-            dailyWithdrawn: new Decimal(0),
-            monthlyWithdrawn: new Decimal(0),
-            limitResetDate: new Date(now.getFullYear(), now.getMonth() + 1, 1),
-          },
-        });
-      }
-
-      const dailyWithdrawn = needsReset
-        ? new Decimal(0)
-        : new Decimal(limitUser.dailyWithdrawn);
-      const monthlyWithdrawn = needsReset
-        ? new Decimal(0)
-        : new Decimal(limitUser.monthlyWithdrawn);
+      const dailyWithdrawn = new Decimal(limitUser.dailyWithdrawn);
+      const monthlyWithdrawn = new Decimal(limitUser.monthlyWithdrawn);
       const dailyWithdrawLimit = new Decimal(limitUser.dailyWithdrawLimit);
       const monthlyWithdrawLimit = new Decimal(limitUser.monthlyWithdrawLimit);
 
@@ -455,6 +512,7 @@ export class PaymentService {
       const limitsUpdated = await tx.user.updateMany({
         where: {
           id: userId,
+          limitResetDate: limitUser.limitResetDate,
           dailyWithdrawn: { lte: dailyWithdrawLimit.minus(amount) },
           monthlyWithdrawn: { lte: monthlyWithdrawLimit.minus(amount) },
         },
@@ -465,16 +523,16 @@ export class PaymentService {
       });
 
       if (limitsUpdated.count !== 1) {
-        throw new BadRequestException('Withdrawal limit exceeded');
+        throw new BadRequestException("Withdrawal limit exceeded");
       }
 
       const transaction = await tx.transaction.create({
         data: {
           userId,
-          type: 'WITHDRAW',
+          type: "WITHDRAW",
           amount,
           currency: dto.currency,
-          status: 'PENDING',
+          status: "PENDING",
           reference,
           walletId: wallet.id,
           metadata: {
@@ -495,7 +553,7 @@ export class PaymentService {
           amount,
           transactionId: transaction.id,
           reference,
-          source: 'WITHDRAWAL',
+          source: "WITHDRAWAL",
           metadata: {
             beneficiaryId: destination.beneficiaryId,
             accountNumberMasked: destination.accountNumberMasked,
@@ -504,11 +562,33 @@ export class PaymentService {
         tx,
       );
 
-      return { id: transaction.id, reference: transaction.reference };
+      const transferAttempt = await tx.transferAttempt.create({
+        data: {
+          transactionId: transaction.id,
+          provider: provider.toUpperCase() as "PAYSTACK" | "FLUTTERWAVE",
+          providerReference: transaction.reference,
+          providerStatus: "RESERVED",
+          status: "PENDING",
+          metadata: {
+            beneficiaryId: destination.beneficiaryId,
+            bankCode: destination.bankCode,
+            bankName: destination.bankName,
+            accountName: destination.accountName,
+            accountNumberMasked: destination.accountNumberMasked,
+          },
+        },
+        select: { id: true },
+      });
+
+      return {
+        id: transaction.id,
+        reference: transaction.reference,
+        transferAttemptId: transferAttempt.id,
+      };
     });
 
     try {
-      if (provider === 'paystack') {
+      if (provider === "paystack") {
         const recipient = await this.paystack.createTransferRecipient({
           accountNumber: destination.accountNumber,
           bankCode: destination.bankCode,
@@ -518,17 +598,17 @@ export class PaymentService {
 
         transferRequestSent = true;
         const transfer = await this.paystack.initiateTransfer({
-          amount: dto.amount,
+          amountMinor: toMinorUnit(amount),
           recipientCode: recipient.recipientCode,
           currency: dto.currency,
           reference: transactionRecord.reference,
         });
 
         transferStatus = transfer.data.status;
-      } else if (provider === 'flutterwave') {
+      } else if (provider === "flutterwave") {
         transferRequestSent = true;
         const transfer = await this.flutterwave.initiateTransfer({
-          amount: dto.amount,
+          amount: toProviderDecimalString(amount),
           bankCode: destination.bankCode,
           accountNumber: destination.accountNumber,
           currency: dto.currency,
@@ -538,7 +618,7 @@ export class PaymentService {
         transferStatus = transfer.status;
         providerTransferId = transfer.id;
       } else {
-        throw new BadRequestException('Unsupported withdrawal provider');
+        throw new BadRequestException("Unsupported withdrawal provider");
       }
 
       const finalStatus = this.mapTransferStatus(transferStatus);
@@ -548,11 +628,9 @@ export class PaymentService {
         data: { status: finalStatus },
       });
 
-      await this.prisma.transferAttempt.create({
+      await this.prisma.transferAttempt.update({
+        where: { id: transactionRecord.transferAttemptId },
         data: {
-          transactionId: transactionRecord.id,
-          provider: provider.toUpperCase() as 'PAYSTACK' | 'FLUTTERWAVE',
-          providerReference: transactionRecord.reference,
           providerStatus: transferStatus,
           status: finalStatus,
           lastCheckedAt: new Date(),
@@ -567,7 +645,7 @@ export class PaymentService {
         },
       });
 
-      if (['FAILED', 'REVERSED'].includes(finalStatus)) {
+      if (["FAILED", "REVERSED"].includes(finalStatus)) {
         await this.reverseWithdrawal(
           userId,
           dto.currency,
@@ -578,10 +656,10 @@ export class PaymentService {
 
         this.logger.error(
           { reference: transactionRecord.reference, transferStatus },
-          'Transfer failed, balance reversed',
+          "Transfer failed, balance reversed",
         );
         throw new BadRequestException(
-          'Transfer failed. Balance has been reversed.',
+          "Transfer failed. Balance has been reversed.",
         );
       }
     } catch (error) {
@@ -592,7 +670,7 @@ export class PaymentService {
       if (!transferRequestSent) {
         await this.prisma.transaction.update({
           where: { reference: transactionRecord.reference },
-          data: { status: 'FAILED' },
+          data: { status: "FAILED" },
         });
 
         await this.reverseWithdrawal(
@@ -603,13 +681,11 @@ export class PaymentService {
           destination,
         );
 
-        await this.prisma.transferAttempt.create({
+        await this.prisma.transferAttempt.update({
+          where: { id: transactionRecord.transferAttemptId },
           data: {
-            transactionId: transactionRecord.id,
-            provider: provider.toUpperCase() as 'PAYSTACK' | 'FLUTTERWAVE',
-            providerReference: transactionRecord.reference,
-            providerStatus: 'NOT_CREATED',
-            status: 'FAILED',
+            providerStatus: "NOT_CREATED",
+            status: "FAILED",
             lastCheckedAt: new Date(),
             metadata: {
               beneficiaryId: destination.beneficiaryId,
@@ -620,7 +696,7 @@ export class PaymentService {
               errorMessage:
                 error instanceof Error
                   ? error.message
-                  : 'Unknown provider error',
+                  : "Unknown provider error",
             },
           },
         });
@@ -628,28 +704,26 @@ export class PaymentService {
         this.logger.error(
           {
             reference: transactionRecord.reference,
-            error: error instanceof Error ? error.message : 'Unknown error',
+            error: error instanceof Error ? error.message : "Unknown error",
           },
-          'Transfer was not created, balance reversed',
+          "Transfer was not created, balance reversed",
         );
 
         throw new BadRequestException(
-          'Transfer could not be created. Balance has been reversed.',
+          "Transfer could not be created. Balance has been reversed.",
         );
       }
 
       await this.prisma.transaction.update({
         where: { reference: transactionRecord.reference },
-        data: { status: 'PENDING' },
+        data: { status: "PENDING" },
       });
 
-      await this.prisma.transferAttempt.create({
+      await this.prisma.transferAttempt.update({
+        where: { id: transactionRecord.transferAttemptId },
         data: {
-          transactionId: transactionRecord.id,
-          provider: provider.toUpperCase() as 'PAYSTACK' | 'FLUTTERWAVE',
-          providerReference: transactionRecord.reference,
-          providerStatus: 'UNKNOWN',
-          status: 'PENDING',
+          providerStatus: "UNKNOWN",
+          status: "PENDING",
           lastCheckedAt: new Date(),
           metadata: {
             beneficiaryId: destination.beneficiaryId,
@@ -658,7 +732,7 @@ export class PaymentService {
             accountName: destination.accountName,
             accountNumberMasked: destination.accountNumberMasked,
             errorMessage:
-              error instanceof Error ? error.message : 'Unknown provider error',
+              error instanceof Error ? error.message : "Unknown provider error",
           },
         },
       });
@@ -666,16 +740,16 @@ export class PaymentService {
       this.logger.warn(
         {
           reference: transactionRecord.reference,
-          error: error instanceof Error ? error.message : 'Unknown error',
+          error: error instanceof Error ? error.message : "Unknown error",
         },
-        'Transfer provider result unknown, withdrawal left pending',
+        "Transfer provider result unknown, withdrawal left pending",
       );
 
       return {
         reference: transactionRecord.reference,
-        status: 'PENDING',
+        status: "PENDING",
         message:
-          'Withdrawal submitted and pending provider confirmation. Funds remain reserved until verification completes.',
+          "Withdrawal submitted and pending provider confirmation. Funds remain reserved until verification completes.",
       };
     }
 
@@ -683,16 +757,16 @@ export class PaymentService {
       {
         userId,
         reference: transactionRecord.reference,
-        amount: dto.amount,
+        amount: amount.toString(),
         currency: dto.currency,
       },
-      'Withdrawal processed',
+      "Withdrawal processed",
     );
 
     return {
       reference: transactionRecord.reference,
-      status: 'PENDING',
-      message: 'Withdrawal submitted successfully',
+      status: "PENDING",
+      message: "Withdrawal submitted successfully",
     };
   }
 
@@ -701,7 +775,7 @@ export class PaymentService {
       where: {
         userId,
         reference,
-        type: 'WITHDRAW',
+        type: "WITHDRAW",
       },
       select: {
         reference: true,
@@ -713,7 +787,7 @@ export class PaymentService {
         createdAt: true,
         updatedAt: true,
         transferAttempts: {
-          orderBy: { createdAt: 'desc' },
+          orderBy: { createdAt: "desc" },
           select: {
             provider: true,
             providerReference: true,
@@ -730,7 +804,7 @@ export class PaymentService {
     });
 
     if (!transaction) {
-      throw new NotFoundException('Withdrawal not found');
+      throw new NotFoundException("Withdrawal not found");
     }
 
     return {
@@ -744,13 +818,13 @@ export class PaymentService {
   }
 
   async processTransferWebhook(input: {
-    provider: 'paystack' | 'flutterwave';
+    provider: "paystack" | "flutterwave";
     eventType: string;
     providerReference: string;
     providerStatus: string;
     rawPayload: Record<string, unknown>;
   }) {
-    const provider = input.provider.toUpperCase() as 'PAYSTACK' | 'FLUTTERWAVE';
+    const provider = input.provider.toUpperCase() as "PAYSTACK" | "FLUTTERWAVE";
     const payload = this.sanitizeProviderPayload(input.rawPayload);
 
     let providerEvent: { id: string; status: string };
@@ -761,7 +835,7 @@ export class PaymentService {
           provider,
           eventType: input.eventType,
           providerReference: input.providerReference,
-          status: 'PROCESSING',
+          status: "PROCESSING",
           payload: payload as Prisma.InputJsonValue,
         },
         select: { id: true, status: true },
@@ -778,18 +852,18 @@ export class PaymentService {
       where: { reference: input.providerReference },
       include: {
         transferAttempts: {
-          orderBy: { createdAt: 'desc' },
+          orderBy: { createdAt: "desc" },
           take: 1,
         },
       },
     });
 
-    if (!transaction || transaction.type !== 'WITHDRAW') {
+    if (!transaction || transaction.type !== "WITHDRAW") {
       await this.prisma.providerEvent.update({
         where: { id: providerEvent.id },
         data: {
-          status: 'IGNORED',
-          errorMessage: 'Withdrawal transaction not found',
+          status: "IGNORED",
+          errorMessage: "Withdrawal transaction not found",
           processedAt: new Date(),
         },
       });
@@ -800,9 +874,9 @@ export class PaymentService {
 
     await this.prisma.$transaction(async (tx) => {
       const transitionStatus =
-        finalStatus === 'REVERSED'
-          ? { in: ['PENDING', 'SUCCESS'] as TransactionStatus[] }
-          : 'PENDING';
+        finalStatus === "REVERSED"
+          ? { in: ["PENDING", "SUCCESS"] as TransactionStatus[] }
+          : "PENDING";
       const updatedTransaction = await tx.transaction.updateMany({
         where: {
           id: transaction.id,
@@ -828,12 +902,12 @@ export class PaymentService {
 
       if (
         updatedTransaction.count === 1 &&
-        ['FAILED', 'REVERSED'].includes(finalStatus)
+        ["FAILED", "REVERSED"].includes(finalStatus)
       ) {
         const existingReversal = await tx.ledgerEntry.findFirst({
           where: {
             transactionId: transaction.id,
-            source: 'WITHDRAWAL_REVERSAL',
+            source: "WITHDRAWAL_REVERSAL",
           },
         });
 
@@ -845,7 +919,7 @@ export class PaymentService {
               amount: new Decimal(transaction.amount),
               transactionId: transaction.id,
               reference: `${transaction.reference}-REVERSAL`,
-              source: 'WITHDRAWAL_REVERSAL',
+              source: "WITHDRAWAL_REVERSAL",
               metadata: {
                 provider,
                 providerStatus: input.providerStatus,
@@ -854,13 +928,31 @@ export class PaymentService {
             },
             tx,
           );
+          await tx.user.updateMany({
+            where: {
+              id: transaction.userId,
+              dailyWithdrawn: { gte: new Decimal(transaction.amount) },
+            },
+            data: {
+              dailyWithdrawn: { decrement: new Decimal(transaction.amount) },
+            },
+          });
+          await tx.user.updateMany({
+            where: {
+              id: transaction.userId,
+              monthlyWithdrawn: { gte: new Decimal(transaction.amount) },
+            },
+            data: {
+              monthlyWithdrawn: { decrement: new Decimal(transaction.amount) },
+            },
+          });
         }
       }
 
       await tx.providerEvent.update({
         where: { id: providerEvent.id },
         data: {
-          status: 'PROCESSED',
+          status: "PROCESSED",
           processedAt: new Date(),
         },
       });
@@ -884,7 +976,7 @@ export class PaymentService {
       });
 
       if (!beneficiary) {
-        throw new NotFoundException('Beneficiary not found');
+        throw new NotFoundException("Beneficiary not found");
       }
 
       return {
@@ -905,7 +997,7 @@ export class PaymentService {
 
     if (!dto.bankCode || !dto.accountNumber || !dto.accountName) {
       throw new BadRequestException(
-        'Provide beneficiaryId or bankCode, accountNumber, and accountName',
+        "Provide beneficiaryId or bankCode, accountNumber, and accountName",
       );
     }
 
@@ -920,12 +1012,23 @@ export class PaymentService {
 
   private async reverseWithdrawal(
     userId: string,
-    currency: WithdrawDto['currency'],
+    currency: WithdrawDto["currency"],
     amount: Decimal,
     transaction: { id: string; reference: string },
     destination: WithdrawalDestination,
   ) {
     await this.prisma.$transaction(async (tx) => {
+      const existingReversal = await tx.ledgerEntry.findFirst({
+        where: {
+          transactionId: transaction.id,
+          source: "WITHDRAWAL_REVERSAL",
+        },
+      });
+
+      if (existingReversal) {
+        return;
+      }
+
       await this.ledger.creditWallet(
         {
           userId,
@@ -933,7 +1036,7 @@ export class PaymentService {
           amount,
           transactionId: transaction.id,
           reference: `${transaction.reference}-REVERSAL`,
-          source: 'WITHDRAWAL_REVERSAL',
+          source: "WITHDRAWAL_REVERSAL",
           metadata: {
             beneficiaryId: destination.beneficiaryId,
             accountNumberMasked: destination.accountNumberMasked,
@@ -941,6 +1044,15 @@ export class PaymentService {
         },
         tx,
       );
+
+      await tx.user.updateMany({
+        where: { id: userId, dailyWithdrawn: { gte: amount } },
+        data: { dailyWithdrawn: { decrement: amount } },
+      });
+      await tx.user.updateMany({
+        where: { id: userId, monthlyWithdrawn: { gte: amount } },
+        data: { monthlyWithdrawn: { decrement: amount } },
+      });
     });
   }
 
@@ -948,30 +1060,30 @@ export class PaymentService {
     const normalized = status.toLowerCase();
 
     if (
-      ['success', 'successful', 'completed', 'complete'].includes(normalized)
+      ["success", "successful", "completed", "complete"].includes(normalized)
     ) {
-      return 'SUCCESS';
+      return "SUCCESS";
     }
 
-    if (['reversed'].includes(normalized)) {
-      return 'REVERSED';
+    if (["reversed"].includes(normalized)) {
+      return "REVERSED";
     }
 
-    if (['failed', 'abandoned', 'blocked', 'rejected'].includes(normalized)) {
-      return 'FAILED';
+    if (["failed", "abandoned", "blocked", "rejected"].includes(normalized)) {
+      return "FAILED";
     }
 
-    return 'PENDING';
+    return "PENDING";
   }
 
   private getBankAccountEncryptionKey() {
     const key =
-      this.configService.get<string>('BANK_ACCOUNT_ENCRYPTION_KEY') ||
-      this.configService.get<string>('PII_ENCRYPTION_KEY');
+      this.configService.get<string>("BANK_ACCOUNT_ENCRYPTION_KEY") ||
+      this.configService.get<string>("PII_ENCRYPTION_KEY");
 
     if (!key) {
       throw new BadRequestException(
-        'Sensitive data encryption key is not configured',
+        "Sensitive data encryption key is not configured",
       );
     }
 
@@ -979,7 +1091,7 @@ export class PaymentService {
   }
 
   private sanitizeWithdrawalMetadata(metadata: unknown) {
-    if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
+    if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
       return {};
     }
 
@@ -1001,7 +1113,7 @@ export class PaymentService {
     updates: Record<string, unknown>,
   ) {
     return {
-      ...(existing && typeof existing === 'object' && !Array.isArray(existing)
+      ...(existing && typeof existing === "object" && !Array.isArray(existing)
         ? (existing as Record<string, unknown>)
         : {}),
       ...updates,
@@ -1011,7 +1123,7 @@ export class PaymentService {
   private isUniqueConstraintError(error: unknown) {
     return (
       error instanceof Prisma.PrismaClientKnownRequestError &&
-      error.code === 'P2002'
+      error.code === "P2002"
     );
   }
 
@@ -1019,7 +1131,7 @@ export class PaymentService {
     const sanitized = this.sanitizeWithdrawalMetadata(payload);
     const data = sanitized.data;
 
-    if (data && typeof data === 'object' && !Array.isArray(data)) {
+    if (data && typeof data === "object" && !Array.isArray(data)) {
       sanitized.data = this.sanitizeWithdrawalMetadata(data);
     }
 
@@ -1035,8 +1147,8 @@ export class PaymentService {
   }
 
   verifyPaystackSignature(rawBody: string, signature: string): boolean {
-    const secret = this.configService.getOrThrow<string>('PAYSTACK_SECRET_KEY');
-    const hash = createHmac('sha512', secret).update(rawBody).digest('hex');
+    const secret = this.configService.getOrThrow<string>("PAYSTACK_SECRET_KEY");
+    const hash = createHmac("sha512", secret).update(rawBody).digest("hex");
     if (hash.length !== signature.length) {
       return false;
     }
@@ -1045,9 +1157,9 @@ export class PaymentService {
 
   verifyFlutterwaveSignature(rawBody: string, signature: string): boolean {
     const secret = this.configService.getOrThrow<string>(
-      'FLUTTERWAVE_SECRET_KEY',
+      "FLUTTERWAVE_SECRET_KEY",
     );
-    const hash = createHmac('sha256', secret).update(rawBody).digest('hex');
+    const hash = createHmac("sha256", secret).update(rawBody).digest("hex");
     if (hash.length !== signature.length) {
       return false;
     }
@@ -1056,7 +1168,7 @@ export class PaymentService {
 
   verifyFlutterwaveSecretHash(verifHash: string): boolean {
     const secretHash = this.configService.getOrThrow<string>(
-      'FLUTTERWAVE_SECRET_HASH',
+      "FLUTTERWAVE_SECRET_HASH",
     );
     if (secretHash.length !== verifHash.length) {
       return false;
@@ -1085,7 +1197,7 @@ export class PaymentService {
     ) {
       await this.prisma.transaction.update({
         where: { id: transaction.id },
-        data: { status: 'FAILED' },
+        data: { status: "FAILED" },
       });
       this.logger.error(
         {
@@ -1097,17 +1209,17 @@ export class PaymentService {
           providerCurrency: currency,
           transactionCurrency: transaction.currency,
         },
-        'Payment verification mismatch',
+        "Payment verification mismatch",
       );
-      throw new BadRequestException('Payment verification mismatch');
+      throw new BadRequestException("Payment verification mismatch");
     }
 
     await this.prisma.$transaction(async (tx) => {
       const providerEvent = await this.createFundingProviderEvent(tx, {
         provider: providerData.provider,
-        eventType: 'payment.verify',
+        eventType: "payment.verify",
         providerReference: transaction.reference,
-        status: 'PROCESSING',
+        status: "PROCESSING",
         rawPayload: {
           reference: providerData.reference,
           status: providerData.status,
@@ -1123,10 +1235,10 @@ export class PaymentService {
       const updated = await tx.transaction.updateMany({
         where: {
           id: transaction.id,
-          status: 'PENDING',
+          status: "PENDING",
         },
         data: {
-          status: 'SUCCESS',
+          status: "SUCCESS",
           metadata: this.mergeJsonMetadata(transaction.metadata, {
             providerEventId: providerEvent.id,
             providerStatus: providerData.status,
@@ -1137,13 +1249,13 @@ export class PaymentService {
       if (updated.count === 0) {
         this.logger.info(
           { reference: transaction.reference },
-          'Deposit already processed',
+          "Deposit already processed",
         );
         await tx.providerEvent.update({
           where: { id: providerEvent.id },
           data: {
-            status: 'IGNORED',
-            errorMessage: 'Funding transaction is no longer pending',
+            status: "IGNORED",
+            errorMessage: "Funding transaction is no longer pending",
             processedAt: new Date(),
           },
         });
@@ -1170,7 +1282,7 @@ export class PaymentService {
       await tx.providerEvent.update({
         where: { id: providerEvent.id },
         data: {
-          status: 'PROCESSED',
+          status: "PROCESSED",
           processedAt: new Date(),
         },
       });
@@ -1181,23 +1293,23 @@ export class PaymentService {
         reference: transaction.reference,
         amount: transaction.amount,
       },
-      'Deposit processed successfully',
+      "Deposit processed successfully",
     );
   }
 
   private isSuccessfulPaymentStatus(status: string) {
-    return ['success', 'successful', 'completed', 'complete'].includes(
+    return ["success", "successful", "completed", "complete"].includes(
       status.toLowerCase(),
     );
   }
 
   private async createFundingProviderEvent(
-    tx: Pick<Prisma.TransactionClient, 'providerEvent'>,
+    tx: Pick<Prisma.TransactionClient, "providerEvent">,
     input: {
       provider: PaymentProviderName;
       eventType: string;
       providerReference: string;
-      status: 'PROCESSING' | 'FAILED' | 'IGNORED';
+      status: "PROCESSING" | "FAILED" | "IGNORED";
       rawPayload: Record<string, unknown>;
       errorMessage?: string;
     },
@@ -1205,7 +1317,7 @@ export class PaymentService {
     try {
       return await tx.providerEvent.create({
         data: {
-          provider: input.provider.toUpperCase() as 'PAYSTACK' | 'FLUTTERWAVE',
+          provider: input.provider.toUpperCase() as "PAYSTACK" | "FLUTTERWAVE",
           eventType: input.eventType,
           providerReference: input.providerReference,
           status: input.status,
@@ -1213,7 +1325,7 @@ export class PaymentService {
             input.rawPayload,
           ) as Prisma.InputJsonValue,
           errorMessage: input.errorMessage,
-          processedAt: input.status === 'PROCESSING' ? undefined : new Date(),
+          processedAt: input.status === "PROCESSING" ? undefined : new Date(),
         },
         select: { id: true, status: true },
       });
@@ -1227,13 +1339,13 @@ export class PaymentService {
   }
 
   private normalizeCurrency(currency: string) {
-    return currency.toUpperCase() as 'NGN' | 'GHS';
+    return currency.toUpperCase() as "NGN" | "GHS";
   }
 
   private normalizePaymentProvider(provider: string): PaymentProviderName {
     const normalized = provider.toLowerCase();
-    if (normalized !== 'paystack' && normalized !== 'flutterwave') {
-      throw new BadRequestException('Unsupported payment provider');
+    if (normalized !== "paystack" && normalized !== "flutterwave") {
+      throw new BadRequestException("Unsupported payment provider");
     }
 
     return normalized;
@@ -1243,7 +1355,32 @@ export class PaymentService {
     return left.minus(right).abs().lessThanOrEqualTo(new Decimal(0.01));
   }
 
+  private assertAmountWithinLimit(amount: Decimal) {
+    if (
+      !amount.isFinite() ||
+      amount.lessThanOrEqualTo(0) ||
+      amount.greaterThan(10_000_000)
+    ) {
+      throw new BadRequestException("Amount must be between 0.01 and 10000000");
+    }
+  }
+
+  private buildPaymentCallbackUrl() {
+    const webUrl =
+      this.configService.get<string>("WEB_URL") || "http://localhost:3001";
+    const base = new URL(webUrl);
+
+    if (
+      this.configService.get<string>("NODE_ENV") === "production" &&
+      base.protocol !== "https:"
+    ) {
+      throw new BadRequestException("Invalid payment callback configuration");
+    }
+
+    return new URL("/payment/callback", base).toString();
+  }
+
   private getDefaultProvider(currency: string): string {
-    return currency === 'NGN' ? 'paystack' : 'flutterwave';
+    return currency === "NGN" ? "paystack" : "flutterwave";
   }
 }

@@ -4,24 +4,60 @@ import 'package:trustpay_app/services/home_data_service.dart';
 void main() {
   group('KycGatePolicy', () {
     test('allows non-debit funding before KYC verification', () {
-      expect(KycGatePolicy.isBlocked(route: '/fund', status: 'PENDING'), false);
+      expect(
+        KycGatePolicy.isBlocked(
+          route: '/fund',
+          status: 'PENDING',
+          kycTier: 'TIER_0',
+        ),
+        false,
+      );
     });
 
     test('blocks debit and payout routes before KYC verification', () {
-      expect(KycGatePolicy.isBlocked(route: '/send', status: 'PENDING'), true);
       expect(
-          KycGatePolicy.isBlocked(route: '/withdraw', status: 'PENDING'), true);
+        KycGatePolicy.isBlocked(
+          route: '/send',
+          status: 'PENDING',
+          kycTier: 'TIER_0',
+        ),
+        true,
+      );
       expect(
-          KycGatePolicy.isBlocked(route: '/exchange', status: 'PENDING'), true);
+        KycGatePolicy.isBlocked(
+          route: '/withdraw',
+          status: 'PENDING',
+          kycTier: 'TIER_0',
+        ),
+        true,
+      );
       expect(
-        KycGatePolicy.isBlocked(route: '/virtual-account', status: 'PENDING'),
+        KycGatePolicy.isBlocked(
+          route: '/exchange',
+          status: 'PENDING',
+          kycTier: 'TIER_0',
+        ),
+        true,
+      );
+      expect(
+        KycGatePolicy.isBlocked(
+          route: '/virtual-account',
+          status: 'PENDING',
+          kycTier: 'TIER_0',
+        ),
         true,
       );
     });
 
     test('allows gated routes after KYC verification', () {
-      expect(KycGatePolicy.isBlocked(route: '/withdraw', status: 'VERIFIED'),
-          false);
+      expect(
+        KycGatePolicy.isBlocked(
+          route: '/withdraw',
+          status: 'VERIFIED',
+          kycTier: 'TIER_2',
+        ),
+        false,
+      );
     });
   });
 }

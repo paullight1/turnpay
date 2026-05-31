@@ -5,15 +5,16 @@ import {
   CallHandler,
   BadRequestException,
   ConflictException,
-} from '@nestjs/common';
-import { Observable, of } from 'rxjs';
-import { lastValueFrom } from 'rxjs';
-import { createHash } from 'crypto';
-import { RedisService } from '../../redis/redis.service';
-import { PrismaService } from '../../prisma/prisma.service';
-import { PinoLogger } from 'nestjs-pino';
-import { Prisma } from '@prisma/client';
-import { AuthenticatedRequest } from '../types/request-context';
+  HttpException,
+} from "@nestjs/common";
+import { Observable, of } from "rxjs";
+import { lastValueFrom } from "rxjs";
+import { createHash } from "crypto";
+import { RedisService } from "../../redis/redis.service";
+import { PrismaService } from "../../prisma/prisma.service";
+import { PinoLogger } from "nestjs-pino";
+import { Prisma } from "@prisma/client";
+import { AuthenticatedRequest } from "../types/request-context";
 
 const IDEMPOTENCY_TTL = 86400; // 24 hours
 const IDEMPOTENCY_LOCK_TTL = 30;
@@ -32,26 +33,26 @@ export class IdempotencyInterceptor implements NestInterceptor {
   ): Promise<Observable<unknown>> {
     const request = context.switchToHttp().getRequest<AuthenticatedRequest>();
     const method = request.method.toUpperCase();
-    const path = request.originalUrl || request.url || '';
+    const path = request.originalUrl || request.url || "";
     const shouldProcess =
-      ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method) &&
-      !path.startsWith('/api/webhooks') &&
-      !path.startsWith('/api/auth');
+      ["POST", "PUT", "PATCH", "DELETE"].includes(method) &&
+      !path.startsWith("/api/webhooks") &&
+      !path.startsWith("/api/auth");
 
     if (!shouldProcess) {
       return next.handle();
     }
 
     const idempotencyKey =
-      request.headers['idempotency-key'] ||
-      request.headers['x-idempotency-key'];
+      request.headers["idempotency-key"] ||
+      request.headers["x-idempotency-key"];
 
-    if (typeof idempotencyKey !== 'string') {
-      throw new BadRequestException('Idempotency-Key header is required');
+    if (typeof idempotencyKey !== "string") {
+      throw new BadRequestException("Idempotency-Key header is required");
     }
 
-    const userId = request.user?.userId || 'anonymous';
-    const normalizedPath = path.split('?')[0];
+    const userId = request.user?.userId || "anonymous";
+    const normalizedPath = path.split("?")[0];
     const requestHash = this.hashRequestBody(request.body);
     const scope = `${userId}:${method}:${normalizedPath}`;
     const expiresAt = new Date(Date.now() + IDEMPOTENCY_TTL * 1000);
@@ -64,20 +65,27 @@ export class IdempotencyInterceptor implements NestInterceptor {
       if (this.isCachedIdempotencyResponse(cached)) {
         if (cached.requestHash !== requestHash) {
           throw new ConflictException(
-            'Idempotency-Key was already used with a different request body',
+            "Idempotency-Key was already used with a different request body",
+          );
+        }
+
+        if (cached.status === "FAILED_FINAL") {
+          throw new HttpException(
+            cached.errorResponse ?? { message: "Request failed" },
+            cached.httpStatus ?? 500,
           );
         }
 
         this.logger.info(
           { idempotencyKey },
-          'Idempotency key matched, returning cached response',
+          "Idempotency key matched, returning cached response",
         );
         return of(cached.response);
       }
 
       this.logger.info(
         { idempotencyKey },
-        'Idempotency key matched, returning cached response',
+        "Idempotency key matched, returning cached response",
       );
       return of(cached);
     }
@@ -95,15 +103,14 @@ export class IdempotencyInterceptor implements NestInterceptor {
       return this.resolveExistingRecord(existingRecord, requestHash);
     }
 
-    const lock = await this.redis.setIfNotExists(
-      lockKey,
-      '1',
-      IDEMPOTENCY_LOCK_TTL,
-    );
+    const useRedisLock = this.redis.isAvailable();
+    const lock = useRedisLock
+      ? await this.redis.setIfNotExists(lockKey, "1", IDEMPOTENCY_LOCK_TTL)
+      : true;
 
     if (!lock) {
       throw new ConflictException(
-        'Request with this idempotency key is already in progress',
+        "Request with this idempotency key is already in progress",
       );
     }
 
@@ -121,44 +128,69 @@ export class IdempotencyInterceptor implements NestInterceptor {
         next.handle() as Observable<unknown>,
       );
 
-      if (response) {
+      if (response !== undefined) {
         const responseJson = this.toJsonValue(response);
         await this.prisma.idempotencyRecord.update({
           where: { id: record.id },
           data: {
-            status: 'COMPLETED',
+            status: "COMPLETED",
             response: responseJson,
             expiresAt,
           },
         });
-        await this.redis.set(
-          cacheKey,
-          JSON.stringify({ requestHash, response: responseJson }),
-          IDEMPOTENCY_TTL,
-        );
+        if (this.redis.isAvailable()) {
+          await this.redis.set(
+            cacheKey,
+            JSON.stringify({ requestHash, response: responseJson }),
+            IDEMPOTENCY_TTL,
+          );
+        }
       }
 
       return of(response);
     } catch (error) {
+      const httpStatus =
+        error instanceof HttpException ? error.getStatus() : 500;
+      const errorResponse = this.toJsonValue(
+        error instanceof HttpException
+          ? error.getResponse()
+          : { statusCode: 500, message: "Internal server error" },
+      );
       await this.prisma.idempotencyRecord.update({
         where: { id: record.id },
         data: {
-          status: 'FAILED',
+          status: "FAILED_FINAL",
+          httpStatus,
+          errorResponse,
           errorMessage:
-            error instanceof Error ? error.message : 'Request failed',
+            error instanceof Error ? error.message : "Request failed",
           expiresAt,
         },
       });
+      if (this.redis.isAvailable()) {
+        await this.redis.set(
+          cacheKey,
+          JSON.stringify({
+            requestHash,
+            status: "FAILED_FINAL",
+            httpStatus,
+            errorResponse,
+          }),
+          IDEMPOTENCY_TTL,
+        );
+      }
       throw error;
     } finally {
-      await this.redis.del(lockKey);
+      if (useRedisLock) {
+        await this.redis.del(lockKey);
+      }
     }
   }
 
   private hashRequestBody(body: unknown) {
-    return createHash('sha256')
+    return createHash("sha256")
       .update(JSON.stringify(body ?? {}))
-      .digest('hex');
+      .digest("hex");
   }
 
   private toJsonValue(value: unknown): Prisma.InputJsonValue {
@@ -169,15 +201,19 @@ export class IdempotencyInterceptor implements NestInterceptor {
     return JSON.parse(value) as unknown;
   }
 
-  private isCachedIdempotencyResponse(
-    value: unknown,
-  ): value is { requestHash: string; response: unknown } {
+  private isCachedIdempotencyResponse(value: unknown): value is {
+    requestHash: string;
+    status?: string;
+    response?: unknown;
+    httpStatus?: number;
+    errorResponse?: unknown;
+  } {
     return (
       !!value &&
-      typeof value === 'object' &&
+      typeof value === "object" &&
       !Array.isArray(value) &&
-      typeof (value as { requestHash?: unknown }).requestHash === 'string' &&
-      'response' in value
+      typeof (value as { requestHash?: unknown }).requestHash === "string" &&
+      ("response" in value || "errorResponse" in value)
     );
   }
 
@@ -186,21 +222,30 @@ export class IdempotencyInterceptor implements NestInterceptor {
       requestHash: string;
       status: string;
       response: unknown;
+      httpStatus?: number | null;
+      errorResponse?: unknown;
     },
     requestHash: string,
   ) {
     if (record.requestHash !== requestHash) {
       throw new ConflictException(
-        'Idempotency-Key was already used with a different request body',
+        "Idempotency-Key was already used with a different request body",
       );
     }
 
-    if (record.status === 'COMPLETED') {
+    if (record.status === "COMPLETED") {
       return of(record.response);
     }
 
+    if (record.status === "FAILED_FINAL") {
+      throw new HttpException(
+        record.errorResponse ?? { message: "Request failed" },
+        record.httpStatus ?? 500,
+      );
+    }
+
     throw new ConflictException(
-      'Request with this idempotency key is already in progress',
+      "Request with this idempotency key is already in progress",
     );
   }
 
@@ -217,7 +262,7 @@ export class IdempotencyInterceptor implements NestInterceptor {
     } catch (error: unknown) {
       if (
         error instanceof Prisma.PrismaClientKnownRequestError &&
-        error.code === 'P2002'
+        error.code === "P2002"
       ) {
         const existing = await this.prisma.idempotencyRecord.findUnique({
           where: {
@@ -230,12 +275,12 @@ export class IdempotencyInterceptor implements NestInterceptor {
 
         if (existing?.requestHash !== data.requestHash) {
           throw new ConflictException(
-            'Idempotency-Key was already used with a different request body',
+            "Idempotency-Key was already used with a different request body",
           );
         }
 
         throw new ConflictException(
-          'Request with this idempotency key is already in progress',
+          "Request with this idempotency key is already in progress",
         );
       }
 

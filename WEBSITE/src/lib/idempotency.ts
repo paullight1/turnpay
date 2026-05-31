@@ -1,4 +1,11 @@
-export type MoneyAttemptScope = "fund" | "withdraw" | "exchange" | "vtu" | "mutation";
+export type MoneyAttemptScope =
+  | "fund"
+  | "withdraw"
+  | "exchange"
+  | "vtu"
+  | "vtu-requery"
+  | "vtu-pricing"
+  | "mutation";
 
 function randomUuid() {
   if (typeof globalThis.crypto?.randomUUID === "function") {

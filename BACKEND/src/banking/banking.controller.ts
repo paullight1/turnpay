@@ -6,19 +6,19 @@ import {
   Param,
   Post,
   UseGuards,
-} from '@nestjs/common';
-import { Throttle } from '@nestjs/throttler';
-import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
-import { CurrentUser } from '../common/decorators/current-user.decorator';
-import { BankingService } from './banking.service';
+} from "@nestjs/common";
+import { Throttle } from "@nestjs/throttler";
+import { JwtAuthGuard } from "../auth/guards/jwt-auth.guard";
+import { CurrentUser } from "../common/decorators/current-user.decorator";
+import { BankingService } from "./banking.service";
 import {
   CreateBeneficiaryDto,
   ProvisionVirtualAccountDto,
   ResolveBankAccountDto,
-} from './dto/banking.dto';
-import { BeneficiariesService } from './beneficiaries.service';
+} from "./dto/banking.dto";
+import { BeneficiariesService } from "./beneficiaries.service";
 
-@Controller('banking')
+@Controller("banking")
 @UseGuards(JwtAuthGuard)
 export class BankingController {
   constructor(
@@ -26,12 +26,12 @@ export class BankingController {
     private readonly beneficiariesService: BeneficiariesService,
   ) {}
 
-  @Get('accounts')
+  @Get("accounts")
   async getVirtualAccounts(@CurrentUser() user: { userId: string }) {
     return this.bankingService.getVirtualAccounts(user.userId);
   }
 
-  @Post('accounts/provision')
+  @Post("accounts/provision")
   @Throttle({ default: { limit: 3, ttl: 60000 } })
   async provisionVirtualAccount(
     @CurrentUser() user: { userId: string },
@@ -40,18 +40,18 @@ export class BankingController {
     return this.bankingService.provisionVirtualAccount(user.userId, dto);
   }
 
-  @Get('banks')
+  @Get("banks")
   async listBanks() {
     return this.beneficiariesService.listBanks();
   }
 
-  @Post('banks/resolve')
+  @Post("banks/resolve")
   @Throttle({ default: { limit: 5, ttl: 60000 } })
   async resolveBank(@Body() dto: ResolveBankAccountDto) {
     return this.beneficiariesService.resolveBankAccount(dto);
   }
 
-  @Post('beneficiaries')
+  @Post("beneficiaries")
   @Throttle({ default: { limit: 5, ttl: 60000 } })
   async createBeneficiary(
     @CurrentUser() user: { userId: string },
@@ -60,15 +60,15 @@ export class BankingController {
     return this.beneficiariesService.createBeneficiary(user.userId, dto);
   }
 
-  @Get('beneficiaries')
+  @Get("beneficiaries")
   async getBeneficiaries(@CurrentUser() user: { userId: string }) {
     return this.beneficiariesService.getBeneficiaries(user.userId);
   }
 
-  @Delete('beneficiaries/:id')
+  @Delete("beneficiaries/:id")
   async deleteBeneficiary(
     @CurrentUser() user: { userId: string },
-    @Param('id') id: string,
+    @Param("id") id: string,
   ) {
     return this.beneficiariesService.deleteBeneficiary(user.userId, id);
   }

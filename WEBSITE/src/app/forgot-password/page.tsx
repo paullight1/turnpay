@@ -5,11 +5,12 @@ import { useAuth } from "@/lib/auth-provider";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { AuthShell } from "@/components/auth/auth-shell";
 import Link from "next/link";
 import { toast } from "sonner";
 import { getErrorMessage } from "@/lib/errors";
-import { ShieldCheck } from "lucide-react";
+import { Loader2 } from "lucide-react";
 
 export default function ForgotPasswordPage() {
   const [email, setEmail] = useState("");
@@ -22,7 +23,7 @@ export default function ForgotPasswordPage() {
     setIsLoading(true);
 
     try {
-      await resetPassword(email);
+      await resetPassword(email.trim());
       setSent(true);
       toast.success("Password reset link sent to your email");
     } catch (error: unknown) {
@@ -33,13 +34,11 @@ export default function ForgotPasswordPage() {
   };
 
   return (
-    <div className="relative isolate flex min-h-screen items-center justify-center overflow-hidden bg-[#050605] px-4 py-10 text-white">
-      <div className="absolute -left-28 -top-64 -z-10 h-[30rem] w-[calc(100%+14rem)] rounded-[0_0_100%_100%] bg-[radial-gradient(circle_at_45%_55%,#ffd36b_0%,#ff7a18_34%,#dc2f02_58%,rgba(5,6,5,0)_74%)] opacity-85 blur-[2px]" />
-      <Card className="w-full max-w-md border-white/10 bg-card/92 shadow-2xl shadow-black/40">
+    <AuthShell
+      title="Recover access without weakening security."
+      subtitle="Reset your password through a protected email link, then return to your wallet with the same transaction controls."
+    >
         <CardHeader className="text-center">
-          <div className="mx-auto grid size-11 place-items-center rounded-lg bg-primary text-primary-foreground">
-            <ShieldCheck aria-hidden="true" className="size-5" />
-          </div>
           <CardTitle className="text-3xl font-semibold">Reset access</CardTitle>
           <CardDescription>
             {sent ? "Check your email for the reset link." : "Enter your email to reset your password."}
@@ -56,12 +55,13 @@ export default function ForgotPasswordPage() {
               </Link>
             </div>
           ) : (
-            <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+            <form onSubmit={handleSubmit} className="flex flex-col gap-4" aria-busy={isLoading}>
               <div className="flex flex-col gap-2">
                 <Label htmlFor="email">Email</Label>
                 <Input
                   id="email"
                   type="email"
+                  autoComplete="email"
                   placeholder="you@example.com"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
@@ -69,6 +69,7 @@ export default function ForgotPasswordPage() {
                 />
               </div>
               <Button type="submit" disabled={isLoading} className="w-full">
+                {isLoading && <Loader2 aria-hidden="true" className="size-4 animate-spin" />}
                 {isLoading ? "Sending..." : "Send Reset Link"}
               </Button>
               <p className="text-center text-sm text-muted-foreground">
@@ -80,7 +81,6 @@ export default function ForgotPasswordPage() {
             </form>
           )}
         </CardContent>
-      </Card>
-    </div>
+    </AuthShell>
   );
 }

@@ -1,0 +1,109 @@
+# Gitleaks Configuration — TRUSTPAY
+# Prevents accidental secret commits. Run: npx gitleaks detect --source . --no-git
+# Docs: https://github.com/gitleaks/gitleaks
+
+title: "TRUSTPAY Gitleaks Config"
+
+# Scan all files by default
+[extend]
+  useDefault = true
+
+# ─── Custom Rules ───────────────────────────────────────────────────────────
+[[rules]]
+  id = "trustpay-jwt-secret"
+  description = "TRUSTPAY JWT secret — must not be in code"
+  regex = '''(?i)(JWT_SECRET|JWT_REFRESH_SECRET)\s*=\s*['"]{1}[a-zA-Z0-9_\-+/=]{20,}['"]{1}'''
+  tags = ["jwt", "trustpay", "critical"]
+
+[[rules]]
+  id = "trustpay-pii-key"
+  description = "TRUSTPAY PII encryption key — must not be in code"
+  regex = '''(?i)PII_ENCRYPTION_KEY\s*=\s*['"]{1}[a-fA-F0-9]{32,}['"]{1}'''
+  tags = ["encryption", "trustpay", "critical"]
+
+[[rules]]
+  id = "trustpay-bank-key"
+  description = "TRUSTPAY bank account encryption key — must not be in code"
+  regex = '''(?i)BANK_ACCOUNT_ENCRYPTION_KEY\s*=\s*['"]{1}[a-fA-F0-9]{32,}['"]{1}'''
+  tags = ["encryption", "trustpay", "critical"]
+
+[[rules]]
+  id = "trustpay-monnify-key"
+  description = "Monnify API/secret key — must not be in code"
+  regex = '''(?i)MONNIFY_(API_KEY|SECRET_KEY)\s*=\s*['"]{1}MK_[A-Z0-9_]{10,}['"]{1}'''
+  tags = ["api-key", "trustpay", "critical"]
+
+[[rules]]
+  id = "trustpay-paystack-secret"
+  description = "Paystack secret key — must not be in code"
+  regex = '''(?i)PAYSTACK_SECRET_KEY\s*=\s*['"]{1}sk_(live|test)_[a-zA-Z0-9_]{10,}['"]{1}'''
+  tags = ["api-key", "trustpay", "critical"]
+
+[[rules]]
+  id = "trustpay-flutterwave-secret"
+  description = "Flutterwave secret key — must not be in code"
+  regex = '''(?i)FLUTTERWAVE_SECRET_KEY\s*=\s*['"]{1}FLWSECK_(TEST|LIVE)_[a-zA-Z0-9_\-]{10,}['"]{1}'''
+  tags = ["api-key", "trustpay", "critical"]
+
+[[rules]]
+  id = "trustpay-supabase-service-role"
+  description = "Supabase service role key — must not be in code"
+  regex = '''(?i)SUPABASE_SERVICE_ROLE_KEY\s*=\s*['"]{1}sb_[a-zA-Z0-9_]{20,}['"]{1}'''
+  tags = ["api-key", "trustpay", "critical"]
+
+[[rules]]
+  id = "trustpay-database-url"
+  description = "Database URL with credentials — must not be in code"
+  regex = '''(?i)DATABASE_URL\s*=\s*['"]{1}postgres(ql)?://[^:@]+:[^@]+@[^'"]+['"]{1}'''
+  tags = ["database", "trustpay", "critical"]
+
+[[rules]]
+  id = "trustpay-redis-url"
+  description = "Redis URL with credentials — must not be in code"
+  regex = '''(?i)REDIS_URL\s*=\s*['"]{1}rediss?://[^:@]+:[^@]+@[^'"]+['"]{1}'''
+  tags = ["database", "trustpay", "critical"]
+
+# ─── Allowlist — Known safe patterns ────────────────────────────────────────
+[allowlist]
+  description = "Allowlist for TRUSTPAY-specific safe patterns"
+
+  # Dev/test keys that are intentional placeholders
+  regexes = [
+    '''dev_jwt_secret_do_not_use''',
+    '''dev_refresh_secret_do_not_use''',
+    '''test-pii-encryption-key''',
+    '''test-bank-account-encryption-key''',
+    '''sk_test_placeholder''',
+    '''FLWSECK_TEST_PLACEHOLDER''',
+    '''trustpay_secret''',
+    '''MK_TEST_YOUR_KEY''',
+    '''sk_test_your_paystack_secret_key''',
+    '''pk_test_your_paystack_public_key''',
+    '''FLWSECK_TEST_YOUR_FLUTTERWAVE_SECRET''',
+    '''FLWPUBK_TEST_YOUR_PUBLIC_KEY''',
+    '''your_vtpass_api_key''',
+    '''PK_your_vtpass_public_key''',
+    '''SK_your_vtpass_secret_key''',
+    '''sb_publishable_your_key_here''',
+    '''sb_anon_your_key_here''',
+    '''sb_service_role_your_key_here''',
+    '''GENERATE_AND_REPLACE''',
+    '''GENERATE_WITH_OPENSSL_RAND_HEX_32''',
+    '''MK_PROD_REPLACE''',
+    '''sk_live_REPLACE''',
+    '''pk_live_REPLACE''',
+    '''FLWSECK_REPLACE''',
+    '''FLWPUBK_REPLACE''',
+    '''PK_REPLACE''',
+    '''SK_REPLACE''',
+    '''whsec_REPLACE''',
+    '''your-project.supabase.co''',
+  ]
+
+  paths = [
+    '''BACKEND/.env.example''',
+    '''DOCS/PRODUCTION-GUIDES/17-SECRET-INVENTORY.md''',
+    '''.gitleaks.toml''',
+    '''DOCS/KYC-GUIDE.MD''',
+    '''DOCS/TESTING-GUIDE.MD''',
+  ]

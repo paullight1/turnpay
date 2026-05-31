@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="220" height="80" viewBox="0 0 220 80" role="img" aria-label="Ecobank logo">
+  <rect width="220" height="80" rx="18" fill="#005eb8"/>
+  <circle cx="48" cy="40" r="24" fill="#f7c600"/>
+  <path d="M37 41h23M49 29v23" stroke="#005eb8" stroke-width="5" stroke-linecap="round"/>
+  <text x="84" y="47" font-family="Arial, Helvetica, sans-serif" font-size="25" font-weight="900" fill="#ffffff">Ecobank</text>
+</svg>

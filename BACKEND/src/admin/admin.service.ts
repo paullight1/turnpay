@@ -2,20 +2,36 @@ import {
   BadRequestException,
   Injectable,
   NotFoundException,
-} from '@nestjs/common';
-import { PrismaService } from '../prisma/prisma.service';
+} from "@nestjs/common";
+import { PrismaService } from "../prisma/prisma.service";
 import {
   AdminActionReasonDto,
+  AdminCreateVtuPricingRuleDto,
   AdminTransferVerificationDto,
+  AdminUpdateVtuPricingRuleDto,
   AdminUpdateUserDto,
-} from './dto/admin.dto';
-import { PinoLogger } from 'nestjs-pino';
-import { Prisma, ProviderEventStatus, TransactionStatus } from '@prisma/client';
-import { Decimal } from '@prisma/client/runtime/library';
-import { LedgerService } from '../wallets/ledger.service';
-import { PaystackProvider } from '../payments/providers/paystack.provider';
-import { FlutterwaveProvider } from '../payments/providers/flutterwave.provider';
-import { SupabaseService } from '../supabase/supabase.service';
+} from "./dto/admin.dto";
+import { PinoLogger } from "nestjs-pino";
+import {
+  Prisma,
+  ProviderEventStatus,
+  TransactionStatus,
+  TransactionType,
+  VtuOrderStatus,
+  VtuOrderScope,
+} from "@prisma/client";
+import { Decimal } from "@prisma/client/runtime/library";
+import { LedgerService } from "../wallets/ledger.service";
+import { PaystackProvider } from "../payments/providers/paystack.provider";
+import { FlutterwaveProvider } from "../payments/providers/flutterwave.provider";
+import { SupabaseService } from "../supabase/supabase.service";
+import { VtuService } from "../vtu/vtu.service";
+
+const STALE_VTU_STATUSES: VtuOrderStatus[] = [
+  "PENDING",
+  "PROCESSING",
+  "UNKNOWN",
+];
 
 @Injectable()
 export class AdminService {
@@ -26,6 +42,7 @@ export class AdminService {
     private readonly paystack: PaystackProvider,
     private readonly flutterwave: FlutterwaveProvider,
     private readonly supabaseService: SupabaseService,
+    private readonly vtuService: VtuService,
   ) {}
 
   async getUsers(
@@ -45,13 +62,14 @@ export class AdminService {
         where,
         skip,
         take: limit,
-        orderBy: { createdAt: 'desc' },
+        orderBy: { createdAt: "desc" },
         select: {
           id: true,
           email: true,
           phone: true,
           role: true,
           kycStatus: true,
+          kycTier: true,
           isSuspended: true,
           createdAt: true,
           wallets: {
@@ -77,13 +95,14 @@ export class AdminService {
         phone: true,
         role: true,
         kycStatus: true,
+        kycTier: true,
         isSuspended: true,
         createdAt: true,
         updatedAt: true,
         wallets: true,
         transactions: {
           take: 20,
-          orderBy: { createdAt: 'desc' },
+          orderBy: { createdAt: "desc" },
           select: {
             id: true,
             type: true,
@@ -98,7 +117,7 @@ export class AdminService {
     });
 
     if (!user) {
-      throw new NotFoundException('User not found');
+      throw new NotFoundException("User not found");
     }
 
     return user;
@@ -111,7 +130,7 @@ export class AdminService {
     });
 
     if (!existing) {
-      throw new NotFoundException('User not found');
+      throw new NotFoundException("User not found");
     }
 
     const { reason, ...updates } = dto;
@@ -126,6 +145,7 @@ export class AdminService {
           phone: true,
           role: true,
           kycStatus: true,
+          kycTier: true,
           isSuspended: true,
           updatedAt: true,
         },
@@ -134,8 +154,8 @@ export class AdminService {
       await tx.auditLog.create({
         data: {
           adminId,
-          action: 'USER_UPDATE',
-          targetType: 'User',
+          action: "USER_UPDATE",
+          targetType: "User",
           targetId: userId,
           reason,
           before: this.sanitizeMetadata(existing) as Prisma.InputJsonValue,
@@ -149,7 +169,7 @@ export class AdminService {
 
     this.logger.info(
       { adminId, userId, changes: Object.keys(updates) },
-      'Admin updated user',
+      "Admin updated user",
     );
 
     if (updates.role) {
@@ -160,9 +180,9 @@ export class AdminService {
           {
             adminId,
             userId,
-            error: error instanceof Error ? error.message : 'Unknown error',
+            error: error instanceof Error ? error.message : "Unknown error",
           },
-          'Unable to sync Supabase app_metadata role after admin role update',
+          "Unable to sync Supabase app_metadata role after admin role update",
         );
       }
     }
@@ -206,11 +226,11 @@ export class AdminService {
       this.prisma.transaction.count(),
       this.prisma.transaction.aggregate({
         _sum: { amount: true },
-        where: { status: 'SUCCESS' },
+        where: { status: "SUCCESS" },
       }),
       this.prisma.transaction.aggregate({
         _sum: { fee: true },
-        where: { status: 'SUCCESS' },
+        where: { status: "SUCCESS" },
       }),
       this.prisma.user.count({
         where: {
@@ -237,7 +257,7 @@ export class AdminService {
   async getRecentTransactions(limit = 20) {
     return this.prisma.transaction.findMany({
       take: limit,
-      orderBy: { createdAt: 'desc' },
+      orderBy: { createdAt: "desc" },
       include: {
         user: {
           select: {
@@ -250,6 +270,73 @@ export class AdminService {
     });
   }
 
+  async getTransactionDrilldown(reference: string) {
+    const transaction = await this.prisma.transaction.findUnique({
+      where: { reference },
+      include: {
+        user: {
+          select: {
+            id: true,
+            email: true,
+            phone: true,
+            kycStatus: true,
+            kycTier: true,
+            isSuspended: true,
+            createdAt: true,
+          },
+        },
+        wallet: {
+          select: {
+            id: true,
+            currency: true,
+            balance: true,
+            updatedAt: true,
+          },
+        },
+        ledgerEntries: {
+          orderBy: { createdAt: "asc" },
+          select: {
+            id: true,
+            direction: true,
+            amount: true,
+            currency: true,
+            balanceBefore: true,
+            balanceAfter: true,
+            reference: true,
+            source: true,
+            metadata: true,
+            createdAt: true,
+          },
+        },
+        transferAttempts: {
+          orderBy: { createdAt: "desc" },
+        },
+        vtuOrders: {
+          orderBy: { createdAt: "desc" },
+        },
+        exchangeReceipt: true,
+        disputes: {
+          orderBy: { createdAt: "desc" },
+          select: {
+            id: true,
+            type: true,
+            status: true,
+            description: true,
+            resolution: true,
+            createdAt: true,
+            updatedAt: true,
+          },
+        },
+      },
+    });
+
+    if (!transaction) {
+      throw new NotFoundException("Transaction not found");
+    }
+
+    return this.sanitizeTransactionDrilldown(transaction);
+  }
+
   updateTransactionStatus(
     reference: string,
     status: TransactionStatus,
@@ -257,10 +344,10 @@ export class AdminService {
   ) {
     this.logger.warn(
       { adminId, reference, requestedStatus: status },
-      'Blocked generic admin transaction status update',
+      "Blocked generic admin transaction status update",
     );
     throw new BadRequestException(
-      'Generic transaction status updates are disabled. Use a typed audited banking operation.',
+      "Generic transaction status updates are disabled. Use a typed audited banking operation.",
     );
   }
 
@@ -275,16 +362,16 @@ export class AdminService {
       failedProviderEvents,
       failedTransferAttempts,
     ] = await Promise.all([
-      this.prisma.virtualAccount.count({ where: { status: 'ACTIVE' } }),
-      this.prisma.virtualAccount.count({ where: { status: 'FAILED' } }),
+      this.prisma.virtualAccount.count({ where: { status: "ACTIVE" } }),
+      this.prisma.virtualAccount.count({ where: { status: "FAILED" } }),
       this.prisma.transaction.count({
-        where: { type: 'WITHDRAW', status: 'PENDING' },
+        where: { type: "WITHDRAW", status: "PENDING" },
       }),
       this.prisma.transferAttempt.count({
-        where: { status: 'PENDING', createdAt: { lt: staleCutoff } },
+        where: { status: "PENDING", createdAt: { lt: staleCutoff } },
       }),
-      this.prisma.providerEvent.count({ where: { status: 'FAILED' } }),
-      this.prisma.transferAttempt.count({ where: { status: 'FAILED' } }),
+      this.prisma.providerEvent.count({ where: { status: "FAILED" } }),
+      this.prisma.transferAttempt.count({ where: { status: "FAILED" } }),
     ]);
 
     return {
@@ -307,7 +394,7 @@ export class AdminService {
   async getVirtualAccounts(limit = 50) {
     return this.prisma.virtualAccount.findMany({
       take: limit,
-      orderBy: { createdAt: 'desc' },
+      orderBy: { createdAt: "desc" },
       select: {
         id: true,
         userId: true,
@@ -329,7 +416,7 @@ export class AdminService {
     const events = await this.prisma.providerEvent.findMany({
       take: limit,
       where: status ? { status: status as ProviderEventStatus } : undefined,
-      orderBy: { createdAt: 'desc' },
+      orderBy: { createdAt: "desc" },
       select: {
         id: true,
         provider: true,
@@ -355,10 +442,10 @@ export class AdminService {
     const withdrawals = await this.prisma.transaction.findMany({
       take: limit,
       where: {
-        type: 'WITHDRAW',
-        status: 'PENDING',
+        type: "WITHDRAW",
+        status: "PENDING",
       },
-      orderBy: { createdAt: 'asc' },
+      orderBy: { createdAt: "asc" },
       select: {
         id: true,
         userId: true,
@@ -376,11 +463,12 @@ export class AdminService {
             email: true,
             phone: true,
             kycStatus: true,
+            kycTier: true,
             isSuspended: true,
           },
         },
         transferAttempts: {
-          orderBy: { createdAt: 'desc' },
+          orderBy: { createdAt: "desc" },
           take: 3,
           select: {
             provider: true,
@@ -407,6 +495,16 @@ export class AdminService {
     }));
   }
 
+  async getWithdrawalDrilldown(reference: string) {
+    const transaction = await this.getTransactionDrilldown(reference);
+
+    if (transaction.type !== "WITHDRAW") {
+      throw new NotFoundException("Withdrawal not found");
+    }
+
+    return transaction;
+  }
+
   async verifyTransfer(
     reference: string,
     dto: AdminTransferVerificationDto,
@@ -418,19 +516,19 @@ export class AdminService {
       where: { reference },
       include: {
         transferAttempts: {
-          orderBy: { createdAt: 'desc' },
+          orderBy: { createdAt: "desc" },
           take: 1,
         },
       },
     });
 
-    if (!transaction || transaction.type !== 'WITHDRAW') {
-      throw new NotFoundException('Withdrawal not found');
+    if (!transaction || transaction.type !== "WITHDRAW") {
+      throw new NotFoundException("Withdrawal not found");
     }
 
     const latestAttempt = transaction.transferAttempts[0];
     if (!latestAttempt) {
-      throw new BadRequestException('Withdrawal has no transfer attempt');
+      throw new BadRequestException("Withdrawal has no transfer attempt");
     }
 
     const providerVerification =
@@ -439,8 +537,8 @@ export class AdminService {
       providerVerification.providerStatus,
     );
 
-    if (['SUCCESS', 'REVERSED'].includes(transaction.status)) {
-      throw new BadRequestException('Terminal withdrawal cannot be changed');
+    if (["SUCCESS", "REVERSED"].includes(transaction.status)) {
+      throw new BadRequestException("Terminal withdrawal cannot be changed");
     }
 
     const result = await this.prisma.$transaction(async (tx) => {
@@ -470,7 +568,7 @@ export class AdminService {
           lastCheckedAt: new Date(),
           metadata: {
             ...(latestAttempt.metadata &&
-            typeof latestAttempt.metadata === 'object' &&
+            typeof latestAttempt.metadata === "object" &&
             !Array.isArray(latestAttempt.metadata)
               ? (latestAttempt.metadata as Record<string, unknown>)
               : {}),
@@ -483,13 +581,13 @@ export class AdminService {
 
       const shouldReverse =
         updatedStatus.count === 1 &&
-        ['FAILED', 'REVERSED'].includes(verifiedStatus);
+        ["FAILED", "REVERSED"].includes(verifiedStatus);
 
       if (shouldReverse) {
         const existingReversal = await tx.ledgerEntry.findFirst({
           where: {
             transactionId: transaction.id,
-            source: 'WITHDRAWAL_REVERSAL',
+            source: "WITHDRAWAL_REVERSAL",
           },
         });
 
@@ -501,7 +599,7 @@ export class AdminService {
               amount: new Decimal(transaction.amount),
               transactionId: transaction.id,
               reference: `${transaction.reference}-REVERSAL`,
-              source: 'WITHDRAWAL_REVERSAL',
+              source: "WITHDRAWAL_REVERSAL",
               metadata: {
                 adminId,
                 reason: dto.reason,
@@ -510,14 +608,32 @@ export class AdminService {
             },
             tx,
           );
+          await tx.user.updateMany({
+            where: {
+              id: transaction.userId,
+              dailyWithdrawn: { gte: new Decimal(transaction.amount) },
+            },
+            data: {
+              dailyWithdrawn: { decrement: new Decimal(transaction.amount) },
+            },
+          });
+          await tx.user.updateMany({
+            where: {
+              id: transaction.userId,
+              monthlyWithdrawn: { gte: new Decimal(transaction.amount) },
+            },
+            data: {
+              monthlyWithdrawn: { decrement: new Decimal(transaction.amount) },
+            },
+          });
         }
       }
 
       await tx.auditLog.create({
         data: {
           adminId,
-          action: 'TRANSFER_VERIFY',
-          targetType: 'Transaction',
+          action: "TRANSFER_VERIFY",
+          targetType: "Transaction",
           targetId: transaction.id,
           reference,
           reason: dto.reason,
@@ -528,7 +644,7 @@ export class AdminService {
           },
           metadata: {
             reversed:
-              ['FAILED', 'REVERSED'].includes(verifiedStatus) &&
+              ["FAILED", "REVERSED"].includes(verifiedStatus) &&
               updatedStatus.count === 1,
           },
         },
@@ -538,7 +654,7 @@ export class AdminService {
         where: { id: transaction.id },
         include: {
           transferAttempts: {
-            orderBy: { createdAt: 'desc' },
+            orderBy: { createdAt: "desc" },
             take: 1,
           },
         },
@@ -547,7 +663,7 @@ export class AdminService {
 
     this.logger.info(
       { adminId, reference, status: verifiedStatus },
-      'Admin verified withdrawal transfer',
+      "Admin verified withdrawal transfer",
     );
 
     return result;
@@ -560,7 +676,7 @@ export class AdminService {
       await Promise.all([
         this.prisma.providerEvent.findMany({
           take: 200,
-          orderBy: { createdAt: 'desc' },
+          orderBy: { createdAt: "desc" },
           select: {
             id: true,
             provider: true,
@@ -573,7 +689,7 @@ export class AdminService {
         }),
         this.prisma.transaction.findMany({
           take: 200,
-          orderBy: { createdAt: 'desc' },
+          orderBy: { createdAt: "desc" },
           select: {
             id: true,
             reference: true,
@@ -585,11 +701,11 @@ export class AdminService {
         }),
         this.prisma.transaction.findMany({
           where: {
-            type: 'WITHDRAW',
+            type: "WITHDRAW",
             transferAttempts: { none: {} },
           },
           take: 100,
-          orderBy: { createdAt: 'desc' },
+          orderBy: { createdAt: "desc" },
           select: {
             id: true,
             reference: true,
@@ -601,11 +717,11 @@ export class AdminService {
         }),
         this.prisma.transferAttempt.findMany({
           where: {
-            status: 'PENDING',
+            status: "PENDING",
             createdAt: { lt: staleCutoff },
           },
           take: 100,
-          orderBy: { createdAt: 'asc' },
+          orderBy: { createdAt: "asc" },
           select: {
             id: true,
             transactionId: true,
@@ -615,6 +731,14 @@ export class AdminService {
             status: true,
             createdAt: true,
             lastCheckedAt: true,
+            transaction: {
+              select: {
+                reference: true,
+                status: true,
+                amount: true,
+                currency: true,
+              },
+            },
           },
         }),
       ]);
@@ -679,8 +803,8 @@ export class AdminService {
     await this.prisma.auditLog.create({
       data: {
         adminId,
-        action: 'RECONCILIATION_RUN',
-        targetType: 'ReconciliationReport',
+        action: "RECONCILIATION_RUN",
+        targetType: "ReconciliationReport",
         targetId: `report-${Date.now()}`,
         reason: dto.reason,
         after: report,
@@ -691,10 +815,553 @@ export class AdminService {
     return report;
   }
 
+  async getStaleVtuOrders(olderThanMinutes = 10, limit = 50) {
+    if (!Number.isInteger(olderThanMinutes) || olderThanMinutes < 1) {
+      throw new BadRequestException("olderThanMinutes must be at least 1");
+    }
+
+    const cutoff = new Date(Date.now() - olderThanMinutes * 60 * 1000);
+    const orders = await this.prisma.vtuOrder.findMany({
+      take: limit,
+      where: {
+        status: { in: STALE_VTU_STATUSES },
+        createdAt: { lt: cutoff },
+      },
+      orderBy: [{ createdAt: "asc" }],
+      select: {
+        id: true,
+        provider: true,
+        providerRequestId: true,
+        providerTransactionId: true,
+        providerStatus: true,
+        status: true,
+        scope: true,
+        serviceType: true,
+        countryCode: true,
+        localProvider: true,
+        operatorId: true,
+        amount: true,
+        currency: true,
+        costAmount: true,
+        fee: true,
+        margin: true,
+        targetMasked: true,
+        requeryAttempts: true,
+        lastRequeryAt: true,
+        nextRequeryAt: true,
+        createdAt: true,
+        updatedAt: true,
+        transaction: {
+          select: {
+            id: true,
+            reference: true,
+            status: true,
+            createdAt: true,
+            updatedAt: true,
+          },
+        },
+      },
+    });
+
+    return {
+      generatedAt: new Date(),
+      olderThanMinutes,
+      cutoff,
+      count: orders.length,
+      orders: orders.map((order) => ({
+        orderId: order.id,
+        provider: order.provider,
+        providerRequestId: order.providerRequestId,
+        providerTransactionId: order.providerTransactionId,
+        providerStatus: order.providerStatus,
+        scope: order.scope,
+        transactionId: order.transaction.id,
+        transactionReference: order.transaction.reference,
+        transactionStatus: order.transaction.status,
+        serviceType: order.serviceType,
+        countryCode: order.countryCode,
+        localProvider: order.localProvider,
+        operatorId: order.operatorId,
+        amount: order.amount,
+        currency: order.currency,
+        costAmount: order.costAmount,
+        fee: order.fee,
+        margin: order.margin,
+        status: order.status,
+        targetMasked: order.targetMasked,
+        attempts: order.requeryAttempts,
+        lastRequeryAt: order.lastRequeryAt,
+        nextRequeryAt: order.nextRequeryAt,
+        createdAt: order.createdAt,
+        updatedAt: order.updatedAt,
+        transactionCreatedAt: order.transaction.createdAt,
+        transactionUpdatedAt: order.transaction.updatedAt,
+      })),
+    };
+  }
+
+  async getVtuProviderHealth() {
+    return this.vtuService.getProviderHealth();
+  }
+
+  async getVtuReconciliationReport(olderThanMinutes = 10, limit = 50) {
+    if (!Number.isInteger(olderThanMinutes) || olderThanMinutes < 1) {
+      throw new BadRequestException("olderThanMinutes must be at least 1");
+    }
+
+    const generatedAt = new Date();
+    const cutoff = new Date(generatedAt.getTime() - olderThanMinutes * 60000);
+    const orders = await this.prisma.vtuOrder.findMany({
+      take: limit,
+      orderBy: [{ createdAt: "desc" }],
+      select: {
+        id: true,
+        provider: true,
+        providerRequestId: true,
+        providerTransactionId: true,
+        providerStatus: true,
+        scope: true,
+        serviceType: true,
+        countryCode: true,
+        localProvider: true,
+        operatorId: true,
+        amount: true,
+        currency: true,
+        costAmount: true,
+        fee: true,
+        margin: true,
+        status: true,
+        targetMasked: true,
+        requeryAttempts: true,
+        lastRequeryAt: true,
+        nextRequeryAt: true,
+        completedAt: true,
+        failedAt: true,
+        createdAt: true,
+        updatedAt: true,
+        transaction: {
+          select: {
+            id: true,
+            reference: true,
+            type: true,
+            amount: true,
+            fee: true,
+            currency: true,
+            status: true,
+            createdAt: true,
+            updatedAt: true,
+            ledgerEntries: {
+              select: {
+                id: true,
+                direction: true,
+                amount: true,
+                currency: true,
+                reference: true,
+                source: true,
+                createdAt: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    const summary = {
+      ordersReviewed: orders.length,
+      totalOrderAmount: new Decimal(0),
+      totalFees: new Decimal(0),
+      totalDebitAmount: new Decimal(0),
+      amountMismatches: 0,
+      feeMismatches: 0,
+      missingDebitLedger: 0,
+      staleOrders: 0,
+      terminalWithoutReversalCredit: 0,
+    };
+    const providerBreakdown = new Map<
+      string,
+      {
+        provider: string;
+        count: number;
+        totalAmount: Decimal;
+        totalFees: Decimal;
+        totalDebitAmount: Decimal;
+      }
+    >();
+    const statusBreakdown = new Map<
+      string,
+      {
+        status: string;
+        count: number;
+        totalAmount: Decimal;
+        totalFees: Decimal;
+        totalDebitAmount: Decimal;
+      }
+    >();
+    const exceptions = {
+      amountMismatches: [] as Array<Record<string, unknown>>,
+      feeMismatches: [] as Array<Record<string, unknown>>,
+      missingDebitLedger: [] as Array<Record<string, unknown>>,
+      staleOrders: [] as Array<Record<string, unknown>>,
+      terminalWithoutReversalCredit: [] as Array<Record<string, unknown>>,
+    };
+
+    for (const order of orders) {
+      const orderAmount = new Decimal(order.amount);
+      const orderFee = this.toDecimalOrZero(order.fee);
+      const expectedDebit = orderAmount.plus(orderFee);
+      const debitLedger = order.transaction.ledgerEntries.find(
+        (entry) =>
+          entry.source === "VTU_PURCHASE" && entry.direction === "DEBIT",
+      );
+      const reversalCredit = order.transaction.ledgerEntries.find(
+        (entry) =>
+          entry.source === "VTU_REVERSAL" && entry.direction === "CREDIT",
+      );
+
+      summary.totalOrderAmount = summary.totalOrderAmount.plus(orderAmount);
+      summary.totalFees = summary.totalFees.plus(orderFee);
+      summary.totalDebitAmount = summary.totalDebitAmount.plus(expectedDebit);
+      this.addVtuBreakdown(
+        providerBreakdown,
+        "provider",
+        order.provider,
+        orderAmount,
+        orderFee,
+        expectedDebit,
+      );
+      this.addVtuBreakdown(
+        statusBreakdown,
+        "status",
+        order.status,
+        orderAmount,
+        orderFee,
+        expectedDebit,
+      );
+
+      if (!new Decimal(order.transaction.amount).equals(orderAmount)) {
+        summary.amountMismatches += 1;
+        exceptions.amountMismatches.push({
+          ...this.toVtuReconciliationOrderReference(order),
+          orderAmount: orderAmount.toString(),
+          transactionAmount: order.transaction.amount.toString(),
+        });
+      }
+
+      if (!new Decimal(order.transaction.fee).equals(orderFee)) {
+        summary.feeMismatches += 1;
+        exceptions.feeMismatches.push({
+          ...this.toVtuReconciliationOrderReference(order),
+          orderFee: orderFee.toString(),
+          transactionFee: order.transaction.fee.toString(),
+        });
+      }
+
+      if (!debitLedger) {
+        summary.missingDebitLedger += 1;
+        exceptions.missingDebitLedger.push({
+          ...this.toVtuReconciliationOrderReference(order),
+          expectedDebitAmount: expectedDebit.toString(),
+        });
+      } else if (!new Decimal(debitLedger.amount).equals(expectedDebit)) {
+        summary.amountMismatches += 1;
+        exceptions.amountMismatches.push({
+          ...this.toVtuReconciliationOrderReference(order),
+          expectedDebitAmount: expectedDebit.toString(),
+          debitLedgerAmount: debitLedger.amount.toString(),
+          ledgerEntryId: debitLedger.id,
+        });
+      }
+
+      if (
+        STALE_VTU_STATUSES.includes(order.status) &&
+        order.createdAt < cutoff
+      ) {
+        summary.staleOrders += 1;
+        exceptions.staleOrders.push({
+          ...this.toVtuReconciliationOrderReference(order),
+          providerStatus: order.providerStatus,
+          targetMasked: order.targetMasked,
+          requeryAttempts: order.requeryAttempts,
+          lastRequeryAt: order.lastRequeryAt,
+          nextRequeryAt: order.nextRequeryAt,
+          createdAt: order.createdAt,
+          updatedAt: order.updatedAt,
+        });
+      }
+
+      if (["FAILED", "REVERSED"].includes(order.status) && !reversalCredit) {
+        summary.terminalWithoutReversalCredit += 1;
+        exceptions.terminalWithoutReversalCredit.push({
+          ...this.toVtuReconciliationOrderReference(order),
+          expectedReversalAmount: expectedDebit.toString(),
+          failedAt: order.failedAt,
+        });
+      }
+    }
+
+    return {
+      generatedAt,
+      olderThanMinutes,
+      limit,
+      cutoff,
+      summary: this.stringifyVtuReconciliationSummary(summary),
+      providerBreakdown: this.stringifyVtuBreakdown(providerBreakdown),
+      statusBreakdown: this.stringifyVtuBreakdown(statusBreakdown),
+      breakdowns: {
+        providers: this.stringifyVtuBreakdown(providerBreakdown),
+        statuses: this.stringifyVtuBreakdown(statusBreakdown),
+      },
+      exceptions: {
+        amountMismatches: exceptions.amountMismatches,
+        feeMismatches: exceptions.feeMismatches,
+        missingDebits: exceptions.missingDebitLedger,
+        missingReversals: exceptions.terminalWithoutReversalCredit,
+        staleOrders: exceptions.staleOrders,
+        missingDebitLedger: exceptions.missingDebitLedger,
+        terminalWithoutReversalCredit: exceptions.terminalWithoutReversalCredit,
+      },
+    };
+  }
+
+  async requeryVtuOrder(
+    reference: string,
+    dto: AdminActionReasonDto,
+    adminId: string,
+  ) {
+    this.assertReason(dto.reason);
+
+    const before = await this.vtuService.findOrderForAdmin(reference);
+    if (!before) {
+      throw new NotFoundException("VTU order not found");
+    }
+
+    let requeryResult: Awaited<ReturnType<VtuService["requeryOrder"]>> | null =
+      null;
+    let requeryError: string | null = null;
+
+    try {
+      requeryResult = await this.vtuService.requeryOrder(before.id);
+    } catch (error) {
+      requeryError = error instanceof Error ? error.message : "Unknown error";
+    }
+
+    const after = await this.vtuService.findOrderForAdmin(before.id);
+
+    await this.prisma.auditLog.create({
+      data: {
+        adminId,
+        action: "VTU_ORDER_REQUERY",
+        targetType: "VtuOrder",
+        targetId: before.id,
+        reference,
+        reason: dto.reason,
+        before: this.toVtuOrderAuditSnapshot(before),
+        after: this.toVtuOrderAuditSnapshot(after),
+        metadata: {
+          requestedReference: reference,
+          transactionReference: before.transaction.reference,
+          provider: before.provider,
+          providerRequestId: before.providerRequestId,
+          providerTransactionId: before.providerTransactionId,
+          requeryResult: requeryResult ?? {
+            processed: false,
+            error: requeryError,
+          },
+        },
+      },
+    });
+
+    if (requeryError) {
+      this.logger.warn(
+        {
+          adminId,
+          reference,
+          orderId: before.id,
+          error: requeryError,
+        },
+        "Admin manual VTU order requery failed",
+      );
+      throw new BadRequestException("VTU order requery failed");
+    }
+
+    this.logger.info(
+      {
+        adminId,
+        reference,
+        orderId: before.id,
+        status: after?.status,
+      },
+      "Admin manually requeried VTU order",
+    );
+
+    return {
+      orderId: before.id,
+      reference,
+      result: requeryResult,
+      order: after,
+    };
+  }
+
+  async listVtuPricingRules(query: {
+    limit?: number;
+    countryCode?: string;
+    serviceType?: string;
+    provider?: string;
+    scope?: string;
+    isActive?: boolean;
+  }) {
+    const where: Prisma.VtuPricingRuleWhereInput = {};
+    if (query.countryCode) where.countryCode = query.countryCode;
+    if (query.serviceType)
+      where.serviceType = query.serviceType as TransactionType;
+    if (query.provider) where.provider = query.provider;
+    if (query.scope) where.scope = query.scope as VtuOrderScope;
+    if (query.isActive !== undefined) where.isActive = query.isActive;
+
+    return this.prisma.vtuPricingRule.findMany({
+      take: query.limit ?? 50,
+      where,
+      orderBy: [
+        { isActive: "desc" },
+        { priority: "desc" },
+        { createdAt: "desc" },
+      ],
+    });
+  }
+
+  async createVtuPricingRule(
+    dto: AdminCreateVtuPricingRuleDto,
+    adminId: string,
+  ) {
+    this.assertReason(dto.reason);
+    this.assertVtuPricingRuleAmounts(dto);
+
+    const { reason, ...ruleInput } = dto;
+    const created = await this.prisma.$transaction(async (tx) => {
+      const rule = await tx.vtuPricingRule.create({
+        data: this.buildVtuPricingRuleData(ruleInput),
+      });
+
+      await tx.auditLog.create({
+        data: {
+          adminId,
+          action: "VTU_PRICING_RULE_CREATE",
+          targetType: "VtuPricingRule",
+          targetId: rule.id,
+          reason,
+          after: this.toVtuPricingRuleAuditSnapshot(rule),
+          metadata: {
+            countryCode: rule.countryCode,
+            serviceType: rule.serviceType,
+            provider: rule.provider,
+            scope: rule.scope,
+            priority: rule.priority,
+          },
+        },
+      });
+
+      return rule;
+    });
+
+    this.logger.info(
+      { adminId, ruleId: created.id },
+      "Admin created VTU pricing rule",
+    );
+
+    return created;
+  }
+
+  async updateVtuPricingRule(
+    ruleId: string,
+    dto: AdminUpdateVtuPricingRuleDto,
+    adminId: string,
+  ) {
+    this.assertReason(dto.reason);
+    this.assertVtuPricingRuleAmounts(dto);
+
+    const existing = await this.prisma.vtuPricingRule.findUnique({
+      where: { id: ruleId },
+    });
+
+    if (!existing) {
+      throw new NotFoundException("VTU pricing rule not found");
+    }
+
+    const { reason, ...ruleInput } = dto;
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const rule = await tx.vtuPricingRule.update({
+        where: { id: ruleId },
+        data: this.buildVtuPricingRuleData(ruleInput),
+      });
+
+      await tx.auditLog.create({
+        data: {
+          adminId,
+          action: "VTU_PRICING_RULE_UPDATE",
+          targetType: "VtuPricingRule",
+          targetId: ruleId,
+          reason,
+          before: this.toVtuPricingRuleAuditSnapshot(existing),
+          after: this.toVtuPricingRuleAuditSnapshot(rule),
+          metadata: {
+            changedFields: Object.keys(ruleInput),
+          },
+        },
+      });
+
+      return rule;
+    });
+
+    this.logger.info({ adminId, ruleId }, "Admin updated VTU pricing rule");
+
+    return updated;
+  }
+
+  async deactivateVtuPricingRule(
+    ruleId: string,
+    dto: AdminActionReasonDto,
+    adminId: string,
+  ) {
+    this.assertReason(dto.reason);
+
+    const existing = await this.prisma.vtuPricingRule.findUnique({
+      where: { id: ruleId },
+    });
+
+    if (!existing) {
+      throw new NotFoundException("VTU pricing rule not found");
+    }
+
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const rule = await tx.vtuPricingRule.update({
+        where: { id: ruleId },
+        data: { isActive: false },
+      });
+
+      await tx.auditLog.create({
+        data: {
+          adminId,
+          action: "VTU_PRICING_RULE_DEACTIVATE",
+          targetType: "VtuPricingRule",
+          targetId: ruleId,
+          reason: dto.reason,
+          before: this.toVtuPricingRuleAuditSnapshot(existing),
+          after: this.toVtuPricingRuleAuditSnapshot(rule),
+        },
+      });
+
+      return rule;
+    });
+
+    this.logger.info({ adminId, ruleId }, "Admin deactivated VTU pricing rule");
+
+    return updated;
+  }
+
   async getAuditLogs(limit = 50) {
     const logs = await this.prisma.auditLog.findMany({
       take: limit,
-      orderBy: { createdAt: 'desc' },
+      orderBy: { createdAt: "desc" },
       select: {
         id: true,
         adminId: true,
@@ -719,11 +1386,11 @@ export class AdminService {
   }
 
   private async verifyProviderTransfer(latestAttempt: {
-    provider: 'PAYSTACK' | 'FLUTTERWAVE';
+    provider: string;
     providerReference: string;
     metadata: unknown;
   }) {
-    if (latestAttempt.provider === 'PAYSTACK') {
+    if (latestAttempt.provider === "PAYSTACK") {
       const transfer = await this.paystack.verifyTransfer(
         latestAttempt.providerReference,
       );
@@ -734,9 +1401,15 @@ export class AdminService {
       };
     }
 
+    if (latestAttempt.provider !== "FLUTTERWAVE") {
+      throw new BadRequestException(
+        "Provider transfer verification is not supported for this provider",
+      );
+    }
+
     const metadata =
       latestAttempt.metadata &&
-      typeof latestAttempt.metadata === 'object' &&
+      typeof latestAttempt.metadata === "object" &&
       !Array.isArray(latestAttempt.metadata)
         ? (latestAttempt.metadata as Record<string, unknown>)
         : {};
@@ -744,7 +1417,7 @@ export class AdminService {
 
     if (!Number.isFinite(providerTransferId)) {
       throw new BadRequestException(
-        'Flutterwave transfer id is required for provider verification',
+        "Flutterwave transfer id is required for provider verification",
       );
     }
 
@@ -760,28 +1433,231 @@ export class AdminService {
     const normalized = status.toLowerCase();
 
     if (
-      ['success', 'successful', 'completed', 'complete'].includes(normalized)
+      ["success", "successful", "completed", "complete"].includes(normalized)
     ) {
-      return 'SUCCESS';
+      return "SUCCESS";
     }
 
-    if (normalized === 'reversed') {
-      return 'REVERSED';
+    if (normalized === "reversed") {
+      return "REVERSED";
     }
 
-    if (['failed', 'abandoned', 'blocked', 'rejected'].includes(normalized)) {
-      return 'FAILED';
+    if (["failed", "abandoned", "blocked", "rejected"].includes(normalized)) {
+      return "FAILED";
     }
 
-    return 'PENDING';
+    return "PENDING";
   }
 
   private assertReason(reason: string) {
     if (!reason || reason.trim().length < 10) {
       throw new BadRequestException(
-        'A reason of at least 10 characters is required',
+        "A reason of at least 10 characters is required",
       );
     }
+  }
+
+  private assertVtuPricingRuleAmounts(input: {
+    fixedMargin?: string;
+    percentMargin?: string;
+    minAmount?: string;
+    maxAmount?: string;
+  }) {
+    const fixedMargin =
+      input.fixedMargin === undefined
+        ? new Decimal(0)
+        : new Decimal(input.fixedMargin);
+    const percentMargin =
+      input.percentMargin === undefined
+        ? new Decimal(0)
+        : new Decimal(input.percentMargin);
+
+    if (fixedMargin.lessThan(0) || percentMargin.lessThan(0)) {
+      throw new BadRequestException("VTU margins cannot be negative");
+    }
+
+    if (percentMargin.greaterThan(100)) {
+      throw new BadRequestException("VTU percent margin cannot exceed 100");
+    }
+
+    if (input.minAmount && input.maxAmount) {
+      const minAmount = new Decimal(input.minAmount);
+      const maxAmount = new Decimal(input.maxAmount);
+      if (minAmount.greaterThan(maxAmount)) {
+        throw new BadRequestException("minAmount cannot exceed maxAmount");
+      }
+    }
+  }
+
+  private buildVtuPricingRuleData(input: {
+    countryCode?: string;
+    serviceType?: string;
+    provider?: string;
+    scope?: string;
+    fixedMargin?: string;
+    percentMargin?: string;
+    minAmount?: string;
+    maxAmount?: string;
+    priority?: number;
+    isActive?: boolean;
+  }) {
+    return {
+      countryCode: input.countryCode,
+      serviceType: input.serviceType as TransactionType | undefined,
+      provider: input.provider,
+      scope: input.scope as VtuOrderScope | undefined,
+      fixedMargin:
+        input.fixedMargin === undefined
+          ? undefined
+          : new Decimal(input.fixedMargin),
+      percentMargin:
+        input.percentMargin === undefined
+          ? undefined
+          : new Decimal(input.percentMargin),
+      minAmount:
+        input.minAmount === undefined
+          ? undefined
+          : new Decimal(input.minAmount),
+      maxAmount:
+        input.maxAmount === undefined
+          ? undefined
+          : new Decimal(input.maxAmount),
+      priority: input.priority,
+      isActive: input.isActive,
+    };
+  }
+
+  private toDecimalOrZero(value: Decimal | null | undefined) {
+    return value === null || value === undefined
+      ? new Decimal(0)
+      : new Decimal(value);
+  }
+
+  private addVtuBreakdown(
+    breakdown: Map<
+      string,
+      {
+        provider?: string;
+        status?: string;
+        count: number;
+        totalAmount: Decimal;
+        totalFees: Decimal;
+        totalDebitAmount: Decimal;
+      }
+    >,
+    label: "provider" | "status",
+    key: string,
+    amount: Decimal,
+    fee: Decimal,
+    debitAmount: Decimal,
+  ) {
+    const existing = breakdown.get(key) ?? {
+      [label]: key,
+      count: 0,
+      totalAmount: new Decimal(0),
+      totalFees: new Decimal(0),
+      totalDebitAmount: new Decimal(0),
+    };
+
+    existing.count += 1;
+    existing.totalAmount = existing.totalAmount.plus(amount);
+    existing.totalFees = existing.totalFees.plus(fee);
+    existing.totalDebitAmount = existing.totalDebitAmount.plus(debitAmount);
+    breakdown.set(key, existing);
+  }
+
+  private stringifyVtuBreakdown(
+    breakdown: Map<
+      string,
+      {
+        provider?: string;
+        status?: string;
+        count: number;
+        totalAmount: Decimal;
+        totalFees: Decimal;
+        totalDebitAmount: Decimal;
+      }
+    >,
+  ) {
+    return Array.from(breakdown.values()).map((item) => ({
+      ...item,
+      currency: "NGN",
+      amount: item.totalAmount.toString(),
+      costAmount: item.totalAmount.toString(),
+      fees: item.totalFees.toString(),
+      margin: item.totalFees.toString(),
+      totalAmount: item.totalAmount.toString(),
+      totalFees: item.totalFees.toString(),
+      totalDebitAmount: item.totalDebitAmount.toString(),
+    }));
+  }
+
+  private stringifyVtuReconciliationSummary(summary: {
+    ordersReviewed: number;
+    totalOrderAmount: Decimal;
+    totalFees: Decimal;
+    totalDebitAmount: Decimal;
+    amountMismatches: number;
+    feeMismatches: number;
+    missingDebitLedger: number;
+    staleOrders: number;
+    terminalWithoutReversalCredit: number;
+  }) {
+    return {
+      ...summary,
+      totalOrders: summary.ordersReviewed,
+      totalAmount: summary.totalOrderAmount.toString(),
+      totalCostAmount: summary.totalOrderAmount.toString(),
+      totalMargin: summary.totalFees.toString(),
+      missingDebits: summary.missingDebitLedger,
+      missingReversals: summary.terminalWithoutReversalCredit,
+      highRiskExceptions:
+        summary.amountMismatches +
+        summary.missingDebitLedger +
+        summary.terminalWithoutReversalCredit,
+      currency: "NGN",
+      totalOrderAmount: summary.totalOrderAmount.toString(),
+      totalFees: summary.totalFees.toString(),
+      totalDebitAmount: summary.totalDebitAmount.toString(),
+    };
+  }
+
+  private toVtuReconciliationOrderReference(order: {
+    id: string;
+    provider: string;
+    providerRequestId: string;
+    providerTransactionId: string | null;
+    status: string;
+    serviceType: string;
+    amount: Decimal;
+    fee: Decimal | null;
+    currency: string;
+    transaction: {
+      id: string;
+      reference: string;
+      status: string;
+      amount: Decimal;
+      fee: Decimal;
+      currency: string;
+    };
+  }) {
+    return {
+      orderId: order.id,
+      provider: order.provider,
+      providerRequestId: order.providerRequestId,
+      providerTransactionId: order.providerTransactionId,
+      status: order.status,
+      serviceType: order.serviceType,
+      amount: order.amount.toString(),
+      fee: this.toDecimalOrZero(order.fee).toString(),
+      currency: order.currency,
+      transactionId: order.transaction.id,
+      transactionReference: order.transaction.reference,
+      transactionStatus: order.transaction.status,
+      transactionAmount: order.transaction.amount.toString(),
+      transactionFee: order.transaction.fee.toString(),
+      transactionCurrency: order.transaction.currency,
+    };
   }
 
   private getStalePendingCutoff() {
@@ -789,7 +1665,7 @@ export class AdminService {
   }
 
   private extractProviderAmount(payload: unknown): Decimal | null {
-    if (!payload || typeof payload !== 'object') {
+    if (!payload || typeof payload !== "object") {
       return null;
     }
 
@@ -800,7 +1676,7 @@ export class AdminService {
       return null;
     }
 
-    if (typeof rawAmount !== 'string' && typeof rawAmount !== 'number') {
+    if (typeof rawAmount !== "string" && typeof rawAmount !== "number") {
       return null;
     }
 
@@ -813,7 +1689,7 @@ export class AdminService {
   }
 
   private sanitizeMetadata(metadata: unknown) {
-    if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
+    if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
       return {};
     }
 
@@ -830,5 +1706,109 @@ export class AdminService {
     delete safeMetadata.secret;
 
     return safeMetadata;
+  }
+
+  private sanitizeTransactionDrilldown<T extends { metadata?: unknown }>(
+    transaction: T & {
+      ledgerEntries?: Array<{ metadata?: unknown }>;
+      transferAttempts?: Array<{ metadata?: unknown }>;
+      vtuOrders?: Array<{ metadata?: unknown; rawResponse?: unknown }>;
+      exchangeReceipt?: { metadata?: unknown } | null;
+    },
+  ) {
+    return {
+      ...transaction,
+      metadata: this.sanitizeMetadata(transaction.metadata),
+      ledgerEntries: transaction.ledgerEntries?.map((entry) => ({
+        ...entry,
+        metadata: this.sanitizeMetadata(entry.metadata),
+      })),
+      transferAttempts: transaction.transferAttempts?.map((attempt) => ({
+        ...attempt,
+        metadata: this.sanitizeMetadata(attempt.metadata),
+      })),
+      vtuOrders: transaction.vtuOrders?.map((order) => ({
+        ...order,
+        metadata: this.sanitizeMetadata(order.metadata),
+        rawResponse: this.sanitizeMetadata(order.rawResponse),
+      })),
+      exchangeReceipt: transaction.exchangeReceipt
+        ? {
+            ...transaction.exchangeReceipt,
+            metadata: this.sanitizeMetadata(
+              transaction.exchangeReceipt.metadata,
+            ),
+          }
+        : null,
+    };
+  }
+
+  private toVtuOrderAuditSnapshot(
+    order: Awaited<ReturnType<VtuService["findOrderForAdmin"]>>,
+  ): Prisma.InputJsonValue {
+    if (!order) {
+      return {};
+    }
+
+    return {
+      orderId: order.id,
+      provider: order.provider,
+      providerRequestId: order.providerRequestId,
+      providerTransactionId: order.providerTransactionId,
+      providerStatus: order.providerStatus,
+      status: order.status,
+      amount: order.amount.toString(),
+      currency: order.currency,
+      targetMasked: order.targetMasked,
+      attempts: order.requeryAttempts,
+      lastRequeryAt: order.lastRequeryAt?.toISOString() ?? null,
+      nextRequeryAt: order.nextRequeryAt?.toISOString() ?? null,
+      completedAt: order.completedAt?.toISOString() ?? null,
+      failedAt: order.failedAt?.toISOString() ?? null,
+      createdAt: order.createdAt.toISOString(),
+      updatedAt: order.updatedAt.toISOString(),
+      transaction: {
+        id: order.transaction.id,
+        reference: order.transaction.reference,
+        status: order.transaction.status,
+        amount: order.transaction.amount.toString(),
+        currency: order.transaction.currency,
+        type: order.transaction.type,
+        createdAt: order.transaction.createdAt.toISOString(),
+        updatedAt: order.transaction.updatedAt.toISOString(),
+      },
+    };
+  }
+
+  private toVtuPricingRuleAuditSnapshot(rule: {
+    id: string;
+    countryCode: string | null;
+    serviceType: string | null;
+    provider: string | null;
+    scope: string | null;
+    fixedMargin: Decimal;
+    percentMargin: Decimal;
+    minAmount: Decimal | null;
+    maxAmount: Decimal | null;
+    priority: number;
+    isActive: boolean;
+    createdAt: Date;
+    updatedAt: Date;
+  }): Prisma.InputJsonValue {
+    return {
+      id: rule.id,
+      countryCode: rule.countryCode,
+      serviceType: rule.serviceType,
+      provider: rule.provider,
+      scope: rule.scope,
+      fixedMargin: rule.fixedMargin.toString(),
+      percentMargin: rule.percentMargin.toString(),
+      minAmount: rule.minAmount?.toString() ?? null,
+      maxAmount: rule.maxAmount?.toString() ?? null,
+      priority: rule.priority,
+      isActive: rule.isActive,
+      createdAt: rule.createdAt.toISOString(),
+      updatedAt: rule.updatedAt.toISOString(),
+    };
   }
 }

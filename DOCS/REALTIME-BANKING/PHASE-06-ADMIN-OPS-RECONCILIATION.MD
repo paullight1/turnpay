@@ -59,13 +59,23 @@ Completed in this phase:
 - Transfer verification now calls provider verification server-side before updating local transaction and transfer-attempt status.
 - Failed/reversed provider verification uses `LedgerService.creditWallet` for reversal and checks for an existing `WITHDRAWAL_REVERSAL` ledger entry first.
 - Raw webhook body capture was moved ahead of route handling by disabling Nest's default parser and registering the verified JSON parser before the global API prefix/guards.
+- Scheduled wallet reconciliation now derives expected balances from ledger entries with Decimal math.
 - Added focused admin service tests for provider-backed verification, audit creation, failed withdrawal reversal, and blocking generic withdrawal status edits.
 
 Remaining blockers before launch:
 
 - Add signed transfer webhook ingestion for Paystack and Flutterwave with provider-event idempotency and replay tests.
-- Replace Redis-only idempotency with DB-backed records bound to route and payload hash for financial/admin mutations.
+- Harden DB-backed idempotency recovery for financial/admin mutations that may time out or crash after provider-side effects.
 - Add database-level uniqueness or reversal markers to make failed withdrawal reversal exactly-once under concurrent webhook/admin retries.
 - Refactor legacy fund-wallet webhook deposits to use `ProviderEvent` and `LedgerService`.
 - Persist reconciliation reports instead of returning generated snapshots only.
 - Add E2E tests for non-admin denial, missing idempotency key, short/missing reason, duplicate admin verify/reverse, webhook replay, and metadata redaction.
+
+## Hardening Checkpoint
+
+May 21, 2026:
+
+- Backend compile passes.
+- Focused banking unit tests pass for ledger, banking, beneficiaries, transfers, payments, admin service, and idempotency.
+- Reconciliation service now uses `LedgerEntry` as the balance source of truth.
+- Launch remains blocked on provider signoff, E2E replay/signature coverage, persisted reconciliation reports, and frontend/admin operational panels.

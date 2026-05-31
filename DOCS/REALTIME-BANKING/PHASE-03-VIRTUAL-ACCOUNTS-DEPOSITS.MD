@@ -47,15 +47,17 @@ Allow verified users to receive wallet funding through provider-backed virtual a
 
 ## Implementation Status
 
-Status: `IMPLEMENTED FOR PAYSTACK-FIRST SANDBOX PATH`
+Status: `IMPLEMENTED FOR MONNIFY-ONLY SANDBOX PATH`
 
 Implemented in backend:
 
 - Added `BankingModule`, `BankingController`, and `BankingService`.
 - Added guarded user APIs:
   - `GET /api/banking/accounts`
-  - `POST /api/banking/accounts/provision`
-- Added Paystack virtual account provider method for DVA assignment.
+- `POST /api/banking/accounts/provision`
+- Added Monnify reserved account provider for Nigerian NGN wallet funding.
+- Locked virtual account provisioning to Monnify only to avoid duplicate account numbers and operational confusion.
+- Added Monnify webhook handling at `POST /api/webhooks/monnify`.
 - Enforced verified KYC and non-suspended user checks before virtual account provisioning.
 - Added provider-event driven deposit processing for virtual-account bank-transfer webhooks.
 - Added duplicate provider event no-op behavior.
@@ -63,12 +65,11 @@ Implemented in backend:
 - Credits wallet through `LedgerService` and creates a `LedgerEntry`.
 - Redacts provider payloads before storing them in `ProviderEvent`.
 - Removed webhook signature values from warning logs.
-- Split Flutterwave `transfer.completed` away from deposit processing by only using `charge.completed` for deposit fallback handling.
+- Split Paystack/Flutterwave checkout webhooks away from virtual-account deposit handling.
 - Added focused tests for KYC provisioning gate, virtual account upsert, deposit credit, duplicate event idempotency, and currency mismatch failure.
 
 Remaining for later phases:
 
-- Confirm Flutterwave API version/signature scheme before full Flutterwave virtual account implementation.
 - Add explicit webhook DTO/runtime validation for malformed provider payloads.
 - Add controller/e2e tests for invalid signatures and raw-body behavior.
 - Add admin provider-event/deposit panels from Phase 6 before production.

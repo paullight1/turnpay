@@ -5,6 +5,8 @@ import 'package:intl/intl.dart';
 
 import '../../../core/router/app_router.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../core/widgets/micro_interactions.dart';
+import '../../../core/widgets/trustpay_lottie.dart';
 import '../../../services/auth_service.dart';
 import '../../../services/home_data_service.dart';
 
@@ -78,17 +80,31 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                     sliver: SliverList.list(
                       children: [
-                        _HomeTopBar(user: data.user),
+                        StaggeredEntrance(
+                          child: _HomeTopBar(user: data.user),
+                        ),
                         SizedBox(height: AppSpacing.lg),
-                        _BalancePanel(
-                          data: data,
-                          showBalances: _showBalances,
-                          onToggleBalances: _toggleBalances,
+                        StaggeredEntrance(
+                          delay: const Duration(milliseconds: 45),
+                          child: _BalancePanel(
+                            data: data,
+                            showBalances: _showBalances,
+                            onToggleBalances: _toggleBalances,
+                          ),
                         ),
                         SizedBox(height: AppSpacing.md),
-                        _KycStatusBanner(status: data.user.kycStatus),
+                        StaggeredEntrance(
+                          delay: const Duration(milliseconds: 90),
+                          child: _KycStatusBanner(status: data.user.kycStatus),
+                        ),
                         SizedBox(height: AppSpacing.lg),
-                        _QuickActionsGrid(kycStatus: data.user.kycStatus),
+                        StaggeredEntrance(
+                          delay: const Duration(milliseconds: 130),
+                          child: _QuickActionsGrid(
+                            kycStatus: data.user.kycStatus,
+                            kycTier: data.user.kycTier,
+                          ),
+                        ),
                         SizedBox(height: AppSpacing.xl),
                         const _SectionTitle(
                           title: 'Wallets',
@@ -110,6 +126,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         _VirtualAccountPanel(
                           accounts: data.virtualAccounts,
                           kycStatus: data.user.kycStatus,
+                          kycTier: data.user.kycTier,
                         ),
                         SizedBox(height: AppSpacing.xl),
                         const _SectionTitle(
@@ -144,21 +161,31 @@ class _HomeTopBar extends StatelessWidget {
   Widget build(BuildContext context) {
     return Row(
       children: [
-        Container(
-          width: 44,
-          height: 44,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            color: AppColors.primary,
-          ),
+        Stack(
           alignment: Alignment.center,
-          child: Text(
-            user.initials,
-            style: AppTextStyles.headingM.copyWith(
-              color: AppColors.textPrimary,
-              fontWeight: FontWeight.w900,
+          children: [
+            const TrustPayLottie(
+              variant: TrustPayAnimationVariant.loading,
+              size: 56,
+              semanticsLabel: 'Home greeting',
             ),
-          ),
+            Container(
+              width: 44,
+              height: 44,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: AppColors.primary,
+              ),
+              alignment: Alignment.center,
+              child: Text(
+                user.initials,
+                style: AppTextStyles.headingM.copyWith(
+                  color: AppColors.textPrimary,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+            ),
+          ],
         ),
         SizedBox(width: AppSpacing.md),
         Expanded(
@@ -234,14 +261,12 @@ class _BalancePanel extends StatelessWidget {
           Row(
             children: [
               Flexible(
-                child: Text(
-                  showBalances ? _money('NGN', ngn) : 'NGN ******',
+                child: AnimatedValueText(
+                  value: showBalances ? _money('NGN', ngn) : 'NGN ******',
                   style: AppTextStyles.displayMedium.copyWith(
                     fontSize: 34,
                     letterSpacing: 0,
                   ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
                 ),
               ),
               SizedBox(width: AppSpacing.sm),
@@ -256,8 +281,8 @@ class _BalancePanel extends StatelessWidget {
             ],
           ),
           SizedBox(height: AppSpacing.xs),
-          Text(
-            showBalances
+          AnimatedValueText(
+            value: showBalances
                 ? '${_money('GHS', ghs)} available'
                 : 'GHS ****** available',
             style: AppTextStyles.bodyM,
@@ -300,31 +325,32 @@ class _PanelActionButton extends StatelessWidget {
 
     return Tooltip(
       message: tooltip,
-      child: Material(
-        color: background,
+      child: TapScale(
+        onTap: onTap,
         borderRadius: BorderRadius.circular(AppRadius.full),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(AppRadius.full),
-          onTap: onTap,
-          child: Container(
-            height: 34,
-            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm),
-            constraints: const BoxConstraints(minWidth: 34),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(icon, color: foreground, size: 17),
-                SizedBox(width: 4),
-                Text(
-                  label,
-                  style: AppTextStyles.labelS.copyWith(
-                    color: foreground,
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: 0,
-                  ),
+        pressedScale: 0.96,
+        child: Container(
+          height: 34,
+          padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm),
+          constraints: const BoxConstraints(minWidth: 34),
+          decoration: BoxDecoration(
+            color: background,
+            borderRadius: BorderRadius.circular(AppRadius.full),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, color: foreground, size: 17),
+              SizedBox(width: 4),
+              Text(
+                label,
+                style: AppTextStyles.labelS.copyWith(
+                  color: foreground,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 0,
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
         ),
       ),
@@ -345,44 +371,41 @@ class _KycStatusBanner extends StatelessWidget {
         ? 'KYC verified. Withdrawals, higher limits, and virtual account access are enabled.'
         : 'Complete KYC to unlock higher limits, withdrawals, and virtual account access.';
 
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        borderRadius: BorderRadius.circular(AppRadius.sm),
-        onTap: () => context.push(AppRoutes.kyc),
-        child: Ink(
-          padding: const EdgeInsets.all(AppSpacing.md),
-          decoration: BoxDecoration(
-            color: color.withValues(alpha: 0.12),
-            borderRadius: BorderRadius.circular(AppRadius.sm),
-            border: Border.all(color: color.withValues(alpha: 0.35)),
-          ),
-          child: Row(
-            children: [
-              Icon(
-                isVerified
-                    ? Icons.verified_user_rounded
-                    : Icons.verified_user_outlined,
-                color: color,
-                size: 22,
-              ),
-              SizedBox(width: AppSpacing.sm),
-              Expanded(
-                child: Text(
-                  message,
-                  style: AppTextStyles.bodyS.copyWith(
-                    color: AppColors.textPrimary,
-                  ),
+    return TapScale(
+      onTap: () => context.push(AppRoutes.kyc),
+      borderRadius: BorderRadius.circular(AppRadius.sm),
+      child: Container(
+        padding: const EdgeInsets.all(AppSpacing.md),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.12),
+          borderRadius: BorderRadius.circular(AppRadius.sm),
+          border: Border.all(color: color.withValues(alpha: 0.35)),
+        ),
+        child: Row(
+          children: [
+            Icon(
+              isVerified
+                  ? Icons.verified_user_rounded
+                  : Icons.verified_user_outlined,
+              color: color,
+              size: 22,
+            ),
+            SizedBox(width: AppSpacing.sm),
+            Expanded(
+              child: Text(
+                message,
+                style: AppTextStyles.bodyS.copyWith(
+                  color: AppColors.textPrimary,
                 ),
               ),
-              SizedBox(width: AppSpacing.sm),
-              Icon(
-                Icons.chevron_right_rounded,
-                color: color,
-                size: 20,
-              ),
-            ],
-          ),
+            ),
+            SizedBox(width: AppSpacing.sm),
+            Icon(
+              Icons.chevron_right_rounded,
+              color: color,
+              size: 20,
+            ),
+          ],
         ),
       ),
     );
@@ -391,12 +414,22 @@ class _KycStatusBanner extends StatelessWidget {
 
 class _QuickActionsGrid extends StatelessWidget {
   final String kycStatus;
+  final String kycTier;
 
-  const _QuickActionsGrid({required this.kycStatus});
+  const _QuickActionsGrid({
+    required this.kycStatus,
+    required this.kycTier,
+  });
 
   @override
   Widget build(BuildContext context) {
     final needsKyc = kycStatus.toUpperCase() != 'VERIFIED';
+    final needsVtuTier = needsKyc || !KycGatePolicy.isTier2OrHigher(kycTier);
+    final vtuBadge = needsKyc
+        ? 'KYC'
+        : needsVtuTier
+            ? 'Tier 2'
+            : null;
     final actions = [
       const _ActionItem('Fund', Icons.add_card_rounded, AppRoutes.fund),
       _ActionItem(
@@ -417,14 +450,23 @@ class _QuickActionsGrid extends StatelessWidget {
         AppRoutes.exchange,
         badge: needsKyc ? 'KYC' : null,
       ),
-      const _ActionItem(
-          'Airtime', Icons.phone_android_rounded, AppRoutes.airtime),
-      const _ActionItem(
-          'Data', Icons.signal_cellular_alt_rounded, AppRoutes.data),
-      const _ActionItem(
+      _ActionItem(
+        'Airtime',
+        Icons.phone_android_rounded,
+        AppRoutes.airtime,
+        badge: vtuBadge,
+      ),
+      _ActionItem(
+        'Data',
+        Icons.signal_cellular_alt_rounded,
+        AppRoutes.data,
+        badge: vtuBadge,
+      ),
+      _ActionItem(
         'Electricity',
         Icons.bolt_rounded,
         AppRoutes.electricity,
+        badge: vtuBadge,
       ),
       const _ActionItem('More', Icons.more_horiz_rounded, AppRoutes.more),
     ];
@@ -441,7 +483,11 @@ class _QuickActionsGrid extends StatelessWidget {
       ),
       itemBuilder: (context, index) {
         final action = actions[index];
-        return _QuickActionTile(action: action, kycStatus: kycStatus);
+        return _QuickActionTile(
+          action: action,
+          kycStatus: kycStatus,
+          kycTier: kycTier,
+        );
       },
     );
   }
@@ -450,95 +496,132 @@ class _QuickActionsGrid extends StatelessWidget {
 class _QuickActionTile extends StatelessWidget {
   final _ActionItem action;
   final String kycStatus;
+  final String kycTier;
 
   const _QuickActionTile({
     required this.action,
     required this.kycStatus,
+    required this.kycTier,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Material(
-      color: AppColors.surfaceVariant,
+    return TapScale(
+      onTap: () => _openAction(context),
       borderRadius: BorderRadius.circular(AppRadius.sm),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(AppRadius.sm),
-        onTap: () => _openAction(context),
-        child: Padding(
-          padding: const EdgeInsets.all(AppSpacing.sm),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Stack(
-                clipBehavior: Clip.none,
-                children: [
-                  Icon(action.icon, color: AppColors.primary, size: 24),
-                  if (action.badge != null)
-                    Positioned(
-                      right: -24,
-                      top: -10,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 5,
-                          vertical: 2,
+      pressedScale: 0.94,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        curve: Curves.easeOutCubic,
+        padding: const EdgeInsets.all(AppSpacing.sm),
+        decoration: BoxDecoration(
+          color: AppColors.surfaceVariant,
+          borderRadius: BorderRadius.circular(AppRadius.sm),
+          border: Border.all(color: AppColors.border.withValues(alpha: 0.6)),
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Stack(
+              clipBehavior: Clip.none,
+              children: [
+                Container(
+                  width: 38,
+                  height: 38,
+                  decoration: BoxDecoration(
+                    color: AppColors.primary.withValues(alpha: 0.10),
+                    borderRadius: BorderRadius.circular(AppRadius.full),
+                  ),
+                  child: Icon(action.icon, color: AppColors.primary, size: 22),
+                ),
+                if (action.badge != null)
+                  Positioned(
+                    right: -24,
+                    top: -8,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 5,
+                        vertical: 2,
+                      ),
+                      decoration: BoxDecoration(
+                        color: AppColors.warning.withValues(alpha: 0.18),
+                        borderRadius: BorderRadius.circular(AppRadius.full),
+                        border: Border.all(
+                          color: AppColors.warning.withValues(alpha: 0.45),
                         ),
-                        decoration: BoxDecoration(
-                          color: AppColors.warning.withValues(alpha: 0.18),
-                          borderRadius: BorderRadius.circular(AppRadius.full),
-                          border: Border.all(
-                            color: AppColors.warning.withValues(alpha: 0.45),
-                          ),
-                        ),
-                        child: Text(
-                          action.badge!,
-                          style: AppTextStyles.caption.copyWith(
-                            color: AppColors.warning,
-                            fontSize: 9,
-                            fontWeight: FontWeight.w700,
-                          ),
+                      ),
+                      child: Text(
+                        action.badge!,
+                        style: AppTextStyles.caption.copyWith(
+                          color: AppColors.warning,
+                          fontSize: 9,
+                          fontWeight: FontWeight.w700,
                         ),
                       ),
                     ),
-                ],
+                  ),
+              ],
+            ),
+            SizedBox(height: AppSpacing.sm),
+            Text(
+              action.label,
+              style: AppTextStyles.labelS.copyWith(
+                color: AppColors.textPrimary,
               ),
-              SizedBox(height: AppSpacing.sm),
-              Text(
-                action.label,
-                style: AppTextStyles.labelS.copyWith(
-                  color: AppColors.textPrimary,
-                ),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ],
-          ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ],
         ),
       ),
     );
   }
 
   Future<void> _openAction(BuildContext context) async {
-    if (!KycGatePolicy.isBlocked(route: action.route, status: kycStatus)) {
+    if (!KycGatePolicy.isBlocked(
+      route: action.route,
+      status: kycStatus,
+      kycTier: kycTier,
+    )) {
       context.push(action.route);
       return;
     }
 
-    final goToKyc = await _showKycRequiredDialog(context, action.label);
+    final goToKyc = await _showKycRequiredDialog(
+      context,
+      action.label,
+      requiresTier2: KycGatePolicy.vtuRoutesRequiringTier2.contains(
+        action.route,
+      ),
+    );
     if (goToKyc == true && context.mounted) {
       context.push(AppRoutes.kyc);
     }
   }
 }
 
-Future<bool?> _showKycRequiredDialog(BuildContext context, String actionLabel) {
+Future<bool?> _showKycRequiredDialog(
+  BuildContext context,
+  String actionLabel, {
+  bool requiresTier2 = false,
+}) {
+  final requirement =
+      requiresTier2 ? 'KYC verification and Tier 2' : 'KYC verification';
+  final guidance = requiresTier2
+      ? 'Complete or upgrade KYC to continue.'
+      : 'Complete KYC to continue.';
+
   return showDialog<bool>(
     context: context,
     builder: (dialogContext) {
       return AlertDialog(
         backgroundColor: AppColors.surface,
-        title: Text('KYC required', style: AppTextStyles.headingM),
+        title: Text(
+          requiresTier2 ? 'KYC and Tier 2 required' : 'KYC required',
+          style: AppTextStyles.headingM,
+        ),
         content: Text(
-          '$actionLabel is available after KYC verification. Complete KYC to continue.',
+          '$actionLabel requires $requirement. $guidance',
           style: AppTextStyles.bodyM,
         ),
         actions: [
@@ -692,10 +775,12 @@ String _currencyMark(String currency) {
 class _VirtualAccountPanel extends StatelessWidget {
   final List<HomeVirtualAccount> accounts;
   final String kycStatus;
+  final String kycTier;
 
   const _VirtualAccountPanel({
     required this.accounts,
     required this.kycStatus,
+    required this.kycTier,
   });
 
   @override
@@ -716,77 +801,80 @@ class _VirtualAccountPanel extends StatelessWidget {
             ? 'Ready to provision'
             : 'Not provisioned yet';
     final detail = hasAccount
-        ? '${firstAccount.accountName} â€¢ ${firstAccount.accountNumberMasked}'
+        ? '${firstAccount.accountName} - ${firstAccount.accountNumberMasked}'
         : isVerified
             ? 'Create a provider-assigned account to receive bank transfers.'
             : 'A partner bank account will appear here after KYC and provider setup.';
 
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        borderRadius: BorderRadius.circular(AppRadius.sm),
-        onTap: () async {
-          if (!KycGatePolicy.isBlocked(
-            route: AppRoutes.virtualAccount,
-            status: kycStatus,
-          )) {
-            context.push(AppRoutes.virtualAccount);
-            return;
-          }
-          final goToKyc = await _showKycRequiredDialog(
-            context,
-            'Virtual account access',
-          );
-          if (goToKyc == true && context.mounted) {
-            context.push(AppRoutes.kyc);
-          }
-        },
-        child: Ink(
-          padding: const EdgeInsets.all(AppSpacing.md),
-          decoration: BoxDecoration(
-            color: AppColors.surfaceVariant,
-            borderRadius: BorderRadius.circular(AppRadius.sm),
-            border: Border.all(color: AppColors.border),
-          ),
-          child: Row(
-            children: [
-              Container(
-                width: 44,
-                height: 44,
-                decoration: BoxDecoration(
-                  color: AppColors.inputFill,
-                  borderRadius: BorderRadius.circular(AppRadius.sm),
-                ),
-                child: Icon(
-                  Icons.account_balance_outlined,
-                  color: AppColors.primary,
-                  size: 22,
-                ),
+    return TapScale(
+      onTap: () async {
+        if (!KycGatePolicy.isBlocked(
+          route: AppRoutes.virtualAccount,
+          status: kycStatus,
+          kycTier: kycTier,
+        )) {
+          context.push(AppRoutes.virtualAccount);
+          return;
+        }
+        final goToKyc = await _showKycRequiredDialog(
+          context,
+          'Virtual account access',
+        );
+        if (goToKyc == true && context.mounted) {
+          context.push(AppRoutes.kyc);
+        }
+      },
+      borderRadius: BorderRadius.circular(AppRadius.sm),
+      child: Container(
+        padding: const EdgeInsets.all(AppSpacing.md),
+        decoration: BoxDecoration(
+          color: AppColors.surfaceVariant,
+          borderRadius: BorderRadius.circular(AppRadius.sm),
+          border: Border.all(color: AppColors.border),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 44,
+              height: 44,
+              decoration: BoxDecoration(
+                color: AppColors.inputFill,
+                borderRadius: BorderRadius.circular(AppRadius.sm),
               ),
-              SizedBox(width: AppSpacing.md),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(title, style: AppTextStyles.labelM),
-                    SizedBox(height: 2),
-                    Text(
-                      detail,
-                      style: AppTextStyles.bodyS,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ],
+              child: Center(
+                child: TrustPayLottie(
+                  variant: hasAccount
+                      ? TrustPayAnimationVariant.success
+                      : TrustPayAnimationVariant.loading,
+                  size: 30,
+                  repeat: !hasAccount,
+                  semanticsLabel: title,
                 ),
               ),
-              SizedBox(width: AppSpacing.sm),
-              Icon(
-                Icons.chevron_right_rounded,
-                color: AppColors.textHint,
-                size: 20,
+            ),
+            SizedBox(width: AppSpacing.md),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(title, style: AppTextStyles.labelM),
+                  SizedBox(height: 2),
+                  Text(
+                    detail,
+                    style: AppTextStyles.bodyS,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
               ),
-            ],
-          ),
+            ),
+            SizedBox(width: AppSpacing.sm),
+            Icon(
+              Icons.chevron_right_rounded,
+              color: AppColors.textHint,
+              size: 20,
+            ),
+          ],
         ),
       ),
     );
@@ -832,7 +920,19 @@ class _ActivityList extends StatelessWidget {
         : transactions.map(_activityFromTransaction).toList();
 
     return Column(
-      children: items.map((item) => _ActivityRow(item: item)).toList(),
+      children: [
+        if (transactions.isEmpty) ...[
+          const TrustPayAnimatedState(
+            variant: TrustPayAnimationVariant.send,
+            title: 'Ready for your first transfer',
+            detail:
+                'Fund your wallet or complete KYC, then recent activity will appear here.',
+            animationSize: 72,
+          ),
+          SizedBox(height: AppSpacing.md),
+        ],
+        ...items.map((item) => _ActivityRow(item: item)),
+      ],
     );
   }
 }
@@ -846,39 +946,36 @@ class _ActivityRow extends StatelessWidget {
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.only(bottom: AppSpacing.sm),
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          borderRadius: BorderRadius.circular(AppRadius.sm),
-          onTap: () => context.push(item.route),
-          child: Ink(
-            padding: const EdgeInsets.all(AppSpacing.md),
-            decoration: BoxDecoration(
-              color: AppColors.surfaceVariant,
-              borderRadius: BorderRadius.circular(AppRadius.sm),
-            ),
-            child: Row(
-              children: [
-                Icon(item.icon, color: item.color, size: 22),
-                SizedBox(width: AppSpacing.md),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(item.title, style: AppTextStyles.labelM),
-                      SizedBox(height: 2),
-                      Text(item.detail, style: AppTextStyles.bodyS),
-                    ],
-                  ),
+      child: TapScale(
+        onTap: () => context.push(item.route),
+        borderRadius: BorderRadius.circular(AppRadius.sm),
+        child: Container(
+          padding: const EdgeInsets.all(AppSpacing.md),
+          decoration: BoxDecoration(
+            color: AppColors.surfaceVariant,
+            borderRadius: BorderRadius.circular(AppRadius.sm),
+          ),
+          child: Row(
+            children: [
+              Icon(item.icon, color: item.color, size: 22),
+              SizedBox(width: AppSpacing.md),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(item.title, style: AppTextStyles.labelM),
+                    SizedBox(height: 2),
+                    Text(item.detail, style: AppTextStyles.bodyS),
+                  ],
                 ),
-                SizedBox(width: AppSpacing.sm),
-                Icon(
-                  Icons.chevron_right_rounded,
-                  color: AppColors.textHint,
-                  size: 20,
-                ),
-              ],
-            ),
+              ),
+              SizedBox(width: AppSpacing.sm),
+              Icon(
+                Icons.chevron_right_rounded,
+                color: AppColors.textHint,
+                size: 20,
+              ),
+            ],
           ),
         ),
       ),
@@ -904,8 +1001,10 @@ class _SectionTitle extends StatelessWidget {
         Expanded(
           child: Text(title, style: AppTextStyles.headingM),
         ),
-        GestureDetector(
+        TapScale(
           onTap: () => context.push(route),
+          borderRadius: BorderRadius.circular(AppRadius.full),
+          pressedScale: 0.96,
           child: Text(
             actionLabel,
             style: AppTextStyles.labelM.copyWith(color: AppColors.primary),
@@ -935,17 +1034,18 @@ class _IconButton extends StatelessWidget {
 
     return Tooltip(
       message: tooltip,
-      child: Material(
-        color: AppColors.surfaceVariant,
+      child: TapScale(
+        onTap: onTap,
         borderRadius: BorderRadius.circular(AppRadius.sm),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(AppRadius.sm),
-          onTap: onTap,
-          child: SizedBox(
-            width: size,
-            height: size,
-            child: Icon(icon, color: AppColors.textPrimary, size: 20),
+        pressedScale: 0.94,
+        child: Container(
+          width: size,
+          height: size,
+          decoration: BoxDecoration(
+            color: AppColors.surfaceVariant,
+            borderRadius: BorderRadius.circular(AppRadius.sm),
           ),
+          child: Icon(icon, color: AppColors.textPrimary, size: 20),
         ),
       ),
     );
@@ -982,11 +1082,105 @@ class _HomeLoadingState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Center(
-      child: CircularProgressIndicator(
-        color: AppColors.primary,
-        backgroundColor: AppColors.surfaceVariant,
+    return ListView(
+      physics: const AlwaysScrollableScrollPhysics(
+        parent: BouncingScrollPhysics(),
       ),
+      padding: const EdgeInsets.fromLTRB(
+        AppSpacing.lg,
+        AppSpacing.md,
+        AppSpacing.lg,
+        AppSpacing.xxl,
+      ),
+      children: [
+        const TrustPayAnimatedState(
+          variant: TrustPayAnimationVariant.loading,
+          title: 'Loading dashboard',
+          detail: 'Fetching balances, account status, and recent activity.',
+          animationSize: 72,
+        ),
+        SizedBox(height: AppSpacing.lg),
+        Row(
+          children: [
+            ShimmerBlock(
+              width: 44,
+              height: 44,
+              borderRadius: BorderRadius.circular(AppRadius.full),
+            ),
+            SizedBox(width: AppSpacing.md),
+            const Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  ShimmerBlock(width: 96, height: 12),
+                  SizedBox(height: AppSpacing.sm),
+                  ShimmerBlock(width: 154, height: 18),
+                ],
+              ),
+            ),
+            ShimmerBlock(
+              width: 44,
+              height: 44,
+              borderRadius: BorderRadius.circular(AppRadius.sm),
+            ),
+          ],
+        ),
+        SizedBox(height: AppSpacing.lg),
+        ShimmerBlock(
+          width: double.infinity,
+          height: 188,
+          borderRadius: BorderRadius.circular(AppRadius.md),
+        ),
+        SizedBox(height: AppSpacing.md),
+        ShimmerBlock(
+          width: double.infinity,
+          height: 72,
+          borderRadius: BorderRadius.circular(AppRadius.sm),
+        ),
+        SizedBox(height: AppSpacing.lg),
+        GridView.builder(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          itemCount: 8,
+          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: 4,
+            crossAxisSpacing: AppSpacing.sm,
+            mainAxisSpacing: AppSpacing.sm,
+            childAspectRatio: 0.92,
+          ),
+          itemBuilder: (context, index) => ShimmerBlock(
+            width: double.infinity,
+            height: double.infinity,
+            borderRadius: BorderRadius.circular(AppRadius.sm),
+          ),
+        ),
+        SizedBox(height: AppSpacing.xl),
+        Row(
+          children: [
+            Expanded(
+              child: ShimmerBlock(
+                width: double.infinity,
+                height: 118,
+                borderRadius: BorderRadius.circular(AppRadius.sm),
+              ),
+            ),
+            SizedBox(width: AppSpacing.sm),
+            Expanded(
+              child: ShimmerBlock(
+                width: double.infinity,
+                height: 118,
+                borderRadius: BorderRadius.circular(AppRadius.sm),
+              ),
+            ),
+          ],
+        ),
+        SizedBox(height: AppSpacing.xl),
+        ShimmerBlock(
+          width: double.infinity,
+          height: 76,
+          borderRadius: BorderRadius.circular(AppRadius.sm),
+        ),
+      ],
     );
   }
 }
@@ -1055,7 +1249,7 @@ _ActivityItem _activityFromTransaction(HomeTransaction transaction) {
 
   return _ActivityItem(
     title: title,
-    detail: '$amount â€¢ $date',
+    detail: '$amount - $date',
     icon: _transactionIcon(transaction.type),
     color: _transactionColor(transaction.status),
     route: AppRoutes.activity,

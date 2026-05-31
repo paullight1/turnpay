@@ -1,47 +1,48 @@
-﻿import 'package:flutter/material.dart';
+import 'dart:async';
+
+import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/theme/app_theme.dart';
 import '../../../core/router/app_router.dart';
+import '../../../core/widgets/trustpay_lottie.dart';
 
 // â”€â”€â”€ ONBOARDING DATA â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 class _OnboardingPage {
   final String title;
   final String subtitle;
-  final Color gradientTopColor;
-  final Color gradientBottomColor;
   final IconData icon;
+  final TrustPayAnimationVariant animation;
 
   const _OnboardingPage({
     required this.title,
     required this.subtitle,
-    required this.gradientTopColor,
-    required this.gradientBottomColor,
     required this.icon,
+    required this.animation,
   });
 }
 
 const _pages = [
   _OnboardingPage(
     title: 'Send money\nwithout limits.',
-    subtitle: 'Transfer between GHS and NGN instantly at the best market rates.',
-    gradientTopColor: Color(0xFF1A0A0A),
-    gradientBottomColor: Color(0xFF0D0E14),
+    subtitle:
+        'Transfer between GHS and NGN instantly at the best market rates.',
     icon: Icons.send_rounded,
+    animation: TrustPayAnimationVariant.send,
   ),
   _OnboardingPage(
     title: 'Pay your bills\nin seconds.',
-    subtitle: 'Top up airtime, pay for data, electricity and cable TV â€” all in one place.',
-    gradientTopColor: Color(0xFF0A0F1A),
-    gradientBottomColor: Color(0xFF0D0E14),
+    subtitle:
+        'Top up airtime, pay for data, electricity and cable TV â€” all in one place.',
     icon: Icons.receipt_long_rounded,
+    animation: TrustPayAnimationVariant.loading,
   ),
   _OnboardingPage(
     title: 'Your money,\nalways safe.',
-    subtitle: 'Bank-grade encryption and two-factor authentication protect every transaction.',
-    gradientTopColor: Color(0xFF0A1A10),
-    gradientBottomColor: Color(0xFF0D0E14),
+    subtitle:
+        'Bank-grade encryption and two-factor authentication protect every transaction.',
     icon: Icons.shield_rounded,
+    animation: TrustPayAnimationVariant.success,
   ),
 ];
 
@@ -58,10 +59,27 @@ class OnboardingScreen extends StatefulWidget {
 class _OnboardingScreenState extends State<OnboardingScreen>
     with TickerProviderStateMixin {
   final PageController _pageController = PageController();
+  Timer? _autoScrollTimer;
   int _currentPage = 0;
 
   @override
+  void initState() {
+    super.initState();
+    _autoScrollTimer = Timer.periodic(const Duration(seconds: 3), (_) {
+      if (!mounted || !_pageController.hasClients) return;
+
+      final nextPage = (_currentPage + 1) % _pages.length;
+      _pageController.animateToPage(
+        nextPage,
+        duration: const Duration(milliseconds: 520),
+        curve: Curves.easeOutCubic,
+      );
+    });
+  }
+
+  @override
   void dispose() {
+    _autoScrollTimer?.cancel();
     _pageController.dispose();
     super.dispose();
   }
@@ -140,25 +158,18 @@ class _OnboardingPageView extends StatelessWidget {
 
     return Stack(
       children: [
-        // Hero gradient background (top 60% of screen)
         Positioned(
           top: 0,
           left: 0,
           right: 0,
           height: size.height * 0.60,
           child: Container(
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: [
-                  page.gradientTopColor,
-                  AppColors.background,
-                ],
-              ),
-            ),
+            color: AppColors.background,
             child: Center(
-              child: _HeroIllustration(icon: page.icon),
+              child: _HeroIllustration(
+                icon: page.icon,
+                animation: page.animation,
+              ),
             ),
           ),
         ),
@@ -191,29 +202,46 @@ class _OnboardingPageView extends StatelessWidget {
 // â”€â”€â”€ HERO ILLUSTRATION (placeholder icon with glow) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 class _HeroIllustration extends StatelessWidget {
   final IconData icon;
-  const _HeroIllustration({required this.icon});
+  final TrustPayAnimationVariant animation;
+
+  const _HeroIllustration({
+    required this.icon,
+    required this.animation,
+  });
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      width: 140,
-      height: 140,
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        color: AppColors.surfaceVariant,
-        boxShadow: [
-          BoxShadow(
-            color: AppColors.primary.withOpacity(0.25),
-            blurRadius: 60,
-            spreadRadius: 20,
+    return Stack(
+      alignment: Alignment.center,
+      children: [
+        TrustPayLottie(
+          variant: animation,
+          size: 180,
+          repeat: animation != TrustPayAnimationVariant.success,
+          semanticsLabel: 'TRUSTPAY onboarding',
+        ),
+        Container(
+          width: 86,
+          height: 86,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: AppColors.surfaceVariant.withValues(alpha: 0.92),
+            border: Border.all(color: AppColors.border),
+            boxShadow: [
+              BoxShadow(
+                color: AppColors.overlayLight,
+                blurRadius: 24,
+                offset: const Offset(0, 12),
+              ),
+            ],
           ),
-        ],
-      ),
-      child: Icon(
-        icon,
-        size: 64,
-        color: AppColors.primary,
-      ),
+          child: Icon(
+            icon,
+            size: 38,
+            color: AppColors.primary,
+          ),
+        ),
+      ],
     );
   }
 }
@@ -238,16 +266,7 @@ class _BottomSection extends StatelessWidget {
         40,
       ),
       decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [
-            AppColors.background.withOpacity(0),
-            AppColors.background,
-            AppColors.background,
-          ],
-          stops: const [0.0, 0.2, 1.0],
-        ),
+        color: AppColors.background,
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -276,20 +295,18 @@ class _BottomSection extends StatelessWidget {
           // CTA Buttons Row (Sign up | Log in)
           Row(
             children: [
-              // Sign Up - White fill (primary action)
               Expanded(
                 child: _AuthButton(
                   label: 'Sign up',
-                  isFilledWhite: true,
+                  isPrimary: true,
                   onTap: () => context.push(AppRoutes.register),
                 ),
               ),
               SizedBox(width: AppSpacing.md),
-              // Log In - Dark outline
               Expanded(
                 child: _AuthButton(
                   label: 'Log in',
-                  isFilledWhite: false,
+                  isPrimary: false,
                   onTap: () => context.push(AppRoutes.login),
                 ),
               ),
@@ -318,12 +335,12 @@ class _BottomSection extends StatelessWidget {
 
 class _AuthButton extends StatelessWidget {
   final String label;
-  final bool isFilledWhite;
+  final bool isPrimary;
   final VoidCallback onTap;
 
   const _AuthButton({
     required this.label,
-    required this.isFilledWhite,
+    required this.isPrimary,
     required this.onTap,
   });
 
@@ -334,11 +351,9 @@ class _AuthButton extends StatelessWidget {
       child: Container(
         height: 54,
         decoration: BoxDecoration(
-          color: isFilledWhite
-              ? AppColors.textPrimary
-              : AppColors.surfaceVariant,
+          color: isPrimary ? AppColors.primary : AppColors.surface,
           borderRadius: BorderRadius.circular(AppRadius.full),
-          border: isFilledWhite
+          border: isPrimary
               ? null
               : Border.all(color: AppColors.border, width: 1.5),
         ),
@@ -346,9 +361,7 @@ class _AuthButton extends StatelessWidget {
           child: Text(
             label,
             style: AppTextStyles.labelL.copyWith(
-              color: isFilledWhite
-                  ? AppColors.background
-                  : AppColors.textPrimary,
+              color: isPrimary ? Colors.white : AppColors.textPrimary,
             ),
           ),
         ),
@@ -356,4 +369,3 @@ class _AuthButton extends StatelessWidget {
     );
   }
 }
-

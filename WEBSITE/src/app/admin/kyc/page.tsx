@@ -20,17 +20,16 @@ import { toast } from "sonner";
 import { getErrorMessage } from "@/lib/errors";
 import DashboardLayout from "@/components/layout/dashboard-layout";
 import { maskEmail, maskKycId, maskPhone } from "@/lib/privacy";
+import type { KycDocument } from "@/types";
 
-type AdminKycDocument = {
-  id: string;
-  type: string;
-  idNumber: string;
-  status: string;
-  documentUrl: string;
+type AdminKycDocument = KycDocument & {
+  documentUrl?: string;
   createdAt: string;
   user?: {
     email?: string;
     phone?: string;
+    kycStatus?: string;
+    kycTier?: string | number | null;
   };
 };
 
@@ -41,12 +40,59 @@ type AdminKycResponse = {
   totalPages: number;
 };
 
+const statusVariants: Record<string, "secondary" | "default" | "destructive" | "outline"> = {
+  PENDING: "secondary",
+  SUBMITTED: "default",
+  VERIFIED: "default",
+  APPROVED: "default",
+  REJECTED: "destructive",
+  FAILED: "destructive",
+  REVIEW_REQUIRED: "outline",
+};
+
+function humanize(value?: string | number | null) {
+  if (value === undefined || value === null || value === "") return "Not set";
+  return String(value)
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function formatTier(value?: string | number | null) {
+  if (value === undefined || value === null || value === "") return "Tier 0";
+  const tier = String(value).replace(/^TIER[_\s-]?/i, "");
+  return `Tier ${tier}`;
+}
+
+function statusVariant(status?: string | null) {
+  return statusVariants[status ?? ""] ?? "secondary";
+}
+
+function documentTypeLabel(type: string) {
+  return humanize(type).toLowerCase();
+}
+
+function verificationLine(doc: AdminKycDocument) {
+  const providerStatus = doc.verificationStatus ?? doc.providerStatus;
+  const manualReview =
+    doc.manualReviewStatus ??
+    (doc.manualReviewRequired || doc.requiresManualReview ? "pending" : null);
+
+  if (!providerStatus && !manualReview) return "Awaiting review";
+  if (providerStatus && manualReview) {
+    return `Provider ${humanize(providerStatus)}; manual ${humanize(manualReview)}`;
+  }
+  if (providerStatus) return `Provider ${humanize(providerStatus)}`;
+  return `Manual ${humanize(manualReview)}`;
+}
+
 export default function AdminKycPage() {
   const { user, isLoading: authLoading } = useAuth();
   const router = useRouter();
   const isAdmin = user?.role === "ADMIN";
   const [page, setPage] = useState(1);
   const [selectedDoc, setSelectedDoc] = useState<AdminKycDocument | null>(null);
+  const [reviewDocumentUrl, setReviewDocumentUrl] = useState<string | null>(null);
+  const [loadingDocumentId, setLoadingDocumentId] = useState<string | null>(null);
   const [reviewReason, setReviewReason] = useState("");
   const [pendingReviewStatus, setPendingReviewStatus] = useState<"VERIFIED" | "REJECTED" | null>(null);
   const queryClient = useQueryClient();
@@ -88,6 +134,7 @@ export default function AdminKycPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["admin-kyc"] });
       setSelectedDoc(null);
+      setReviewDocumentUrl(null);
       setReviewReason("");
       setPendingReviewStatus(null);
       toast.success("KYC document reviewed successfully");
@@ -112,6 +159,24 @@ export default function AdminKycPage() {
     }
 
     setPendingReviewStatus(status);
+  };
+
+  const openDocumentForReview = async (doc: AdminKycDocument) => {
+    setSelectedDoc(doc);
+    setReviewDocumentUrl(null);
+    setReviewReason("");
+    setPendingReviewStatus(null);
+    setLoadingDocumentId(doc.id);
+
+    try {
+      const res = await apiClient.post(`/api/admin/kyc/${doc.id}/document-url`);
+      setReviewDocumentUrl(res.data.documentUrl);
+    } catch (error: unknown) {
+      setSelectedDoc(null);
+      toast.error(getErrorMessage(error, "Failed to open KYC document"));
+    } finally {
+      setLoadingDocumentId(null);
+    }
   };
 
   const confirmReview = () => {
@@ -161,9 +226,9 @@ export default function AdminKycPage() {
                 <TableHeader>
                   <TableRow>
                     <TableHead>User</TableHead>
-                    <TableHead>ID Type</TableHead>
-                    <TableHead>ID Number</TableHead>
-                    <TableHead>Status</TableHead>
+                    <TableHead>User KYC</TableHead>
+                    <TableHead>Document</TableHead>
+                    <TableHead>Verification</TableHead>
                     <TableHead>Submitted</TableHead>
                     <TableHead>Actions</TableHead>
                   </TableRow>
@@ -179,20 +244,28 @@ export default function AdminKycPage() {
                           </p>
                         </div>
                       </TableCell>
-                      <TableCell className="capitalize">
-                        {doc.type.toLowerCase().replace("_", " ")}
-                      </TableCell>
-                      <TableCell className="font-mono text-sm">
-                        {maskKycId(doc.idNumber)}
+                      <TableCell>
+                        <div className="flex flex-col gap-1">
+                          <Badge variant={statusVariant(doc.user?.kycStatus ?? doc.status)}>
+                            {humanize(doc.user?.kycStatus ?? doc.status)}
+                          </Badge>
+                          <span className="text-xs text-muted-foreground">
+                            {formatTier(doc.user?.kycTier ?? doc.kycTier)}
+                          </span>
+                        </div>
                       </TableCell>
                       <TableCell>
-                        <Badge
-                          variant={
-                            doc.status === "SUBMITTED" ? "default" : "secondary"
-                          }
-                        >
-                          {doc.status}
-                        </Badge>
+                        <div>
+                          <p className="font-medium capitalize">
+                            {documentTypeLabel(doc.type)}
+                          </p>
+                          <p className="font-mono text-sm text-muted-foreground">
+                            {maskKycId(doc.idNumber)}
+                          </p>
+                        </div>
+                      </TableCell>
+                      <TableCell className="max-w-[220px] text-sm text-muted-foreground">
+                        {verificationLine(doc)}
                       </TableCell>
                       <TableCell>
                         {new Date(doc.createdAt).toLocaleDateString()}
@@ -202,13 +275,10 @@ export default function AdminKycPage() {
                           <Button
                             size="sm"
                             variant="outline"
-                            onClick={() => {
-                              setSelectedDoc(doc);
-                              setReviewReason("");
-                              setPendingReviewStatus(null);
-                            }}
+                            disabled={loadingDocumentId === doc.id}
+                            onClick={() => openDocumentForReview(doc)}
                           >
-                            View
+                            {loadingDocumentId === doc.id ? "Opening..." : "View"}
                           </Button>
                         </div>
                       </TableCell>
@@ -264,25 +334,52 @@ export default function AdminKycPage() {
                 <div>
                   <p className="text-muted-foreground">ID Type</p>
                   <p className="font-medium capitalize">
-                    {selectedDoc.type.toLowerCase().replace("_", " ")}
+                    {documentTypeLabel(selectedDoc.type)}
                   </p>
                 </div>
                 <div>
                   <p className="text-muted-foreground">ID Number</p>
                   <p className="font-mono">{maskKycId(selectedDoc.idNumber)}</p>
                 </div>
+                <div>
+                  <p className="text-muted-foreground">User KYC</p>
+                  <div className="mt-1 flex flex-wrap gap-2">
+                    <Badge variant={statusVariant(selectedDoc.user?.kycStatus ?? selectedDoc.status)}>
+                      {humanize(selectedDoc.user?.kycStatus ?? selectedDoc.status)}
+                    </Badge>
+                    <Badge variant="outline">
+                      {formatTier(selectedDoc.user?.kycTier ?? selectedDoc.kycTier)}
+                    </Badge>
+                  </div>
+                </div>
+                <div>
+                  <p className="text-muted-foreground">Document status</p>
+                  <Badge className="mt-1" variant={statusVariant(selectedDoc.status)}>
+                    {humanize(selectedDoc.status)}
+                  </Badge>
+                </div>
+                <div className="col-span-2">
+                  <p className="text-muted-foreground">Verification route</p>
+                  <p className="font-medium">{verificationLine(selectedDoc)}</p>
+                </div>
               </div>
 
               <div>
                 <p className="text-muted-foreground text-sm mb-2">Document</p>
-                <a
-                  href={selectedDoc.documentUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-primary hover:underline"
-                >
-                  View Document →
-                </a>
+                {reviewDocumentUrl ? (
+                  <a
+                    href={reviewDocumentUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-primary hover:underline"
+                  >
+                    View Document →
+                  </a>
+                ) : (
+                  <p className="text-sm text-muted-foreground">
+                    Preparing secure document link...
+                  </p>
+                )}
               </div>
 
               <div className="flex flex-col gap-2">
@@ -306,7 +403,7 @@ export default function AdminKycPage() {
                     Confirm {pendingReviewStatus === "VERIFIED" ? "approval" : "rejection"}
                   </p>
                   <p className="mt-1 text-muted-foreground">
-                    This will mark the masked {selectedDoc.type.toLowerCase().replace("_", " ")} submission as {pendingReviewStatus.toLowerCase()}.
+                    This will mark the masked {documentTypeLabel(selectedDoc.type)} submission as {pendingReviewStatus.toLowerCase()}.
                   </p>
                 </div>
               )}
@@ -341,6 +438,7 @@ export default function AdminKycPage() {
                   variant="outline"
                   onClick={() => {
                     setSelectedDoc(null);
+                    setReviewDocumentUrl(null);
                     setReviewReason("");
                     setPendingReviewStatus(null);
                   }}

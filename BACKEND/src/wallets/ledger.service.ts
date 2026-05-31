@@ -2,13 +2,13 @@ import {
   BadRequestException,
   Injectable,
   NotFoundException,
-} from '@nestjs/common';
-import { Prisma } from '@prisma/client';
-import { Decimal } from '@prisma/client/runtime/library';
-import { PrismaService } from '../prisma/prisma.service';
+} from "@nestjs/common";
+import { Prisma } from "@prisma/client";
+import { Decimal } from "@prisma/client/runtime/library";
+import { PrismaService } from "../prisma/prisma.service";
 
-type LedgerCurrency = 'NGN' | 'GHS';
-type LedgerDirection = 'DEBIT' | 'CREDIT';
+type LedgerCurrency = "NGN" | "GHS";
+type LedgerDirection = "DEBIT" | "CREDIT";
 
 interface WalletMovementInput {
   userId: string;
@@ -20,18 +20,18 @@ interface WalletMovementInput {
   metadata?: Record<string, unknown>;
 }
 
-type LedgerClient = Pick<Prisma.TransactionClient, 'wallet' | 'ledgerEntry'>;
+type LedgerClient = Pick<Prisma.TransactionClient, "wallet" | "ledgerEntry">;
 
 @Injectable()
 export class LedgerService {
   constructor(private readonly prisma: PrismaService) {}
 
   creditWallet(input: WalletMovementInput, client?: LedgerClient) {
-    return this.postWalletMovement('CREDIT', input, client);
+    return this.postWalletMovement("CREDIT", input, client);
   }
 
   debitWallet(input: WalletMovementInput, client?: LedgerClient) {
-    return this.postWalletMovement('DEBIT', input, client);
+    return this.postWalletMovement("DEBIT", input, client);
   }
 
   private async postWalletMovement(
@@ -46,7 +46,7 @@ export class LedgerService {
       let balanceBefore: Decimal;
       let balanceAfter: Decimal;
 
-      if (direction === 'DEBIT') {
+      if (direction === "DEBIT") {
         const debited = await tx.wallet.updateMany({
           where: {
             userId: input.userId,
@@ -122,7 +122,7 @@ export class LedgerService {
         } catch (error: unknown) {
           if (
             error instanceof Prisma.PrismaClientKnownRequestError &&
-            error.code === 'P2025'
+            error.code === "P2025"
           ) {
             throw new NotFoundException(`${input.currency} wallet not found`);
           }
@@ -132,7 +132,7 @@ export class LedgerService {
       }
 
       if (balanceBefore.isNegative() || balanceAfter.isNegative()) {
-        throw new BadRequestException('Wallet balance cannot be negative');
+        throw new BadRequestException("Wallet balance cannot be negative");
       }
 
       await tx.ledgerEntry.create({
@@ -166,7 +166,7 @@ export class LedgerService {
 
   private assertPositiveAmount(amount: Decimal) {
     if (!amount.isFinite() || amount.lessThanOrEqualTo(0)) {
-      throw new BadRequestException('Amount must be positive');
+      throw new BadRequestException("Amount must be positive");
     }
   }
 }

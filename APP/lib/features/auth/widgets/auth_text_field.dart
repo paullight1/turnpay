@@ -1,4 +1,5 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../../../core/theme/app_theme.dart';
 
 /// Reusable text field widget for auth screens.
@@ -9,10 +10,14 @@ class AuthTextField extends StatelessWidget {
   final String label;
   final String hint;
   final bool obscureText;
+  final String obscuringCharacter;
   final TextInputType keyboardType;
   final IconData? prefixIcon;
   final Widget? suffixIcon;
   final String? Function(String?)? validator;
+  final List<TextInputFormatter>? inputFormatters;
+  final int? maxLength;
+  final TextInputAction? textInputAction;
 
   const AuthTextField({
     super.key,
@@ -20,10 +25,14 @@ class AuthTextField extends StatelessWidget {
     required this.label,
     required this.hint,
     this.obscureText = false,
+    this.obscuringCharacter = '*',
     this.keyboardType = TextInputType.text,
     this.prefixIcon,
     this.suffixIcon,
     this.validator,
+    this.inputFormatters,
+    this.maxLength,
+    this.textInputAction,
   });
 
   @override
@@ -36,7 +45,11 @@ class AuthTextField extends StatelessWidget {
         TextFormField(
           controller: controller,
           obscureText: obscureText,
+          obscuringCharacter: obscuringCharacter,
           keyboardType: keyboardType,
+          inputFormatters: inputFormatters,
+          maxLength: maxLength,
+          textInputAction: textInputAction,
           style: AppTextStyles.bodyL.copyWith(
             color: AppColors.textPrimary,
             fontWeight: FontWeight.w500,
@@ -45,6 +58,7 @@ class AuthTextField extends StatelessWidget {
           autovalidateMode: AutovalidateMode.onUserInteraction,
           decoration: InputDecoration(
             hintText: hint,
+            counterText: maxLength == null ? null : '',
             prefixIcon: prefixIcon != null
                 ? Icon(prefixIcon, color: AppColors.textHint, size: 20)
                 : null,
@@ -60,4 +74,3 @@ class AuthTextField extends StatelessWidget {
     );
   }
 }
-

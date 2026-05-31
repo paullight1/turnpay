@@ -1,11 +1,12 @@
-import { Injectable, Logger } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
-import { RedisService } from '../redis/redis.service';
-import { createHash, randomInt } from 'crypto';
+import { Injectable } from "@nestjs/common";
+import { ConfigService } from "@nestjs/config";
+import { RedisService } from "../redis/redis.service";
+import { createHash, randomInt } from "crypto";
+import { PinoLogger } from "nestjs-pino";
+import { maskPhone } from "../common/utils/masking";
 
 @Injectable()
 export class OtpService {
-  private readonly logger = new Logger(OtpService.name);
   private readonly expirySeconds: number;
   private readonly otpLength: number;
   private readonly devOtpCode?: string;
@@ -14,15 +15,17 @@ export class OtpService {
   constructor(
     private readonly redis: RedisService,
     private readonly configService: ConfigService,
+    private readonly logger: PinoLogger,
   ) {
+    this.logger.setContext(OtpService.name);
     this.expirySeconds =
-      parseInt(this.configService.get<string>('OTP_EXPIRES_IN') || '5') * 60;
+      parseInt(this.configService.get<string>("OTP_EXPIRES_IN") || "5") * 60;
     this.otpLength = parseInt(
-      this.configService.get<string>('OTP_LENGTH') || '6',
+      this.configService.get<string>("OTP_LENGTH") || "6",
     );
-    const configuredDevCode = this.configService.get<string>('OTP_DEV_CODE');
+    const configuredDevCode = this.configService.get<string>("OTP_DEV_CODE");
     this.devOtpCode =
-      this.configService.get<string>('NODE_ENV') !== 'production' &&
+      this.configService.get<string>("NODE_ENV") !== "production" &&
       configuredDevCode &&
       /^\d{6}$/.test(configuredDevCode)
         ? configuredDevCode
@@ -31,7 +34,8 @@ export class OtpService {
 
   async sendOtp(phone: string): Promise<{ success: boolean; message: string }> {
     const code = this.devOtpCode ?? this.generateOtp();
-    const key = `otp:${this.hashPhone(phone)}`;
+    const phoneHash = this.hashPhone(phone);
+    const key = `otp:${phoneHash}`;
 
     await this.redis.set(
       key,
@@ -39,25 +43,32 @@ export class OtpService {
       this.expirySeconds,
     );
 
-    this.logger.log(
-      `OTP generated for ${phone} (expires in ${this.expirySeconds / 60}min)`,
+    this.logger.info(
+      {
+        phoneHash,
+        phoneMasked: maskPhone(phone),
+        expiresInSeconds: this.expirySeconds,
+      },
+      "OTP generated",
     );
     if (this.devOtpCode) {
-      this.logger.warn('Development OTP override is enabled');
+      this.logger.warn("Development OTP override is enabled");
     }
 
     return {
       success: true,
-      message: 'OTP sent successfully',
+      message: "OTP sent successfully",
     };
   }
 
   async verifyOtp(phone: string, otp: string): Promise<boolean> {
-    const key = `otp:${this.hashPhone(phone)}`;
+    const phoneHash = this.hashPhone(phone);
+    const phoneMasked = maskPhone(phone);
+    const key = `otp:${phoneHash}`;
     const raw = await this.redis.get(key);
 
     if (!raw) {
-      this.logger.warn(`OTP not found for ${phone}`);
+      this.logger.warn({ phoneHash, phoneMasked }, "OTP not found");
       return false;
     }
 
@@ -66,7 +77,10 @@ export class OtpService {
 
     if (record.attempts >= this.maxAttempts) {
       await this.redis.del(key);
-      this.logger.warn(`Max attempts exceeded for ${phone}`);
+      this.logger.warn(
+        { phoneHash, phoneMasked },
+        "Maximum OTP verification attempts exceeded",
+      );
       return false;
     }
 
@@ -74,13 +88,19 @@ export class OtpService {
       record.attempts++;
       await this.redis.set(key, JSON.stringify(record), this.expirySeconds);
       this.logger.warn(
-        `Invalid OTP for ${phone} (attempt ${record.attempts}/${this.maxAttempts})`,
+        {
+          phoneHash,
+          phoneMasked,
+          attempt: record.attempts,
+          maxAttempts: this.maxAttempts,
+        },
+        "Invalid OTP submitted",
       );
       return false;
     }
 
     await this.redis.del(key);
-    this.logger.log(`OTP verified successfully for ${phone}`);
+    this.logger.info({ phoneHash, phoneMasked }, "OTP verified successfully");
     return true;
   }
 
@@ -91,6 +111,6 @@ export class OtpService {
   }
 
   private hashPhone(phone: string): string {
-    return createHash('sha256').update(phone).digest('hex');
+    return createHash("sha256").update(phone).digest("hex");
   }
 }

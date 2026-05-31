@@ -51,12 +51,13 @@ Implemented in backend:
 - Added Prisma models/enums for `LedgerEntry`, `VirtualAccount`, `BankAccount`, `ProviderEvent`, `TransferAttempt`, and `AuditLog`.
 - Added database constraints for positive ledger amounts and non-negative wallet balances.
 - Added `LedgerService` to centralize wallet credit/debit mutations and append ledger entries with balance before/after.
+- Added durable `IdempotencyRecord` storage alongside Redis response caching.
 - Added account-number masking and provider-payload redaction helpers.
 - Added focused tests for positive amount enforcement, overdraft prevention, balance before/after recording, and missing wallet handling.
+- Updated scheduled wallet reconciliation to derive expected balances from `LedgerEntry` records using Decimal math instead of inferring balances from transaction type.
 
 Remaining for later phases:
 
 - Refactor existing payment-link deposits, withdrawals, exchange, and VTU flows to use `LedgerService`.
-- Add durable database-backed idempotency records if Redis-only idempotency is not enough for production.
-- Update reconciliation to derive balances from `LedgerEntry` instead of `Transaction.type`.
+- Harden idempotency recovery for provider-side effects that may succeed before a process crash or timeout.
 - Add maker-checker admin action enforcement for high-risk money operations.

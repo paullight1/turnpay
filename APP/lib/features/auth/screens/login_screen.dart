@@ -1,15 +1,12 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../../core/theme/app_theme.dart';
 import '../../../core/router/app_router.dart';
+import '../../../core/theme/app_theme.dart';
 import '../../../services/auth_service.dart';
 import '../widgets/auth_text_field.dart';
 import '../widgets/tp_button.dart';
-import '../widgets/social_auth_button.dart';
 
-/// Login screen â€” Superlist-inspired dark layout with top logo,
-/// bold welcome heading, email/password fields, and social auth options.
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
 
@@ -49,9 +46,7 @@ class _LoginScreenState extends State<LoginScreen> {
       if (!mounted) return;
       _showError(authErrorMessage(error, 'Login failed'));
     } finally {
-      if (mounted) {
-        setState(() => _isLoading = false);
-      }
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
@@ -71,169 +66,118 @@ class _LoginScreenState extends State<LoginScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.background,
-      body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.symmetric(
-            horizontal: AppSpacing.lg,
-            vertical: AppSpacing.lg,
-          ),
-          child: Form(
-            key: _formKey,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // â”€â”€ Back Button â”€â”€
-                GestureDetector(
-                  onTap: () => context.pop(),
-                  child: Container(
-                    width: 44,
-                    height: 44,
-                    decoration: BoxDecoration(
-                      color: AppColors.surfaceVariant,
-                      borderRadius: BorderRadius.circular(AppRadius.sm),
-                    ),
-                    child: Icon(
-                      Icons.arrow_back_ios_new_rounded,
-                      color: AppColors.textPrimary,
-                      size: 18,
-                    ),
+      body: _AuthBackground(
+        child: SafeArea(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.symmetric(
+              horizontal: AppSpacing.lg,
+              vertical: AppSpacing.lg,
+            ),
+            child: Form(
+              key: _formKey,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _BackButton(onTap: () => context.pop()),
+                  SizedBox(height: AppSpacing.xxl),
+                  Text('Welcome\nback.', style: AppTextStyles.displayMedium),
+                  SizedBox(height: AppSpacing.sm),
+                  Text(
+                    'Log in to manage your transfers and payments.',
+                    style: AppTextStyles.bodyL,
                   ),
-                ),
-
-                SizedBox(height: AppSpacing.xl),
-
-                // â”€â”€ Logo Mark â”€â”€
-                _TrustPayIcon(),
-
-                SizedBox(height: AppSpacing.lg),
-
-                // â”€â”€ Welcome Copy â”€â”€
-                Text('Welcome\nback.', style: AppTextStyles.displayMedium),
-
-                SizedBox(height: AppSpacing.sm),
-
-                Text(
-                  'Log in to manage your transfers and payments.',
-                  style: AppTextStyles.bodyL,
-                ),
-
-                SizedBox(height: AppSpacing.xxl),
-
-                // â”€â”€ Email Field â”€â”€
-                AuthTextField(
-                  controller: _emailController,
-                  label: 'Email address',
-                  hint: 'you@example.com',
-                  keyboardType: TextInputType.emailAddress,
-                  prefixIcon: Icons.mail_outline_rounded,
-                  validator: (v) {
-                    if (v == null || v.isEmpty)
-                      return 'Please enter your email';
-                    final emailRegex = RegExp(r'^[\w\.-]+@[\w-]+\.\w+$');
-                    if (!emailRegex.hasMatch(v)) return 'Enter a valid email';
-                    return null;
-                  },
-                ),
-
-                SizedBox(height: AppSpacing.md),
-
-                // â”€â”€ Password Field â”€â”€
-                AuthTextField(
-                  controller: _passwordController,
-                  label: 'Password',
-                  hint: 'â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢',
-                  obscureText: _obscurePassword,
-                  prefixIcon: Icons.lock_outline_rounded,
-                  suffixIcon: GestureDetector(
-                    onTap: () {
-                      setState(() => _obscurePassword = !_obscurePassword);
-                    },
-                    child: Icon(
-                      _obscurePassword
-                          ? Icons.visibility_off_outlined
-                          : Icons.visibility_outlined,
-                      color: AppColors.textHint,
-                      size: 20,
-                    ),
-                  ),
-                  validator: (v) {
-                    if (v == null || v.isEmpty)
-                      return 'Please enter your password';
-                    if (v.length < 8)
-                      return 'Password must be at least 8 characters';
-                    return null;
-                  },
-                ),
-
-                SizedBox(height: AppSpacing.sm),
-
-                // â”€â”€ Forgot Password link â”€â”€
-                Align(
-                  alignment: Alignment.centerRight,
-                  child: GestureDetector(
-                    onTap: () => context.push(AppRoutes.forgotPassword),
-                    child: Text(
-                      'Forgot password?',
-                      style: AppTextStyles.link,
-                    ),
-                  ),
-                ),
-
-                SizedBox(height: AppSpacing.xl),
-
-                // â”€â”€ Log In Button â”€â”€
-                TpButton(
-                  label: 'Log in',
-                  isLoading: _isLoading,
-                  onTap: _onLogin,
-                ),
-
-                SizedBox(height: AppSpacing.lg),
-
-                // â”€â”€ Divider â”€â”€
-                _OrDivider(),
-
-                SizedBox(height: AppSpacing.lg),
-
-                // â”€â”€ Social Logins â”€â”€
-                SocialAuthButton(
-                  label: 'Continue with Google',
-                  icon: Icons.g_mobiledata_rounded,
-                  onTap: () {},
-                ),
-
-                SizedBox(height: AppSpacing.sm),
-
-                SocialAuthButton(
-                  label: 'Continue with Apple',
-                  icon: Icons.apple_rounded,
-                  onTap: () {},
-                ),
-
-                SizedBox(height: AppSpacing.xl),
-
-                // â”€â”€ Sign Up redirect â”€â”€
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Text(
-                      "Don't have an account? ",
-                      style: AppTextStyles.bodyM,
-                    ),
-                    GestureDetector(
-                      onTap: () => context.pushReplacement(AppRoutes.register),
-                      child: Text(
-                        'Sign up',
-                        style: AppTextStyles.link.copyWith(
-                          fontWeight: FontWeight.w700,
+                  SizedBox(height: AppSpacing.xxl),
+                  _AuthPanel(
+                    children: [
+                      AuthTextField(
+                        controller: _emailController,
+                        label: 'Email address',
+                        hint: 'you@example.com',
+                        keyboardType: TextInputType.emailAddress,
+                        validator: (value) {
+                          if (value == null || value.isEmpty) {
+                            return 'Please enter your email';
+                          }
+                          final emailRegex =
+                              RegExp(r'^[\w\.-]+@[\w-]+\.\w+$');
+                          if (!emailRegex.hasMatch(value)) {
+                            return 'Enter a valid email';
+                          }
+                          return null;
+                        },
+                      ),
+                      SizedBox(height: AppSpacing.md),
+                      AuthTextField(
+                        controller: _passwordController,
+                        label: 'Password',
+                        hint: '********',
+                        obscureText: _obscurePassword,
+                        suffixIcon: GestureDetector(
+                          onTap: () {
+                            setState(
+                              () => _obscurePassword = !_obscurePassword,
+                            );
+                          },
+                          child: Icon(
+                            _obscurePassword
+                                ? Icons.visibility_off_outlined
+                                : Icons.visibility_outlined,
+                            color: AppColors.textHint,
+                            size: 20,
+                          ),
+                        ),
+                        validator: (value) {
+                          if (value == null || value.isEmpty) {
+                            return 'Please enter your password';
+                          }
+                          if (value.length < 8) {
+                            return 'Password must be at least 8 characters';
+                          }
+                          return null;
+                        },
+                      ),
+                      SizedBox(height: AppSpacing.sm),
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: GestureDetector(
+                          onTap: () => context.push(AppRoutes.forgotPassword),
+                          child: Text(
+                            'Forgot password?',
+                            style: AppTextStyles.link,
+                          ),
                         ),
                       ),
-                    ),
-                  ],
-                ),
-
-                SizedBox(height: AppSpacing.lg),
-              ],
+                      SizedBox(height: AppSpacing.xl),
+                      TpButton(
+                        label: 'Log in',
+                        isLoading: _isLoading,
+                        onTap: _onLogin,
+                      ),
+                    ],
+                  ),
+                  SizedBox(height: AppSpacing.xl),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text(
+                        "Don't have an account? ",
+                        style: AppTextStyles.bodyM,
+                      ),
+                      GestureDetector(
+                        onTap: () =>
+                            context.pushReplacement(AppRoutes.register),
+                        child: Text(
+                          'Sign up',
+                          style: AppTextStyles.link.copyWith(
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  SizedBox(height: AppSpacing.lg),
+                ],
+              ),
             ),
           ),
         ),
@@ -242,55 +186,120 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 }
 
-// â”€â”€â”€ SMALL LOGO MARK â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-class _TrustPayIcon extends StatelessWidget {
+class _BackButton extends StatelessWidget {
+  final VoidCallback onTap;
+
+  const _BackButton({required this.onTap});
+
   @override
   Widget build(BuildContext context) {
-    return Container(
-      width: 52,
-      height: 52,
-      decoration: BoxDecoration(
-        color: AppColors.primary,
-        borderRadius: BorderRadius.circular(AppRadius.md),
-        boxShadow: [
-          BoxShadow(
-            color: AppColors.primary.withOpacity(0.3),
-            blurRadius: 20,
-            spreadRadius: 2,
-          ),
-        ],
-      ),
-      child: Center(
-        child: Text(
-          'T',
-          style: TextStyle(
-            fontSize: 26,
-            fontWeight: FontWeight.w900,
-            color: Colors.white,
-          ),
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: 44,
+        height: 44,
+        decoration: BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.circular(AppRadius.sm),
+          border: Border.all(color: AppColors.border),
+        ),
+        child: Icon(
+          Icons.arrow_back_ios_new_rounded,
+          color: AppColors.textPrimary,
+          size: 18,
         ),
       ),
     );
   }
 }
 
-// â”€â”€â”€ OR DIVIDER â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-class _OrDivider extends StatelessWidget {
+class _AuthBackground extends StatelessWidget {
+  final Widget child;
+
+  const _AuthBackground({required this.child});
+
   @override
   Widget build(BuildContext context) {
-    return Row(
+    return Stack(
+      fit: StackFit.expand,
       children: [
-        Expanded(child: Divider(color: AppColors.divider)),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
-          child: Text(
-            'or continue with',
-            style: AppTextStyles.caption,
+        Container(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [
+                AppColors.primary.withValues(alpha: 0.18),
+                AppColors.background.withValues(alpha: 0.92),
+                AppColors.background,
+              ],
+              stops: const [0, 0.48, 1],
+            ),
           ),
         ),
-        Expanded(child: Divider(color: AppColors.divider)),
+        Positioned(
+          top: -88,
+          right: -92,
+          child: Container(
+            width: 280,
+            height: 280,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: AppColors.primary.withValues(alpha: 0.14),
+            ),
+          ),
+        ),
+        Positioned(
+          left: 0,
+          right: 0,
+          bottom: 0,
+          height: 300,
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [
+                  AppColors.background.withValues(alpha: 0),
+                  AppColors.background.withValues(alpha: 0.94),
+                  AppColors.background,
+                ],
+              ),
+            ),
+          ),
+        ),
+        child,
       ],
     );
   }
 }
 
+class _AuthPanel extends StatelessWidget {
+  final List<Widget> children;
+
+  const _AuthPanel({required this.children});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(AppSpacing.lg),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(AppRadius.xl),
+        border: Border.all(color: AppColors.border),
+        boxShadow: [
+          BoxShadow(
+            color: AppColors.overlayLight,
+            blurRadius: 24,
+            offset: const Offset(0, 16),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: children,
+      ),
+    );
+  }
+}

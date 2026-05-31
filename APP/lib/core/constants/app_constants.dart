@@ -22,5 +22,5 @@ String _resolveApiBaseUrl() {
     throw StateError('API_BASE_URL is required in release builds.');
   }
 
-  return kIsWeb ? 'http://127.0.0.1:3000' : 'http://localhost:3000';
+  return kIsWeb ? 'http://127.0.0.1:4000' : 'http://localhost:4000';
 }

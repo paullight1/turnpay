@@ -1,109 +1,52 @@
-# Exchange Admin Review Backend Gap
+# Exchange Admin Review Backend Gap (Superseded)
 
-## Current State
+## Status
 
-The mobile app exchange screen now creates a live quote and renders a review receipt.
+Superseded. This document described an earlier backend gap for admin-reviewed exchange receipts. The backend/admin flow has since been implemented under the manual NGN to GHS receipt flow, using receipt-specific endpoints rather than the older proposed `/api/exchange/requests` API shape.
 
-Current backend behavior:
+Authoritative current guide: `DOCS/PRODUCTION-GUIDES/14-MANUAL-EXCHANGE-RECEIPT-FLOW.MD`.
 
-- `POST /api/exchange/quote` creates a live quote in Redis
-- `POST /api/exchange/execute` immediately settles wallet-to-wallet exchange
-- there is no persistent exchange review request for admin approval
-- there is no admin approve or decline action for exchange receipts
+Related status guide: `DOCS/PRODUCTION-GUIDES/13-MONNIFY-ONLY-VIRTUAL-ACCOUNTS-STATUS.MD`.
 
-## Required Backend Additions
+## Implemented Backend/Admin Flow
 
-### 1. Persistent exchange request model
+- `POST /api/exchange/receipts` lets a verified, active user submit an NGN bank receipt for manual NGN to GHS exchange review.
+- `POST /api/exchange/receipts/upload-url` creates a signed upload URL for protected receipt proof storage.
+- `GET /api/exchange/receipts/:receiptId/proof-url` lets the owner open proof through a short-lived signed read URL.
+- `GET /api/exchange/receipts` returns the signed-in user's manual receipt history.
+- `GET /api/admin/exchange/receipts?status=SUBMITTED&limit=50` gives finance admins a filtered manual receipt queue.
+- `POST /api/admin/exchange/receipts/:receiptId/proof-url` lets finance open receipt proof through an audited short-lived signed read URL.
+- `POST /api/admin/exchange/receipts/:receiptId/review` lets finance admins approve-and-credit, reject, or request more information.
+- Approval credits the user's GHS wallet through the ledger inside a Prisma transaction.
+- Admin review actions are audit logged.
+- The dashboard exchange page exposes a Deposit receipt form and receipt history.
+- The admin page exposes the manual receipt review queue and review controls.
+- Monnify-only NGN virtual account provisioning is implemented separately from this manual exchange receipt flow.
 
-Add an exchange review entity with:
+## Important Difference From The Old Plan
 
-- `id`
-- `userId`
-- `quoteId`
-- `fromCurrency`
-- `toCurrency`
-- `amount`
-- `fee`
-- `rate`
-- `sendAmount`
-- `receiveAmount`
-- `destinationLabel`
-- `destinationAccount`
-- `destinationInstitution`
-- `note`
-- `status` (`PENDING`, `APPROVED`, `DECLINED`, `EXPIRED`, `PAID_OUT`)
-- `adminReason`
-- `approvedBy`
-- `approvedAt`
-- `declinedBy`
-- `declinedAt`
-
-### 2. User submission endpoint
-
-Create a protected endpoint:
+The older proposed endpoints below are not the current implementation target:
 
 - `POST /api/exchange/requests`
-
-Rules:
-
-- requires `JwtAuthGuard`
-- requires `Idempotency-Key`
-- validates payload with DTO
-- verifies quote ownership and quote expiry
-- stores payout destination details
-- writes audit log
-- returns the saved receipt payload
-
-### 3. Admin review endpoints
-
-Create admin-only endpoints:
-
 - `GET /api/admin/exchange/requests?status=PENDING`
 - `POST /api/admin/exchange/requests/:id/approve`
 - `POST /api/admin/exchange/requests/:id/decline`
 
-Rules:
+Do not use this file as an active backend implementation checklist. Use the production guide and current endpoint names above.
 
-- admin auth and role guard
-- no generic status mutation
-- approval must record admin identity and reason
-- decline must record a user-visible reason
-- every action must be audit logged
+## Remaining Gaps
 
-### 4. Settlement behavior
+The backend/admin gap is closed, but these launch gaps remain:
 
-Approval should do one of these, explicitly:
+- Production environment setup is still required for Monnify live credentials, the private `EXCHANGE_RECEIPT_BUCKET`, storage secrets, public collection-account display variables, migration deployment, and feature flags.
+- Production reconciliation is still required to tie each credited receipt to bank statement or provider settlement evidence.
+- Backend e2e and idempotency tests are still required for receipt submission, admin review, duplicate review attempts, missing idempotency keys, non-admin denial, and duplicate Monnify webhook replay.
 
-1. debit source wallet and create payout instruction
-2. confirm funds already reserved and release payout
+## Safety Rules That Still Apply
 
-Do not mix quote creation with settlement.
-
-### 5. User notification flow
-
-On decline:
-
-- store admin reason
-- expose it on user activity/history
-- trigger notification entry
-
-On approval:
-
-- mark request approved
-- show payout in progress or completed
-
-## Recommended Sequence
-
-1. add Prisma model and migration
-2. add request creation endpoint
-3. add admin list and approve/decline endpoints
-4. wire admin panel queue
-5. update mobile app to submit receipt to `/api/exchange/requests` instead of quote-only mode
-
-## Important Safety Rules
-
-- all mutations must be idempotent
-- use Prisma transactions for every balance move
-- do not auto-credit destination wallet before admin approval
-- do not allow negative balances
-- audit log every admin review action
+- All mutations must be idempotent.
+- Use Prisma transactions for every balance move.
+- Do not credit GHS before finance verifies the NGN deposit.
+- Do not allow negative balances.
+- Audit log every admin review action.
+- Preserve transaction reference, bank reference, ledger source, credited amount, admin identity, and review reason for reconciliation.

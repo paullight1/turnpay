@@ -1,7 +1,7 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
-import { PrismaService } from '../prisma/prisma.service';
-import { CreateUserDto } from './dto/create-user.dto';
-import { UpdateUserDto } from './dto/update-user.dto';
+import { Injectable, NotFoundException } from "@nestjs/common";
+import { PrismaService } from "../prisma/prisma.service";
+import { CreateUserDto } from "./dto/create-user.dto";
+import { UpdateUserDto } from "./dto/update-user.dto";
 
 @Injectable()
 export class UsersService {
@@ -12,9 +12,9 @@ export class UsersService {
       data: {
         id: createUserDto.id,
         email: createUserDto.email,
-        phone: createUserDto.phone || '',
+        phone: createUserDto.phone || "",
         fullName: createUserDto.fullName,
-        password: createUserDto.password || '',
+        password: createUserDto.password || "",
       },
       select: {
         id: true,
@@ -23,6 +23,7 @@ export class UsersService {
         fullName: true,
         role: true,
         kycStatus: true,
+        kycTier: true,
         createdAt: true,
       },
     });
@@ -40,13 +41,14 @@ export class UsersService {
         fullName: true,
         role: true,
         kycStatus: true,
+        kycTier: true,
         createdAt: true,
         wallets: true,
       },
     });
 
     if (!user) {
-      throw new NotFoundException('User not found');
+      throw new NotFoundException("User not found");
     }
 
     return user;
@@ -73,6 +75,7 @@ export class UsersService {
         fullName: true,
         role: true,
         kycStatus: true,
+        kycTier: true,
         updatedAt: true,
       },
     });
@@ -91,9 +94,10 @@ export class UsersService {
           fullName: true,
           role: true,
           kycStatus: true,
+          kycTier: true,
           createdAt: true,
         },
-        orderBy: { createdAt: 'desc' },
+        orderBy: { createdAt: "desc" },
       }),
       this.prisma.user.count(),
     ]);

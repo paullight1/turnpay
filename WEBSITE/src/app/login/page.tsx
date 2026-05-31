@@ -5,16 +5,18 @@ import { useAuth } from "@/lib/auth-provider";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { AuthShell } from "@/components/auth/auth-shell";
 import Link from "next/link";
 import { toast } from "sonner";
 import { getErrorMessage } from "@/lib/errors";
-import { ShieldCheck } from "lucide-react";
+import { Eye, EyeOff, Loader2 } from "lucide-react";
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
   const { signIn } = useAuth();
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -22,7 +24,7 @@ export default function LoginPage() {
     setIsLoading(true);
 
     try {
-      await signIn(email, password);
+      await signIn(email.trim(), password);
       toast.success("Welcome back!");
     } catch (error: unknown) {
       toast.error(getErrorMessage(error, "Login failed"));
@@ -32,44 +34,60 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="relative isolate flex min-h-screen items-center justify-center overflow-hidden bg-[#050605] px-4 py-10 text-white">
-      <div className="absolute -left-28 -top-64 -z-10 h-[30rem] w-[calc(100%+14rem)] rounded-[0_0_100%_100%] bg-[radial-gradient(circle_at_45%_55%,#ffd36b_0%,#ff7a18_34%,#dc2f02_58%,rgba(5,6,5,0)_74%)] opacity-85 blur-[2px]" />
-      <Card className="w-full max-w-md border-white/10 bg-card/92 shadow-2xl shadow-black/40">
+    <AuthShell
+      title="Secure access for money movement."
+      subtitle="Sign in to exchange, pay bills, approve transactions with your PIN, and track every receipt from one protected dashboard."
+    >
         <CardHeader className="text-center">
-          <div className="mx-auto grid size-11 place-items-center rounded-lg bg-primary text-primary-foreground">
-            <ShieldCheck aria-hidden="true" className="size-5" />
-          </div>
           <CardTitle className="text-3xl font-semibold">Welcome back</CardTitle>
           <CardDescription>Sign in to exchange, pay bills, and track receipts.</CardDescription>
         </CardHeader>
         <CardContent>
-          <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+          <form onSubmit={handleSubmit} className="flex flex-col gap-4" aria-busy={isLoading}>
             <div className="flex flex-col gap-2">
               <Label htmlFor="email">Email</Label>
               <Input
                 id="email"
                 type="email"
+                autoComplete="email"
                 placeholder="you@example.com"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 required
               />
             </div>
-            <div className="flex items-center justify-between">
-              <Label htmlFor="password">Password</Label>
-              <Link href="/forgot-password" className="text-xs text-primary hover:underline">
-                Forgot password?
-              </Link>
+            <div className="flex flex-col gap-2">
+              <div className="flex items-center justify-between">
+                <Label htmlFor="password">Password</Label>
+                <Link href="/forgot-password" className="text-xs text-primary hover:underline">
+                  Forgot password?
+                </Link>
+              </div>
+              <div className="relative">
+                <Input
+                  id="password"
+                  type={showPassword ? "text" : "password"}
+                  autoComplete="current-password"
+                  placeholder="Enter your password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  required
+                  className="pr-10"
+                />
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  className="absolute right-1 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                  aria-label={showPassword ? "Hide password" : "Show password"}
+                  onClick={() => setShowPassword((current) => !current)}
+                >
+                  {showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+                </Button>
+              </div>
             </div>
-            <Input
-              id="password"
-              type="password"
-              placeholder="••••••••"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-            />
             <Button type="submit" disabled={isLoading} className="w-full">
+              {isLoading && <Loader2 aria-hidden="true" className="size-4 animate-spin" />}
               {isLoading ? "Signing in..." : "Sign In"}
             </Button>
           </form>
@@ -80,7 +98,6 @@ export default function LoginPage() {
             </Link>
           </p>
         </CardContent>
-      </Card>
-    </div>
+    </AuthShell>
   );
 }

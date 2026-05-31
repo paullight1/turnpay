@@ -35,12 +35,12 @@ export default function SecurityPage() {
     <MarketingShell>
       <PageHero
         eyebrow="Security"
-        title="Security for every wallet action."
-        description="TrustPay protects sign in, wallet activity, payment retries, receipts, and admin actions with clear controls."
+        title="Checks for every wallet action."
+        description="TrustPay protects sign in, wallet activity, payment retries, receipts, and admin work."
       >
         <Button asChild>
           <Link href="/register">
-            Create Account
+            Create account
             <ArrowRight data-icon="inline-end" aria-hidden="true" />
           </Link>
         </Button>
@@ -53,8 +53,8 @@ export default function SecurityPage() {
         <div className="mx-auto grid max-w-7xl gap-10 lg:grid-cols-[0.8fr_1.2fr]">
           <SectionHeading
             eyebrow="Controls"
-            title="Security is a product surface, not footer fine print."
-            description="Users should know how their account, money movement, and support records are protected."
+            title="Security should be easy to see."
+            description="Users should know how their account, money, and support records are protected."
           />
           <div className="grid gap-4 sm:grid-cols-2">
             {securityControls.map((control) => {
@@ -83,11 +83,11 @@ export default function SecurityPage() {
               Financial Integrity
             </Badge>
             <h2 className="text-3xl font-semibold leading-tight text-balance md:text-5xl">
-              Every money movement should be traceable, retry-safe, and reversible when needed.
+              Every money move should be traceable and retry-safe.
             </h2>
             <p className="text-base leading-7 text-background/72">
-              TrustPay should prevent duplicate payments, avoid silent balance changes,
-              and show clear outcomes users can understand.
+              TrustPay should stop duplicate payments, avoid silent balance changes,
+              and show clear outcomes.
             </p>
           </div>
           <div className="grid gap-3">

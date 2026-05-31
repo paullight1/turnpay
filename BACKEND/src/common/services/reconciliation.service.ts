@@ -1,12 +1,11 @@
-import { Injectable, Logger } from '@nestjs/common';
-import { Cron, CronExpression } from '@nestjs/schedule';
-import { PrismaService } from '../../prisma/prisma.service';
-import { PinoLogger } from 'nestjs-pino';
+import { Injectable } from "@nestjs/common";
+import { Cron, CronExpression } from "@nestjs/schedule";
+import { Decimal } from "@prisma/client/runtime/library";
+import { PrismaService } from "../../prisma/prisma.service";
+import { PinoLogger } from "nestjs-pino";
 
 @Injectable()
 export class ReconciliationService {
-  private readonly logger = new Logger(ReconciliationService.name);
-
   constructor(
     private readonly prisma: PrismaService,
     private readonly pinoLogger: PinoLogger,
@@ -14,7 +13,7 @@ export class ReconciliationService {
 
   @Cron(CronExpression.EVERY_DAY_AT_MIDNIGHT)
   async runDailyReconciliation() {
-    this.logger.log('Starting daily reconciliation...');
+    this.pinoLogger.info({}, "Starting daily reconciliation");
 
     try {
       const result = await this.reconcileWallets();
@@ -25,28 +24,33 @@ export class ReconciliationService {
           checkedWallets: result.totalChecked,
           timestamp: new Date().toISOString(),
         },
-        'Daily reconciliation completed',
+        "Daily reconciliation completed",
       );
 
       if (result.mismatches.length > 0) {
-        this.logger.warn(`Found ${result.mismatches.length} wallet mismatches`);
+        this.pinoLogger.warn(
+          { mismatchCount: result.mismatches.length },
+          "Found wallet mismatches",
+        );
       }
     } catch (error) {
       const errorMessage =
-        error instanceof Error ? error.message : 'Unknown reconciliation error';
+        error instanceof Error ? error.message : "Unknown reconciliation error";
 
-      this.logger.error('Reconciliation failed', errorMessage);
-      this.pinoLogger.error({ errorMessage }, 'Daily reconciliation failed');
+      this.pinoLogger.error({ errorMessage }, "Daily reconciliation failed");
     }
   }
 
   async reconcileWallets() {
     const wallets = await this.prisma.wallet.findMany({
-      include: {
-        transactions: {
-          where: { status: 'SUCCESS' },
+      select: {
+        id: true,
+        userId: true,
+        currency: true,
+        balance: true,
+        ledgerEntries: {
           select: {
-            type: true,
+            direction: true,
             amount: true,
             currency: true,
           },
@@ -58,50 +62,37 @@ export class ReconciliationService {
       walletId: string;
       userId: string;
       currency: string;
-      expectedBalance: number;
-      actualBalance: number;
-      difference: number;
+      expectedBalance: string;
+      actualBalance: string;
+      difference: string;
     }> = [];
 
     for (const wallet of wallets) {
-      let expectedBalance = 0;
+      let expectedBalance = new Decimal(0);
 
-      for (const tx of wallet.transactions) {
-        const txAmount = Number(tx.amount);
-        const txCurrency = tx.currency;
+      for (const entry of wallet.ledgerEntries) {
+        if (entry.currency !== wallet.currency) continue;
 
-        if (txCurrency !== wallet.currency) continue;
+        const entryAmount = new Decimal(entry.amount);
 
-        switch (tx.type) {
-          case 'FUND':
-          case 'EXCHANGE':
-            if (txCurrency === wallet.currency) {
-              if (tx.type === 'FUND') {
-                expectedBalance += txAmount;
-              }
-            }
-            break;
-          case 'WITHDRAW':
-          case 'AIRTIME':
-          case 'DATA':
-          case 'CABLE':
-          case 'ELECTRICITY':
-            expectedBalance -= txAmount;
-            break;
+        if (entry.direction === "CREDIT") {
+          expectedBalance = expectedBalance.plus(entryAmount);
+        } else {
+          expectedBalance = expectedBalance.minus(entryAmount);
         }
       }
 
-      const actualBalance = Number(wallet.balance);
-      const difference = Math.abs(expectedBalance - actualBalance);
+      const actualBalance = new Decimal(wallet.balance);
+      const difference = expectedBalance.minus(actualBalance).abs();
 
-      if (difference > 0.01) {
+      if (difference.greaterThan(new Decimal("0.01"))) {
         mismatches.push({
           walletId: wallet.id,
           userId: wallet.userId,
           currency: wallet.currency,
-          expectedBalance,
-          actualBalance,
-          difference,
+          expectedBalance: expectedBalance.toFixed(2),
+          actualBalance: actualBalance.toFixed(2),
+          difference: difference.toFixed(2),
         });
       }
     }

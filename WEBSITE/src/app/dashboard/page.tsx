@@ -8,44 +8,28 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import {
+  AlertCircle,
+  ArrowDownToLine,
   ArrowLeftRight,
   Banknote,
+  ChevronRight,
+  CheckCircle2,
   ClipboardList,
+  Clock3,
   Landmark,
+  LockKeyhole,
+  ReceiptText,
+  RefreshCw,
+  Send,
   Smartphone,
 } from "lucide-react";
 import { Wallet as WalletType, Transaction } from "@/types";
 import { getMoneyActionGate } from "@/lib/account-status";
 import { maskEmail } from "@/lib/privacy";
-
-const quickActions = [
-  {
-    label: "Fund Wallet",
-    href: "/dashboard/fund",
-    icon: Banknote,
-    color: "bg-emerald-600",
-  },
-  {
-    label: "Exchange Currency",
-    href: "/dashboard/exchange",
-    icon: ArrowLeftRight,
-    color: "bg-blue-600",
-  },
-  {
-    label: "Withdraw",
-    href: "/dashboard/withdraw",
-    icon: Landmark,
-    color: "bg-rose-600",
-  },
-  {
-    label: "Buy Airtime",
-    href: "/dashboard/vtu?type=airtime",
-    icon: Smartphone,
-    color: "bg-violet-600",
-  },
-];
+import { getErrorMessage } from "@/lib/errors";
 
 type WalletCurrency = "NGN" | "GHS";
 
@@ -56,22 +40,42 @@ function formatMoney(value?: number | string) {
   });
 }
 
+function formatDate(value?: string) {
+  if (!value) return "No recent update";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "No recent update";
+  return new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date);
+}
+
 function WalletCard({
   wallet,
   currency,
   isLoading,
+  onOpen,
+  sendHref,
+  receiveHref,
 }: {
   wallet?: WalletType;
   currency: WalletCurrency;
   isLoading: boolean;
+  onOpen: () => void;
+  sendHref: string;
+  receiveHref: string;
 }) {
-  const label = `${currency} Balance`;
+  const label = `${currency} available balance`;
 
   if (isLoading) {
     return (
-      <Card>
+      <Card className="border-slate-200 bg-white text-slate-950 shadow-sm">
         <CardHeader className="flex flex-row items-center justify-between pb-2">
-          <CardTitle className="text-sm font-medium">{label}</CardTitle>
+          <CardTitle className="text-sm font-medium text-slate-700">
+            {label}
+          </CardTitle>
           <Skeleton className="size-8 rounded-full" />
         </CardHeader>
         <CardContent>
@@ -83,18 +87,62 @@ function WalletCard({
   }
 
   return (
-    <Card>
+    <Card
+      role="button"
+      tabIndex={0}
+      onClick={onOpen}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          onOpen();
+        }
+      }}
+      className="cursor-pointer border-slate-200 bg-[linear-gradient(135deg,#ffffff,#f8fafc_52%,#ecfdf5)] text-slate-950 shadow-sm ring-slate-200 transition duration-200 hover:-translate-y-0.5 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
+    >
       <CardHeader className="flex flex-row items-center justify-between pb-2">
-        <CardTitle className="text-sm font-medium">{label}</CardTitle>
-        <div className="flex size-8 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-primary">
+        <CardTitle className="text-sm font-medium text-slate-700">
+          {label}
+        </CardTitle>
+        <div className="flex size-9 items-center justify-center rounded-full bg-emerald-50 text-xs font-semibold text-emerald-700 ring-1 ring-emerald-200">
           {currency}
         </div>
       </CardHeader>
       <CardContent>
-        <div className="text-2xl font-bold">
+        <div className="text-2xl font-bold tabular-nums tracking-tight text-slate-950">
           {currency} {formatMoney(wallet?.balance)}
         </div>
-        <p className="mt-1 text-xs text-muted-foreground">Available balance</p>
+        <p className="mt-1 text-xs text-slate-500">
+          Updated {formatDate(wallet?.updatedAt)}
+        </p>
+        <div className="mt-4 grid gap-2 sm:grid-cols-2">
+          <Button
+            asChild
+            size="sm"
+            className="bg-slate-950 text-white hover:bg-slate-800"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <Link href={sendHref}>
+              <Send aria-hidden="true" className="size-4" />
+              Send Money
+            </Link>
+          </Button>
+          <Button
+            asChild
+            size="sm"
+            variant="outline"
+            className="border-emerald-200 bg-white text-emerald-800 hover:bg-emerald-50 hover:text-emerald-900"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <Link href={receiveHref}>
+              <ArrowDownToLine aria-hidden="true" className="size-4" />
+              Receive Money
+            </Link>
+          </Button>
+        </div>
+        <div className="mt-4 flex items-center justify-between border-t border-slate-200 pt-3 text-xs font-medium text-slate-500">
+          <span>Open account and history</span>
+          <ChevronRight aria-hidden="true" className="size-4" />
+        </div>
       </CardContent>
     </Card>
   );
@@ -109,34 +157,34 @@ function TransactionIcon({ type }: { type: string }) {
 
 function TransactionRow({ tx }: { tx: Transaction }) {
   const statusColors: Record<string, string> = {
-    SUCCESS: "bg-green-100 text-green-800",
-    PENDING: "bg-yellow-100 text-yellow-800",
-    FAILED: "bg-red-100 text-red-800",
-    REVERSED: "bg-gray-100 text-gray-800",
+    SUCCESS: "border-emerald-400/25 bg-emerald-400/12 text-emerald-200",
+    PENDING: "border-amber-300/25 bg-amber-300/12 text-amber-100",
+    FAILED: "border-rose-400/25 bg-rose-400/12 text-rose-100",
+    REVERSED: "border-sky-400/25 bg-sky-400/12 text-sky-100",
   };
 
   const currency = tx.currency === "GHS" ? "GHS" : "NGN";
 
   return (
-    <div className="flex items-center justify-between border-b py-3 last:border-0">
-      <div className="flex items-center gap-3">
-        <div className="flex size-10 items-center justify-center rounded-full bg-muted">
+    <div className="grid gap-3 border-b py-3 last:border-0 sm:grid-cols-[1fr_auto] sm:items-center">
+      <div className="flex min-w-0 items-center gap-3">
+        <div className="flex size-10 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
           <TransactionIcon type={tx.type} />
         </div>
-        <div>
+        <div className="min-w-0">
           <p className="text-sm font-medium capitalize">
             {tx.type.toLowerCase()}
           </p>
-          <p className="text-xs text-muted-foreground">{tx.reference}</p>
+          <p className="truncate text-xs text-muted-foreground">{tx.reference}</p>
         </div>
       </div>
-      <div className="text-right">
-        <p className="text-sm font-medium">
+      <div className="flex items-center justify-between gap-3 sm:block sm:text-right">
+        <p className="text-sm font-medium tabular-nums">
           {currency} {formatMoney(tx.amount)}
         </p>
         <Badge
           variant="secondary"
-          className={`text-xs ${statusColors[tx.status] || ""}`}
+          className={`border text-xs ${statusColors[tx.status] || ""}`}
         >
           {tx.status}
         </Badge>
@@ -145,11 +193,48 @@ function TransactionRow({ tx }: { tx: Transaction }) {
   );
 }
 
+function QueryErrorState({
+  title,
+  message,
+  onRetry,
+}: {
+  title: string;
+  message: string;
+  onRetry: () => void;
+}) {
+  return (
+    <Card className="border-destructive/25 bg-destructive/5">
+      <CardContent className="flex flex-col gap-3 py-5 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex gap-3">
+          <AlertCircle className="mt-0.5 size-5 shrink-0 text-destructive" />
+          <div>
+            <p className="font-medium">{title}</p>
+            <p className="mt-1 text-sm text-muted-foreground">{message}</p>
+          </div>
+        </div>
+        <Button variant="outline" onClick={onRetry} className="w-full sm:w-auto">
+          <RefreshCw aria-hidden="true" className="size-4" />
+          Retry
+        </Button>
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function DashboardPage() {
   const { user, profile } = useAuth();
+  const router = useRouter();
   const moneyGate = getMoneyActionGate(profile);
+  const sendHref = moneyGate?.actionHref ?? "/dashboard/withdraw";
+  const receiveHref = moneyGate?.actionHref ?? "/dashboard/fund";
 
-  const { data: wallets, isLoading: walletsLoading } = useQuery({
+  const {
+    data: wallets,
+    isLoading: walletsLoading,
+    isError: walletsError,
+    error: walletsErrorDetails,
+    refetch: refetchWallets,
+  } = useQuery({
     queryKey: ["wallets", user?.id],
     queryFn: async () => {
       const res = await walletApi.getBalances();
@@ -159,7 +244,13 @@ export default function DashboardPage() {
     staleTime: 30000,
   });
 
-  const { data: transactions, isLoading: txLoading } = useQuery({
+  const {
+    data: transactions,
+    isLoading: txLoading,
+    isError: txError,
+    error: txErrorDetails,
+    refetch: refetchTransactions,
+  } = useQuery({
     queryKey: ["transactions", user?.id],
     queryFn: async () => {
       const res = await transactionApi.getTransactions(1, 5);
@@ -174,20 +265,43 @@ export default function DashboardPage() {
 
   return (
     <DashboardLayout>
-      <div className="flex flex-col gap-6">
-        <div>
-          <h1 className="text-3xl font-bold">
-            Welcome back, {maskEmail(profile?.email ?? user?.email)}
-          </h1>
-          <p className="mt-1 text-muted-foreground">
-            Manage your wallets and transactions
-          </p>
+      <div className="flex flex-col gap-6 animate-trustpay-fade-up">
+        <div className="grid gap-4 lg:grid-cols-[1fr_auto] lg:items-end">
+          <div>
+            <p className="mb-2 inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-xs text-muted-foreground">
+              <span className="size-1.5 rounded-full bg-emerald-400 animate-trustpay-soft-pulse" />
+              Wallet workspace
+            </p>
+            <h1 className="text-2xl font-bold text-balance sm:text-3xl">
+              Welcome back, {maskEmail(profile?.email ?? user?.email)}
+            </h1>
+            <p className="mt-1 text-muted-foreground">
+              Review balances, receive money, send money, and track recent receipts.
+            </p>
+          </div>
+          <div className="grid grid-cols-3 gap-2 rounded-lg border border-white/10 bg-card/55 p-2 text-center text-xs text-muted-foreground">
+            <span className="flex flex-col gap-1 rounded-md bg-muted/45 px-3 py-2">
+              <CheckCircle2 className="mx-auto size-4 text-emerald-300" />
+              Receipts
+            </span>
+            <span className="flex flex-col gap-1 rounded-md bg-muted/45 px-3 py-2">
+              <Clock3 className="mx-auto size-4 text-amber-200" />
+              Status
+            </span>
+            <span className="flex flex-col gap-1 rounded-md bg-muted/45 px-3 py-2">
+              <LockKeyhole className="mx-auto size-4 text-sky-200" />
+              Guarded
+            </span>
+          </div>
         </div>
 
         {moneyGate && (
-          <Card>
+          <Card className="border-amber-300/25 bg-amber-300/10">
             <CardHeader>
-              <CardTitle>{moneyGate.title}</CardTitle>
+              <CardTitle className="flex items-center gap-2">
+                <LockKeyhole className="size-5 text-amber-200" />
+                {moneyGate.title}
+              </CardTitle>
             </CardHeader>
             <CardContent className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
               <p className="text-sm text-muted-foreground">{moneyGate.message}</p>
@@ -200,16 +314,30 @@ export default function DashboardPage() {
           </Card>
         )}
 
+        {walletsError && (
+          <QueryErrorState
+            title="Wallet balances could not load"
+            message={getErrorMessage(walletsErrorDetails, "Please retry before starting a money action.")}
+            onRetry={() => void refetchWallets()}
+          />
+        )}
+
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
           <WalletCard
             wallet={ngnWallet}
             currency="NGN"
             isLoading={walletsLoading}
+            onOpen={() => router.push("/dashboard/wallet/ngn")}
+            sendHref={sendHref}
+            receiveHref={receiveHref}
           />
           <WalletCard
             wallet={ghsWallet}
             currency="GHS"
             isLoading={walletsLoading}
+            onOpen={() => router.push("/dashboard/wallet/ghs")}
+            sendHref={sendHref}
+            receiveHref={receiveHref}
           />
           <Card>
             <CardHeader className="flex flex-row items-center justify-between pb-2">
@@ -220,39 +348,22 @@ export default function DashboardPage() {
             </CardHeader>
             <CardContent>
               {txLoading ? (
-                <Skeleton className="h-8 w-16" />
+                <div className="space-y-2">
+                  <Skeleton className="h-8 w-16" />
+                  <Skeleton className="h-3 w-24" />
+                </div>
               ) : (
                 <>
-                  <div className="text-2xl font-bold">
+                  <div className="text-2xl font-bold tabular-nums">
                     {transactions?.total ?? 0}
                   </div>
-                  <p className="mt-1 text-xs text-muted-foreground">All time</p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {txError ? "Refresh needed" : "All time"}
+                  </p>
                 </>
               )}
             </CardContent>
           </Card>
-        </div>
-
-        <div>
-          <h2 className="mb-4 text-xl font-semibold">Quick Actions</h2>
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-            {quickActions.map((action) => (
-              <Link key={action.href} href={action.href}>
-                <Card className="cursor-pointer transition-shadow hover:shadow-md">
-                  <CardContent className="pt-6">
-                    <div className="flex items-center gap-3">
-                      <div
-                        className={`flex size-10 items-center justify-center rounded-lg text-white ${action.color}`}
-                      >
-                        <action.icon className="size-5" />
-                      </div>
-                      <span className="font-medium">{action.label}</span>
-                    </div>
-                  </CardContent>
-                </Card>
-              </Link>
-            ))}
-          </div>
         </div>
 
         <Card>
@@ -265,16 +376,42 @@ export default function DashboardPage() {
             </Link>
           </CardHeader>
           <CardContent>
-            {txLoading ? (
+            {txError ? (
+              <div className="flex flex-col items-center gap-3 py-8 text-center">
+                <AlertCircle className="size-8 text-destructive" />
+                <div>
+                  <p className="font-medium">Transactions could not load</p>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    {getErrorMessage(txErrorDetails, "Retry to refresh your recent activity.")}
+                  </p>
+                </div>
+                <Button variant="outline" onClick={() => void refetchTransactions()}>
+                  <RefreshCw aria-hidden="true" className="size-4" />
+                  Retry
+                </Button>
+              </div>
+            ) : txLoading ? (
               <div className="space-y-3">
                 {[1, 2, 3].map((i) => (
                   <Skeleton key={i} className="h-14 w-full" />
                 ))}
               </div>
             ) : transactions?.transactions?.length === 0 ? (
-              <div className="py-8 text-center text-muted-foreground">
-                No transactions yet. Start by funding your wallet or exchanging
-                currency.
+              <div className="flex flex-col items-center gap-3 py-8 text-center text-muted-foreground">
+                <div className="grid size-12 place-items-center rounded-full bg-primary/10 text-primary">
+                  <ReceiptText className="size-6" />
+                </div>
+                <div>
+                  <p className="font-medium text-foreground">No receipts yet</p>
+                  <p className="mt-1 max-w-md text-sm">
+                    Start by receiving money into your wallet. Your latest receipts will appear here.
+                  </p>
+                </div>
+                <Button asChild variant="outline">
+                  <Link href={moneyGate?.actionHref ?? "/dashboard/fund"}>
+                    {moneyGate?.actionLabel ?? "Receive money"}
+                  </Link>
+                </Button>
               </div>
             ) : (
               <div>

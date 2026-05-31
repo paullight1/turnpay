@@ -1,8 +1,8 @@
-import { Decimal } from '@prisma/client/runtime/library';
+import { Decimal } from "@prisma/client/runtime/library";
 
-export type BankingProviderName = 'paystack' | 'flutterwave';
-export type NormalizedProviderName = 'PAYSTACK' | 'FLUTTERWAVE';
-export type BankingCurrency = 'NGN' | 'GHS';
+export type BankingProviderName = "paystack" | "flutterwave" | "monnify";
+export type NormalizedProviderName = "PAYSTACK" | "FLUTTERWAVE" | "MONNIFY";
+export type BankingCurrency = "NGN" | "GHS";
 
 export interface ProvisionVirtualAccountInput {
   userId: string;
@@ -14,6 +14,7 @@ export interface ProvisionVirtualAccountInput {
   country: string;
   currency: BankingCurrency;
   bvn?: string;
+  nin?: string;
   identityAccountNumber?: string;
   identityBankCode?: string;
 }
@@ -27,7 +28,7 @@ export interface ProviderVirtualAccount {
   bankName: string;
   bankCode?: string;
   currency: BankingCurrency;
-  status: 'ACTIVE' | 'PENDING' | 'FAILED' | 'DISABLED';
+  status: "ACTIVE" | "PENDING" | "FAILED" | "DISABLED";
   raw?: Record<string, unknown>;
 }
 
