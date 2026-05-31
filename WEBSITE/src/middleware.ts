@@ -6,6 +6,7 @@ const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseAnonKey =
   process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ||
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+const isSupabaseConfigured = Boolean(supabaseUrl && supabaseAnonKey);
 
 const PROTECTED_ROUTES = ["/dashboard"];
 const ADMIN_ROUTES = ["/admin"];
@@ -13,6 +14,7 @@ const AUTH_ROUTES = ["/login", "/register"];
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
+  const response = NextResponse.next();
 
   const isProtected = PROTECTED_ROUTES.some(
     (route) => pathname === route || pathname.startsWith(`${route}/`)
@@ -24,8 +26,17 @@ export async function middleware(request: NextRequest) {
 
   const isAuthRoute = AUTH_ROUTES.includes(pathname);
 
+  if (!isSupabaseConfigured) {
+    if (isProtected || isAdmin) {
+      const url = new URL("/login", request.url);
+      url.searchParams.set("callbackUrl", pathname);
+      return NextResponse.redirect(url);
+    }
+
+    return response;
+  }
+
   // Create Supabase client for server-side session check
-  const response = NextResponse.next();
   const supabase = createServerClient(supabaseUrl, supabaseAnonKey, {
     cookies: {
       getAll() {
