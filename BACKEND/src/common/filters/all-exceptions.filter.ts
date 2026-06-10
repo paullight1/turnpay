@@ -29,7 +29,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
 
     const rawMessage =
       exception instanceof HttpException
-        ? exception.getResponse()
+        ? this.normalizeExceptionResponse(exception.getResponse())
         : "Internal server error";
 
     const responseBody = {
@@ -88,5 +88,15 @@ export class AllExceptionsFilter implements ExceptionFilter {
     }
 
     return rawMessage;
+  }
+
+  private normalizeExceptionResponse(
+    value: string | object,
+  ): string | Record<string, unknown> | Array<unknown> {
+    if (typeof value === "string" || Array.isArray(value)) {
+      return value;
+    }
+
+    return value as Record<string, unknown>;
   }
 }
