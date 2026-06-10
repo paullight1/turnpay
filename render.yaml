@@ -8,6 +8,7 @@ services:
     autoDeploy: true
     dockerfilePath: ./BACKEND/Dockerfile
     dockerContext: ./BACKEND
+    preDeployCommand: npx prisma migrate deploy
     healthCheckPath: /api/health
     envVars:
       - key: NODE_ENV
