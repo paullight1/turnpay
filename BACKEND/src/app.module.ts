@@ -28,6 +28,8 @@ import { AppController } from "./app.controller";
 import { AppService } from "./app.service";
 import { IdempotencyInterceptor } from "./common/interceptors/idempotency.interceptor";
 
+const usePrettyLogs = process.env.NODE_ENV === "development";
+
 @Module({
   imports: [
     ConfigModule.forRoot({
@@ -208,7 +210,7 @@ import { IdempotencyInterceptor } from "./common/interceptors/idempotency.interc
     LoggerModule.forRoot({
       pinoHttp: {
         transport:
-          process.env.NODE_ENV !== "production"
+          usePrettyLogs
             ? { target: "pino-pretty", options: { singleLine: true } }
             : undefined,
         level:
