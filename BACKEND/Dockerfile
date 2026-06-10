@@ -25,4 +25,4 @@ RUN npx prisma generate
 
 EXPOSE 3000
 
-CMD ["dumb-init", "--", "node", "dist/main"]
+CMD ["dumb-init", "--", "node", "dist/src/main.js"]
