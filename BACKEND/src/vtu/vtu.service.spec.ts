@@ -806,6 +806,103 @@ describe("VtuService purchase ledger handling", () => {
     });
   });
 
+  it("stores VTpass webhook events idempotently in webhook logs", async () => {
+    prisma.webhookLog.create.mockResolvedValue({
+      id: "webhook-log-1",
+      reference: "vtpass:transaction-update:REQ-1:TX-1:delivered",
+    });
+
+    await expect(
+      service.recordVtpassWebhookEvent({
+        eventType: "transaction-update",
+        providerRequestId: "REQ-1",
+        providerReference: "TX-1",
+        status: "delivered",
+        rawPayload: { type: "transaction-update" },
+      }),
+    ).resolves.toEqual({
+      duplicate: false,
+      logId: "webhook-log-1",
+      reference: "vtpass:transaction-update:REQ-1:TX-1:delivered",
+    });
+
+    expect(prisma.webhookLog.create).toHaveBeenCalledWith({
+      data: {
+        provider: "vtpass",
+        eventType: "transaction-update",
+        reference: "vtpass:transaction-update:REQ-1:TX-1:delivered",
+        payload: { type: "transaction-update" },
+        processed: false,
+      },
+      select: { id: true, reference: true },
+    });
+  });
+
+  it("finalizes a VTpass webhook success through the existing VTU order path", async () => {
+    prisma.webhookLog.findUnique.mockResolvedValue({
+      id: "webhook-log-1",
+      reference: "vtpass:transaction-update:REQ-1:TX-1:delivered",
+      processed: false,
+    });
+    prisma.vtuOrder.findFirst.mockResolvedValue({
+      id: "order-1",
+      transactionId: "tx-1",
+      providerRequestId: "REQ-1",
+      transaction: {
+        id: "tx-1",
+        userId: "user-1",
+        reference: "VTU-1",
+        amount: new Decimal(500),
+        fee: new Decimal(0),
+        currency: "NGN",
+        status: "PENDING",
+      },
+    });
+
+    await expect(
+      service.processVtpassWebhookEvent({
+        eventType: "transaction-update",
+        providerRequestId: "REQ-1",
+        providerReference: "TX-1",
+        status: "delivered",
+        message: "TRANSACTION DELIVERED",
+        rawPayload: { type: "transaction-update" },
+      }),
+    ).resolves.toEqual({
+      processed: true,
+      orderId: "order-1",
+      status: "delivered",
+    });
+
+    expect(prisma.transaction.updateMany).toHaveBeenCalledWith({
+      where: { id: "tx-1", status: "PENDING" },
+      data: {
+        status: "SUCCESS",
+        metadata: {
+          providerReference: "TX-1",
+          providerStatus: "delivered",
+          providerRequestId: "REQ-1",
+        },
+      },
+    });
+    expect(prisma.vtuOrder.update).toHaveBeenCalledWith({
+      where: { id: "order-1" },
+      data: expect.objectContaining({
+        status: "SUCCESS",
+        providerTransactionId: "TX-1",
+        providerStatus: "delivered",
+        nextRequeryAt: null,
+      }),
+    });
+    expect(prisma.webhookLog.update).toHaveBeenCalledWith({
+      where: { reference: "vtpass:transaction-update:REQ-1:TX-1:delivered" },
+      data: {
+        processed: true,
+        errorMessage: undefined,
+      },
+    });
+  });
+
   it("finalizes a Reloadly webhook success through the existing VTU order path", async () => {
     prisma.vtuOrder.findFirst.mockResolvedValue({
       id: "order-1",

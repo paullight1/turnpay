@@ -41,6 +41,15 @@ type ReloadlyWebhookEvent = {
   rawPayload: Record<string, unknown>;
 };
 
+type VtpassWebhookEvent = {
+  eventType: string;
+  providerRequestId: string;
+  providerReference?: string;
+  status: string;
+  message?: string;
+  rawPayload: Record<string, unknown>;
+};
+
 type VtuPricingContext = {
   amount: Decimal;
   countryCode: string;
@@ -131,6 +140,120 @@ export class VtuService {
         return { duplicate: true, reference };
       }
 
+      throw error;
+    }
+  }
+
+  async recordVtpassWebhookEvent(event: VtpassWebhookEvent) {
+    const reference = this.vtpassWebhookReference(event);
+
+    try {
+      const log = await this.prisma.webhookLog.create({
+        data: {
+          provider: "vtpass",
+          eventType: event.eventType,
+          reference,
+          payload: event.rawPayload as Prisma.InputJsonValue,
+          processed: false,
+        },
+        select: { id: true, reference: true },
+      });
+
+      return { duplicate: false, logId: log.id, reference: log.reference };
+    } catch (error) {
+      if (this.isUniqueConstraintError(error)) {
+        return { duplicate: true, reference };
+      }
+
+      throw error;
+    }
+  }
+
+  async processVtpassWebhookEvent(event: VtpassWebhookEvent) {
+    const reference = this.vtpassWebhookReference(event);
+    const log = await this.prisma.webhookLog.findUnique({
+      where: { reference },
+    });
+
+    if (log?.processed) {
+      return { processed: false, duplicate: true };
+    }
+
+    try {
+      const order = await this.prisma.vtuOrder.findFirst({
+        where: {
+          provider: "VTPASS",
+          OR: [
+            { providerRequestId: event.providerRequestId },
+            ...(event.providerReference
+              ? [{ providerTransactionId: event.providerReference }]
+              : []),
+          ],
+        },
+        select: {
+          id: true,
+          transactionId: true,
+          providerRequestId: true,
+          transaction: {
+            select: {
+              id: true,
+              userId: true,
+              reference: true,
+              amount: true,
+              fee: true,
+              currency: true,
+              status: true,
+            },
+          },
+        },
+      });
+
+      if (!order) {
+        await this.markVtpassWebhookLog(
+          reference,
+          false,
+          "VTU order not found",
+        );
+        this.logger.warn(
+          { reference, providerRequestId: event.providerRequestId },
+          "VTpass webhook VTU order not found",
+        );
+        return { processed: false, orderFound: false };
+      }
+
+      await this.applyProviderResultToOrder({
+        order,
+        result: {
+          reference: event.providerReference || event.providerRequestId,
+          status: event.status,
+          message: event.message || "VTpass webhook status update",
+          providerRequestId: event.providerRequestId,
+          rawResponse: event.rawPayload,
+        },
+      });
+
+      await this.markVtpassWebhookLog(reference, true);
+
+      this.logger.info(
+        {
+          reference,
+          providerRequestId: event.providerRequestId,
+          providerReference: event.providerReference,
+          status: event.status,
+          orderId: order.id,
+        },
+        "VTpass webhook VTU order processed",
+      );
+
+      return { processed: true, orderId: order.id, status: event.status };
+    } catch (error) {
+      const errorMessage =
+        error instanceof Error ? error.message : "Unknown VTpass webhook error";
+      await this.markVtpassWebhookLog(reference, false, errorMessage);
+      this.logger.error(
+        { reference, providerRequestId: event.providerRequestId, errorMessage },
+        "VTpass webhook VTU processing failed",
+      );
       throw error;
     }
   }
@@ -1296,7 +1419,27 @@ export class VtuService {
     return `reloadly:${eventKey}`;
   }
 
+  private vtpassWebhookReference(event: VtpassWebhookEvent) {
+    const providerReference =
+      event.providerReference || "no-provider-reference";
+    return `vtpass:${event.eventType}:${event.providerRequestId}:${providerReference}:${event.status}`;
+  }
+
   private async markReloadlyWebhookLog(
+    reference: string,
+    processed: boolean,
+    errorMessage?: string,
+  ) {
+    await this.prisma.webhookLog.update({
+      where: { reference },
+      data: {
+        processed,
+        errorMessage,
+      },
+    });
+  }
+
+  private async markVtpassWebhookLog(
     reference: string,
     processed: boolean,
     errorMessage?: string,
