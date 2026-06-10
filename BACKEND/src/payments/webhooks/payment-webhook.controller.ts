@@ -11,6 +11,7 @@ import { PaymentService } from "../payment.service";
 import { PinoLogger } from "nestjs-pino";
 import { Throttle } from "@nestjs/throttler";
 import { Decimal } from "@prisma/client/runtime/library";
+import type { Prisma } from "@prisma/client";
 import { BankingService } from "../../banking/banking.service";
 import type { RawBodyRequest } from "../../common/types/request-context";
 import { ConfigService } from "@nestjs/config";
@@ -253,7 +254,7 @@ export class WebhookController {
           provider: "MONNIFY",
           eventType: eventType || "UNKNOWN",
           reference: providerReference || `unknown-${Date.now()}`,
-          payload: body as unknown as Record<string, unknown>,
+          payload: body as unknown as Prisma.InputJsonValue,
           processed: false,
         },
       });

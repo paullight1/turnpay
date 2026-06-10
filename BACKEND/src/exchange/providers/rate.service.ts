@@ -158,7 +158,11 @@ export class RateService implements OnModuleInit {
     });
 
     const oldRateValue = oldRate
-      ? { rate: oldRate.rate.toNumber(), markup: oldRate.markup.toNumber() }
+      ? {
+          rate: oldRate.rate.toNumber(),
+          markup: oldRate.markup.toNumber(),
+          source: oldRate.source,
+        }
       : null;
 
     await this.prisma.rate.upsert({
@@ -197,7 +201,7 @@ export class RateService implements OnModuleInit {
             ? {
                 rate: oldRateValue.rate,
                 markup: oldRateValue.markup,
-                source: oldRate.source,
+                source: oldRateValue.source,
               }
             : { rate: null, markup: null },
           after: { rate, markup, source: "admin" },

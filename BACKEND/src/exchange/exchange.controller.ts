@@ -9,7 +9,7 @@ import {
   ParseUUIDPipe,
   Res,
 } from "@nestjs/common";
-import { Response } from "express";
+import type { Response } from "express";
 import { Throttle } from "@nestjs/throttler";
 import { ExchangeService } from "./exchange.service";
 import { RateService } from "./providers/rate.service";
