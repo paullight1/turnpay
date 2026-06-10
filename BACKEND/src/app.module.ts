@@ -28,8 +28,6 @@ import { AppController } from "./app.controller";
 import { AppService } from "./app.service";
 import { IdempotencyInterceptor } from "./common/interceptors/idempotency.interceptor";
 
-const usePrettyLogs = process.env.NODE_ENV === "development";
-
 @Module({
   imports: [
     ConfigModule.forRoot({
@@ -209,10 +207,17 @@ const usePrettyLogs = process.env.NODE_ENV === "development";
     }),
     LoggerModule.forRoot({
       pinoHttp: {
-        transport:
-          usePrettyLogs
-            ? { target: "pino-pretty", options: { singleLine: true } }
-            : undefined,
+        redact: {
+          paths: [
+            "req.headers.authorization",
+            "req.headers.cookie",
+            "req.headers['set-cookie']",
+            "req.headers['x-api-key']",
+            "req.headers['x-auth-token']",
+            "res.headers['set-cookie']",
+          ],
+          censor: "[REDACTED]",
+        },
         level:
           process.env.LOG_LEVEL ||
           (process.env.NODE_ENV === "production" ? "info" : "debug"),
