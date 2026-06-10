@@ -47,9 +47,12 @@ const defaultNodeEnv =
         PORT: Joi.number().empty("").default(3000),
         DATABASE_URL: Joi.when("NODE_ENV", {
           is: deployedEnvironment,
-          then: Joi.string().uri().required(),
+          then: Joi.string()
+            .uri({ scheme: ["postgres", "postgresql"] })
+            .required(),
           otherwise: Joi.string()
             .empty("")
+            .uri({ scheme: ["postgres", "postgresql"] })
             .default(
               "postgresql://trustpay:trustpay_secret@localhost:5432/trustpay_db?schema=public",
             ),
