@@ -28,6 +28,8 @@ import { AppController } from "./app.controller";
 import { AppService } from "./app.service";
 import { IdempotencyInterceptor } from "./common/interceptors/idempotency.interceptor";
 
+const deployedEnvironment = Joi.valid("production", "staging");
+
 @Module({
   imports: [
     ConfigModule.forRoot({
@@ -40,7 +42,7 @@ import { IdempotencyInterceptor } from "./common/interceptors/idempotency.interc
           .default("development"),
         PORT: Joi.number().empty("").default(3000),
         DATABASE_URL: Joi.when("NODE_ENV", {
-          is: "production",
+          is: deployedEnvironment,
           then: Joi.string().uri().required(),
           otherwise: Joi.string()
             .empty("")
@@ -86,13 +88,19 @@ import { IdempotencyInterceptor } from "./common/interceptors/idempotency.interc
         MONNIFY_EXCHANGE_COLLECTION_ACCOUNT_NUMBER: Joi.string()
           .allow("")
           .optional(),
+        REDIS_URL: Joi.when("NODE_ENV", {
+          is: deployedEnvironment,
+          then: Joi.string()
+            .uri({ scheme: ["redis", "rediss"] })
+            .required(),
+          otherwise: Joi.string()
+            .uri({ scheme: ["redis", "rediss"] })
+            .allow("")
+            .optional(),
+        }),
         REDIS_HOST: Joi.string().empty("").default("localhost"),
         REDIS_PORT: Joi.number().empty("").default(6379),
-        REDIS_PASSWORD: Joi.when("NODE_ENV", {
-          is: "production",
-          then: Joi.string().min(16).required(),
-          otherwise: Joi.string().allow("").optional(),
-        }),
+        REDIS_PASSWORD: Joi.string().allow("").optional(),
         OTP_EXPIRES_IN: Joi.string().allow("").optional(),
         OTP_LENGTH: Joi.string().allow("").optional(),
         OTP_DEV_CODE: Joi.string().allow("").optional(),

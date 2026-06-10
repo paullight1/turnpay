@@ -11,16 +11,23 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
     private configService: ConfigService,
     private readonly logger: PinoLogger,
   ) {
-    this.client = new IORedis({
-      host: this.configService.get<string>("REDIS_HOST", "localhost"),
-      port: this.configService.get<number>("REDIS_PORT", 6379),
-      password: this.configService.get<string>("REDIS_PASSWORD", ""),
+    const options = {
       retryStrategy: (times: number) => {
         if (times > 10) return null;
         return Math.min(times * 200, 2000);
       },
       maxRetriesPerRequest: 3,
-    });
+    };
+    const redisUrl = this.configService.get<string>("REDIS_URL");
+
+    this.client = redisUrl
+      ? new IORedis(redisUrl, options)
+      : new IORedis({
+          host: this.configService.get<string>("REDIS_HOST", "localhost"),
+          port: this.configService.get<number>("REDIS_PORT", 6379),
+          password: this.configService.get<string>("REDIS_PASSWORD", ""),
+          ...options,
+        });
 
     this.client.on("error", (err) => {
       this.logger.error({ err }, "Redis connection error");
