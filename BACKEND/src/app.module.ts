@@ -191,6 +191,10 @@ const defaultNodeEnv =
         VTU_PROVIDER: Joi.string()
           .valid("generic", "vtpass")
           .default("generic"),
+        VTU_KYC_BYPASS: Joi.boolean()
+          .truthy("true")
+          .falsy("false")
+          .default(false),
         VTU_API_URL: Joi.string().uri().allow("").optional(),
         VTU_API_KEY: Joi.string().allow("").optional(),
         VTPASS_BASE_URL: Joi.string().uri().allow("").optional(),

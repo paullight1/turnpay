@@ -59,6 +59,9 @@ describe("VtuService purchase ledger handling", () => {
     requeryUtilityPayment: jest.fn(),
     assertReadyForPurchase: jest.fn(),
   };
+  const configService = {
+    get: jest.fn(),
+  };
 
   const logger = {
     info: jest.fn(),
@@ -78,6 +81,12 @@ describe("VtuService purchase ledger handling", () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    configService.get.mockImplementation((key: string) => {
+      if (key === "VTU_KYC_BYPASS") {
+        return false;
+      }
+      return undefined;
+    });
     prisma.user.findUnique.mockResolvedValue({
       id: "user-1",
       kycStatus: "VERIFIED",
@@ -111,6 +120,7 @@ describe("VtuService purchase ledger handling", () => {
       walletsService as any,
       vtuApi as any,
       reloadly as any,
+      configService as any,
       logger as any,
       ledger as any,
       transactionPin as any,
@@ -530,6 +540,48 @@ describe("VtuService purchase ledger handling", () => {
 
     expect(walletsService.getWallet).not.toHaveBeenCalled();
     expect(vtuApi.purchase).not.toHaveBeenCalled();
+  });
+
+  it("allows VTU purchase when the KYC bypass flag is enabled", async () => {
+    configService.get.mockImplementation((key: string) => {
+      if (key === "VTU_KYC_BYPASS") {
+        return true;
+      }
+      return undefined;
+    });
+    prisma.user.findUnique.mockResolvedValue({
+      id: "user-1",
+      kycStatus: "PENDING",
+      kycTier: "TIER_0",
+      isSuspended: false,
+    });
+    walletsService.getWallet.mockResolvedValue({
+      id: "wallet-1",
+      balance: new Decimal(5000),
+    });
+    prisma.transaction.create.mockResolvedValue({
+      id: "tx-1",
+      reference: "VTU-1",
+    });
+    ledger.debitWallet.mockResolvedValue({
+      balanceAfter: new Decimal(4500),
+    });
+    vtuApi.purchase.mockResolvedValue({
+      reference: "provider-vtu-1",
+      status: "success",
+      message: "Airtime delivered",
+    });
+
+    await service.purchase("user-1", {
+      type: "airtime",
+      provider: "mtn",
+      recipientNumber: "+2348012345678",
+      amount: "500",
+    });
+
+    expect(prisma.user.findUnique).not.toHaveBeenCalled();
+    expect(walletsService.getWallet).toHaveBeenCalledWith("user-1", "NGN");
+    expect(vtuApi.purchase).toHaveBeenCalled();
   });
 
   it("rejects data bundle purchases when client amount does not match provider package price", async () => {

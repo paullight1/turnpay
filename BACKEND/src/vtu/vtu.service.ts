@@ -4,6 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
+import { ConfigService } from "@nestjs/config";
 import { PrismaService } from "../prisma/prisma.service";
 import {
   Prisma,
@@ -65,6 +66,7 @@ export class VtuService {
     private readonly walletsService: WalletsService,
     private readonly vtuApi: VtuApiProvider,
     private readonly reloadly: ReloadlyProvider,
+    private readonly configService: ConfigService,
     private readonly logger: PinoLogger,
     private readonly ledger: LedgerService,
     private readonly transactionPin: TransactionPinService,
@@ -896,6 +898,10 @@ export class VtuService {
   }
 
   private async assertUserCanPurchase(userId: string) {
+    if (this.isVtuKycBypassEnabled()) {
+      return;
+    }
+
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
       select: {
@@ -923,6 +929,11 @@ export class VtuService {
         `KYC ${formatKycTier("TIER_2")} is required for VTU purchases`,
       );
     }
+  }
+
+  private isVtuKycBypassEnabled() {
+    const configured = this.configService.get<unknown>("VTU_KYC_BYPASS");
+    return configured === true || configured === "true";
   }
 
   private assertRequiredTarget(dto: PurchaseVtuDto) {
