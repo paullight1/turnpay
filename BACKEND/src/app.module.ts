@@ -29,6 +29,10 @@ import { AppService } from "./app.service";
 import { IdempotencyInterceptor } from "./common/interceptors/idempotency.interceptor";
 
 const deployedEnvironment = Joi.valid("production", "staging");
+const defaultNodeEnv =
+  process.env.WEB_CONCURRENCY || process.env.RENDER_WEB_CONCURRENCY
+    ? "staging"
+    : "development";
 
 @Module({
   imports: [
@@ -39,7 +43,7 @@ const deployedEnvironment = Joi.valid("production", "staging");
         NODE_ENV: Joi.string()
           .valid("development", "production", "test", "staging")
           .empty("")
-          .default("development"),
+          .default(defaultNodeEnv),
         PORT: Joi.number().empty("").default(3000),
         DATABASE_URL: Joi.when("NODE_ENV", {
           is: deployedEnvironment,
