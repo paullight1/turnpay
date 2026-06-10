@@ -41,10 +41,13 @@ const defaultNodeEnv =
       envFilePath: [".env", ".env.example"],
       validationSchema: Joi.object({
         NODE_ENV: Joi.string()
+          .trim()
+          .lowercase()
           .valid("development", "production", "test", "staging")
           .empty("")
+          .empty("value")
           .default(defaultNodeEnv),
-        PORT: Joi.number().empty("").default(3000),
+        PORT: Joi.number().empty("").empty("value").default(3000),
         DATABASE_URL: Joi.when("NODE_ENV", {
           is: deployedEnvironment,
           then: Joi.string()
