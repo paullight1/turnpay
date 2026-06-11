@@ -42,6 +42,26 @@ interface WithdrawalDestination {
   accountNumberMasked: string;
 }
 
+interface WithdrawalRecord {
+  id: string;
+  reference: string;
+  amount: Decimal;
+  currency: string;
+  status: TransactionStatus;
+  metadata: unknown;
+  transferAttempts: Array<{
+    id: string;
+    providerReference: string;
+    providerStatus: string;
+    status: string;
+    attemptNo: number;
+    lastCheckedAt: Date | null;
+    metadata: unknown;
+    createdAt: Date;
+    updatedAt: Date;
+  }>;
+}
+
 @Injectable()
 export class PaymentService {
   constructor(
@@ -763,37 +783,7 @@ export class PaymentService {
   }
 
   async getWithdrawal(userId: string, reference: string) {
-    const transaction = await this.prisma.transaction.findFirst({
-      where: {
-        userId,
-        reference,
-        type: "WITHDRAW",
-      },
-      select: {
-        reference: true,
-        amount: true,
-        currency: true,
-        status: true,
-        fee: true,
-        metadata: true,
-        createdAt: true,
-        updatedAt: true,
-        transferAttempts: {
-          orderBy: { createdAt: "desc" },
-          select: {
-            provider: true,
-            providerReference: true,
-            providerStatus: true,
-            status: true,
-            attemptNo: true,
-            lastCheckedAt: true,
-            metadata: true,
-            createdAt: true,
-            updatedAt: true,
-          },
-        },
-      },
-    });
+    const transaction = await this.loadWithdrawal(userId, reference);
 
     if (!transaction) {
       throw new NotFoundException("Withdrawal not found");
@@ -806,6 +796,148 @@ export class PaymentService {
         ...attempt,
         metadata: this.sanitizeWithdrawalMetadata(attempt.metadata),
       })),
+    };
+  }
+
+  async authorizeWithdrawal(
+    userId: string,
+    reference: string,
+    authorizationCode: string,
+  ) {
+    const withdrawal = await this.loadWithdrawal(userId, reference);
+
+    if (!withdrawal) {
+      throw new NotFoundException("Withdrawal not found");
+    }
+
+    const latestAttempt = withdrawal.transferAttempts[0];
+    if (!latestAttempt) {
+      throw new BadRequestException("Withdrawal has not been submitted");
+    }
+
+    const providerReference = this.getWithdrawalProviderReference(
+      withdrawal.reference,
+      latestAttempt.metadata,
+    );
+
+    const authorization = await this.monnifyBanks.authorizeTransfer({
+      reference: providerReference,
+      authorizationCode,
+    });
+    const finalStatus = this.mapTransferStatus(authorization.status);
+
+    const updatedTransaction = await this.prisma.$transaction(async (tx) => {
+      const transition = await tx.transaction.updateMany({
+        where: {
+          id: withdrawal.id,
+          status: "PENDING",
+        },
+        data: { status: finalStatus },
+      });
+
+      if (transition.count === 0) {
+        return false;
+      }
+
+      await tx.transferAttempt.update({
+        where: { id: latestAttempt.id },
+        data: {
+          providerStatus: authorization.status,
+          status: finalStatus,
+          lastCheckedAt: new Date(),
+          metadata: this.mergeJsonMetadata(latestAttempt.metadata, {
+            providerTransactionReference:
+              authorization.transactionReference || providerReference,
+            providerAuthorizationStatus:
+              authorization.responseMessage || authorization.status,
+          }) as Prisma.InputJsonValue,
+        },
+      });
+
+      return true;
+    });
+
+    if (updatedTransaction && ["FAILED", "REVERSED"].includes(finalStatus)) {
+      const withdrawalMetadata =
+        withdrawal.metadata &&
+        typeof withdrawal.metadata === "object" &&
+        !Array.isArray(withdrawal.metadata)
+          ? (withdrawal.metadata as Record<string, unknown>)
+          : {};
+      const attemptMetadata =
+        latestAttempt.metadata &&
+        typeof latestAttempt.metadata === "object" &&
+        !Array.isArray(latestAttempt.metadata)
+          ? (latestAttempt.metadata as Record<string, unknown>)
+          : {};
+
+      await this.reverseWithdrawal(
+        userId,
+        withdrawal.currency as WithdrawDto["currency"],
+        new Decimal(withdrawal.amount),
+        {
+          id: withdrawal.id,
+          reference: withdrawal.reference,
+        },
+        {
+          beneficiaryId:
+            (attemptMetadata.beneficiaryId as string | undefined) ||
+            (withdrawalMetadata.beneficiaryId as string | undefined),
+          accountNumberMasked:
+            (attemptMetadata.accountNumberMasked as string | undefined) ||
+            (withdrawalMetadata.accountNumberMasked as string | undefined) ||
+            maskAccountNumber("0000000000"),
+        },
+      );
+    }
+
+    return {
+      reference: withdrawal.reference,
+      status: finalStatus,
+      message:
+        finalStatus === "SUCCESS"
+          ? "Withdrawal authorized successfully"
+          : "Withdrawal authorization submitted",
+    };
+  }
+
+  async resendWithdrawalOtp(userId: string, reference: string) {
+    const withdrawal = await this.loadWithdrawal(userId, reference);
+
+    if (!withdrawal) {
+      throw new NotFoundException("Withdrawal not found");
+    }
+
+    const latestAttempt = withdrawal.transferAttempts[0];
+    if (!latestAttempt) {
+      throw new BadRequestException("Withdrawal has not been submitted");
+    }
+
+    const providerReference = this.getWithdrawalProviderReference(
+      withdrawal.reference,
+      latestAttempt.metadata,
+    );
+
+    const response = await this.monnifyBanks.resendTransferOtp(
+      providerReference,
+    );
+
+    await this.prisma.transferAttempt.update({
+      where: { id: latestAttempt.id },
+      data: {
+        lastCheckedAt: new Date(),
+        metadata: this.mergeJsonMetadata(latestAttempt.metadata, {
+          otpResentAt: new Date().toISOString(),
+          providerTransactionReference:
+            response.reference || providerReference,
+        }) as Prisma.InputJsonValue,
+      },
+    });
+
+    return {
+      reference: response.reference || withdrawal.reference,
+      message:
+        response.responseMessage || "Withdrawal OTP resent successfully",
     };
   }
 
@@ -1028,7 +1160,7 @@ export class PaymentService {
     currency: WithdrawDto["currency"],
     amount: Decimal,
     transaction: { id: string; reference: string },
-    destination: WithdrawalDestination,
+    destination: Pick<WithdrawalDestination, "beneficiaryId" | "accountNumberMasked">,
   ) {
     await this.prisma.$transaction(async (tx) => {
       const existingReversal = await tx.ledgerEntry.findFirst({
@@ -1067,6 +1199,60 @@ export class PaymentService {
         data: { monthlyWithdrawn: { decrement: amount } },
       });
     });
+  }
+
+  private async loadWithdrawal(userId: string, reference: string) {
+    return this.prisma.transaction.findFirst({
+      where: {
+        userId,
+        reference,
+        type: "WITHDRAW",
+      },
+      select: {
+        id: true,
+        reference: true,
+        amount: true,
+        currency: true,
+        status: true,
+        metadata: true,
+        createdAt: true,
+        updatedAt: true,
+        transferAttempts: {
+          orderBy: { createdAt: "desc" },
+          select: {
+            provider: true,
+            providerReference: true,
+            providerStatus: true,
+            status: true,
+            attemptNo: true,
+            lastCheckedAt: true,
+            metadata: true,
+            createdAt: true,
+            updatedAt: true,
+          },
+        },
+      },
+    }) as Promise<WithdrawalRecord | null>;
+  }
+
+  private getWithdrawalProviderReference(
+    reference: string,
+    metadata: unknown,
+  ) {
+    if (metadata && typeof metadata === "object" && !Array.isArray(metadata)) {
+      const providerTransactionReference = (
+        metadata as Record<string, unknown>
+      ).providerTransactionReference;
+
+      if (
+        typeof providerTransactionReference === "string" &&
+        providerTransactionReference.trim().length > 0
+      ) {
+        return providerTransactionReference;
+      }
+    }
+
+    return reference;
   }
 
   private mapTransferStatus(status: string) {

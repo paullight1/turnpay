@@ -18,6 +18,7 @@ describe("PaymentService withdrawals", () => {
     },
     transaction: {
       create: jest.fn(),
+      findFirst: jest.fn(),
       findUnique: jest.fn(),
       update: jest.fn(),
       updateMany: jest.fn(),
@@ -49,6 +50,9 @@ describe("PaymentService withdrawals", () => {
     listBanks: jest.fn(),
     resolveBankAccount: jest.fn(),
     initiateTransfer: jest.fn(),
+    authorizeTransfer: jest.fn(),
+    resendTransferOtp: jest.fn(),
+    getTransferStatus: jest.fn(),
   };
   const flutterwave = {};
   const config = {
@@ -570,5 +574,127 @@ describe("PaymentService withdrawals", () => {
       }),
       prisma,
     );
+  });
+
+  it("authorizes a pending withdrawal using the Monnify OTP flow", async () => {
+    const transferAttemptMetadata = {
+      beneficiaryId: "beneficiary-1",
+      accountNumberMasked: "******6789",
+      providerTransactionReference: "MNF-1",
+    };
+
+    prisma.transaction.findFirst.mockResolvedValue({
+      id: "tx-1",
+      reference: "WD-1",
+      amount: new Decimal(1000),
+      currency: "NGN",
+      status: "PENDING",
+      metadata: { accountNumberMasked: "******6789" },
+      transferAttempts: [
+        {
+          id: "attempt-1",
+          providerReference: "WD-1",
+          providerStatus: "PENDING_AUTHORIZATION",
+          status: "PENDING",
+          attemptNo: 1,
+          lastCheckedAt: null,
+          metadata: transferAttemptMetadata,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+      ],
+    });
+    prisma.transaction.updateMany.mockResolvedValue({ count: 1 });
+    prisma.transferAttempt.update.mockResolvedValue({
+      id: "attempt-1",
+    });
+    monnifyBanks.authorizeTransfer.mockResolvedValue({
+      reference: "MNF-1",
+      transactionReference: "MNF-1",
+      status: "AWAITING_PROCESSING",
+      responseMessage: "OTP accepted",
+      raw: {},
+    });
+
+    const result = await service.authorizeWithdrawal(
+      "user-1",
+      "WD-1",
+      "123456",
+    );
+
+    expect(monnifyBanks.authorizeTransfer).toHaveBeenCalledWith({
+      reference: "MNF-1",
+      authorizationCode: "123456",
+    });
+    expect(prisma.transaction.updateMany).toHaveBeenCalledWith({
+      where: { id: "tx-1", status: "PENDING" },
+      data: { status: "PENDING" },
+    });
+    expect(prisma.transferAttempt.update).toHaveBeenCalledWith({
+      where: { id: "attempt-1" },
+      data: expect.objectContaining({
+        providerStatus: "AWAITING_PROCESSING",
+        status: "PENDING",
+      }),
+    });
+    expect(ledger.creditWallet).not.toHaveBeenCalled();
+    expect(result).toEqual({
+      reference: "WD-1",
+      status: "PENDING",
+      message: "Withdrawal authorization submitted",
+    });
+  });
+
+  it("resends Monnify OTP for a pending withdrawal", async () => {
+    prisma.transaction.findFirst.mockResolvedValue({
+      id: "tx-1",
+      reference: "WD-1",
+      amount: new Decimal(1000),
+      currency: "NGN",
+      status: "PENDING",
+      metadata: { accountNumberMasked: "******6789" },
+      transferAttempts: [
+        {
+          id: "attempt-1",
+          providerReference: "WD-1",
+          providerStatus: "PENDING_AUTHORIZATION",
+          status: "PENDING",
+          attemptNo: 1,
+          lastCheckedAt: null,
+          metadata: {
+            beneficiaryId: "beneficiary-1",
+            accountNumberMasked: "******6789",
+            providerTransactionReference: "MNF-1",
+          },
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+      ],
+    });
+    prisma.transferAttempt.update.mockResolvedValue({
+      id: "attempt-1",
+    });
+    monnifyBanks.resendTransferOtp.mockResolvedValue({
+      reference: "MNF-1",
+      responseMessage: "OTP resent",
+      raw: {},
+    });
+
+    const result = await service.resendWithdrawalOtp("user-1", "WD-1");
+
+    expect(monnifyBanks.resendTransferOtp).toHaveBeenCalledWith("MNF-1");
+    expect(prisma.transferAttempt.update).toHaveBeenCalledWith({
+      where: { id: "attempt-1" },
+      data: expect.objectContaining({
+        metadata: expect.objectContaining({
+          otpResentAt: expect.any(String),
+          providerTransactionReference: "MNF-1",
+        }),
+      }),
+    });
+    expect(result).toEqual({
+      reference: "MNF-1",
+      message: "OTP resent",
+    });
   });
 });
