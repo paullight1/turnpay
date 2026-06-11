@@ -1,6 +1,5 @@
-import 'dart:io';
-
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 
 import 'api_client.dart';
 
@@ -16,7 +15,7 @@ class AuthService {
     final response = await _apiClient.client.post(
       '/api/auth/login',
       data: {
-        'email': email.trim(),
+        'email': _normalizeEmail(email),
         'password': password,
         'deviceName': _deviceName(),
       },
@@ -31,16 +30,19 @@ class AuthService {
     required String phone,
     required String password,
     required String transactionPin,
+    String? referralCode,
   }) async {
     final response = await _apiClient.client.post(
       '/api/auth/register',
       data: {
         'fullName': fullName.trim(),
-        'email': email.trim(),
+        'email': _normalizeEmail(email),
         'phone': _normalizePhone(phone),
         'password': password,
         'transactionPin': transactionPin,
         'deviceName': _deviceName(),
+        if (referralCode != null && referralCode.trim().isNotEmpty)
+          'referralCode': referralCode.trim().toUpperCase(),
       },
     );
 
@@ -50,7 +52,7 @@ class AuthService {
   Future<void> forgotPassword(String email) async {
     await _apiClient.client.post(
       '/api/auth/forgot-password',
-      data: {'email': email.trim()},
+      data: {'email': _normalizeEmail(email)},
     );
   }
 
@@ -162,9 +164,7 @@ class AuthService {
       return [];
     }
 
-    return sessions
-        .whereType<Map<String, dynamic>>()
-        .toList(growable: false);
+    return sessions.whereType<Map<String, dynamic>>().toList(growable: false);
   }
 
   Future<bool> revokeSession(String sessionId) async {
@@ -176,23 +176,25 @@ class AuthService {
     return phone.replaceAll(RegExp(r'\s+'), '').trim();
   }
 
+  String _normalizeEmail(String email) {
+    return email.trim().toLowerCase();
+  }
+
   String _deviceName() {
-    final platform = Platform.operatingSystem;
-    final version = Platform.operatingSystemVersion;
-
-    if (platform.isNotEmpty) {
-      if (version.isNotEmpty) {
-        final versionLabel =
-            '$platform ${version.replaceAll(RegExp(r'\s+'), ' ')}'.trim();
-        return versionLabel.length > 120
-            ? versionLabel.substring(0, 120)
-            : versionLabel;
-      }
-
-      return platform;
+    if (kIsWeb) {
+      return 'TrustPay Flutter Web';
     }
 
-    return 'Unknown mobile device';
+    final platform = switch (defaultTargetPlatform) {
+      TargetPlatform.android => 'Android',
+      TargetPlatform.iOS => 'iOS',
+      TargetPlatform.macOS => 'macOS',
+      TargetPlatform.linux => 'Linux',
+      TargetPlatform.windows => 'Windows',
+      TargetPlatform.fuchsia => 'Fuchsia',
+    };
+
+    return 'TrustPay Flutter $platform';
   }
 }
 
@@ -202,7 +204,11 @@ String authErrorMessage(Object error, String fallback) {
   if (error is DioException) {
     final data = error.response?.data;
     if (_isAuthRequest(path)) {
-      return _authSafeMessage(fallback, path);
+      return _authSafeMessage(
+        fallback,
+        path,
+        statusCode: error.response?.statusCode,
+      );
     }
 
     if (data is Map<String, dynamic>) {
@@ -232,9 +238,21 @@ bool _isAuthRequest(String? path) {
   return path != null && path.startsWith('/api/auth/');
 }
 
-String _authSafeMessage(String fallback, String? path) {
+String _authSafeMessage(
+  String fallback,
+  String? path, {
+  int? statusCode,
+}) {
   if (path == null) {
     return fallback;
+  }
+
+  if (statusCode == 429) {
+    if (path.contains('/register')) {
+      return 'Registration is temporarily rate limited. Please try again later.';
+    }
+
+    return 'Too many attempts. Please wait a moment and try again.';
   }
 
   if (path.contains('/login')) {
@@ -242,6 +260,10 @@ String _authSafeMessage(String fallback, String? path) {
   }
 
   if (path.contains('/refresh')) {
+    return 'Your session has expired. Please sign in again.';
+  }
+
+  if (path.contains('/bootstrap')) {
     return 'Your session has expired. Please sign in again.';
   }
 

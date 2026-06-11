@@ -95,3 +95,9 @@ export class ResolveBankDto {
   @MaxLength(32)
   bankCode: string;
 }
+
+export class AuthorizeWithdrawalDto {
+  @IsString()
+  @Matches(/^\d{6,8}$/)
+  authorizationCode: string;
+}

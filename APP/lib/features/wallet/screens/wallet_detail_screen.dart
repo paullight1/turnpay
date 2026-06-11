@@ -6,6 +6,8 @@ import 'package:intl/intl.dart';
 import '../../../core/router/app_router.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/widgets/micro_interactions.dart';
+import '../../../core/widgets/tp_page_header.dart';
+import '../../../core/widgets/tp_snackbar.dart';
 import '../../../services/wallet_service.dart';
 
 class WalletDetailScreen extends StatefulWidget {
@@ -43,12 +45,20 @@ class _WalletDetailScreenState extends State<WalletDetailScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.background,
-      appBar: AppBar(
-        title: Text('${widget.currency} Wallet'),
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back_rounded),
-          onPressed: () => context.pop(),
-        ),
+      appBar: TpAppHeader(
+        label: '${widget.currency} Wallet',
+        menuActions: [
+          TpPageMenuAction(
+            label: 'Refresh',
+            icon: Icons.refresh_rounded,
+            onTap: _refresh,
+          ),
+          TpPageMenuAction(
+            label: 'Home',
+            icon: Icons.home_rounded,
+            onTap: () => context.go(AppRoutes.home),
+          ),
+        ],
       ),
       body: RefreshIndicator(
         color: AppColors.primary,
@@ -101,8 +111,7 @@ class _WalletDetailScreenState extends State<WalletDetailScreen> {
                                   icon: Icons.near_me_rounded,
                                   label: 'Send Money',
                                   color: AppColors.primary,
-                                  onTap: () =>
-                                      context.push(AppRoutes.send),
+                                  onTap: () => context.push(AppRoutes.send),
                                 ),
                               ),
                               SizedBox(width: AppSpacing.sm),
@@ -136,8 +145,7 @@ class _WalletDetailScreenState extends State<WalletDetailScreen> {
                                 ),
                               ),
                               TapScale(
-                                onTap: () =>
-                                    context.push(AppRoutes.activity),
+                                onTap: () => context.push(AppRoutes.activity),
                                 borderRadius: BorderRadius.circular(
                                   AppRadius.full,
                                 ),
@@ -166,8 +174,7 @@ class _WalletDetailScreenState extends State<WalletDetailScreen> {
                             padding: const EdgeInsets.all(AppSpacing.xl),
                             decoration: BoxDecoration(
                               color: AppColors.surfaceVariant,
-                              borderRadius:
-                                  BorderRadius.circular(AppRadius.md),
+                              borderRadius: BorderRadius.circular(AppRadius.md),
                             ),
                             child: Column(
                               children: [
@@ -237,41 +244,87 @@ class _BalanceHero extends StatelessWidget {
   Widget build(BuildContext context) {
     final symbol = currency == 'NGN' ? '₦' : 'GH₵';
     final formatted = NumberFormat('#,##0.00').format(balance);
+    final isLight = Theme.of(context).brightness == Brightness.light;
 
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(AppSpacing.lg),
       decoration: BoxDecoration(
-        gradient: const LinearGradient(
+        gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: [
-            Color(0xFF223B68),
-            Color(0xFF1E2A4B),
-          ],
+          colors: isLight
+              ? [
+                  AppColors.primary.withValues(alpha: 0.92),
+                  AppColors.primaryLight,
+                  AppColors.primaryDark,
+                ]
+              : [
+                  AppColors.primaryDark,
+                  AppColors.primary,
+                  AppColors.primaryLight,
+                ],
         ),
         borderRadius: BorderRadius.circular(AppRadius.md),
-        border: Border.all(color: const Color(0xFF30466F)),
+        boxShadow: [
+          BoxShadow(
+            color: AppColors.primary.withValues(alpha: 0.3),
+            blurRadius: 24,
+            offset: const Offset(0, 12),
+          ),
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            'Available Balance',
-            style: AppTextStyles.bodyM.copyWith(
-              color: AppColors.textSecondary,
-            ),
+          Row(
+            children: [
+              Container(
+                width: 8,
+                height: 8,
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.8),
+                  shape: BoxShape.circle,
+                ),
+              ),
+              const SizedBox(width: AppSpacing.sm),
+              Text(
+                'Available Balance',
+                style: AppTextStyles.bodyM.copyWith(
+                  color: Colors.white.withValues(alpha: 0.85),
+                ),
+              ),
+              const Spacer(),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 4,
+                ),
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.18),
+                  borderRadius: BorderRadius.circular(AppRadius.full),
+                ),
+                child: Text(
+                  currency,
+                  style: AppTextStyles.labelS.copyWith(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+            ],
           ),
-          SizedBox(height: AppSpacing.xs),
+          const SizedBox(height: AppSpacing.md),
           Text(
             '$symbol$formatted',
             style: AppTextStyles.displayMedium.copyWith(
               fontSize: 36,
               letterSpacing: -1.5,
               fontWeight: FontWeight.w800,
+              color: Colors.white,
             ),
           ),
-          SizedBox(height: AppSpacing.sm),
+          const SizedBox(height: AppSpacing.xs),
           Row(
             children: [
               Container(
@@ -282,11 +335,11 @@ class _BalanceHero extends StatelessWidget {
                   shape: BoxShape.circle,
                 ),
               ),
-              SizedBox(width: AppSpacing.sm),
+              const SizedBox(width: AppSpacing.sm),
               Text(
                 '$currency Wallet',
                 style: AppTextStyles.labelS.copyWith(
-                  color: AppColors.textSecondary,
+                  color: Colors.white.withValues(alpha: 0.82),
                 ),
               ),
             ],
@@ -314,25 +367,31 @@ class _ActionButton extends StatelessWidget {
   Widget build(BuildContext context) {
     return TapScale(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(AppRadius.sm),
+      borderRadius: BorderRadius.circular(AppRadius.md),
+      pressedScale: 0.95,
       child: Container(
         padding: const EdgeInsets.symmetric(
           vertical: AppSpacing.md,
-          horizontal: AppSpacing.lg,
+          horizontal: AppSpacing.sm,
         ),
         decoration: BoxDecoration(
-          color: color.withValues(alpha: 0.12),
-          borderRadius: BorderRadius.circular(AppRadius.sm),
-          border: Border.all(color: color.withValues(alpha: 0.3)),
+          color: color.withValues(alpha: 0.1),
+          borderRadius: BorderRadius.circular(AppRadius.md),
+          border: Border.all(color: color.withValues(alpha: 0.25)),
         ),
-        child: Row(
+        child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(icon, color: color, size: 20),
-            SizedBox(width: AppSpacing.sm),
+            Icon(icon, color: color, size: 22),
+            SizedBox(height: AppSpacing.xs),
             Text(
               label,
-              style: AppTextStyles.labelM.copyWith(color: color),
+              style: AppTextStyles.labelS.copyWith(
+                color: color,
+                fontWeight: FontWeight.w700,
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
             ),
           ],
         ),
@@ -347,8 +406,7 @@ class _VirtualAccountSection extends StatefulWidget {
   const _VirtualAccountSection({required this.currency});
 
   @override
-  State<_VirtualAccountSection> createState() =>
-      _VirtualAccountSectionState();
+  State<_VirtualAccountSection> createState() => _VirtualAccountSectionState();
 }
 
 class _VirtualAccountSectionState extends State<_VirtualAccountSection> {
@@ -358,8 +416,7 @@ class _VirtualAccountSectionState extends State<_VirtualAccountSection> {
   @override
   void initState() {
     super.initState();
-    _accountsFuture =
-        _walletService.fetchVirtualAccounts();
+    _accountsFuture = _walletService.fetchVirtualAccounts();
   }
 
   @override
@@ -373,7 +430,8 @@ class _VirtualAccountSectionState extends State<_VirtualAccountSection> {
             .cast<VirtualAccountData?>()
             .firstOrNull;
 
-        if (!snapshot.hasData && snapshot.connectionState == ConnectionState.waiting) {
+        if (!snapshot.hasData &&
+            snapshot.connectionState == ConnectionState.waiting) {
           return const SizedBox.shrink();
         }
 
@@ -401,10 +459,8 @@ class _VirtualAccountSectionState extends State<_VirtualAccountSection> {
                 ),
                 SizedBox(width: AppSpacing.sm),
                 TapScale(
-                  onTap: () =>
-                      context.push(AppRoutes.virtualAccount),
-                  borderRadius:
-                      BorderRadius.circular(AppRadius.full),
+                  onTap: () => context.push(AppRoutes.virtualAccount),
+                  borderRadius: BorderRadius.circular(AppRadius.full),
                   child: Text(
                     'Setup',
                     style: AppTextStyles.labelM.copyWith(
@@ -479,12 +535,10 @@ class _ActiveVirtualAccountCard extends StatelessWidget {
                 Clipboard.setData(
                   ClipboardData(text: account.accountNumber),
                 );
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text('Account number copied'),
-                    backgroundColor: AppColors.surface,
-                    duration: const Duration(seconds: 2),
-                  ),
+                showTpSnackbar(
+                  context,
+                  'Account number copied',
+                  type: TpSnackbarType.success,
                 );
               },
             ),
@@ -605,8 +659,7 @@ class _TransactionRow extends StatelessWidget {
               height: 40,
               decoration: BoxDecoration(
                 color: _statusColor.withValues(alpha: 0.12),
-                borderRadius:
-                    BorderRadius.circular(AppRadius.sm),
+                borderRadius: BorderRadius.circular(AppRadius.sm),
               ),
               child: Icon(_icon, color: _statusColor, size: 20),
             ),
@@ -644,8 +697,7 @@ class _TransactionRow extends StatelessWidget {
                   ),
                   decoration: BoxDecoration(
                     color: _statusColor.withValues(alpha: 0.12),
-                    borderRadius:
-                        BorderRadius.circular(AppRadius.full),
+                    borderRadius: BorderRadius.circular(AppRadius.full),
                   ),
                   child: Text(
                     status.toUpperCase(),
@@ -683,8 +735,7 @@ class _TransactionRow extends StatelessWidget {
       case 'CABLE':
         return 'Cable TV';
       default:
-        return type[0].toUpperCase() +
-            type.substring(1).toLowerCase();
+        return type[0].toUpperCase() + type.substring(1).toLowerCase();
     }
   }
 }
@@ -714,8 +765,7 @@ class _WalletDetailLoadingState extends StatelessWidget {
               child: ShimmerBlock(
                 width: double.infinity,
                 height: 48,
-                borderRadius:
-                    BorderRadius.circular(AppRadius.sm),
+                borderRadius: BorderRadius.circular(AppRadius.sm),
               ),
             ),
             SizedBox(width: AppSpacing.sm),
@@ -723,8 +773,7 @@ class _WalletDetailLoadingState extends StatelessWidget {
               child: ShimmerBlock(
                 width: double.infinity,
                 height: 48,
-                borderRadius:
-                    BorderRadius.circular(AppRadius.sm),
+                borderRadius: BorderRadius.circular(AppRadius.sm),
               ),
             ),
           ],
@@ -742,8 +791,7 @@ class _WalletDetailLoadingState extends StatelessWidget {
             child: ShimmerBlock(
               width: double.infinity,
               height: 68,
-              borderRadius:
-                  BorderRadius.circular(AppRadius.sm),
+              borderRadius: BorderRadius.circular(AppRadius.sm),
             ),
           );
         }),

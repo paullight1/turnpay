@@ -28,8 +28,21 @@ export type MarketingItem = {
   icon: LucideIcon;
 };
 
+export type BlogArticle = {
+  slug: string;
+  title: string;
+  excerpt: string;
+  content: string;
+  image: { src: string; alt: string; credit: string; href: string };
+  author: string;
+  date: string;
+  readTime: string;
+  tags: string[];
+};
+
 export const navItems = [
   { label: "Download", href: "/download" },
+  { label: "Blog", href: "/blog" },
   { label: "About", href: "/about" },
   { label: "Contact Us", href: "/support" },
 ];
@@ -253,20 +266,17 @@ export const supportChannels: MarketingItem[] = [
 export const companyValues: MarketingItem[] = [
   {
     title: "Built for the Corridor",
-    description:
-      "TrustPay starts with Ghana and Nigeria money needs.",
+    description: "For NGN and GHS.",
     icon: UsersRound,
   },
   {
     title: "Clear Money Movement",
-    description:
-      "Users should see balance, rate, fee, and status.",
+    description: "Rates, fees, status.",
     icon: TrendingUp,
   },
   {
     title: "Operational Discipline",
-    description:
-      "Money flows need checks, records, and clear fixes.",
+    description: "Checks and records.",
     icon: ShieldCheck,
   },
 ];
@@ -294,6 +304,90 @@ export const faqItems = [
   },
 ];
 
+export const blogArticles: BlogArticle[] = [
+  {
+    slug: "cbn-fintech-regulation-2026",
+    title: "CBN's 2026 Fintech Strategy: What It Means for Naira-GHS Exchange",
+    excerpt: "Nigeria's Central Bank released a landmark fintech strategy report in February 2026, signalling a shift toward innovation-friendly regulation that could transform cross-border payments between Nigeria and Ghana.",
+    content: `The Central Bank of Nigeria (CBN) published its comprehensive Fintech Strategy Report in February 2026, marking a pivotal moment for digital financial services in Africa's largest economy.
+
+The report outlines a clear roadmap for streamlining fintech approvals, deploying Supervisory Technology (SupTech) for real-time compliance monitoring, and creating sandbox frameworks that allow faster market entry for innovative payment solutions.
+
+For the Nigeria-Ghana corridor, this regulatory evolution is particularly significant. The CBN's embrace of structured fintech oversight creates a more predictable environment for cross-border payment platforms like TrustPay, which facilitate NGN to GHS exchange for thousands of users.
+
+"A predictable regulatory framework is the foundation for building trust in digital financial services," says the report. "We are committed to supporting innovation while maintaining the highest standards of financial integrity."
+
+Key takeaways from the strategy include:\n\n- **Streamlined licensing:** Reduced approval timelines for payment service providers\n- **SupTech deployment:** AI-powered monitoring for compliance and fraud detection\n- **Sandbox expansion:** More flexible testing environments for new financial products\n- **Cross-border focus:** Specific provisions for regional payment corridors\n
+The Bank of Ghana (BoG) has similarly signaled openness to fintech-led payment innovations, creating a regulatory environment where NGN-GHS exchange platforms can operate with greater confidence. As both regulators move toward more structured fintech frameworks, the corridor stands to benefit from increased investment, better infrastructure, and clearer consumer protections.
+
+For TrustPay users, this means more reliable service, stronger security guarantees, and a platform that's aligned with the evolving regulatory landscape across both countries.`,
+    image: {
+      src: "https://images.unsplash.com/photo-1554224155-8d04cb21cd6c?auto=format&fit=crop&q=80&w=2000",
+      alt: "Nigerian Naira and Ghanaian Cedi banknotes",
+      credit: "Photo by Stephen on Unsplash",
+      href: "https://unsplash.com/photos/pile-of-assorted-banknotes-t2S2tAk1SFw",
+    },
+    author: "TrustPay Editorial",
+    date: "March 10, 2026",
+    readTime: "4 min read",
+    tags: ["Regulation", "CBN", "NGN"],
+  },
+  {
+    slug: "west-africa-digital-payments-2026",
+    title: "West Africa's Digital Payments Surge: Ghana and Nigeria Lead the Way",
+    excerpt: "A surge in digital financial infrastructure across West Africa is reshaping how Ghanaians and Nigerians move money, with mobile money and fintech platforms driving unprecedented adoption.",
+    content: `The first quarter of 2026 has seen an acceleration in digital payment adoption across West Africa, with Ghana and Nigeria emerging as the region's clear leaders in fintech innovation and usage.
+
+According to recent industry data, mobile money transactions in both countries grew by over 40% year-on-year, driven by increasing smartphone penetration, improved agent networks, and a growing preference for digital over cash transactions.
+
+In Ghana, the Bank of Ghana's continued support for mobile money interoperability has been a key driver. The country's universal QR code system now connects all major mobile money operators and banks, allowing seamless transfers across previously siloed networks.
+
+Nigeria's fintech ecosystem continues to expand, with the naira's digital transformation gathering pace. The eNaira, Nigeria's central bank digital currency (CBDC), has seen increased adoption, particularly for cross-border transactions.
+
+"The Nigeria-Ghana corridor is one of the most active payment corridors in Africa," notes a recent industry report. "With millions of people moving money between both countries for trade, education, and family support, the demand for efficient, low-cost exchange services has never been higher."
+
+TrustPay sits at the intersection of these trends. By providing multi-currency wallets that hold both NGN and GHS balances, the platform eliminates the friction of traditional bank transfers and offers real-time exchange rates that reflect market conditions.
+
+The surge in digital payments benefits everyone in the corridor:\n\n- **Lower costs:** Digital platforms reduce the fees associated with traditional money transfer operators\n- **Faster settlement:** Transactions that once took days now complete in minutes\n- **Better transparency:** Users can see rates, fees, and status in real time\n- **Greater access:** Mobile-first platforms reach users who were previously excluded from formal financial services\n\nAs West Africa's digital financial infrastructure continues to mature, platforms that prioritize clarity, speed, and trust will be best positioned to serve the region's growing demand for cross-border payment solutions.`,
+    image: {
+      src: "https://images.unsplash.com/photo-1579621970563-ebec7560ff3e?auto=format&fit=crop&q=80&w=2000",
+      alt: "Mobile phone displaying digital payment",
+      credit: "Photo by Christiann on Unsplash",
+      href: "https://unsplash.com/photos/person-holding-smartphone-fIq0tET6llw",
+    },
+    author: "TrustPay Editorial",
+    date: "February 25, 2026",
+    readTime: "5 min read",
+    tags: ["Digital Payments", "West Africa", "GHS"],
+  },
+  {
+    slug: "bank-recapitalization-fintech-partnerships",
+    title: "Bank Recapitalization Creates New Opportunities for Fintech Partnerships",
+    excerpt: "As Nigerian and Ghanaian banks race to meet new capital requirements, many are turning to fintech partnerships to accelerate digital transformation and maintain market share.",
+    content: `The CBN's March 2026 recapitalization deadline has triggered a wave of consolidation and strategic partnerships across Nigeria's banking sector, with similar pressures emerging in Ghana's financial industry.
+
+The new capital requirements — designed to strengthen the banking system and support larger lending capacity — have forced traditional banks to evaluate their digital capabilities more seriously than ever before.
+
+Rather than building digital infrastructure from scratch, many banks are pursuing partnerships with established fintechs that already have proven platforms, user bases, and regulatory compliance in place.
+
+"Banks are realizing that partnering with fintechs is faster and more cost-effective than building competing platforms internally," explains a banking industry analyst. "This creates a win-win: banks get digital capabilities, and fintechs get access to the banks' customer base and regulatory infrastructure."
+
+For the Nigeria-Ghana corridor, these partnerships could accelerate the development of seamless cross-border payment solutions. As banks and fintechs collaborate, users can expect:\n\n- **Integrated banking and wallet experiences:** Move money between bank accounts and digital wallets without leaving either platform\n- **Better exchange rates:** Higher volumes and stronger banking partnerships can reduce the cost of currency conversion\n- **Enhanced security:** Bank-grade security measures applied to fintech platforms\n- **Faster compliance:** Shared KYC and AML infrastructure reduces onboarding friction\n\nTrustPay's multi-currency wallet is well-positioned to benefit from this trend, as the platform's focus on clear records, transparent fees, and auditable transactions aligns with the compliance requirements that banks and regulators prioritize.
+
+As the financial services landscape in both countries continues to evolve, the line between traditional banking and fintech will continue to blur — creating better outcomes for users who need to move money across the Nigeria-Ghana corridor.`,
+    image: {
+      src: "https://images.unsplash.com/photo-1560472354-b33ff0c44a43?auto=format&fit=crop&q=80&w=2000",
+      alt: "Bank building with modern architecture",
+      credit: "Photo by Clint Adair on Unsplash",
+      href: "https://unsplash.com/photos/brown-concrete-building-under-blue-sky-during-daytime-BW0vK-FA3eg",
+    },
+    author: "TrustPay Editorial",
+    date: "February 12, 2026",
+    readTime: "4 min read",
+    tags: ["Banking", "Partnerships", "NGN"],
+  },
+];
+
 export const footerGroups = [
   {
     title: "Product",
@@ -305,8 +399,8 @@ export const footerGroups = [
     title: "Company",
     links: [
       { label: "About", href: "/about" },
+      { label: "Blog", href: "/blog" },
       { label: "Contact Us", href: "/support" },
-      { label: "Dashboard", href: "/dashboard" },
     ],
   },
   {
@@ -315,6 +409,13 @@ export const footerGroups = [
       { label: "Sign In", href: "/login" },
       { label: "Create Account", href: "/register" },
       { label: "Reset Password", href: "/forgot-password" },
+    ],
+  },
+  {
+    title: "Legal",
+    links: [
+      { label: "Privacy Policy", href: "/legal#privacy" },
+      { label: "Terms of Use", href: "/legal#terms" },
     ],
   },
 ];

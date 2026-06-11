@@ -62,7 +62,7 @@ class TpButton extends StatelessWidget {
                   style: AppTextStyles.labelL.copyWith(
                     color: isOutlined
                         ? AppColors.textSecondary
-                        : AppColors.textPrimary,
+                        : Colors.white,
                   ),
                 ),
         ),

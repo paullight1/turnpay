@@ -1,36 +1,28 @@
+"use client";
+
 import Image from "next/image";
 import Link from "next/link";
 import {
   ArrowRight,
-  Banknote,
-  Cable,
-  ChevronLeft,
-  ChevronRight,
-  CreditCard,
-  Flame,
-  Gauge,
-  Landmark,
-  MessageCircle,
-  ReceiptText,
-  Send,
-  ShieldCheck,
-  Smartphone,
-  Star,
-  WalletCards,
-  Zap,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { marketingImages } from "@/lib/marketing";
+import {
+  blogArticles,
+  productFeatures,
+  securityControls,
+  testimonials,
+  faqItems as faqData,
+  companyValues,
+} from "@/lib/marketing";
 
-const brandStrip = [
-  "TrustFlow",
-  "PayLink",
-  "NGN-GHS",
-  "Wallet",
-  "VTU Stack",
-  "Rates",
-  "Receipts",
+// ─── DATA ──────────────────────────────────────────────────────────────────────
+
+const stats = [
+  { value: "250+", label: "Happy Clients" },
+  { value: "90%", label: "Customer Satisfaction" },
+  { value: "5k+", label: "Successful Payments" },
+  { value: "100%", label: "Security Controls" },
 ];
 
 const trustedBanks = [
@@ -48,348 +40,517 @@ const trustedBanks = [
   { name: "Access Bank", src: "/bank-logos-real/access.png", market: "Africa" },
 ];
 
-const stats = [
-  ["250+", "Happy Clients"],
-  ["90%", "Customer Satisfaction"],
-  ["5k", "Successful Payments"],
-  ["100%", "Security Controls"],
-];
-
-const workSteps = [
+const heroSlides = [
   {
-    icon: WalletCards,
-    title: "Create Wallet",
-    text: "Open NGN and GHS balances from one account.",
+    title: "Exchange Naira and Cedis in Minutes.",
+    image:
+      "https://images.unsplash.com/photo-1579621970795-87facc2f976d?auto=format&fit=crop&q=85&w=2200",
+    context: "Live NGN to GHS exchange",
   },
   {
-    icon: CreditCard,
-    title: "Fund Account",
-    text: "Add money and keep wallet records clean.",
+    title: "Send Money Across Ghana and Nigeria, Fast.",
+    image:
+      "https://images.unsplash.com/photo-1556742031-c6961e8560b0?auto=format&fit=crop&q=85&w=2200",
+    context: "Cross-border transfers",
   },
   {
-    icon: ReceiptText,
-    title: "Register",
-    text: "Attach references to each payment attempt.",
-  },
-  {
-    icon: Gauge,
-    title: "Start Trading",
-    text: "Exchange or pay bills after reviewing the details.",
+    title: "The Easy Way to Exchange Naira and Cedis.",
+    image:
+      "https://images.unsplash.com/photo-1563013544-824ae1b704d3?auto=format&fit=crop&q=85&w=2200",
+    context: "Simple, secure payments",
   },
 ];
 
-const currencyServices = [
-  { label: "Cedis", detail: "GHS wallet", flag: "ghana" },
-  { label: "NGN", detail: "Naira currency", flag: "nigeria" },
-  { label: "Virtual account", detail: "Local funding", flag: "wallet" },
-  { label: "USD accounts", detail: "Dollar-ready", flag: "usd" },
-  { label: "Euro", detail: "EUR account", flag: "euro" },
-  { label: "Pounds", detail: "GBP account", flag: "gbp" },
-];
-
-const networkServices = [
-  { label: "MTN", detail: "Airtime + data", tone: "bg-[#ffcc00] text-black" },
-  { label: "Glo", detail: "Airtime + data", tone: "bg-[#0f9d42] text-white" },
-  { label: "Airtel", detail: "Airtime + data", tone: "bg-[#ed1c24] text-white" },
-  { label: "Telecel", detail: "Ghana network", tone: "bg-[#e60000] text-white" },
-  { label: "AT", detail: "Ghana network", tone: "bg-[#006bff] text-white" },
-  { label: "9mobile", detail: "Airtime + data", tone: "bg-[#b5d334] text-black" },
-];
-
-const fastServiceWords = [
-  "Fast withdrawal",
-  "Fast transfer",
-  "Fast airtime",
-  "Fast data",
-  "Fast receipts",
-];
-
-const portfolioSteps = [
-  ["01", "Verify your identity", "Complete KYC so wallet limits and review rules are clear."],
-  ["02", "Fund your account", "Add money once and move between exchange and utility payments."],
-  ["03", "Short trading", "Track pending, successful, reversed, or failed transactions."],
-];
-
-const faqs = [
+const useCases = [
   {
-    question: "How do I create an account on TrustPay?",
-    answer: "Tap Get Started, add your details, verify your phone, and your NGN and GHS wallet setup can begin.",
+    title: "Freelancers",
+    description: "Get paid in NGN or GHS, then withdraw locally.",
+    image:
+      "https://images.unsplash.com/photo-1522202176988-66273c2fd55f?auto=format&fit=crop&q=80&w=1200",
+    alt: "Freelancers working together on laptops",
+    tag: "Client payments",
   },
   {
-    question: "How can I fund my account for bill trading?",
-    answer: "Use bank transfer, mobile money, or a supported wallet route. TrustPay keeps the funding record clear before you move money.",
+    title: "Businesses",
+    description: "Pay suppliers and teams across Ghana and Nigeria.",
+    image:
+      "https://images.unsplash.com/photo-1556761175-b413da4baf72?auto=format&fit=crop&q=80&w=1200",
+    alt: "Business team reviewing payment work",
+    tag: "Team payouts",
   },
   {
-    question: "What services are supported on the TrustPay platform?",
-    answer: "TrustPay supports NGN to GHS exchange, wallet funding, airtime, data, bills, receipts, and payment tracking.",
-  },
-  {
-    question: "Does TrustPay show receipts for every money movement?",
-    answer: "Yes. Each completed payment or exchange keeps a receipt and reference so you can review it later.",
-  },
-  {
-    question: "How does the advanced algorithm work to optimize wallet trades?",
-    answer: "It helps present clear rates, fees, and payment status so users can review the transaction before confirming.",
-  },
-  {
-    question: "Can I use TrustPay on mobile devices?",
-    answer: "Yes. TrustPay is designed for mobile users, with app download options and responsive wallet flows.",
+    title: "Travelers",
+    description: "Exchange, top up, and pay bills while on the move.",
+    image:
+      "https://images.unsplash.com/photo-1507525428034-b723cf961d3e?auto=format&fit=crop&q=80&w=1200",
+    alt: "Traveler walking near the coast",
+    tag: "On-the-go money",
   },
 ];
 
-function GlowToken({
-  className,
-  icon,
-}: {
-  className: string;
-  icon: React.ReactNode;
-}) {
-  return (
-    <span
-      className={`absolute hidden size-12 place-items-center rounded-full border border-orange-300/25 bg-orange-500/16 text-orange-200 shadow-[0_0_34px_rgba(255,107,10,0.38)] md:grid ${className}`}
-    >
-      {icon}
-    </span>
-  );
-}
+const processSteps = [
+  {
+    title: "Create wallet",
+    description: "Open NGN and GHS balances.",
+    image:
+      "https://images.unsplash.com/photo-1556742044-3c52d6e88c62?auto=format&fit=crop&q=80&w=1200",
+    alt: "Person setting up a mobile wallet on a phone",
+  },
+  {
+    title: "Pick service",
+    description: "Exchange, send, or pay bills.",
+    image:
+      "https://images.unsplash.com/photo-1556742502-ec7c0e9f34b1?auto=format&fit=crop&q=80&w=1200",
+    alt: "Mobile payment being reviewed",
+  },
+  {
+    title: "Review details",
+    description: "See fees before you confirm.",
+    image:
+      "https://images.unsplash.com/photo-1554224155-6726b3ff858f?auto=format&fit=crop&q=80&w=1200",
+    alt: "Payment details and financial paperwork",
+  },
+  {
+    title: "Track status",
+    description: "Follow every transfer clearly.",
+    image:
+      "https://images.unsplash.com/photo-1460925895917-afdab827c52f?auto=format&fit=crop&q=80&w=1200",
+    alt: "Dashboard showing financial activity",
+  },
+];
 
-function DashboardPreview() {
-  const bars = [58, 74, 42, 86, 64, 92, 51];
-  const transactions = [
-    ["Exchange", "GHS 420", "+4.7%"],
-    ["Airtime", "MTN", "+1.2%"],
-    ["Electricity", "NGN 20k", "Done"],
-  ];
+const featureCardStyles = [
+  {
+    card: "border-rose-100 bg-rose-50/80 hover:shadow-rose-100/50",
+    icon: "bg-white text-rose-600",
+  },
+  {
+    card: "border-emerald-100 bg-emerald-50/80 hover:shadow-emerald-100/50",
+    icon: "bg-white text-emerald-600",
+  },
+  {
+    card: "border-sky-100 bg-sky-50/80 hover:shadow-sky-100/50",
+    icon: "bg-white text-sky-600",
+  },
+  {
+    card: "border-violet-100 bg-violet-50/80 hover:shadow-violet-100/50",
+    icon: "bg-white text-violet-600",
+  },
+  {
+    card: "border-amber-100 bg-amber-50/80 hover:shadow-amber-100/50",
+    icon: "bg-white text-amber-600",
+  },
+  {
+    card: "border-slate-200 bg-slate-100/80 hover:shadow-slate-200/60",
+    icon: "bg-white text-slate-700",
+  },
+];
 
-  return (
-    <div className="relative mx-auto mt-12 w-full max-w-4xl rounded-xl border border-orange-400/25 bg-[#111411] p-3 shadow-[0_34px_100px_rgba(0,0,0,0.55)]">
-      <div className="grid overflow-hidden rounded-lg border border-white/8 bg-[#070907] md:grid-cols-[170px_1fr_190px]">
-        <aside className="hidden border-r border-white/8 bg-[#0c120f] p-4 md:block">
-          <div className="text-sm font-semibold text-white">TrustPay</div>
-          <div className="mt-6 grid gap-2 text-xs text-white/46">
-            {["Overview", "Wallets", "Exchange", "VTU", "Receipts"].map((item, index) => (
-              <div
-                key={item}
-                className={`rounded-md px-3 py-2 ${index === 0 ? "bg-orange-500 text-white" : "bg-white/[0.03]"}`}
-              >
-                {item}
-              </div>
-            ))}
-          </div>
-          <div className="mt-16 rounded-lg bg-orange-500/12 p-3 text-center">
-            <div className="mx-auto grid size-14 place-items-center rounded-full bg-orange-500/22 text-orange-200">
-              <WalletCards aria-hidden="true" className="size-6" />
-            </div>
-            <Button asChild size="sm" className="mt-3 rounded-full bg-orange-500 text-white">
-              <Link href="/register">Start</Link>
-            </Button>
-          </div>
-        </aside>
+const testimonialProfiles = [
+  {
+    image:
+      "https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&q=80&w=400",
+    alt: "Portrait of Nana K.",
+  },
+  {
+    image:
+      "https://images.unsplash.com/photo-1531123897727-8f129e1688ce?auto=format&fit=crop&q=80&w=400",
+    alt: "Portrait of Chidinma A.",
+  },
+  {
+    image:
+      "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&q=80&w=400",
+    alt: "Portrait of Kojo M.",
+  },
+];
 
-        <div className="p-4">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <p className="text-xs text-white/44">Analytics</p>
-              <h2 className="text-lg font-semibold">Wallet performance</h2>
-            </div>
-            <div className="rounded-full border border-white/8 bg-white/[0.04] px-3 py-1 text-xs text-orange-200">
-              Live rate
-            </div>
-          </div>
+const whyTrustPayImages = [
+  {
+    src: "https://images.unsplash.com/photo-1529156069898-49953e39b3ac?auto=format&fit=crop&q=80&w=1200",
+    alt: "People connecting across a busy city street",
+    tag: "Ghana + Nigeria",
+  },
+  {
+    src: "https://images.unsplash.com/photo-1554224155-8d04cb21cd6c?auto=format&fit=crop&q=80&w=1200",
+    alt: "Financial details being reviewed on a desk",
+    tag: "Clear rates",
+  },
+  {
+    src: "https://images.unsplash.com/photo-1450101499163-c8848c66ca85?auto=format&fit=crop&q=80&w=1200",
+    alt: "Records and payment documents on a desk",
+    tag: "Clean records",
+  },
+];
 
-          <div className="mt-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
-            {["NGN", "GHS", "VTU", "Fees"].map((item, index) => (
-              <div key={item} className="rounded-lg border border-white/8 bg-white/[0.04] p-3">
-                <p className="text-[11px] text-white/42">{item}</p>
-                <p className="mt-1 text-sm font-semibold">
-                  {index === 0 ? "₦338,060" : index === 1 ? "GH₵4,820" : index === 2 ? "23 paid" : "1.2%"}
-                </p>
-              </div>
-            ))}
-          </div>
+// ─── COMPONENTS ────────────────────────────────────────────────────────────────
 
-          <div className="mt-4 rounded-lg border border-white/8 bg-[#0c0f0c] p-4">
-            <div className="flex h-40 items-end gap-3">
-              {bars.map((height, index) => (
-                <div key={index} className="flex flex-1 items-end rounded-full bg-white/[0.04]">
-                  <span
-                    className="block w-full rounded-full bg-gradient-to-t from-orange-600 to-orange-300"
-                    style={{ height: `${height}%` }}
-                  />
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div className="mt-4 grid gap-3 md:grid-cols-3">
-            {transactions.map(([label, value, trend]) => (
-              <div key={label} className="rounded-lg border border-white/8 bg-white/[0.04] p-3">
-                <p className="text-xs text-white/42">{label}</p>
-                <p className="mt-1 text-sm font-semibold">{value}</p>
-                <p className="mt-2 text-xs text-orange-300">{trend}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <aside className="border-t border-white/8 bg-[#0b0e0b] p-4 md:border-l md:border-t-0">
-          <p className="text-xs text-white/42">Balance</p>
-          <p className="mt-1 text-xl font-semibold">₦338,060.20</p>
-          <div className="mt-5 space-y-3">
-            {["Pending", "Completed", "Reversed"].map((item, index) => (
-              <div key={item} className="flex items-center justify-between rounded-lg bg-white/[0.04] p-3 text-xs">
-                <span className="text-white/54">{item}</span>
-                <span className={index === 0 ? "text-orange-300" : "text-white"}>{index + 2}</span>
-              </div>
-            ))}
-          </div>
-          <Button asChild className="mt-5 w-full rounded-full bg-orange-500 text-white hover:bg-orange-400">
-            <Link href="/dashboard">Open app</Link>
-          </Button>
-        </aside>
-      </div>
-    </div>
-  );
-}
-
-function SectionTitle({
+function SectionHeading({
   eyebrow,
   title,
-  text,
+  description,
+  centered = true,
 }: {
   eyebrow?: string;
   title: string;
-  text?: string;
+  description?: string;
+  centered?: boolean;
 }) {
   return (
-    <div className="mx-auto max-w-2xl text-center">
-      {eyebrow ? <p className="text-xs font-semibold uppercase tracking-[0.18em] text-orange-300">{eyebrow}</p> : null}
-      <h2 className="mt-3 text-3xl font-bold leading-tight text-white md:text-4xl">{title}</h2>
-      {text ? <p className="mt-3 text-sm leading-6 text-white/50">{text}</p> : null}
+    <div className={`max-w-2xl ${centered ? "mx-auto text-center" : ""}`}>
+      {eyebrow && (
+        <p className="mb-3 inline-block rounded-full bg-red-50 px-4 py-1.5 text-xs font-semibold uppercase tracking-[0.12em] text-red-700">
+          {eyebrow}
+        </p>
+      )}
+      <h2 className="text-3xl font-bold leading-tight tracking-tight text-gray-900 md:text-4xl lg:text-5xl">
+        {title}
+      </h2>
+      {description && (
+        <p className="mt-4 text-base leading-7 text-gray-500 md:text-lg">
+          {description}
+        </p>
+      )}
     </div>
   );
 }
 
+// ─── HERO ──────────────────────────────────────────────────────────────────────
+
 function HeroSection() {
   return (
-    <section className="relative isolate overflow-hidden px-4 pb-16 pt-28 sm:px-6 lg:px-8">
-      <div className="absolute inset-0 -z-20 bg-[radial-gradient(circle_at_50%_0%,rgba(255,107,10,0.18),transparent_34%),linear-gradient(180deg,#07100c_0%,#050605_52%,#020302_100%)]" />
-      <div className="absolute inset-x-0 top-16 -z-10 h-px bg-gradient-to-r from-transparent via-orange-400/50 to-transparent" />
-      <GlowToken className="left-[6%] top-72" icon={<Banknote className="size-5" />} />
-      <GlowToken className="right-[16%] top-36" icon={<Zap className="size-5" />} />
-      <GlowToken className="left-[18%] top-[23rem]" icon={<ShieldCheck className="size-5" />} />
-      <GlowToken className="right-[10%] top-[25rem]" icon={<ReceiptText className="size-5" />} />
-
-      <div className="mx-auto max-w-5xl text-center">
-        <p className="mx-auto inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-xs text-white/64">
-          <span className="rounded-full bg-orange-500 px-2 py-0.5 font-semibold text-white">
-            Wallet
-          </span>
-          Secure NGN, GHS, and VTU payments
-        </p>
-        <h1 className="mx-auto mt-6 max-w-4xl text-5xl font-black leading-[0.96] tracking-[-0.02em] text-white md:text-7xl">
-          Naira To <em className="text-orange-400">Cedis</em> Made Simple
-        </h1>
-        <p className="mx-auto mt-5 max-w-2xl text-sm leading-6 text-white/58 md:text-base">
-          Exchange money and manage payments with a wallet built for you.
-        </p>
-        <div className="mt-7 flex items-center justify-center gap-3">
-          <Button asChild className="h-10 rounded-full bg-orange-500 px-4 text-white hover:bg-orange-400 sm:px-5">
-            <Link href="/register">
-              Get Started
-              <ArrowRight data-icon="inline-end" aria-hidden="true" />
-            </Link>
-          </Button>
-          <Button asChild variant="outline" className="h-10 rounded-full border-white/12 bg-white/[0.04] px-4 text-white hover:bg-white hover:text-black sm:px-5">
-            <Link href="/exchange">Exchange now</Link>
-          </Button>
-        </div>
+    <section className="relative isolate min-h-[84svh] overflow-hidden bg-slate-950 lg:min-h-[88svh]">
+      <div className="absolute inset-0 -z-10">
+        {heroSlides.map((slide, index) => (
+          <div
+            key={slide.title}
+            className="trustpay-hero-bg absolute inset-0"
+            style={{ animationDelay: `${index * 5}s` }}
+          >
+            <Image
+              src={slide.image}
+              alt=""
+              fill
+              className="scale-105 object-cover"
+              priority={index === 0}
+              sizes="100vw"
+            />
+          </div>
+        ))}
+        <div className="absolute inset-0 bg-gradient-to-r from-black/88 via-black/66 to-black/30" />
+        <div className="absolute inset-0 bg-gradient-to-t from-black/58 via-transparent to-black/20" />
       </div>
 
-      <div className="hidden md:block">
-        <div className="hidden md:block">
-          <DashboardPreview />
+      <div className="mx-auto flex min-h-[84svh] max-w-7xl items-center px-4 pb-12 pt-24 sm:px-6 sm:pt-28 lg:min-h-[88svh] lg:px-8">
+        <div className="grid w-full items-center gap-10 lg:grid-cols-[minmax(0,1fr)_380px]">
+          <div className="max-w-4xl">
+            <div className="inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/10 px-4 py-1.5 text-sm text-white/90 backdrop-blur-sm">
+              <span className="rounded-full bg-red-600 px-2.5 py-0.5 text-xs font-bold text-white">
+                Live
+              </span>
+              Nigeria and Ghana money corridor
+            </div>
+
+            <h1 className="sr-only">
+              Exchange Naira and Cedis in Minutes. Send Money Across Ghana and
+              Nigeria, Fast. The Easy Way to Exchange Naira and Cedis.
+            </h1>
+
+            <div
+              aria-hidden="true"
+              className="relative mt-8 min-h-[11rem] overflow-hidden sm:min-h-[13.5rem] md:min-h-[15rem] lg:min-h-[16.5rem]"
+            >
+              {heroSlides.map((slide, index) => (
+                <p
+                  key={slide.title}
+                  className="trustpay-hero-copy absolute inset-x-0 top-0 max-w-4xl text-4xl font-bold leading-[1.03] text-white sm:text-6xl md:text-7xl lg:text-8xl"
+                  style={{ animationDelay: `${index * 5}s` }}
+                >
+                  {slide.title}
+                </p>
+              ))}
+            </div>
+
+            <p className="mt-6 max-w-2xl text-base leading-7 text-gray-200 md:text-lg">
+              Get competitive exchange rates, fast transactions, and secure
+              transfers between Nigeria and Ghana.
+            </p>
+
+            <div className="mt-10 flex flex-wrap items-center gap-4">
+              <Button
+                asChild
+                className="h-12 rounded-full bg-red-600 px-7 text-base text-white shadow-lg shadow-red-600/30 transition-all hover:bg-red-700 hover:shadow-xl hover:shadow-red-600/40"
+              >
+                <a href="https://wa.me/233555507240?text=Hello%20TrustPay%2C%20I%20want%20to%20get%20started." target="_blank" rel="noreferrer">
+                  Get Started Free
+                  <ArrowRight data-icon="inline-end" aria-hidden="true" className="size-5" />
+                </a>
+              </Button>
+              <Button
+                asChild
+                variant="outline"
+                className="h-12 rounded-full border-white/25 bg-white/10 px-7 text-base text-white backdrop-blur-sm transition-all hover:bg-white/20"
+              >
+                <Link href="/exchange">
+                  View Rates
+                </Link>
+              </Button>
+            </div>
+
+          </div>
+
+          <div className="hidden border-l border-white/15 pl-6 text-white lg:block">
+            <div className="flex items-center justify-between border-b border-white/10 pb-4">
+              <div>
+                <p className="text-xs uppercase tracking-[0.12em] text-white/50">
+                  Corridor status
+                </p>
+                <p className="mt-1 text-lg font-semibold">TrustPay corridor</p>
+              </div>
+              <span className="rounded-full bg-emerald-400/15 px-3 py-1 text-xs font-semibold text-emerald-200">
+                Active
+              </span>
+            </div>
+            <div className="mt-5 space-y-3">
+              {heroSlides.map((slide, index) => (
+                <div
+                  key={slide.context}
+                  className="trustpay-hero-context border-b border-white/10 pb-4"
+                  style={{ animationDelay: `${index * 5}s` }}
+                >
+                  <p className="text-sm font-semibold">{slide.context}</p>
+                  <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-white/10">
+                    <span className="trustpay-hero-progress block h-full rounded-full bg-red-400" />
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="mt-5 grid grid-cols-2 gap-6 text-sm">
+              <div>
+                <span className="block text-white/55">From</span>
+                <strong className="mt-1 block text-xl">NGN</strong>
+              </div>
+              <div>
+                <span className="block text-white/55">To</span>
+                <strong className="mt-1 block text-xl">GHS</strong>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </section>
   );
 }
 
-function BrandStrip() {
+// ─── FEATURES GRID ─────────────────────────────────────────────────────────────
+
+function FeaturesSection() {
   return (
-    <div className="overflow-hidden border-y border-black bg-orange-400 py-3 text-black">
-      <div className="animate-trustpay-marquee flex w-max gap-10 pr-10 text-sm font-black">
-        {[...brandStrip, ...brandStrip].map((item, index) => (
-          <span key={`${item}-${index}`} className="whitespace-nowrap">
-            {item}
-          </span>
-        ))}
+    <section className="bg-white px-4 py-24 sm:px-6 lg:px-8">
+      <div className="mx-auto max-w-7xl">
+        <SectionHeading
+          eyebrow="Features"
+          title="Everything You Need in One Wallet"
+          description="From multi-currency exchange to utility payments — TrustPay handles your everyday money movement."
+        />
+
+        <div className="mt-16 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+          {productFeatures.map((feature, index) => {
+            const Icon = feature.icon;
+            const style = featureCardStyles[index % featureCardStyles.length];
+            return (
+              <div
+                key={feature.title}
+                className={`group rounded-2xl border p-6 transition-all hover:-translate-y-1 hover:shadow-xl ${style.card}`}
+              >
+                <span className={`mb-4 flex size-12 items-center justify-center rounded-xl shadow-sm ring-1 ring-black/5 ${style.icon}`}>
+                  <Icon aria-hidden="true" className="size-6" />
+                </span>
+                <h3 className="text-lg font-semibold text-gray-900">{feature.title}</h3>
+                <p className="mt-2 text-sm leading-6 text-gray-600">{feature.description}</p>
+              </div>
+            );
+          })}
+        </div>
       </div>
-    </div>
+    </section>
   );
 }
+
+// ─── HOW IT WORKS ──────────────────────────────────────────────────────────────
+
+function HowItWorksSection() {
+  return (
+    <section className="bg-gray-50 px-4 py-20 sm:px-6 lg:px-8">
+      <div className="mx-auto max-w-7xl">
+        <SectionHeading
+          eyebrow="Process"
+          title="How It Works"
+          description="Four simple steps. Clear from start to finish."
+        />
+
+        <div className="mt-12 grid gap-5 sm:grid-cols-2 xl:grid-cols-4">
+          {processSteps.map((step, index) => (
+            <article
+              key={step.title}
+              className="group overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-sm transition-all hover:-translate-y-1 hover:shadow-xl hover:shadow-red-100/30"
+            >
+              <div className="relative aspect-[16/11] overflow-hidden bg-gray-100">
+                <Image
+                  src={step.image}
+                  alt={step.alt}
+                  fill
+                  unoptimized
+                  sizes="(min-width: 1280px) 25vw, (min-width: 640px) 50vw, 100vw"
+                  className="object-cover transition duration-500 group-hover:scale-105"
+                />
+                <div className="absolute inset-0 bg-gradient-to-t from-black/65 via-black/15 to-transparent" />
+                <span className="absolute left-4 top-4 rounded-full bg-white px-3 py-1 text-xs font-black text-red-700 shadow-sm">
+                  {String(index + 1).padStart(2, "0")}
+                </span>
+              </div>
+              <div className="p-5">
+                <h3 className="text-lg font-bold text-gray-900">{step.title}</h3>
+                <p className="mt-1 text-sm leading-6 text-gray-500">
+                  {step.description}
+                </p>
+              </div>
+            </article>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+// ─── USE CASES ─────────────────────────────────────────────────────────────────
+
+function UseCasesSection() {
+  return (
+    <section className="bg-gray-50 px-4 py-24 sm:px-6 lg:px-8">
+      <div className="mx-auto max-w-7xl">
+        <SectionHeading
+          eyebrow="Who It's For"
+          title="Built for Real People"
+          description="Simple money tools for everyday cross-border needs."
+        />
+
+        <div className="mt-14 grid gap-6 md:grid-cols-3">
+          {useCases.map((useCase) => (
+            <article
+              key={useCase.title}
+              className="group overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-sm transition-all hover:-translate-y-1 hover:shadow-xl hover:shadow-red-100/30"
+            >
+              <div className="relative aspect-[4/3] overflow-hidden bg-gray-100">
+                <Image
+                  src={useCase.image}
+                  alt={useCase.alt}
+                  fill
+                  unoptimized
+                  sizes="(min-width: 768px) 33vw, 100vw"
+                  className="object-cover transition duration-500 group-hover:scale-105"
+                />
+                <div className="absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-black/65 to-transparent" />
+                <span className="absolute bottom-4 left-4 rounded-full bg-white/90 px-3 py-1 text-xs font-semibold text-red-700 shadow-sm">
+                  {useCase.tag}
+                </span>
+              </div>
+              <div className="p-6">
+                <h3 className="text-xl font-bold text-gray-900">
+                  {useCase.title}
+                </h3>
+                <p className="mt-2 text-sm leading-6 text-gray-500">
+                  {useCase.description}
+                </p>
+              </div>
+            </article>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+// ─── STATS ─────────────────────────────────────────────────────────────────────
+
+function StatsSection() {
+  return (
+    <section className="bg-red-600 px-4 py-20 sm:px-6 lg:px-8">
+      <div className="mx-auto max-w-7xl">
+        <div className="grid gap-8 text-center md:grid-cols-4">
+          {stats.map((stat) => (
+            <div key={stat.label} className="relative">
+              <p className="text-5xl font-black text-white md:text-6xl">{stat.value}</p>
+              <p className="mt-2 text-sm font-medium text-red-100">{stat.label}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+// ─── TRUSTED BANKS ─────────────────────────────────────────────────────────────
 
 function TrustedBanksSection() {
   const firstRow = trustedBanks.slice(0, 6);
   const secondRow = trustedBanks.slice(6);
 
   return (
-    <section className="bg-[#050505] px-4 py-14 sm:px-6 lg:px-8">
+    <section className="bg-white px-4 py-20 sm:px-6 lg:px-8">
       <div className="mx-auto max-w-7xl">
-        <div className="mx-auto max-w-2xl text-center">
-          <h2 className="text-3xl font-black leading-tight text-white md:text-4xl">
-            Trusted banks
-          </h2>
-          <p className="mt-3 text-sm leading-6 text-white/50">
-            TRUSTPAY is built to feel familiar and reliable across Nigerian and
-            Ghanaian money movement, bank funding, mobile money, and wallet flows.
-          </p>
-        </div>
+        <SectionHeading
+          eyebrow="Partners"
+          title="Trusted by Leading Banks"
+          description="We connect with the most trusted financial institutions across Nigeria and Ghana."
+        />
 
-        <div className="relative mt-10 overflow-hidden rounded-xl border border-white/8 bg-[#0b0d0b] py-5">
-          <div className="pointer-events-none absolute inset-y-0 left-0 z-10 w-14 bg-gradient-to-r from-[#0b0d0b] to-transparent" />
-          <div className="pointer-events-none absolute inset-y-0 right-0 z-10 w-14 bg-gradient-to-l from-[#0b0d0b] to-transparent" />
+        <div className="relative mt-12 overflow-hidden rounded-2xl border border-gray-100 bg-gray-50 py-6">
+          <div className="pointer-events-none absolute inset-y-0 left-0 z-10 w-16 bg-gradient-to-r from-gray-50 to-transparent" />
+          <div className="pointer-events-none absolute inset-y-0 right-0 z-10 w-16 bg-gradient-to-l from-gray-50 to-transparent" />
+
+          {/* First row */}
           <div className="animate-trustpay-marquee flex w-max gap-4 pr-4 [animation-duration:30s]">
             {[...firstRow, ...firstRow].map((bank, index) => (
               <div
                 key={`${bank.name}-${index}`}
-                className="flex min-w-[240px] items-center gap-3 px-4 py-3"
+                className="flex min-w-[220px] items-center gap-3 rounded-xl border border-gray-100 bg-white px-4 py-3 shadow-sm"
               >
-                <span className="grid h-12 w-24 place-items-center overflow-hidden rounded-lg bg-white p-1.5">
+                <span className="grid h-10 w-20 shrink-0 place-items-center overflow-hidden rounded-lg bg-white p-1.5">
                   <Image
                     src={bank.src}
                     alt={`${bank.name} logo`}
-                    width={96}
-                    height={48}
-                    className="max-h-10 w-full object-contain"
+                    width={80}
+                    height={40}
+                    className="max-h-8 w-full object-contain"
                   />
                 </span>
-                <span>
-                  <span className="block text-sm font-black text-white">{bank.name}</span>
-                  <span className="block text-xs text-white/42">{bank.market}</span>
+                <span className="min-w-0">
+                  <span className="block truncate text-sm font-semibold text-gray-900">{bank.name}</span>
+                  <span className="block text-xs text-gray-500">{bank.market}</span>
                 </span>
               </div>
             ))}
           </div>
 
+          {/* Second row */}
           <div className="animate-trustpay-marquee-reverse mt-4 flex w-max gap-4 pr-4 [animation-duration:34s]">
             {[...secondRow, ...secondRow].map((bank, index) => (
               <div
-                key={`${bank.name}-${index}`}
-                className="flex min-w-[240px] items-center gap-3 px-4 py-3"
+                key={`${bank.name}-${index}-r`}
+                className="flex min-w-[220px] items-center gap-3 rounded-xl border border-gray-100 bg-white px-4 py-3 shadow-sm"
               >
-                <span className="grid h-12 w-24 place-items-center overflow-hidden rounded-lg bg-white p-1.5">
+                <span className="grid h-10 w-20 shrink-0 place-items-center overflow-hidden rounded-lg bg-white p-1.5">
                   <Image
                     src={bank.src}
                     alt={`${bank.name} logo`}
-                    width={96}
-                    height={48}
-                    className="max-h-10 w-full object-contain"
+                    width={80}
+                    height={40}
+                    className="max-h-8 w-full object-contain"
                   />
                 </span>
-                <span>
-                  <span className="block text-sm font-black text-white">{bank.name}</span>
-                  <span className="block text-xs text-white/42">{bank.market}</span>
+                <span className="min-w-0">
+                  <span className="block truncate text-sm font-semibold text-gray-900">{bank.name}</span>
+                  <span className="block text-xs text-gray-500">{bank.market}</span>
                 </span>
               </div>
             ))}
@@ -400,412 +561,338 @@ function TrustedBanksSection() {
   );
 }
 
-function ExchangePlusSection() {
+// ─── WHY TRUSTPAY ──────────────────────────────────────────────────────────────
+
+function WhyTrustPaySection() {
   return (
-    <section className="bg-[#050505] px-4 py-16 sm:px-6 lg:px-8">
-      <div className="mx-auto grid max-w-5xl gap-5 rounded-xl border border-white/8 bg-[#1a1a28] p-4 md:grid-cols-[260px_1fr] md:p-5">
-        <div className="rounded-lg bg-gradient-to-br from-orange-300 via-orange-400 to-white p-5 text-black">
-          <p className="text-2xl font-black leading-tight">TrustPay app</p>
-          <p className="mt-2 text-xs font-semibold text-black/68">
-            Swap money, buy airtime, pay bills, and get a virtual account in one simple app.
-          </p>
-          <Button asChild className="mt-5 rounded-full bg-white text-black hover:bg-black hover:text-white">
-            <Link href="/download">Download</Link>
-          </Button>
-        </div>
-        <div className="grid gap-4 md:grid-cols-2">
-          {[
-            ["01", "Swap money", "Change naira to cedis and see the rate first."],
-            ["02", "Buy airtime & data", "Top up your phone for MTN, Airtel, Glo, and more."],
-            ["03", "Pay bills", "Pay electricity and other bills from your wallet."],
-            ["04", "Get virtual account", "Receive money into your TrustPay wallet."],
-          ].map(([number, title, text]) => (
-            <div key={number} className="flex gap-3 rounded-lg bg-white/[0.03] p-4">
-              <span className="grid size-9 shrink-0 place-items-center rounded-full bg-black text-sm font-bold text-white">
-                {number}
-              </span>
-              <div>
-                <h3 className="text-sm font-semibold text-white">{title}</h3>
-                <p className="mt-1 text-xs leading-5 text-white/44">{text}</p>
+    <section className="bg-gray-50 px-4 py-24 sm:px-6 lg:px-8">
+      <div className="mx-auto max-w-7xl">
+        <SectionHeading
+          eyebrow="Why Us"
+          title="Why Choose TrustPay?"
+          description="Built for Ghana and Nigeria money movement."
+        />
+
+        <div className="mt-14 grid gap-5 md:grid-cols-3">
+          {companyValues.map((value, index) => {
+            const Icon = value.icon;
+            const image = whyTrustPayImages[index % whyTrustPayImages.length];
+            return (
+              <div
+                key={value.title}
+                className="group relative min-h-[340px] overflow-hidden rounded-2xl bg-gray-950 shadow-sm"
+              >
+                <Image
+                  src={image.src}
+                  alt={image.alt}
+                  fill
+                  unoptimized
+                  sizes="(min-width: 768px) 33vw, 100vw"
+                  className="object-cover transition duration-700 group-hover:scale-105"
+                />
+                <div className="absolute inset-0 bg-gradient-to-t from-gray-950 via-gray-950/35 to-transparent" />
+                <div className="absolute inset-x-0 bottom-0 p-6">
+                  <div className="mb-4 flex items-center justify-between">
+                    <span className="inline-flex items-center gap-2 rounded-full bg-white/14 px-3 py-1.5 text-xs font-semibold text-white backdrop-blur">
+                      <Icon aria-hidden="true" className="size-4 text-red-200" />
+                      {image.tag}
+                    </span>
+                  </div>
+                  <h3 className="text-2xl font-bold leading-tight text-white">
+                    {value.title}
+                  </h3>
+                  <p className="mt-2 max-w-xs text-sm leading-6 text-white/72">
+                    {value.description}
+                  </p>
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </div>
     </section>
   );
 }
 
-function StatsSection() {
+// ─── SECURITY ───────────────────────────────────────────────────────────────────
+
+function SecuritySection() {
   return (
-    <section className="bg-[#050605] px-4 py-20 sm:px-6 lg:px-8">
-      <div className="mx-auto grid max-w-6xl gap-10 md:grid-cols-[1fr_1fr] md:items-center">
-        <div>
-          <h2 className="text-3xl font-bold leading-tight text-white md:text-4xl">
-            Our statistics over the years
+    <section className="bg-white px-4 py-20 sm:px-6 lg:px-8">
+      <div className="mx-auto max-w-7xl">
+        <div className="relative overflow-hidden rounded-3xl bg-slate-950 px-6 py-12 shadow-2xl shadow-slate-200 sm:px-8 lg:px-12">
+          <Image
+            src="https://images.unsplash.com/photo-1563013544-824ae1b704d3?auto=format&fit=crop&q=80&w=2000"
+            alt=""
+            fill
+            unoptimized
+            sizes="100vw"
+            className="object-cover opacity-30 animate-trustpay-soft-pulse"
+          />
+          <div className="absolute inset-0 bg-gradient-to-r from-slate-950 via-slate-950/82 to-red-950/45" />
+
+          <div className="relative grid gap-10 lg:grid-cols-[0.9fr_1.1fr] lg:items-end">
+            <div className="max-w-xl">
+              <p className="mb-3 inline-block rounded-full bg-white/10 px-4 py-1.5 text-xs font-semibold uppercase tracking-[0.12em] text-red-100">
+                Security
+              </p>
+              <h2 className="text-3xl font-bold leading-tight tracking-tight text-white md:text-5xl">
+                Your Money, Secured
+              </h2>
+              <p className="mt-4 text-base leading-7 text-white/70 md:text-lg">
+                Short sessions. Checked actions. Clear records.
+              </p>
+            </div>
+
+            <div className="grid gap-4 sm:grid-cols-2">
+              {securityControls.map((control) => {
+                const Icon = control.icon;
+                return (
+                  <div
+                    key={control.title}
+                    className="rounded-2xl border border-white/12 bg-slate-950/78 p-5 shadow-lg shadow-black/20 backdrop-blur-md"
+                  >
+                    <span className="flex size-10 items-center justify-center rounded-xl bg-white/10 text-red-200">
+                      <Icon aria-hidden="true" className="size-5" />
+                    </span>
+                    <h3 className="mt-4 text-sm font-bold text-white">
+                      {control.title}
+                    </h3>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+// ─── TESTIMONIALS ──────────────────────────────────────────────────────────────
+
+function TestimonialsSection() {
+  return (
+    <section className="bg-slate-950 px-4 py-24 text-white sm:px-6 lg:px-8">
+      <div className="mx-auto max-w-7xl">
+        <div className="mx-auto max-w-2xl text-center">
+          <p className="mb-3 inline-block rounded-full bg-white/10 px-4 py-1.5 text-xs font-semibold uppercase tracking-[0.12em] text-red-100">
+            Testimonials
+          </p>
+          <h2 className="text-3xl font-bold leading-tight tracking-tight md:text-5xl">
+            What Our Users Say
           </h2>
-          <p className="mt-4 max-w-md text-sm leading-6 text-white/48">
-            Follow our operation growth journey over the years through key
-            achievements in wallet usage, transaction reliability, and support.
+          <p className="mt-4 text-base leading-7 text-white/60 md:text-lg">
+            Real people. Everyday money movement.
           </p>
-          <div className="mt-8 space-y-4">
-            {stats.map(([value, label]) => (
-              <div key={label} className="grid grid-cols-[120px_1fr] items-center gap-4 sm:grid-cols-[150px_1fr]">
-                <span className="text-4xl font-black leading-none text-orange-300 sm:text-5xl">{value}</span>
-                <span className="border-b border-white/10 pb-3 text-sm text-white/56 sm:text-base">{label}</span>
-              </div>
-            ))}
-          </div>
         </div>
-        <div className="relative mx-auto hidden w-full max-w-md md:block">
-          <div className="rounded-xl border border-white/10 bg-white p-4 text-black shadow-[0_24px_80px_rgba(0,0,0,0.45)]">
-            {["Balance", "Difference", "NGN/GHS"].map((item, index) => (
-              <div key={item} className="mb-3 flex items-center justify-between rounded-lg bg-[#f5f5f5] p-3 text-sm">
-                <span className="flex items-center gap-2 font-semibold">
-                  <span className="grid size-7 place-items-center rounded-full bg-orange-500 text-xs text-white">
-                    {index + 1}
+
+        <div className="mt-14 grid gap-6 md:grid-cols-3">
+          {testimonials.map((testimonial, index) => {
+            const profile = testimonialProfiles[index % testimonialProfiles.length];
+            return (
+              <div
+                key={testimonial.name}
+                className="rounded-2xl border border-white/10 bg-white/[0.06] p-7 shadow-xl shadow-black/20"
+              >
+                <div className="mb-5 flex gap-1 text-amber-300">
+                  {Array.from({ length: 5 }).map((_, i) => (
+                    <svg key={i} className="size-4 fill-current" viewBox="0 0 20 20">
+                      <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
+                    </svg>
+                  ))}
+                </div>
+                <blockquote className="text-sm leading-6 text-white/72">
+                  &ldquo;{testimonial.quote}&rdquo;
+                </blockquote>
+                <div className="mt-6 flex items-center gap-3 border-t border-white/10 pt-6">
+                  <span className="relative size-12 overflow-hidden rounded-full ring-2 ring-white/15">
+                    <Image
+                      src={profile.image}
+                      alt={profile.alt}
+                      fill
+                      unoptimized
+                      sizes="48px"
+                      className="object-cover"
+                    />
                   </span>
-                  {item}
-                </span>
-                <span className="text-orange-600">+{index + 2}.7%</span>
+                  <div>
+                    <p className="text-sm font-semibold text-white">
+                      {testimonial.name}
+                    </p>
+                    <p className="text-xs text-white/50">{testimonial.role}</p>
+                  </div>
+                </div>
               </div>
-            ))}
-          </div>
-          <div className="absolute -bottom-8 -left-6 rounded-xl border border-white/10 bg-white p-3 text-black shadow-xl">
-            <p className="text-xs text-black/52">Today</p>
-            <p className="mt-1 text-lg font-black">₦545.23</p>
-            <div className="mt-2 h-12 w-28 rounded-lg bg-[linear-gradient(135deg,#ff6b0a_0%,#111_48%,#ffb36a_100%)]" />
-          </div>
+            );
+          })}
         </div>
       </div>
     </section>
   );
 }
 
-function WorksSection() {
-  return (
-    <section className="bg-[#050505] px-4 py-20 md:bg-[linear-gradient(180deg,#06160f,#04100b)] sm:px-6 lg:px-8">
-      <SectionTitle
-        title="How It Works"
-        text="Discover how TrustPay simplifies money trading through user-friendly interfaces, secure transactions, and real-time wallet insights."
-      />
-      <div className="mx-auto mt-10 grid max-w-3xl gap-3 sm:gap-4">
-        {workSteps.map((step) => {
-          const Icon = step.icon;
-
-          return (
-            <div key={step.title} className="rounded-lg border border-white/10 bg-[#071c2d] p-3 sm:p-5">
-              <span className="grid size-9 place-items-center rounded-full bg-orange-500 text-white sm:size-10">
-                <Icon aria-hidden="true" className="size-4 sm:size-5" />
-              </span>
-              <h3 className="mt-4 text-sm font-semibold leading-tight text-white sm:text-base">{step.title}</h3>
-              <p className="mt-2 text-[11px] leading-5 text-white/56 sm:text-xs">{step.text}</p>
-            </div>
-          );
-        })}
-      </div>
-    </section>
-  );
-}
-
-function MiniFlag({ type }: { type: string }) {
-  if (type === "ghana") {
-    return (
-      <span className="grid size-12 overflow-hidden rounded-2xl border border-white/20 shadow-[inset_0_2px_8px_rgba(255,255,255,0.28),0_12px_28px_rgba(0,0,0,0.38)]">
-        <span className="bg-[#ef3340]" />
-        <span className="bg-[#fcd116]" />
-        <span className="bg-[#009739]" />
-      </span>
-    );
-  }
-
-  if (type === "nigeria") {
-    return (
-      <span className="grid size-12 grid-cols-3 overflow-hidden rounded-2xl border border-white/20 shadow-[inset_0_2px_8px_rgba(255,255,255,0.28),0_12px_28px_rgba(0,0,0,0.38)]">
-        <span className="bg-[#008751]" />
-        <span className="bg-white" />
-        <span className="bg-[#008751]" />
-      </span>
-    );
-  }
-
-  const currencyTiles: Record<string, { symbol: string; className: string }> = {
-    euro: {
-      symbol: "€",
-      className: "border-blue-200/30 bg-[linear-gradient(145deg,#1f6cff_0%,#1737a8_58%,#071a55_100%)] text-yellow-300",
-    },
-    gbp: {
-      symbol: "£",
-      className: "border-red-200/30 bg-[linear-gradient(145deg,#ffffff_0%,#2458b8_42%,#c8102e_100%)] text-white",
-    },
-    usd: {
-      symbol: "$",
-      className: "border-emerald-200/30 bg-[linear-gradient(145deg,#ffffff_0%,#2f9d67_46%,#113d2b_100%)] text-white",
-    },
-    wallet: {
-      symbol: "VA",
-      className: "border-cyan-200/25 bg-[linear-gradient(145deg,#eef7ff_0%,#264a73_46%,#081829_100%)] text-white",
-    },
-  };
-  const tile = currencyTiles[type] ?? {
-    symbol: "TP",
-    className: "border-white/20 bg-[linear-gradient(145deg,#f8fafc_0%,#334155_52%,#020617_100%)] text-white",
-  };
-
-  return (
-    <span className={`grid size-12 place-items-center rounded-2xl border text-xl font-black shadow-[inset_0_2px_8px_rgba(255,255,255,0.35),0_14px_28px_rgba(0,0,0,0.38)] ${tile.className}`}>
-      <span className="drop-shadow-[0_2px_2px_rgba(0,0,0,0.35)]">{tile.symbol}</span>
-    </span>
-  );
-}
-
-function CurrencyServicePill({
-  service,
-}: {
-  service: (typeof currencyServices)[number];
-}) {
-  return (
-    <div className="flex min-w-[250px] items-center gap-4 rounded-full border border-white/8 bg-[#121512] px-4 py-3 shadow-[0_18px_50px_rgba(0,0,0,0.25)]">
-      <MiniFlag type={service.flag} />
-      <span>
-        <span className="block text-sm font-black text-white">{service.label}</span>
-        <span className="block text-xs text-white/44">{service.detail}</span>
-      </span>
-    </div>
-  );
-}
-
-function NetworkServicePill({
-  service,
-}: {
-  service: (typeof networkServices)[number];
-}) {
-  return (
-    <div className="flex min-w-[220px] items-center gap-3 rounded-full border border-white/8 bg-[#141421] px-4 py-3 shadow-[0_18px_50px_rgba(0,0,0,0.25)]">
-      <span className={`grid size-12 place-items-center rounded-2xl text-xs font-black shadow-[inset_0_2px_8px_rgba(255,255,255,0.22),0_12px_26px_rgba(0,0,0,0.35)] ${service.tone}`}>
-        {service.label}
-      </span>
-      <span>
-        <span className="block text-sm font-black text-white">{service.label}</span>
-        <span className="block text-xs text-white/44">{service.detail}</span>
-      </span>
-    </div>
-  );
-}
-
-function ServicesSection() {
-  return (
-    <section className="bg-[#050505] px-4 py-20 sm:px-6 lg:px-8">
-      <SectionTitle
-        title="Popular TrustPay services"
-        text="Explore a variety of payment operations on our platform, empowering you to diversify your wallet and move smarter."
-      />
-      <div className="mx-auto mt-10 max-w-6xl overflow-hidden rounded-xl border border-white/8 bg-[#080908] py-5">
-        <div className="relative overflow-hidden">
-          <div className="pointer-events-none absolute inset-y-0 left-0 z-10 w-12 bg-gradient-to-r from-[#080908] to-transparent" />
-          <div className="pointer-events-none absolute inset-y-0 right-0 z-10 w-12 bg-gradient-to-l from-[#080908] to-transparent" />
-          <div className="animate-trustpay-marquee flex w-max gap-4 pr-4 [animation-duration:24s]">
-            {[...currencyServices, ...currencyServices].map((service, index) => (
-              <CurrencyServicePill key={`${service.label}-${index}`} service={service} />
-            ))}
-          </div>
-        </div>
-
-        <div className="relative mt-4 overflow-hidden">
-          <div className="pointer-events-none absolute inset-y-0 left-0 z-10 w-12 bg-gradient-to-r from-[#080908] to-transparent" />
-          <div className="pointer-events-none absolute inset-y-0 right-0 z-10 w-12 bg-gradient-to-l from-[#080908] to-transparent" />
-          <div className="animate-trustpay-marquee-reverse flex w-max gap-4 pr-4 [animation-duration:28s]">
-            {[...networkServices, ...networkServices].map((service, index) => (
-              <NetworkServicePill key={`${service.label}-${index}`} service={service} />
-            ))}
-          </div>
-        </div>
-      </div>
-
-      <div className="mx-auto mt-8 max-w-3xl rounded-xl border border-orange-400/20 bg-[radial-gradient(circle_at_50%_0%,rgba(255,107,10,0.18),transparent_34%),#090b09] p-6 text-center sm:p-8">
-        <span className="mx-auto grid size-12 place-items-center rounded-full bg-orange-500 text-white shadow-[0_0_30px_rgba(255,107,10,0.35)]">
-          <Landmark aria-hidden="true" className="size-5" />
-        </span>
-        <p className="mt-4 text-xs font-semibold uppercase tracking-[0.18em] text-orange-300">
-          Always ready
-        </p>
-        <h3 className="mt-2 text-2xl font-black text-white">
-          <span className="trustpay-fast-words" aria-label="Fast withdrawal, fast transfer, fast airtime, fast data, fast receipts">
-            {fastServiceWords.map((word) => (
-              <span key={word}>{word}</span>
-            ))}
-          </span>
-        </h3>
-        <p className="mx-auto mt-4 max-w-lg text-sm leading-6 text-white/52">
-          Withdrawals stay steady while the service promise changes around the
-          user: transfer, airtime, data, and receipt flows all stay quick.
-        </p>
-        <Button asChild variant="outline" className="mt-5 rounded-full border-orange-400/30 bg-transparent text-orange-200 hover:bg-orange-500 hover:text-white">
-          <Link href="/register">Start now</Link>
-        </Button>
-      </div>
-    </section>
-  );
-}
-
-function PortfolioSection() {
-  return (
-    <section className="bg-[#050505] px-4 py-16 sm:px-6 lg:px-8">
-      <SectionTitle title="Create your payment portfolio today" text="Start building your TrustPay profile safely, using clear rates, wallet limits, and real transaction records." />
-      <div className="mx-auto mt-10 grid max-w-6xl gap-8 md:grid-cols-[0.9fr_1.1fr] md:items-center">
-        <div className="space-y-5">
-          {portfolioSteps.map(([number, title, text]) => (
-            <div key={number} className="grid grid-cols-[42px_1fr] gap-4">
-              <span className="grid size-10 place-items-center rounded-md border border-orange-400/40 text-sm font-bold text-orange-200">
-                {number}
-              </span>
-              <div>
-                <h3 className="text-base font-semibold text-white">{title}</h3>
-                <p className="mt-1 text-xs leading-5 text-white/46">{text}</p>
-              </div>
-            </div>
-          ))}
-        </div>
-        <div className="hidden md:block">
-          <DashboardPreview />
-        </div>
-      </div>
-    </section>
-  );
-}
-
-function TestimonialSection() {
-  return (
-    <section className="bg-[linear-gradient(180deg,#06160f,#031009)] px-4 py-20 text-center sm:px-6 lg:px-8">
-      <SectionTitle title="What our customers are saying" />
-      <div className="mx-auto mt-8 flex max-w-4xl items-center justify-between gap-6">
-        <button type="button" aria-label="Previous testimonial" className="grid size-9 place-items-center rounded-full bg-white/8 text-white/70">
-          <ChevronLeft aria-hidden="true" className="size-4" />
-        </button>
-        <div className="max-w-xl">
-          <div className="mx-auto grid size-16 place-items-center rounded-full bg-orange-500 text-xl font-black text-white">
-            TP
-          </div>
-          <p className="mt-4 font-semibold text-white">Daniel Giri</p>
-          <p className="text-xs text-orange-300">Digital Marketing Specialist</p>
-          <p className="mt-4 text-sm leading-6 text-white/58">
-            The platform is user-friendly and secure, with real-time wallet
-            insights that make payment tracking simple.
-          </p>
-          <div className="mt-4 flex justify-center gap-1 text-orange-300">
-            {Array.from({ length: 5 }).map((_, index) => (
-              <Star key={index} aria-hidden="true" className="size-4 fill-current" />
-            ))}
-          </div>
-        </div>
-        <button type="button" aria-label="Next testimonial" className="grid size-9 place-items-center rounded-full bg-white/8 text-white/70">
-          <ChevronRight aria-hidden="true" className="size-4" />
-        </button>
-      </div>
-    </section>
-  );
-}
-
-function IntegrationsSection() {
-  return (
-    <section className="bg-[#050505] px-4 py-20 sm:px-6 lg:px-8">
-      <div className="mx-auto max-w-4xl text-center">
-        <div className="mx-auto grid max-w-xl grid-cols-5 gap-5 text-orange-300">
-          {[MessageCircle, Send, Smartphone, Flame, Cable].map((Icon, index) => (
-            <span key={index} className="grid size-11 place-items-center rounded-full bg-white/[0.05]">
-              <Icon aria-hidden="true" className="size-5" />
-            </span>
-          ))}
-        </div>
-        <h2 className="mt-8 text-3xl font-bold text-white">
-          Integrated with most popular payment currencies
-        </h2>
-        <p className="mx-auto mt-3 max-w-xl text-sm leading-6 text-white/50">
-          Experience seamless TrustPay with Ghana integrations of the most
-          popular payment rails.
-        </p>
-        <Button asChild className="mt-6 rounded-full bg-orange-500 text-white hover:bg-orange-400">
-          <Link href="/support">Explore</Link>
-        </Button>
-      </div>
-    </section>
-  );
-}
+// ─── FAQ ────────────────────────────────────────────────────────────────────────
 
 function FaqSection() {
   return (
-    <section className="bg-[#050505] px-4 pb-16 sm:px-6 lg:px-8">
-      <SectionTitle
-        title="Frequently Asked Questions"
-        text="Find answers to common questions in our comprehensive FAQ section, providing clarity and support for your payment journey."
-      />
-      <div className="mx-auto mt-8 grid max-w-5xl gap-4 md:grid-cols-2">
-        {faqs.map((faq) => (
-          <details key={faq.question} className="group rounded-lg border border-white/8 bg-[#181824] text-sm leading-6 text-white sm:text-base">
-            <summary className="flex min-h-[72px] cursor-pointer list-none items-center justify-between gap-4 px-5 py-5 marker:hidden sm:min-h-[84px] sm:px-6 [&::-webkit-details-marker]:hidden">
-              <span className="min-w-0">{faq.question}</span>
-              <span className="grid size-7 shrink-0 place-items-center rounded-full bg-orange-500 text-sm text-white transition-transform duration-200 group-open:rotate-45">
-                +
-              </span>
-            </summary>
-            <p className="border-t border-white/8 px-5 pb-5 pt-4 text-white/56 sm:px-6">
-              {faq.answer}
-            </p>
-          </details>
-        ))}
+    <section className="bg-white px-4 py-24 sm:px-6 lg:px-8">
+      <div className="mx-auto max-w-3xl">
+        <SectionHeading
+          eyebrow="FAQ"
+          title="Frequently Asked Questions"
+          description="Everything you need to know about TrustPay."
+        />
+
+        <div className="mt-12 space-y-3">
+          {faqData.map((faq) => (
+            <details
+              key={faq.question}
+              className="group rounded-xl border border-gray-100 bg-white transition-all hover:border-gray-200 [&[open]]:border-red-100 [&[open]]:shadow-sm"
+            >
+              <summary className="flex min-h-[64px] cursor-pointer list-none items-center justify-between gap-4 px-6 py-4 marker:hidden [&::-webkit-details-marker]:hidden">
+                <span className="text-sm font-medium text-gray-900 sm:text-base">
+                  {faq.question}
+                </span>
+                <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-red-50 text-sm text-red-600 transition-transform duration-200 group-open:rotate-45">
+                  +
+                </span>
+              </summary>
+              <p className="border-t border-gray-100 px-6 pb-5 pt-4 text-sm leading-6 text-gray-500">
+                {faq.answer}
+              </p>
+            </details>
+          ))}
+        </div>
       </div>
     </section>
   );
 }
 
-function DownloadSection() {
+// ─── BLOG SECTION ───────────────────────────────────────────────────────────────
+
+function BlogSection() {
+  const latestArticles = blogArticles.slice(0, 3);
+
   return (
-    <section className="bg-[#050505] px-4 pb-20 sm:px-6 lg:px-8">
-      <div className="mx-auto grid max-w-5xl overflow-hidden rounded-xl border border-white/10 bg-[#07131f] text-white md:grid-cols-[0.9fr_1.1fr]">
-        <div className="relative min-h-[320px]">
-          <Image
-            src={marketingImages.exchangeApp.src}
-            alt="TrustPay mobile experience"
-            fill
-            sizes="(min-width: 768px) 40vw, 100vw"
-            className="object-cover opacity-70"
-          />
-          <div className="absolute inset-0 bg-black/28" />
-        </div>
-        <div className="p-8 md:p-12">
-          <h2 className="text-4xl font-black leading-tight">
-            Download and enjoy the experience
-          </h2>
-          <p className="mt-4 text-sm leading-6 text-white/60">
-            Do not miss out. Download our app and simplify your exchange, wallet,
-            and bill payments in seconds.
+    <section className="bg-gray-50 px-4 py-24 sm:px-6 lg:px-8">
+      <div className="mx-auto max-w-7xl">
+        <div className="max-w-2xl">
+          <p className="mb-3 inline-block rounded-full bg-red-50 px-4 py-1.5 text-xs font-semibold uppercase tracking-[0.12em] text-red-700">
+            Latest Articles
           </p>
-          <div className="mt-7 flex flex-wrap gap-3">
-            <Button asChild className="rounded-full bg-orange-500 px-5 text-white hover:bg-orange-400">
-              <Link href="/download">Download</Link>
-            </Button>
-          </div>
+          <h2 className="text-5xl font-bold leading-tight tracking-tight text-gray-900">
+            Articles
+          </h2>
+          <p className="mt-4 max-w-xl text-base leading-7 text-gray-500 md:text-lg">
+            NGN and GHS updates, written for everyday users.
+          </p>
+        </div>
+
+        <div className="mt-12 grid gap-6 md:grid-cols-3">
+          {latestArticles.map((article) => (
+            <Link
+              key={article.slug}
+              href={`/blog/${article.slug}`}
+              className="group overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-sm transition-all hover:-translate-y-1 hover:border-red-100 hover:shadow-xl hover:shadow-red-100/30"
+            >
+              <div className="relative aspect-[16/11] bg-gray-100">
+                <Image
+                  src={article.image.src}
+                  alt={article.image.alt}
+                  fill
+                  unoptimized
+                  sizes="(min-width: 768px) 33vw, 100vw"
+                  className="object-cover transition duration-500 group-hover:scale-105"
+                />
+              </div>
+              <div className="p-5">
+                <h3 className="text-lg font-bold leading-snug text-gray-900 transition-colors group-hover:text-red-600">
+                  {article.title}
+                </h3>
+              </div>
+            </Link>
+          ))}
+        </div>
+
+        <div className="mt-10 text-center">
+          <Link
+            href="/blog"
+            className="inline-flex items-center gap-2 rounded-full border border-gray-200 bg-white px-6 py-3 text-sm font-semibold text-gray-700 transition-all hover:border-red-200 hover:text-red-600"
+          >
+            View all articles
+            <ArrowRight aria-hidden="true" className="size-4" />
+          </Link>
         </div>
       </div>
     </section>
   );
 }
+
+// ─── CTA ───────────────────────────────────────────────────────────────────────
+
+function CtaSection() {
+  return (
+    <section className="relative overflow-hidden px-4 py-24 sm:px-6 lg:px-8">
+      <Image
+        src="https://images.unsplash.com/photo-1519608487953-e999c86e7455?auto=format&fit=crop&q=80&w=2000"
+        alt=""
+        fill
+        unoptimized
+        sizes="100vw"
+        className="object-cover"
+      />
+      <div className="absolute inset-0 bg-red-700/86" />
+      <div className="absolute inset-0 bg-gradient-to-r from-red-950/35 via-red-700/70 to-red-500/35" />
+
+      <div className="relative mx-auto max-w-3xl text-center">
+        <h2 className="text-4xl font-bold leading-tight text-white md:text-5xl">
+          Ready to Simplify Your Money Movement?
+        </h2>
+        <p className="mx-auto mt-4 max-w-lg text-base leading-7 text-red-50">
+          Start moving NGN and GHS with clearer rates, receipts, and support.
+        </p>
+
+        <div className="mt-10 flex flex-wrap items-center justify-center gap-4">
+          <Button
+            asChild
+            className="rounded-full border-2 border-white bg-white px-6 text-red-700 transition-all hover:bg-transparent hover:text-white"
+          >
+            <a href="https://wa.me/233555507240?text=Hello%20TrustPay%2C%20I%20want%20to%20get%20started." target="_blank" rel="noreferrer">
+              Create Free Account
+              <ArrowRight data-icon="inline-end" aria-hidden="true" className="size-4" />
+            </a>
+          </Button>
+          <Button
+            asChild
+            variant="ghost"
+            className="text-white/85 hover:bg-white/10 hover:text-white"
+          >
+            <Link href="/support">Talk to Sales</Link>
+          </Button>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+// ─── EXPORT ─────────────────────────────────────────────────────────────────────
 
 export function LandingPage() {
   return (
     <>
       <HeroSection />
-      <BrandStrip />
       <TrustedBanksSection />
-      <ExchangePlusSection />
+      <FeaturesSection />
+      <HowItWorksSection />
+      <UseCasesSection />
       <StatsSection />
-      <WorksSection />
-      <ServicesSection />
-      <PortfolioSection />
-      <TestimonialSection />
-      <IntegrationsSection />
+      <WhyTrustPaySection />
+      <BlogSection />
+      <SecuritySection />
+      <TestimonialsSection />
       <FaqSection />
-      <DownloadSection />
+      <CtaSection />
     </>
   );
 }

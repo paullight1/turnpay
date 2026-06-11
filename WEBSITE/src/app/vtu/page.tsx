@@ -60,10 +60,10 @@ export default function VtuPage() {
         description="TrustPay VTU is for everyday utility payments. Pick the service, check the amount, pay, and keep the receipt."
       >
         <Button asChild>
-          <Link href="/register">
-            Start VTU payment
+          <a href="https://wa.me/233555507240?text=Hello%20TrustPay%2C%20I%20want%20to%20get%20started." target="_blank" rel="noreferrer">
+            Get Started on WhatsApp
             <ArrowRight data-icon="inline-end" aria-hidden="true" />
-          </Link>
+          </a>
         </Button>
         <Button variant="outline" asChild>
           <Link href="/exchange">See exchange</Link>
@@ -128,7 +128,7 @@ export default function VtuPage() {
               key={title}
               className="rounded-lg border border-white/10 bg-white/[0.06] p-6 text-white trustpay-focus-card"
             >
-              <BadgeCheck aria-hidden="true" className="size-5 text-orange-300" />
+              <BadgeCheck aria-hidden="true" className="size-5 text-red-400" />
               <h2 className="mt-4 text-xl font-semibold">{title}</h2>
               <p className="mt-2 text-sm leading-6 text-white/66">{text}</p>
             </div>

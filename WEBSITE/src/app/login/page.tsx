@@ -36,7 +36,7 @@ export default function LoginPage() {
 
   return (
     <main className="relative isolate min-h-screen overflow-hidden bg-[#050505] px-4 py-8 text-white sm:px-6 lg:px-8">
-      <div className="absolute inset-0 -z-10 bg-[radial-gradient(circle_at_50%_0%,rgba(255,107,10,0.22),transparent_32%)]" />
+      <div className="absolute inset-0 -z-10 bg-[radial-gradient(circle_at_50%_0%,rgba(220,38,38,0.22),transparent_32%)]" />
       <div className="mx-auto flex min-h-[calc(100vh-4rem)] w-full max-w-6xl flex-col justify-center gap-10 lg:grid lg:grid-cols-[1fr_440px] lg:items-center">
         <section className="mx-auto max-w-2xl text-center lg:mx-0 lg:text-left">
           <Link href="/" className="inline-flex items-center gap-3">
@@ -78,7 +78,7 @@ export default function LoginPage() {
               <div className="flex flex-col gap-2">
                 <div className="flex items-center justify-between gap-3">
                   <Label htmlFor="password" className="text-white/80">Password</Label>
-                  <Link href="/forgot-password" className="text-xs font-semibold text-orange-300 hover:text-orange-200">
+                  <Link href="/forgot-password" className="text-xs font-semibold text-red-400 hover:text-red-300">
                     Forgot password?
                   </Link>
                 </div>
@@ -107,7 +107,7 @@ export default function LoginPage() {
                 </div>
               </div>
 
-              <Button type="submit" disabled={isLoading} className="h-12 rounded-full bg-orange-500 text-white hover:bg-orange-400">
+              <Button type="submit" disabled={isLoading} className="h-12 rounded-full bg-red-600 text-white hover:bg-red-700">
                 {isLoading ? (
                   <>
                     <Loader2 aria-hidden="true" className="size-4 animate-spin" />
@@ -124,7 +124,7 @@ export default function LoginPage() {
 
             <p className="mt-6 text-center text-sm text-white/52">
               New to TrustPay?{" "}
-              <Link href="/register" className="font-semibold text-orange-300 hover:text-orange-200">
+              <Link href="/register" className="font-semibold text-red-400 hover:text-red-300">
                 Create account
               </Link>
             </p>

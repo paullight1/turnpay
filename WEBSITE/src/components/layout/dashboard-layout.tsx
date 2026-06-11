@@ -90,10 +90,10 @@ function Sidebar({
             onClick={onNavigate}
             aria-current={active ? "page" : undefined}
             className={cn(
-              "group/nav relative flex min-h-10 items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-[background-color,color,transform,box-shadow]",
+              "group/nav relative flex min-h-10 items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-all duration-150",
               active
-                ? "bg-orange-500 text-white shadow-sm shadow-orange-950/30"
-                : "text-white/58 hover:translate-x-0.5 hover:bg-white/[0.06] hover:text-white",
+                ? "bg-red-600 text-white shadow-sm shadow-red-950/30 after:absolute after:-left-3 after:top-1/2 after:h-6 after:w-0.5 after:-translate-y-1/2 after:rounded-full after:bg-red-400"
+                : "text-white/58 hover:translate-x-1 hover:bg-white/[0.06] hover:text-white",
             )}
           >
             <Icon className="size-4 transition-transform group-hover/nav:scale-110" />
@@ -126,7 +126,7 @@ export default function DashboardLayout({
     return (
       <div className="dark flex min-h-screen items-center justify-center bg-[#050505] text-white">
         <div className="flex flex-col items-center gap-3 text-white/58">
-          <div className="size-10 rounded-full border-2 border-orange-500/20 border-t-orange-500 animate-spin" />
+          <div className="size-10 rounded-full border-2 border-red-600/20 border-t-red-600 animate-spin" />
           <p className="text-sm">Preparing your workspace...</p>
         </div>
       </div>
@@ -178,7 +178,7 @@ export default function DashboardLayout({
             </Sheet>
             <TrustPayLogo imageClassName="size-10" textClassName="text-xl font-bold" />
             {user.role === "ADMIN" && (
-              <Badge variant="secondary" className="border-orange-400/20 bg-orange-500/10 text-orange-200">
+              <Badge variant="secondary" className="border-red-500/20 bg-red-600/10 text-red-200">
                 Admin
               </Badge>
             )}
@@ -230,7 +230,7 @@ export default function DashboardLayout({
         <aside className="hidden w-64 border-r border-white/10 bg-[#0b0b0b] md:block">
           <Sidebar items={allItems} pathname={pathname} />
         </aside>
-        <main className="trustpay-dashboard-motion flex-1 bg-[radial-gradient(circle_at_0%_0%,rgba(255,107,10,0.12),transparent_28%),#050505] p-4 sm:p-6">
+        <main className="trustpay-dashboard-motion flex-1 bg-[radial-gradient(circle_at_0%_0%,rgba(220,38,38,0.12),transparent_28%),#050505] p-4 sm:p-6">
           {children}
         </main>
       </div>

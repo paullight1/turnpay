@@ -3,7 +3,6 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 
 import '../../core/theme/app_theme.dart';
-import '../../features/analytics/screens/analytics_screen.dart';
 import '../../features/home/screens/dashboard_detail_screen.dart';
 import '../../features/home/screens/home_screen.dart';
 import '../../features/home/screens/money_action_screen.dart';
@@ -54,30 +53,34 @@ class MainShell extends StatefulWidget {
 class _MainShellState extends State<MainShell> {
   int _selectedIndex = 0;
 
-  static const _screens = [
-    HomeScreen(),
-    MoneyActionScreen(
-      kind: MoneyActionKind.exchange,
-      showBackButton: false,
-    ),
-    AnalyticsScreen(),
-    DashboardProfileScreen(),
-  ];
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       extendBody: true,
       backgroundColor: AppColors.background,
-      body: IndexedStack(
-        index: _selectedIndex,
-        children: _screens,
-      ),
+      body: _screenFor(_selectedIndex),
       bottomNavigationBar: _TrustPayBottomNav(
         selectedIndex: _selectedIndex,
         onTap: (i) => setState(() => _selectedIndex = i),
       ),
     );
+  }
+
+  Widget _screenFor(int index) {
+    switch (index) {
+      case 1:
+        return const MoneyActionScreen(
+          kind: MoneyActionKind.exchange,
+          showBackButton: false,
+        );
+      case 2:
+        return const DashboardDetailScreen(kind: DashboardDetailKind.activity);
+      case 3:
+        return const DashboardProfileScreen();
+      case 0:
+      default:
+        return const HomeScreen();
+    }
   }
 }
 

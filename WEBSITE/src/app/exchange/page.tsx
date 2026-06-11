@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 import Image from "next/image";
-import Link from "next/link";
 import {
   ArrowLeftRight,
   ArrowRight,
@@ -28,26 +27,29 @@ export const metadata: Metadata = {
     "Exchange Nigerian naira and Ghanaian cedis with a clear quote, visible rate, and receipt.",
 };
 
+const whatsappExchangeUrl =
+  "https://wa.me/233555507240?text=Hello%20TrustPay%2C%20I%20want%20to%20start%20an%20NGN%20to%20GHS%20exchange.";
+
 const exchangeSteps = [
   {
     icon: ArrowLeftRight,
-    title: "Choose the pair",
-    description: "Pick NGN to GHS or GHS to NGN.",
+    title: "Send your request",
+    description: "Tell us the amount and whether it is NGN to GHS or GHS to NGN.",
   },
   {
     icon: Clock3,
-    title: "Check the quote",
-    description: "See the rate, fee, and amount before approval.",
+    title: "Get a clear rate",
+    description: "We share the rate, fee, and amount before you continue.",
   },
   {
     icon: BadgeCheck,
-    title: "Approve safely",
-    description: "Confirm only when the details look right.",
+    title: "Confirm details",
+    description: "Check the name, amount, wallet, and final value first.",
   },
   {
     icon: ReceiptText,
-    title: "Track the receipt",
-    description: "Use the reference to check the status later.",
+    title: "Keep your proof",
+    description: "Use your receipt and reference to track the exchange.",
   },
 ];
 
@@ -56,17 +58,14 @@ export default function ExchangePage() {
     <MarketingShell>
       <PageHero
         eyebrow="Exchange"
-        title="Swap NGN and GHS with a clear quote."
-        description="TrustPay is built mainly for exchange. You see the rate, fee, amount, and receipt before you move on."
+        title="Exchange Naira to Cedis with TrustPay."
+        description="Start your NGN to GHS exchange on WhatsApp. We help you see the rate, amount, and payment proof clearly."
       >
-        <Button asChild>
-          <Link href="/register">
+        <Button asChild className="bg-primary text-primary-foreground hover:bg-primary/90">
+          <a href={whatsappExchangeUrl} target="_blank" rel="noreferrer">
             Start exchange
             <ArrowRight data-icon="inline-end" aria-hidden="true" />
-          </Link>
-        </Button>
-        <Button variant="outline" asChild>
-          <Link href="/security">See safety checks</Link>
+          </a>
         </Button>
       </PageHero>
 
@@ -81,21 +80,13 @@ export default function ExchangePage() {
               className="object-cover"
             />
             <div className="absolute inset-0 bg-[linear-gradient(180deg,transparent,rgba(5,6,5,0.82))]" />
-            <a
-              href={marketingImages.exchangeApp.href}
-              className="absolute bottom-4 left-4 rounded-full border border-white/12 bg-black/38 px-3 py-1 text-xs text-white/70 backdrop-blur hover:text-white"
-              target="_blank"
-              rel="noreferrer"
-            >
-              {marketingImages.exchangeApp.credit}
-            </a>
           </div>
 
           <div className="flex flex-col gap-8">
             <SectionHeading
               eyebrow="How exchange works"
-              title="No hidden steps."
-              description="The screen should make the money path easy to scan: source, rate, fee, destination, and status."
+              title="Simple, clear, and direct."
+              description="TrustPay keeps the exchange path easy to understand from first message to final receipt."
             />
             <div className="grid gap-4 sm:grid-cols-2">
               {exchangeSteps.map((step) => {
@@ -119,24 +110,19 @@ export default function ExchangePage() {
       </section>
 
       <section className="px-4 py-16 sm:px-6 lg:px-8">
-        <div className="mx-auto flex max-w-7xl flex-col gap-6 rounded-[1.25rem] border border-orange-300/25 bg-[linear-gradient(135deg,rgba(249,115,22,0.2),rgba(34,197,94,0.08),rgba(255,255,255,0.04))] p-8 text-white md:p-12">
-          <ShieldCheck aria-hidden="true" className="size-10 text-orange-300" />
+        <div className="mx-auto flex max-w-7xl flex-col gap-6 rounded-[1.25rem] border border-red-400/25 bg-[linear-gradient(135deg,rgba(220,38,38,0.22),rgba(255,255,255,0.04),rgba(0,0,0,0.42))] p-8 text-white md:p-12">
+          <ShieldCheck aria-hidden="true" className="size-10 text-red-400" />
           <div className="flex flex-col justify-between gap-6 lg:flex-row lg:items-end">
             <div className="max-w-3xl">
               <h2 className="text-3xl font-semibold leading-tight text-balance md:text-5xl">
-                Exchange should feel calm.
+                Keep your exchange details safe.
               </h2>
               <p className="mt-4 text-base leading-7 text-white/64">
-                Clear rates, clear fees, and clear receipts help users trust
-                the result.
+                TrustPay support will not ask for your password, OTP, full card
+                details, or transaction PIN. Share only the amount, currency,
+                and transaction reference.
               </p>
             </div>
-            <Button size="lg" asChild className="bg-orange-500 text-white hover:bg-orange-400">
-              <Link href="/register">
-                Create wallet
-                <ArrowRight data-icon="inline-end" aria-hidden="true" />
-              </Link>
-            </Button>
           </div>
         </div>
       </section>

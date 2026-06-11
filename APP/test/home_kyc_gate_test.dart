@@ -14,10 +14,29 @@ void main() {
       );
     });
 
-    test('blocks debit and payout routes before KYC verification', () {
+    test('allows the send chooser before KYC verification', () {
       expect(
         KycGatePolicy.isBlocked(
           route: '/send',
+          status: 'PENDING',
+          kycTier: 'TIER_0',
+        ),
+        false,
+      );
+    });
+
+    test('blocks debit and payout leaf routes before KYC verification', () {
+      expect(
+        KycGatePolicy.isBlocked(
+          route: '/send/trustpay',
+          status: 'PENDING',
+          kycTier: 'TIER_0',
+        ),
+        true,
+      );
+      expect(
+        KycGatePolicy.isBlocked(
+          route: '/send/bank',
           status: 'PENDING',
           kycTier: 'TIER_0',
         ),

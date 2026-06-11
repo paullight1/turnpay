@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Image from "next/image";
 import Link from "next/link";
 import {
   ArrowRight,
@@ -85,29 +86,37 @@ function SectionTitle({
 export default function DownloadPage() {
   return (
     <MarketingShell>
-      <section className="relative overflow-hidden px-4 pb-14 pt-28 sm:px-6 lg:px-8">
-        <div className="absolute inset-0 -z-20 bg-[radial-gradient(circle_at_52%_18%,rgba(255,107,10,0.2),transparent_32%),linear-gradient(180deg,#050605_0%,#080908_58%,#050505_100%)]" />
-        <div className="mx-auto max-w-4xl text-center">
-          <p className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-xs text-white/64">
-            <span className="rounded-full bg-orange-500 px-2 py-0.5 font-semibold text-white">
+      <section className="relative min-h-[620px] overflow-hidden px-4 py-28 sm:px-6 lg:px-8">
+        <Image
+          src="https://images.unsplash.com/photo-1556742044-3c52d6e88c62?auto=format&fit=crop&q=85&w=2200"
+          alt=""
+          fill
+          priority
+          unoptimized
+          sizes="100vw"
+          className="object-cover"
+        />
+        <div className="absolute inset-0 bg-slate-950/72" />
+        <div className="absolute inset-0 bg-gradient-to-r from-black via-black/78 to-red-950/35" />
+        <div className="relative mx-auto flex min-h-[420px] max-w-6xl items-end">
+          <div className="max-w-3xl">
+            <p className="inline-flex items-center rounded-full bg-white/10 px-4 py-1.5 text-xs font-semibold uppercase tracking-[0.12em] text-red-100 backdrop-blur">
               Mobile app
-            </span>
-            App stores or APK
-          </p>
-          <h1 className="mx-auto mt-6 max-w-3xl text-5xl font-black leading-[0.96] tracking-[-0.02em] text-white md:text-7xl">
-            Download TrustPay.
-          </h1>
-          <p className="mx-auto mt-5 max-w-2xl text-sm leading-6 text-white/56 md:text-base">
-            Install the app to exchange NGN and GHS, pay VTU services, and keep
-            receipts close.
-          </p>
-          <div className="mt-7 flex flex-col justify-center gap-3 sm:flex-row">
-            <Button asChild className="rounded-full bg-orange-500 text-white hover:bg-orange-400">
-              <Link href="#download-options">Choose download</Link>
-            </Button>
-            <Button asChild variant="outline" className="rounded-full border-white/12 bg-white/[0.04] text-white hover:bg-white hover:text-black">
-              <Link href="#apk-safety">APK safety</Link>
-            </Button>
+            </p>
+            <h1 className="mt-6 max-w-3xl text-5xl font-bold leading-[0.98] tracking-tight text-white md:text-7xl">
+              Download TrustPay
+            </h1>
+            <p className="mt-5 max-w-xl text-base leading-7 text-white/72">
+              Install the app for NGN-GHS exchange, VTU payments, and receipts.
+            </p>
+            <div className="mt-8 flex flex-col gap-3 sm:flex-row">
+              <Button asChild className="rounded-full bg-red-600 text-white hover:bg-red-500">
+                <Link href="#download-options">Choose download</Link>
+              </Button>
+              <Button asChild variant="outline" className="rounded-full border-white/30 bg-white/10 text-white hover:bg-white hover:text-black">
+                <Link href="#apk-safety">APK safety</Link>
+              </Button>
+            </div>
           </div>
         </div>
       </section>
@@ -123,15 +132,15 @@ export default function DownloadPage() {
 
             return (
               <div key={option.title} className="rounded-xl border border-white/8 bg-[#171722] p-5">
-                <span className="grid size-12 place-items-center rounded-full bg-orange-500 text-white">
+                <span className="grid size-12 place-items-center rounded-full bg-red-600 text-white">
                   <Icon aria-hidden="true" className="size-6" />
                 </span>
-                <p className="mt-5 text-xs font-semibold uppercase tracking-[0.18em] text-orange-300">
+                <p className="mt-5 text-xs font-semibold uppercase tracking-[0.18em] text-red-400">
                   {option.label}
                 </p>
                 <h2 className="mt-2 text-xl font-black text-white">{option.title}</h2>
                 <p className="mt-3 text-sm leading-6 text-white/52">{option.text}</p>
-                <Button asChild className="mt-6 rounded-full bg-orange-500 text-white hover:bg-orange-400">
+                <Button asChild className="mt-6 rounded-full bg-red-600 text-white hover:bg-red-500">
                   <Link href={option.href}>
                     {option.action}
                     <ArrowRight data-icon="inline-end" aria-hidden="true" />
@@ -154,16 +163,16 @@ export default function DownloadPage() {
 
             return (
               <div key={item.title} className="rounded-xl border border-white/8 bg-[#121212] p-5">
-                <Icon aria-hidden="true" className="size-6 text-orange-300" />
+                <Icon aria-hidden="true" className="size-6 text-red-400" />
                 <h2 className="mt-4 text-lg font-black text-white">{item.title}</h2>
                 <p className="mt-3 text-sm leading-6 text-white/52">{item.text}</p>
               </div>
             );
           })}
         </div>
-        <div className="mx-auto mt-8 max-w-3xl rounded-xl border border-orange-400/20 bg-orange-500/10 p-5">
+        <div className="mx-auto mt-8 max-w-3xl rounded-xl border border-red-500/20 bg-red-600/10 p-5">
           <div className="flex gap-3">
-            <Fingerprint aria-hidden="true" className="mt-1 size-5 shrink-0 text-orange-300" />
+            <Fingerprint aria-hidden="true" className="mt-1 size-5 shrink-0 text-red-400" />
             <p className="text-sm leading-6 text-white/66">
               TrustPay will never ask you to download an APK from a random chat
               group, share your OTP, or reveal your transaction PIN. When in

@@ -17,7 +17,12 @@ export function TrustPayLogo({
 }: TrustPayLogoProps) {
   return (
     <span className={cn("inline-flex min-w-0 items-center gap-2.5", className)} translate="no">
-      <span className={cn("relative size-10 shrink-0 overflow-hidden", imageClassName)}>
+      <span
+        className={cn(
+          "relative size-10 shrink-0 overflow-hidden rounded-xl bg-white p-1.5",
+          imageClassName,
+        )}
+      >
         <Image
           src="/trustpay-logo.png"
           alt=""

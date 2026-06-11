@@ -17,7 +17,7 @@ export const metadata: Metadata = {
 };
 
 const whatsappUrl =
-  "https://wa.me/?text=Hello%20TrustPay%2C%20I%20need%20help%20with%20my%20account.";
+  "https://wa.me/233555507240?text=Hello%20TrustPay%2C%20I%20need%20help%20with%20my%20account.";
 
 const helpTopics = [
   {
@@ -43,7 +43,7 @@ export default function SupportPage() {
       <section className="relative isolate overflow-hidden bg-[#050505] px-4 pb-20 pt-28 text-white sm:px-6 lg:px-8">
         <div className="absolute inset-0 -z-10 bg-[radial-gradient(circle_at_50%_0%,rgba(255,107,10,0.20),transparent_34%)]" />
         <div className="mx-auto max-w-5xl text-center">
-          <span className="mx-auto inline-flex items-center gap-2 rounded-full border border-orange-400/25 bg-orange-500/10 px-4 py-2 text-sm font-semibold text-orange-200">
+          <span className="mx-auto inline-flex items-center gap-2 rounded-full border border-red-500/25 bg-red-600/10 px-4 py-2 text-sm font-semibold text-red-300">
             <MessageSquareText aria-hidden="true" className="size-4" />
             Contact us
           </span>
@@ -56,7 +56,7 @@ export default function SupportPage() {
             support.
           </p>
 
-          <Button asChild className="mt-8 h-12 rounded-full bg-orange-500 px-7 text-white hover:bg-orange-400">
+          <Button asChild className="mt-8 h-12 rounded-full bg-red-600 px-7 text-white hover:bg-red-500">
             <a href={whatsappUrl} target="_blank" rel="noreferrer">
               Contact us on WhatsApp
               <ArrowRight data-icon="inline-end" aria-hidden="true" />
@@ -72,7 +72,7 @@ export default function SupportPage() {
 
             return (
               <div key={topic.title} className="rounded-xl border border-white/10 bg-[#111111] p-5">
-                <span className="grid size-11 place-items-center rounded-full bg-orange-500 text-white">
+                <span className="grid size-11 place-items-center rounded-full bg-red-600 text-white">
                   <Icon aria-hidden="true" className="size-5" />
                 </span>
                 <h2 className="mt-5 text-lg font-black text-white">{topic.title}</h2>
@@ -82,7 +82,7 @@ export default function SupportPage() {
           })}
         </div>
 
-        <div className="mx-auto mt-8 max-w-5xl rounded-xl border border-orange-400/20 bg-orange-500/10 p-5 text-center">
+        <div className="mx-auto mt-8 max-w-5xl rounded-xl border border-red-500/20 bg-red-600/10 p-5 text-center">
           <p className="text-sm leading-6 text-white/64">
             TrustPay support will not ask for your password, OTP, full card
             details, or transaction PIN.

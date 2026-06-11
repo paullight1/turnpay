@@ -51,7 +51,7 @@ async function bootstrap() {
         !origin ||
         allowedOrigins.has(origin) ||
         (!isProduction &&
-          /^http:\/\/(localhost|127\.0\.0\.1):\d+$/.test(origin))
+          /^http:\/\/(localhost|127\.0\.0\.1|\[::1\]):\d+$/.test(origin))
       ) {
         callback(null, true);
         return;

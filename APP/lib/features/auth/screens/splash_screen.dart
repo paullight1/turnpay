@@ -3,11 +3,10 @@ import 'package:go_router/go_router.dart';
 
 import '../../../core/theme/app_theme.dart';
 import '../../../core/router/app_router.dart';
-import '../../../core/widgets/trustpay_lottie.dart';
 import '../../../services/auth_service.dart';
 
 /// Animated splash screen that transitions to onboarding or home.
-/// Features the TRUSTPAY logo on a dark background with a coral glow.
+/// Features the TrustPay brand mark before the app name.
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
 
@@ -22,7 +21,6 @@ class _SplashScreenState extends State<SplashScreen>
   late Animation<double> _logoOpacity;
   late Animation<double> _taglineOpacity;
   final _authService = AuthService();
-  bool _isCheckingSession = true;
 
   @override
   void initState() {
@@ -78,12 +76,9 @@ class _SplashScreenState extends State<SplashScreen>
 
   Future<bool> _tryRestoreSession() async {
     try {
-      _isCheckingSession = true;
       return await _authService.refreshSession();
     } catch (_) {
       return false;
-    } finally {
-      _isCheckingSession = false;
     }
   }
 
@@ -116,9 +111,8 @@ class _SplashScreenState extends State<SplashScreen>
               child: const _LogoMark(),
             ),
 
-            SizedBox(height: AppSpacing.xl),
+            const SizedBox(height: AppSpacing.xl),
 
-            // App Name + Tagline
             AnimatedBuilder(
               animation: _taglineOpacity,
               builder: (context, child) {
@@ -130,17 +124,10 @@ class _SplashScreenState extends State<SplashScreen>
               child: Column(
                 children: [
                   Text(
-                    'TRUSTPAY',
+                    'TrustPay',
                     style: AppTextStyles.displayMedium.copyWith(
-                      letterSpacing: 4,
+                      letterSpacing: -0.4,
                       color: AppColors.textPrimary,
-                    ),
-                  ),
-                  SizedBox(height: AppSpacing.sm),
-                  Text(
-                    'Send money across borders.',
-                    style: AppTextStyles.bodyL.copyWith(
-                      color: AppColors.textSecondary,
                     ),
                   ),
                 ],
@@ -153,47 +140,31 @@ class _SplashScreenState extends State<SplashScreen>
   }
 }
 
-// â”€â”€â”€ LOGO MARK WIDGET â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 class _LogoMark extends StatelessWidget {
   const _LogoMark();
 
   @override
   Widget build(BuildContext context) {
-    return Stack(
-      alignment: Alignment.center,
-      children: [
-        TrustPayLottie(
-          variant: TrustPayAnimationVariant.loading,
-          size: 136,
-          semanticsLabel: 'Starting TRUSTPAY',
-        ),
-        Container(
-          width: 88,
-          height: 88,
-          decoration: BoxDecoration(
-            color: AppColors.primary,
-            borderRadius: BorderRadius.circular(AppRadius.xl),
-            boxShadow: [
-              BoxShadow(
-                color: AppColors.primary.withValues(alpha: 0.4),
-                blurRadius: 40,
-                spreadRadius: 8,
-              ),
-            ],
+    return Container(
+      width: 116,
+      height: 116,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: AppColors.overlayLight,
+            blurRadius: 32,
+            offset: const Offset(0, 18),
           ),
-          child: Center(
-            child: Text(
-              'T',
-              style: TextStyle(
-                fontSize: 44,
-                fontWeight: FontWeight.w900,
-                color: Colors.white,
-                letterSpacing: -2,
-              ),
-            ),
-          ),
-        ),
-      ],
+        ],
+      ),
+      child: Image.asset(
+        'assets/icons/trustpay-logo.png',
+        fit: BoxFit.contain,
+        semanticLabel: 'TrustPay logo',
+      ),
     );
   }
 }

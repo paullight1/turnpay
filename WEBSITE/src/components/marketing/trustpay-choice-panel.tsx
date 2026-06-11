@@ -41,12 +41,12 @@ const choices = [
 function ChoiceVisual({ visual }: { visual: string }) {
   if (visual === "payments") {
     return (
-      <div className="mt-5 grid h-44 place-items-center rounded-lg bg-orange-500/10 p-4">
-        <div className="relative grid size-28 place-items-center rounded-[2rem] border border-orange-300/30 bg-black text-orange-300">
+      <div className="mt-5 grid h-44 place-items-center rounded-lg bg-red-600/10 p-4">
+        <div className="relative grid size-28 place-items-center rounded-[2rem] border border-red-400/30 bg-black text-red-400">
           <Smartphone aria-hidden="true" className="size-12" />
-          <span className="absolute -left-6 top-4 rounded-full bg-orange-500 px-3 py-1 text-xs font-black text-white">Data</span>
+          <span className="absolute -left-6 top-4 rounded-full bg-red-600 px-3 py-1 text-xs font-black text-white">Data</span>
           <span className="absolute -right-7 top-12 rounded-full bg-white px-3 py-1 text-xs font-black text-black">Bills</span>
-          <span className="absolute bottom-1 right-3 grid size-9 place-items-center rounded-full bg-orange-500 text-white">
+          <span className="absolute bottom-1 right-3 grid size-9 place-items-center rounded-full bg-red-600 text-white">
             <Zap aria-hidden="true" className="size-5" />
           </span>
         </div>
@@ -56,15 +56,15 @@ function ChoiceVisual({ visual }: { visual: string }) {
 
   if (visual === "banks") {
     return (
-      <div className="mt-5 h-44 rounded-lg bg-orange-500/10 p-4">
+      <div className="mt-5 h-44 rounded-lg bg-red-600/10 p-4">
         <div className="grid h-full content-center gap-3">
-          <div className="mx-auto grid size-16 place-items-center rounded-2xl bg-orange-500 text-white">
+          <div className="mx-auto grid size-16 place-items-center rounded-2xl bg-red-600 text-white">
             <Landmark aria-hidden="true" className="size-9" />
           </div>
           {["Virtual account", "Bank transfer", "Withdrawal ready"].map((item) => (
             <div key={item} className="flex items-center justify-between rounded-full bg-black/70 px-4 py-2 text-xs text-white/76">
               <span>{item}</span>
-              <span className="size-2 rounded-full bg-orange-400" />
+              <span className="size-2 rounded-full bg-red-500" />
             </div>
           ))}
         </div>
@@ -74,14 +74,14 @@ function ChoiceVisual({ visual }: { visual: string }) {
 
   if (visual === "support") {
     return (
-      <div className="mt-5 grid h-44 content-center gap-3 rounded-lg bg-orange-500/10 p-4">
+      <div className="mt-5 grid h-44 content-center gap-3 rounded-lg bg-red-600/10 p-4">
         <div className="w-4/5 rounded-2xl rounded-bl-sm bg-white px-4 py-3 text-xs font-semibold text-black">
           Ref: TP-2048 found
         </div>
-        <div className="ml-auto w-4/5 rounded-2xl rounded-br-sm bg-orange-500 px-4 py-3 text-xs font-semibold text-white">
+        <div className="ml-auto w-4/5 rounded-2xl rounded-br-sm bg-red-600 px-4 py-3 text-xs font-semibold text-white">
           Receipt sent
         </div>
-        <div className="mx-auto mt-1 grid size-12 place-items-center rounded-full bg-black text-orange-300">
+        <div className="mx-auto mt-1 grid size-12 place-items-center rounded-full bg-black text-red-400">
           <MessageCircle aria-hidden="true" className="size-6" />
         </div>
       </div>
@@ -89,7 +89,7 @@ function ChoiceVisual({ visual }: { visual: string }) {
   }
 
   return (
-    <div className="mt-5 h-44 rounded-lg bg-orange-500/10 p-4">
+    <div className="mt-5 h-44 rounded-lg bg-red-600/10 p-4">
       <div className="grid h-full grid-cols-[1fr_1.2fr] items-center gap-3">
         <div className="grid gap-3">
           {["NGN", "GHS"].map((item) => (
@@ -99,7 +99,7 @@ function ChoiceVisual({ visual }: { visual: string }) {
             </div>
           ))}
         </div>
-        <div className="grid place-items-center rounded-2xl bg-orange-500 p-4 text-white">
+        <div className="grid place-items-center rounded-2xl bg-red-600 p-4 text-white">
           <WalletCards aria-hidden="true" className="size-12" />
           <ReceiptText aria-hidden="true" className="-mt-3 ml-10 size-8 rounded-lg bg-black p-1.5" />
         </div>
@@ -127,11 +127,11 @@ export function TrustpayChoicePanel() {
               onClick={() => setSelectedIndex(index)}
               className={`rounded-lg border p-4 text-left text-sm font-semibold transition-all ${
                 isSelected
-                  ? "border-orange-400/70 bg-orange-500 text-white shadow-[0_0_32px_rgba(255,107,10,0.18)]"
-                  : "border-white/8 bg-black/60 text-white hover:border-orange-300/50 hover:bg-white/[0.06]"
+                  ? "border-red-500/70 bg-red-600 text-white shadow-[0_0_32px_rgba(220,38,38,0.18)]"
+                  : "border-white/8 bg-black/60 text-white hover:border-red-400/50 hover:bg-white/[0.06]"
               }`}
             >
-              <ChoiceIcon aria-hidden="true" className={`mb-3 size-5 ${isSelected ? "text-white" : "text-orange-300"}`} />
+              <ChoiceIcon aria-hidden="true" className={`mb-3 size-5 ${isSelected ? "text-white" : "text-red-400"}`} />
               {choice.label}
             </button>
           );
@@ -145,7 +145,7 @@ export function TrustpayChoicePanel() {
               <p className="text-xs text-white/42">TrustPay focus</p>
               <p className="mt-1 text-sm font-semibold text-white">{selected.label}</p>
             </div>
-            <span className="grid size-10 place-items-center rounded-full bg-orange-500 text-white">
+            <span className="grid size-10 place-items-center rounded-full bg-red-600 text-white">
               <Icon aria-hidden="true" className="size-5" />
             </span>
           </div>
@@ -157,7 +157,7 @@ export function TrustpayChoicePanel() {
           <div className="mt-5 space-y-3 text-sm text-white/72">
             {selected.bullets.map((item) => (
               <p key={item} className="flex items-center gap-2">
-                <span className="size-2 rounded-full bg-orange-400" />
+                <span className="size-2 rounded-full bg-red-500" />
                 {item}
               </p>
             ))}

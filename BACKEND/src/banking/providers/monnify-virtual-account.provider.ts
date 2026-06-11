@@ -77,6 +77,41 @@ interface MonnifyDisbursementResponse {
   };
 }
 
+interface MonnifyTransferStatusResponse {
+  requestSuccessful: boolean;
+  responseMessage?: string;
+  responseCode?: string;
+  responseBody?: {
+    amount?: number;
+    reference?: string;
+    narration?: string;
+    currency?: string;
+    fee?: number;
+    twoFaEnabled?: boolean;
+    status?: string;
+    transactionDescription?: string;
+    transactionReference?: string;
+    destinationBankCode?: string;
+    destinationAccountNumber?: string;
+    destinationAccountName?: string;
+    destinationBankName?: string;
+    createdOn?: string;
+  };
+}
+
+interface MonnifyOtpResponse {
+  requestSuccessful: boolean;
+  responseMessage?: string;
+  responseCode?: string;
+  responseBody?: {
+    reference?: string;
+    transactionReference?: string;
+    status?: string;
+    transactionStatus?: string;
+    message?: string;
+  };
+}
+
 @Injectable()
 export class MonnifyVirtualAccountProvider {
   private accessToken?: string;
@@ -297,6 +332,133 @@ export class MonnifyVirtualAccountProvider {
         response.data.responseBody?.transactionReference || input.reference,
       transactionReference: response.data.responseBody?.transactionReference,
       status: response.data.responseBody?.status || "PENDING",
+      responseMessage: response.data.responseMessage,
+      raw: response.data as unknown as Record<string, unknown>,
+    };
+  }
+
+  async authorizeTransfer(input: {
+    reference: string;
+    authorizationCode: string;
+  }): Promise<{
+    reference: string;
+    transactionReference?: string;
+    status: string;
+    responseMessage?: string;
+    raw: Record<string, unknown>;
+  }> {
+    const token = await this.getAccessToken();
+    const response = await this.fetchMonnify<MonnifyOtpResponse>(
+      firstValueFrom(
+        this.httpService.post<MonnifyOtpResponse>(
+          `${this.baseUrl}/api/v2/disbursements/single/validate-otp`,
+          {
+            reference: input.reference,
+            authorizationCode: input.authorizationCode,
+          },
+          {
+            headers: {
+              Authorization: `Bearer ${token}`,
+              "Content-Type": "application/json",
+            },
+          },
+        ),
+      ),
+      "Could not authorize Monnify transfer",
+    );
+
+    if (!response.data.requestSuccessful) {
+      throw new BadRequestException(
+        response.data.responseMessage || "Could not authorize Monnify transfer",
+      );
+    }
+
+    return {
+      reference:
+        response.data.responseBody?.transactionReference || input.reference,
+      transactionReference: response.data.responseBody?.transactionReference,
+      status:
+        response.data.responseBody?.status ||
+        response.data.responseBody?.transactionStatus ||
+        "PENDING",
+      responseMessage: response.data.responseMessage,
+      raw: response.data as unknown as Record<string, unknown>,
+    };
+  }
+
+  async resendTransferOtp(reference: string): Promise<{
+    reference: string;
+    responseMessage?: string;
+    raw: Record<string, unknown>;
+  }> {
+    const token = await this.getAccessToken();
+    const response = await this.fetchMonnify<MonnifyOtpResponse>(
+      firstValueFrom(
+        this.httpService.post<MonnifyOtpResponse>(
+          `${this.baseUrl}/api/v2/disbursements/single/resend-otp`,
+          { reference },
+          {
+            headers: {
+              Authorization: `Bearer ${token}`,
+              "Content-Type": "application/json",
+            },
+          },
+        ),
+      ),
+      "Could not resend Monnify transfer OTP",
+    );
+
+    if (!response.data.requestSuccessful) {
+      throw new BadRequestException(
+        response.data.responseMessage || "Could not resend Monnify transfer OTP",
+      );
+    }
+
+    return {
+      reference:
+        response.data.responseBody?.transactionReference || reference,
+      responseMessage: response.data.responseMessage,
+      raw: response.data as unknown as Record<string, unknown>,
+    };
+  }
+
+  async getTransferStatus(reference: string): Promise<{
+    reference: string;
+    status: string;
+    responseMessage?: string;
+    raw: Record<string, unknown>;
+  }> {
+    const token = await this.getAccessToken();
+    const response = await this.fetchMonnify<MonnifyTransferStatusResponse>(
+      firstValueFrom(
+        this.httpService.get<MonnifyTransferStatusResponse>(
+          `${this.baseUrl}/api/v2/disbursements/single/summary`,
+          {
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+            params: { reference },
+          },
+        ),
+      ),
+      "Could not fetch Monnify transfer status",
+    );
+
+    if (!response.data.requestSuccessful) {
+      throw new BadRequestException(
+        response.data.responseMessage || "Could not fetch Monnify transfer status",
+      );
+    }
+
+    return {
+      reference:
+        response.data.responseBody?.transactionReference ||
+        response.data.responseBody?.reference ||
+        reference,
+      status:
+        response.data.responseBody?.status ||
+        response.data.responseBody?.transactionDescription ||
+        "PENDING",
       responseMessage: response.data.responseMessage,
       raw: response.data as unknown as Record<string, unknown>,
     };

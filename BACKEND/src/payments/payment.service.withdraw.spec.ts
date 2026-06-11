@@ -274,6 +274,84 @@ describe("PaymentService withdrawals", () => {
     });
   });
 
+  it("keeps a withdrawal pending when Monnify submission times out but status requery returns pending", async () => {
+    wallets.getWallet.mockResolvedValue({
+      id: "wallet-1",
+      balance: new Decimal(5000),
+    });
+    prisma.user.findUnique.mockResolvedValue({
+      kycStatus: "VERIFIED",
+      kycTier: "TIER_2",
+      isSuspended: false,
+      dailyWithdrawLimit: new Decimal(500000),
+      monthlyWithdrawLimit: new Decimal(5000000),
+      dailyWithdrawn: new Decimal(0),
+      monthlyWithdrawn: new Decimal(0),
+      limitResetDate: new Date(Date.now() + 86400000),
+    });
+    prisma.bankAccount.findFirst.mockResolvedValue({
+      id: "beneficiary-1",
+      bankCode: "044",
+      bankName: "Test Bank",
+      accountName: "ADA LOVELACE",
+      accountNumberEncrypted: encryptSensitiveValue(
+        "0123456789",
+        "test-bank-account-encryption-key",
+      ),
+      accountNumberMasked: "******6789",
+      currency: "NGN",
+      provider: "MONNIFY",
+    });
+    prisma.transaction.create.mockResolvedValue({
+      id: "tx-1",
+      reference: "WD-1",
+    });
+    prisma.transaction.update.mockResolvedValue({});
+    prisma.user.updateMany.mockResolvedValue({ count: 1 });
+    ledger.debitWallet.mockResolvedValue({
+      balanceAfter: new Decimal(4000),
+    });
+    monnifyBanks.resolveBankAccount.mockResolvedValue({
+      accountName: "ADA LOVELACE",
+      bankName: "Test Bank",
+      bankCode: "044",
+    });
+    monnifyBanks.initiateTransfer.mockRejectedValue(new Error("Monnify timeout"));
+    monnifyBanks.getTransferStatus.mockResolvedValue({
+      reference: "WD-1",
+      status: "PENDING",
+      raw: {},
+    });
+    prisma.transferAttempt.create.mockResolvedValue({
+      id: "attempt-1",
+    });
+    prisma.transferAttempt.update.mockResolvedValue({
+      id: "attempt-1",
+    });
+
+    const result = await service.withdraw("user-1", {
+      amount: "1000",
+      currency: "NGN",
+      beneficiaryId: "beneficiary-1",
+      provider: "monnify",
+    } as any);
+
+    expect(monnifyBanks.getTransferStatus).toHaveBeenCalledWith("WD-1");
+    expect(prisma.transferAttempt.update).toHaveBeenCalledWith({
+      where: { id: "attempt-1" },
+      data: expect.objectContaining({
+        providerStatus: "PENDING",
+        status: "PENDING",
+      }),
+    });
+    expect(ledger.creditWallet).not.toHaveBeenCalled();
+    expect(result).toEqual({
+      reference: "WD-1",
+      status: "PENDING",
+      message: "Withdrawal submitted and pending provider confirmation",
+    });
+  });
+
   it("processes transfer success webhooks through provider events", async () => {
     prisma.providerEvent.create.mockResolvedValue({
       id: "event-1",

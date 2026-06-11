@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:go_router/go_router.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -11,6 +12,8 @@ import '../../features/auth/screens/otp_screen.dart';
 import '../../features/auth/screens/forgot_password_screen.dart';
 import '../../features/home/screens/dashboard_detail_screen.dart';
 import '../../features/home/screens/home_task_screen.dart';
+import '../../features/home/screens/send_money_entry_screen.dart';
+import '../../features/home/screens/kyc_verification_screen.dart';
 import '../../features/home/screens/money_action_screen.dart';
 import '../../features/security/screens/transaction_security_screen.dart';
 import '../../features/wallet/screens/wallet_detail_screen.dart';
@@ -30,6 +33,8 @@ class AppRoutes {
   static const kyc = '/kyc';
   static const fund = '/fund';
   static const send = '/send';
+  static const sendTrustpay = '/send/trustpay';
+  static const sendBank = '/send/bank';
   static const withdraw = '/withdraw';
   static const exchange = '/exchange';
   static const exchangeSettlement = '/exchange/settlement';
@@ -68,7 +73,7 @@ class AppRoutes {
 final appRouterProvider = Provider<GoRouter>((ref) {
   return GoRouter(
     initialLocation: AppRoutes.splash,
-    debugLogDiagnostics: true,
+    debugLogDiagnostics: kDebugMode,
     routes: [
       GoRoute(
         path: AppRoutes.splash,
@@ -128,10 +133,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       ),
       GoRoute(
         path: AppRoutes.kyc,
-        pageBuilder: (context, state) => _slideTransition(
-          state,
-          const DashboardDetailScreen(kind: DashboardDetailKind.kyc),
-        ),
+        builder: (context, state) => const KycVerificationScreen(),
       ),
       GoRoute(
         path: AppRoutes.fund,
@@ -144,7 +146,21 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         path: AppRoutes.send,
         pageBuilder: (context, state) => _slideTransition(
           state,
+          const SendMoneyEntryScreen(),
+        ),
+      ),
+      GoRoute(
+        path: AppRoutes.sendTrustpay,
+        pageBuilder: (context, state) => _slideTransition(
+          state,
           const MoneyActionScreen(kind: MoneyActionKind.send),
+        ),
+      ),
+      GoRoute(
+        path: AppRoutes.sendBank,
+        pageBuilder: (context, state) => _slideTransition(
+          state,
+          const MoneyActionScreen(kind: MoneyActionKind.withdraw),
         ),
       ),
       GoRoute(
@@ -327,16 +343,8 @@ CustomTransitionPage<void> _slideTransition(
   return CustomTransitionPage<void>(
     key: state.pageKey,
     child: child,
-    transitionsBuilder: (context, animation, secondaryAnimation, child) {
-      final tween = Tween(
-        begin: const Offset(1.0, 0.0),
-        end: Offset.zero,
-      ).chain(CurveTween(curve: Curves.easeOutCubic));
-      return SlideTransition(
-        position: animation.drive(tween),
-        child: child,
-      );
-    },
-    transitionDuration: const Duration(milliseconds: 350),
+    transitionsBuilder: (context, animation, secondaryAnimation, child) =>
+        child,
+    transitionDuration: Duration.zero,
   );
 }

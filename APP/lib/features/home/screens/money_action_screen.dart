@@ -9,6 +9,7 @@ import 'package:dio/dio.dart';
 import '../../../core/router/app_router.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/widgets/micro_interactions.dart';
+import '../../../core/widgets/tp_page_header.dart';
 import '../../../core/widgets/trustpay_lottie.dart';
 import '../../../services/auth_service.dart';
 import '../../../services/api_client.dart';
@@ -52,6 +53,8 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
   final _accountNumberController = TextEditingController();
   final _accountNameController = TextEditingController();
   final _bankCodeController = TextEditingController();
+  final _withdrawBankController = TextEditingController();
+  final _withdrawBankFocusNode = FocusNode();
   final _noteController = TextEditingController();
   final _attemptIdempotency = MoneyAttemptIdempotency();
   late final VtuService _vtuService;
@@ -74,8 +77,8 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
   String _currency = 'NGN';
   String _exchangeFrom = 'GHS';
   String _exchangeTo = 'NGN';
-  String _provider = 'paystack';
-  String _vtuProvider = 'mtn';
+  final String _provider = 'monnify';
+  String _vtuProvider = '';
   String _airtimeScope = 'local';
   String _airtimeCountryCode = 'GH';
   String _airtimeOperatorId = '';
@@ -84,6 +87,7 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
   String _electricityCountryCode = 'NG';
   String _electricityBillerId = '';
   String? _dataPackageId;
+  bool _isElectricityPaymentStep = false;
   String? _message;
   MoneyActionFeedbackType _messageType = MoneyActionFeedbackType.info;
   bool _messageCanRetry = false;
@@ -92,9 +96,14 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
   double? _exchangeEffectiveRate;
   int _exchangeRateRequestId = 0;
   bool _isLoadingFundingAccounts = false;
+  bool _isLoadingWithdrawalBanks = false;
+  bool _isResolvingWithdrawalAccount = false;
   bool _isRequestingFundingAccount = false;
   String? _vtuCatalogMessage;
   String? _fundingAccountMessage;
+  String? _withdrawalBankMessage;
+  String? _withdrawalResolveError;
+  String? _withdrawalAccountName;
   String? _pendingOrderReference;
   VtuOrderStatus? _trackedOrder;
   bool _isSubmitting = false;
@@ -107,27 +116,39 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
   Map<String, List<VtuProviderOption>> _dataOperatorsByCountry = const {};
   Map<String, List<VtuProviderOption>> _electricityBillersByCountry = const {};
   List<VtuPackageOption> _dataPackages = const [];
+  List<_SettlementBankOption> _withdrawalBanks = const [];
+  _SettlementBankOption? _selectedWithdrawalBank;
   HomeUser? _fundingUser;
+  Timer? _withdrawalResolveDebounce;
+  int _withdrawalResolveRequestId = 0;
 
   @override
   void initState() {
     super.initState();
     _vtuService = VtuService(apiClient: _apiClient);
     _amountController.addListener(_onAmountChanged);
+    _accountNumberController.addListener(_scheduleWithdrawalAccountResolve);
+    _withdrawBankController.addListener(_onWithdrawalBankTyped);
     _loadFundingAccounts();
     _loadExchangeRate();
     _loadVtuCatalogs();
+    _loadWithdrawalBanks();
   }
 
   List<HomeVirtualAccount> _fundingAccounts = const [];
 
   @override
   void dispose() {
+    _withdrawalResolveDebounce?.cancel();
     _amountController.removeListener(_onAmountChanged);
+    _accountNumberController.removeListener(_scheduleWithdrawalAccountResolve);
     _amountController.dispose();
     _recipientController.dispose();
     _accountNumberController.dispose();
     _accountNameController.dispose();
+    _withdrawBankController.removeListener(_onWithdrawalBankTyped);
+    _withdrawBankController.dispose();
+    _withdrawBankFocusNode.dispose();
     _bankCodeController.dispose();
     _noteController.dispose();
     super.dispose();
@@ -237,18 +258,15 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
       if (!mounted) return;
 
       setState(() {
-        _localAirtimeProviders = results[0].isEmpty
-            ? _fallbackLocalProviders('airtime')
-            : results[0];
-        _localDataProviders =
-            results[1].isEmpty ? _fallbackLocalProviders('data') : results[1];
-        _localElectricityProviders = results[2].isEmpty
-            ? _fallbackLocalProviders('electricity')
-            : results[2];
+        _localAirtimeProviders = results[0];
+        _localDataProviders = results[1];
+        _localElectricityProviders = results[2];
         _vtuProvider = _firstProviderId(_providersForCurrentFlow());
       });
 
-      if (widget.kind == MoneyActionKind.data && _dataCountryCode == 'NG') {
+      if (widget.kind == MoneyActionKind.data &&
+          _dataCountryCode == 'NG' &&
+          _vtuProvider.isNotEmpty) {
         await _loadDataPackages(_vtuProvider);
       } else if (widget.kind == MoneyActionKind.data &&
           _dataCountryCode == 'GH') {
@@ -266,15 +284,18 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
     } catch (error) {
       if (!mounted) return;
       setState(() {
-        _localAirtimeProviders = _fallbackLocalProviders('airtime');
-        _localDataProviders = _fallbackLocalProviders('data');
-        _localElectricityProviders = _fallbackLocalProviders('electricity');
+        _localAirtimeProviders = const [];
+        _localDataProviders = const [];
+        _localElectricityProviders = const [];
+        _vtuProvider = '';
         _vtuCatalogMessage = authErrorMessage(
           error,
-          'Could not load live VTU providers. Showing default local options.',
+          'Could not load live VTU providers.',
         );
       });
-      if (widget.kind == MoneyActionKind.data && _dataCountryCode == 'NG') {
+      if (widget.kind == MoneyActionKind.data &&
+          _dataCountryCode == 'NG' &&
+          _vtuProvider.isNotEmpty) {
         await _loadDataPackages(_vtuProvider);
       }
     } finally {
@@ -316,6 +337,214 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
     } finally {
       if (mounted) {
         setState(() => _isLoadingFundingAccounts = false);
+      }
+    }
+  }
+
+  Future<void> _loadWithdrawalBanks() async {
+    if (widget.kind != MoneyActionKind.withdraw) return;
+
+    setState(() {
+      _isLoadingWithdrawalBanks = true;
+      _withdrawalBankMessage = null;
+    });
+
+    try {
+      final banks = await _fetchWithdrawalBanks('/api/payments/banks');
+
+      if (!mounted) return;
+      setState(() {
+        _withdrawalBanks = banks;
+        if (banks.isEmpty) {
+          _withdrawalBankMessage =
+              'Bank list is unavailable. Enter the bank code manually.';
+        }
+      });
+    } catch (primaryError) {
+      try {
+        final banks = await _fetchWithdrawalBanks('/api/banking/banks');
+
+        if (!mounted) return;
+        setState(() {
+          _withdrawalBanks = banks;
+          _withdrawalBankMessage = banks.isEmpty
+              ? 'Bank list is unavailable. Enter the bank code manually.'
+              : 'Using backup bank list while payout bank lookup is unavailable.';
+        });
+      } catch (fallbackError) {
+        if (!mounted) return;
+        setState(() {
+          _withdrawalBankMessage = authErrorMessage(
+            fallbackError,
+            authErrorMessage(
+              primaryError,
+              'Could not load bank list. Enter the bank code manually.',
+            ),
+          );
+        });
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isLoadingWithdrawalBanks = false);
+      }
+    }
+  }
+
+  Future<List<_SettlementBankOption>> _fetchWithdrawalBanks(String path) async {
+    final response = await _apiClient.client.get(path);
+    final data = response.data;
+    final items = data is List ? data : const [];
+    return items
+        .whereType<Map>()
+        .map((item) =>
+            _SettlementBankOption.fromJson(Map<String, dynamic>.from(item)))
+        .where((bank) => bank.name.isNotEmpty && bank.code.isNotEmpty)
+        .toList()
+      ..sort((a, b) => a.name.compareTo(b.name));
+  }
+
+  void _setWithdrawalAccountResolveSuccess(String accountName) {
+    setState(() {
+      _withdrawalAccountName = accountName;
+      _accountNameController.text = accountName;
+    });
+  }
+
+  void _setWithdrawalAccountResolveFailure(Object error) {
+    setState(() {
+      _withdrawalAccountName = null;
+      _accountNameController.clear();
+      _withdrawalResolveError = authErrorMessage(
+        error,
+        'Could not confirm this account name.',
+      );
+    });
+  }
+
+  Future<String> _resolveWithdrawalAccountName({
+    required String accountNumber,
+    required String bankCode,
+  }) async {
+    try {
+      final response = await _apiClient.client.post(
+        '/api/payments/banks/resolve',
+        data: {
+          'accountNumber': accountNumber,
+          'bankCode': bankCode,
+        },
+      );
+      final data = Map<String, dynamic>.from(response.data as Map);
+      return '${data['accountName'] ?? ''}'.trim();
+    } catch (_) {
+      final response = await _apiClient.client.post(
+        '/api/banking/banks/resolve',
+        data: {
+          'accountNumber': accountNumber,
+          'bankCode': bankCode,
+          'provider': 'monnify',
+        },
+      );
+      final data = Map<String, dynamic>.from(response.data as Map);
+      return '${data['accountName'] ?? ''}'.trim();
+    }
+  }
+
+  void _onWithdrawalBankTyped() {
+    final query = _withdrawBankController.text.trim().toLowerCase();
+    _SettlementBankOption? exactMatch;
+    for (final bank in _withdrawalBanks) {
+      if (bank.name.toLowerCase() == query ||
+          bank.code.toLowerCase() == query ||
+          bank.slug.toLowerCase() == query) {
+        exactMatch = bank;
+        break;
+      }
+    }
+
+    if (_selectedWithdrawalBank?.code != exactMatch?.code) {
+      setState(() {
+        _selectedWithdrawalBank = exactMatch;
+        _withdrawalAccountName = null;
+        _withdrawalResolveError = null;
+        if (exactMatch == null) {
+          _accountNameController.clear();
+        }
+        _bankCodeController.text = exactMatch?.code ?? '';
+      });
+      _scheduleWithdrawalAccountResolve();
+    }
+  }
+
+  void _selectWithdrawalBank(_SettlementBankOption bank) {
+    setState(() {
+      _selectedWithdrawalBank = bank;
+      _withdrawalAccountName = null;
+      _withdrawalResolveError = null;
+      _accountNameController.clear();
+      _withdrawBankController.text = bank.name;
+      _withdrawBankController.selection = TextSelection.collapsed(
+        offset: bank.name.length,
+      );
+      _bankCodeController.text = bank.code;
+    });
+    _scheduleWithdrawalAccountResolve();
+  }
+
+  void _scheduleWithdrawalAccountResolve() {
+    _withdrawalResolveDebounce?.cancel();
+    if (widget.kind != MoneyActionKind.withdraw) return;
+
+    if (mounted) {
+      setState(() {
+        _withdrawalAccountName = null;
+        _withdrawalResolveError = null;
+        if (!_isResolvingWithdrawalAccount) {
+          _accountNameController.clear();
+        }
+      });
+    }
+
+    final accountNumber = _accountNumberController.text.trim();
+    final bankCode = _bankCodeController.text.trim();
+    if (accountNumber.length != 10 || bankCode.isEmpty) {
+      return;
+    }
+
+    _withdrawalResolveDebounce = Timer(
+      const Duration(milliseconds: 600),
+      _resolveWithdrawalAccount,
+    );
+  }
+
+  Future<void> _resolveWithdrawalAccount() async {
+    final accountNumber = _accountNumberController.text.trim();
+    final bankCode = _bankCodeController.text.trim();
+    if (widget.kind != MoneyActionKind.withdraw ||
+        accountNumber.length != 10 ||
+        bankCode.isEmpty) {
+      return;
+    }
+
+    final requestId = ++_withdrawalResolveRequestId;
+    setState(() {
+      _isResolvingWithdrawalAccount = true;
+      _withdrawalResolveError = null;
+    });
+
+    try {
+      final accountName = await _resolveWithdrawalAccountName(
+        accountNumber: accountNumber,
+        bankCode: bankCode,
+      );
+      if (!mounted || requestId != _withdrawalResolveRequestId) return;
+
+      _setWithdrawalAccountResolveSuccess(accountName);
+    } catch (error) {
+      if (!mounted || requestId != _withdrawalResolveRequestId) return;
+      _setWithdrawalAccountResolveFailure(error);
+    } finally {
+      if (mounted && requestId == _withdrawalResolveRequestId) {
+        setState(() => _isResolvingWithdrawalAccount = false);
       }
     }
   }
@@ -500,6 +729,9 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
       _vtuProvider = provider;
       _dataPackageId = null;
       _dataPackages = const [];
+      if (widget.kind == MoneyActionKind.electricity) {
+        _isElectricityPaymentStep = false;
+      }
       _setMessageState(null);
     });
 
@@ -593,7 +825,9 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
     });
 
     if (countryCode == 'NG') {
-      _loadDataPackages(_vtuProvider);
+      if (_vtuProvider.isNotEmpty) {
+        _loadDataPackages(_vtuProvider);
+      }
     } else if (countryCode == 'GH') {
       _loadInternationalProviders(type: 'data', countryCode: countryCode);
     }
@@ -602,6 +836,7 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
   void _setElectricityCountryCode(String countryCode) {
     setState(() {
       _electricityCountryCode = countryCode;
+      _isElectricityPaymentStep = false;
       if (countryCode == 'GH') {
         _electricityBillerId = _firstProviderId(
           _electricityBillersForCountry(countryCode),
@@ -618,6 +853,55 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
         countryCode: countryCode,
       );
     }
+  }
+
+  void _handlePageBack() {
+    if (widget.kind == MoneyActionKind.electricity &&
+        _isElectricityPaymentStep) {
+      setState(() {
+        _isElectricityPaymentStep = false;
+        _setMessageState(null);
+      });
+      return;
+    }
+
+    if (context.canPop()) {
+      context.pop();
+    } else {
+      context.go(AppRoutes.home);
+    }
+  }
+
+  void _continueToElectricityPayment() {
+    final providers = _providersForCurrentFlow();
+    if (providers.isEmpty) {
+      _showMessage(
+        'No live electricity provider is available for this country yet.',
+        type: MoneyActionFeedbackType.warning,
+      );
+      return;
+    }
+
+    if (!_hasSelectedProvider(providers, _vtuSelectionId())) {
+      _showMessage(
+        'Select an available electricity provider before continuing.',
+        type: MoneyActionFeedbackType.warning,
+      );
+      return;
+    }
+
+    if (_recipientController.text.trim().isEmpty) {
+      _showMessage(
+        'Enter the meter number before continuing.',
+        type: MoneyActionFeedbackType.warning,
+      );
+      return;
+    }
+
+    setState(() {
+      _isElectricityPaymentStep = true;
+      _setMessageState(null);
+    });
   }
 
   List<VtuProviderOption> _providersForCurrentFlow() {
@@ -655,7 +939,7 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
     List<VtuProviderOption> providers, {
     String? fallback,
   }) {
-    return providers.isEmpty ? (fallback ?? _vtuProvider) : providers.first.id;
+    return providers.isEmpty ? (fallback ?? '') : providers.first.id;
   }
 
   bool _hasSelectedProvider(List<VtuProviderOption> providers, String id) {
@@ -682,110 +966,6 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
       }
     }
     return null;
-  }
-
-  List<VtuProviderOption> _fallbackLocalProviders(String type) {
-    if (type == 'electricity') {
-      const billers = [
-        VtuProviderOption(
-          id: 'ikedc',
-          name: 'Ikeja Electric',
-          type: 'electricity',
-          isActive: true,
-        ),
-        VtuProviderOption(
-          id: 'ekedc',
-          name: 'Eko Electric',
-          type: 'electricity',
-          isActive: true,
-        ),
-        VtuProviderOption(
-          id: 'aedc',
-          name: 'Abuja Electric',
-          type: 'electricity',
-          isActive: true,
-        ),
-        VtuProviderOption(
-          id: 'phed',
-          name: 'Port Harcourt Electric',
-          type: 'electricity',
-          isActive: true,
-        ),
-        VtuProviderOption(
-          id: 'jed',
-          name: 'Jos Electric',
-          type: 'electricity',
-          isActive: true,
-        ),
-        VtuProviderOption(
-          id: 'kedco',
-          name: 'Kano Electric',
-          type: 'electricity',
-          isActive: true,
-        ),
-        VtuProviderOption(
-          id: 'kaedco',
-          name: 'Kaduna Electric',
-          type: 'electricity',
-          isActive: true,
-        ),
-        VtuProviderOption(
-          id: 'eedc',
-          name: 'Enugu Electric',
-          type: 'electricity',
-          isActive: true,
-        ),
-        VtuProviderOption(
-          id: 'bedc',
-          name: 'Benin Electric',
-          type: 'electricity',
-          isActive: true,
-        ),
-        VtuProviderOption(
-          id: 'aba',
-          name: 'ABA Power',
-          type: 'electricity',
-          isActive: true,
-        ),
-        VtuProviderOption(
-          id: 'yedc',
-          name: 'Yola Electric',
-          type: 'electricity',
-          isActive: true,
-        ),
-      ];
-      return billers;
-    }
-
-    const networks = [
-      VtuProviderOption(
-          id: 'mtn', name: 'MTN', type: 'airtime', isActive: true),
-      VtuProviderOption(
-        id: 'airtel',
-        name: 'Airtel',
-        type: 'airtime',
-        isActive: true,
-      ),
-      VtuProviderOption(
-          id: 'glo', name: 'Glo', type: 'airtime', isActive: true),
-      VtuProviderOption(
-        id: '9mobile',
-        name: '9mobile',
-        type: 'airtime',
-        isActive: true,
-      ),
-    ];
-
-    return networks
-        .map(
-          (provider) => VtuProviderOption(
-            id: provider.id,
-            name: provider.name,
-            type: type,
-            isActive: true,
-          ),
-        )
-        .toList();
   }
 
   String? _resolvedAmountText() {
@@ -919,6 +1099,24 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
       }
     }
 
+    if (_isVtuAction) {
+      final providers = _providersForCurrentFlow();
+      if (providers.isEmpty) {
+        _showMessage(
+          'No live provider is available for this service yet.',
+          type: MoneyActionFeedbackType.warning,
+        );
+        return;
+      }
+      if (!_hasSelectedProvider(providers, _vtuSelectionId())) {
+        _showMessage(
+          'Select an available provider before continuing.',
+          type: MoneyActionFeedbackType.warning,
+        );
+        return;
+      }
+    }
+
     final resolvedAmount = _resolvedAmountText();
     if (resolvedAmount == null) {
       _showMessage(
@@ -937,6 +1135,31 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
     }
     final amount = amountResult.value!;
 
+    if (widget.kind == MoneyActionKind.withdraw) {
+      if (_isResolvingWithdrawalAccount) {
+        _showMessage(
+          'Wait for the account name confirmation.',
+          type: MoneyActionFeedbackType.warning,
+        );
+        return;
+      }
+      if (_withdrawalBanks.isNotEmpty && _selectedWithdrawalBank == null) {
+        _showMessage(
+          'Choose a bank from the list.',
+          type: MoneyActionFeedbackType.warning,
+        );
+        return;
+      }
+      if (_withdrawalBanks.isNotEmpty &&
+          (_withdrawalAccountName == null || _withdrawalAccountName!.isEmpty)) {
+        _showMessage(
+          _withdrawalResolveError ?? 'Confirm the account name before sending.',
+          type: MoneyActionFeedbackType.warning,
+        );
+        return;
+      }
+    }
+
     final fieldError = MoneyActionFormValidator.validateFields(
       kind: widget.kind,
       recipient: _recipientController.text,
@@ -949,6 +1172,9 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
       _showMessage(fieldError, type: MoneyActionFeedbackType.error);
       return;
     }
+
+    final kycCanConfirm = await _ensureKycCanConfirm();
+    if (!kycCanConfirm) return;
 
     final confirmed = await _confirmSubmission(amount);
     if (!confirmed) return;
@@ -1003,6 +1229,21 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
       MoneyActionKind.data,
       MoneyActionKind.electricity,
     ].contains(widget.kind);
+  }
+
+  String _vtuSelectionId() {
+    if (widget.kind == MoneyActionKind.airtime &&
+        _airtimeScope == 'international') {
+      return _airtimeOperatorId;
+    }
+    if (widget.kind == MoneyActionKind.data && _dataCountryCode == 'GH') {
+      return _dataOperatorId;
+    }
+    if (widget.kind == MoneyActionKind.electricity &&
+        _electricityCountryCode == 'GH') {
+      return _electricityBillerId;
+    }
+    return _vtuProvider;
   }
 
   void _captureVtuOrder(dynamic data) {
@@ -1091,6 +1332,9 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
       );
       return;
     }
+
+    final kycCanConfirm = await _ensureKycCanConfirm();
+    if (!kycCanConfirm) return;
 
     final confirmed = await _confirmSubmission(amount);
     if (!confirmed) return;
@@ -1283,6 +1527,118 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
     ].join('|');
   }
 
+  Future<bool> _ensureKycCanConfirm() async {
+    final route = _routeForKycGate();
+    if (route == null) return true;
+
+    HomeUser user;
+    try {
+      user = await _fetchCurrentUserForKycGate();
+    } catch (error) {
+      if (!mounted) return false;
+      _showMessage(
+        authErrorMessage(error, 'Could not verify your KYC status.'),
+        type: MoneyActionFeedbackType.error,
+        canRetry: true,
+      );
+      return false;
+    }
+
+    final isBlocked = KycGatePolicy.isBlocked(
+      route: route,
+      status: user.kycStatus,
+      kycTier: user.kycTier,
+    );
+    if (!isBlocked) return true;
+    if (!mounted) return false;
+
+    final requiresTier2 = KycGatePolicy.vtuRoutesRequiringTier2.contains(route);
+    final goToKyc = await _showKycConfirmationGate(
+      requiresTier2: requiresTier2,
+    );
+    if (goToKyc == true && mounted) {
+      context.push(AppRoutes.kyc);
+    }
+    return false;
+  }
+
+  Future<HomeUser> _fetchCurrentUserForKycGate() async {
+    final response = await _apiClient.client.post<dynamic>(
+      '/api/auth/bootstrap',
+      options: Options(
+        headers: const {
+          'Cache-Control': 'no-cache',
+          'Pragma': 'no-cache',
+        },
+      ),
+    );
+    final data = response.data;
+    final user = data is Map ? data['user'] : null;
+    if (user is! Map) {
+      throw StateError('KYC status was not available.');
+    }
+    return HomeUser.fromJson(Map<String, dynamic>.from(user));
+  }
+
+  String? _routeForKycGate() {
+    switch (widget.kind) {
+      case MoneyActionKind.send:
+        return AppRoutes.sendTrustpay;
+      case MoneyActionKind.withdraw:
+        return AppRoutes.withdraw;
+      case MoneyActionKind.exchange:
+        return AppRoutes.exchange;
+      case MoneyActionKind.airtime:
+        return AppRoutes.airtime;
+      case MoneyActionKind.data:
+        return AppRoutes.data;
+      case MoneyActionKind.electricity:
+        return AppRoutes.electricity;
+      case MoneyActionKind.fund:
+        return null;
+    }
+  }
+
+  Future<bool?> _showKycConfirmationGate({
+    required bool requiresTier2,
+  }) {
+    final title =
+        requiresTier2 ? 'Tier 2 verification required' : 'KYC required';
+    final message = requiresTier2
+        ? 'Complete or upgrade your KYC before confirming this service.'
+        : 'Complete KYC before confirming this action.';
+
+    return showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          backgroundColor: AppColors.surface,
+          title: Text(title, style: AppTextStyles.headingM),
+          content: Text(message, style: AppTextStyles.bodyM),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: Text(
+                'Not now',
+                style: AppTextStyles.labelM.copyWith(
+                  color: AppColors.textSecondary,
+                ),
+              ),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              style: FilledButton.styleFrom(
+                backgroundColor: AppColors.primary,
+                foregroundColor: Colors.white,
+              ),
+              child: const Text('Complete KYC'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   Future<bool> _confirmSubmission(String amount) async {
     final config = _configFor(widget.kind);
     final rows = _reviewRows(amount);
@@ -1351,10 +1707,11 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
             _ReviewRowData('Note', _noteController.text.trim()),
         ];
       case MoneyActionKind.withdraw:
+        final bankLabel =
+            _selectedWithdrawalBank?.name ?? _bankCodeController.text.trim();
         return [
           _ReviewRowData('Amount', '$amount $_currency'),
-          _ReviewRowData('Provider', _provider),
-          _ReviewRowData('Bank code', _bankCodeController.text.trim()),
+          _ReviewRowData('Bank', bankLabel),
           _ReviewRowData(
             'Account',
             _maskAccountNumber(_accountNumberController.text.trim()),
@@ -1438,6 +1795,11 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
     }
 
     final config = _configFor(widget.kind);
+    final isElectricityPaymentPage =
+        widget.kind == MoneyActionKind.electricity && _isElectricityPaymentStep;
+    final pageSubtitle = isElectricityPaymentPage
+        ? 'Enter the amount to recharge the selected meter.'
+        : config.subtitle;
 
     return Scaffold(
       backgroundColor: AppColors.background,
@@ -1454,39 +1816,16 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
               ),
               sliver: SliverList.list(
                 children: [
-                  Row(
-                    children: [
-                      if (widget.showBackButton)
-                        _IconButton(
-                          icon: Icons.arrow_back_ios_new_rounded,
-                          onTap: () => context.pop(),
-                        ),
-                      const Spacer(),
-                      _StatusPill(label: config.status),
-                    ],
-                  ),
-                  SizedBox(height: AppSpacing.xl),
-                  Container(
-                    width: 64,
-                    height: 64,
-                    decoration: BoxDecoration(
-                      color: AppColors.surfaceVariant,
-                      borderRadius: BorderRadius.circular(AppRadius.md),
-                    ),
-                    child: Center(
-                      child: TrustPayLottie(
-                        variant: _animationFor(widget.kind),
-                        size: 58,
-                        semanticsLabel: config.title,
-                      ),
-                    ),
+                  TpPageHeader(
+                    label: config.title,
+                    showBackButton: widget.showBackButton,
+                    onBack: _handlePageBack,
                   ),
                   SizedBox(height: AppSpacing.lg),
-                  Text(config.title, style: AppTextStyles.displayMedium),
-                  SizedBox(height: AppSpacing.sm),
-                  Text(config.subtitle, style: AppTextStyles.bodyL),
-                  SizedBox(height: AppSpacing.xl),
-                  if (widget.kind != MoneyActionKind.fund) ...[
+                  Text(pageSubtitle, style: AppTextStyles.bodyL),
+                  SizedBox(height: AppSpacing.lg),
+                  if (widget.kind != MoneyActionKind.fund &&
+                      widget.kind != MoneyActionKind.electricity) ...[
                     _CurrencySelector(
                       value: _currency,
                       onChanged: (value) => setState(() => _currency = value),
@@ -1508,23 +1847,10 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
                     ),
                   ],
                   ..._extraFields(),
-                  if (widget.kind != MoneyActionKind.fund) ...[
+                  if (widget.kind != MoneyActionKind.fund &&
+                      widget.kind != MoneyActionKind.electricity) ...[
                     SizedBox(height: AppSpacing.lg),
-                    FilledButton(
-                      onPressed: _isSubmitting ? null : _submit,
-                      style: FilledButton.styleFrom(
-                        backgroundColor: AppColors.primary,
-                        foregroundColor: AppColors.textPrimary,
-                        minimumSize: const Size.fromHeight(54),
-                      ),
-                      child: _isSubmitting
-                          ? TrustPayLottie(
-                              variant: TrustPayAnimationVariant.loading,
-                              size: 30,
-                              semanticsLabel: 'Submitting ${config.title}',
-                            )
-                          : Text(config.buttonLabel),
-                    ),
+                    _buildSubmitButton(config.buttonLabel, config.title),
                   ],
                   if (_vtuCatalogMessage != null) ...[
                     SizedBox(height: AppSpacing.md),
@@ -1580,25 +1906,13 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
               ),
               sliver: SliverList.list(
                 children: [
-                  Row(
-                    children: [
-                      if (widget.showBackButton)
-                        _IconButton(
-                          icon: Icons.arrow_back_ios_new_rounded,
-                          onTap: () => context.pop(),
-                        ),
-                      const Spacer(),
-                      const _StatusPill(label: 'Quote request'),
-                    ],
+                  TpPageHeader(
+                    label: config.title,
+                    showBackButton: widget.showBackButton,
                   ),
-                  SizedBox(height: AppSpacing.xl),
-                  Text(config.title, style: AppTextStyles.displayMedium),
-                  SizedBox(height: AppSpacing.sm),
-                  Text(
-                    'Convert between NGN and GHS. Submit the quote, then add the destination for review.',
-                    style: AppTextStyles.bodyL,
-                  ),
-                  SizedBox(height: AppSpacing.xl),
+                  SizedBox(height: AppSpacing.lg),
+                  Text(config.subtitle, style: AppTextStyles.bodyL),
+                  SizedBox(height: AppSpacing.lg),
                   _ExchangeSwapPanel(
                     fromCurrency: _exchangeFrom,
                     toCurrency: _exchangeTo,
@@ -1633,11 +1947,6 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
                             size: 20,
                           )
                         : const Text('Submit for review'),
-                  ),
-                  SizedBox(height: AppSpacing.md),
-                  const _InfoPanel(
-                    text:
-                        'After the quote is created, you will add where the converted payout should be sent.',
                   ),
                   if (_message != null) ...[
                     SizedBox(height: AppSpacing.md),
@@ -1776,21 +2085,49 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
       case MoneyActionKind.withdraw:
         return [
           SizedBox(height: AppSpacing.md),
-          _ProviderSelector(
-            value: _provider,
-            onChanged: (value) => setState(() => _provider = value),
-          ),
-          SizedBox(height: AppSpacing.md),
-          _InputField(controller: _bankCodeController, label: 'Bank code'),
+          if (_withdrawalBanks.isNotEmpty || _isLoadingWithdrawalBanks)
+            _SettlementBankSearchField(
+              controller: _withdrawBankController,
+              focusNode: _withdrawBankFocusNode,
+              banks: _withdrawalBanks,
+              isLoading: _isLoadingWithdrawalBanks,
+              onSelected: _selectWithdrawalBank,
+            )
+          else
+            _InputField(
+              controller: _bankCodeController,
+              label: 'Bank code',
+              onChanged: (_) => _scheduleWithdrawalAccountResolve(),
+            ),
+          if (_withdrawalBankMessage != null) ...[
+            SizedBox(height: AppSpacing.sm),
+            _InfoPanel(text: _withdrawalBankMessage!),
+          ],
           SizedBox(height: AppSpacing.md),
           _InputField(
             controller: _accountNumberController,
             label: 'Account number',
             keyboardType: TextInputType.number,
+            inputFormatters: [
+              FilteringTextInputFormatter.digitsOnly,
+              LengthLimitingTextInputFormatter(10),
+            ],
           ),
           SizedBox(height: AppSpacing.md),
-          _InputField(
-              controller: _accountNameController, label: 'Account name'),
+          if (_withdrawalBanks.isNotEmpty || _selectedWithdrawalBank != null)
+            _ResolvedAccountPanel(
+              accountName: _withdrawalAccountName,
+              isResolving: _isResolvingWithdrawalAccount,
+              error: _withdrawalResolveError,
+              canResolve: _bankCodeController.text.trim().isNotEmpty &&
+                  _accountNumberController.text.trim().length == 10,
+              onRetry: _resolveWithdrawalAccount,
+            )
+          else
+            _InputField(
+              controller: _accountNameController,
+              label: 'Account name',
+            ),
         ];
       case MoneyActionKind.exchange:
         return const [
@@ -1957,73 +2294,141 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
         ];
       case MoneyActionKind.electricity:
         final ghanaElectricityBillers = _electricityBillersForCountry('GH');
+        if (_isElectricityPaymentStep) {
+          return [
+            SizedBox(height: AppSpacing.md),
+            _FormStepSection(
+              step: '2',
+              title: 'Payment details',
+              subtitle: 'Enter the recharge amount and submit the request.',
+              children: [
+                _CurrencySelector(
+                  value: _currency,
+                  onChanged: (value) => setState(() => _currency = value),
+                ),
+                SizedBox(height: AppSpacing.md),
+                _InputField(
+                  controller: _amountController,
+                  label: 'Amount',
+                  keyboardType:
+                      const TextInputType.numberWithOptions(decimal: true),
+                  inputFormatters: [
+                    FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
+                  ],
+                ),
+                SizedBox(height: AppSpacing.lg),
+                _buildSubmitButton(
+                  _configFor(widget.kind).buttonLabel,
+                  _configFor(widget.kind).title,
+                ),
+              ],
+            ),
+          ];
+        }
+
         return [
           SizedBox(height: AppSpacing.md),
-          const _VtuProviderRoutePanel(
-            title: 'Nigeria electricity via VTPass',
-            description: 'Use prepaid meters for the first live test.',
-          ),
-          SizedBox(height: AppSpacing.md),
-          _ChoiceRow(
-            label: 'Service country',
-            value: _electricityCountryCode,
-            values: _electricityCountryOptions,
-            labels: _countryLabels,
-            disabledValues: _electricityCountryOptions
-                .where((code) => !_enabledElectricityCountries.contains(code))
-                .toSet(),
-            onChanged: _setElectricityCountryCode,
-          ),
-          SizedBox(height: AppSpacing.md),
-          if (_electricityCountryCode == 'GH') ...[
-            if (_isLoadingVtuCatalog && ghanaElectricityBillers.isEmpty) ...[
-              const _InfoPanel(
-                text: 'Loading available electricity billers...',
+          _FormStepSection(
+            step: '1',
+            title: 'Meter details',
+            subtitle: 'Choose the service country, provider, and meter.',
+            children: [
+              _ChoiceRow(
+                label: 'Service country',
+                value: _electricityCountryCode,
+                values: _electricityCountryOptions,
+                labels: _countryLabels,
+                disabledValues: _electricityCountryOptions
+                    .where(
+                        (code) => !_enabledElectricityCountries.contains(code))
+                    .toSet(),
+                onChanged: _setElectricityCountryCode,
               ),
               SizedBox(height: AppSpacing.md),
-            ] else if (ghanaElectricityBillers.isEmpty) ...[
-              const _InfoPanel(
-                text: 'No Ghana electricity billers are available yet.',
+              if (_electricityCountryCode == 'GH') ...[
+                if (_isLoadingVtuCatalog &&
+                    ghanaElectricityBillers.isEmpty) ...[
+                  const _InfoPanel(
+                    text: 'Loading available electricity billers...',
+                  ),
+                  SizedBox(height: AppSpacing.md),
+                ] else if (ghanaElectricityBillers.isEmpty) ...[
+                  const _InfoPanel(
+                    text: 'No Ghana electricity billers are available yet.',
+                  ),
+                  SizedBox(height: AppSpacing.md),
+                ] else ...[
+                  _VtuProviderSelector(
+                    label: 'Biller',
+                    value: _electricityBillerId,
+                    providers: ghanaElectricityBillers,
+                    onChanged: (value) => setState(() {
+                      _electricityBillerId = value;
+                      _isElectricityPaymentStep = false;
+                    }),
+                  ),
+                  SizedBox(height: AppSpacing.md),
+                ],
+              ] else ...[
+                if (_isLoadingVtuCatalog &&
+                    _localElectricityProviders.isEmpty) ...[
+                  const _InfoPanel(
+                    text: 'Loading VTPass electricity providers...',
+                  ),
+                  SizedBox(height: AppSpacing.md),
+                ] else if (_localElectricityProviders.isEmpty) ...[
+                  const _InfoPanel(
+                    text:
+                        'No Nigerian electricity providers are available yet.',
+                  ),
+                  SizedBox(height: AppSpacing.md),
+                ] else ...[
+                  _VtuProviderSelector(
+                    label: 'Provider',
+                    value: _vtuProvider,
+                    providers: _localElectricityProviders,
+                    onChanged: (value) => _setVtuProvider(value),
+                  ),
+                  SizedBox(height: AppSpacing.md),
+                ],
+              ],
+              _InputField(
+                controller: _recipientController,
+                label: 'Meter number',
+                keyboardType: TextInputType.number,
               ),
-              SizedBox(height: AppSpacing.md),
-            ] else ...[
-              _VtuProviderSelector(
-                label: 'Biller',
-                value: _electricityBillerId,
-                providers: ghanaElectricityBillers,
-                onChanged: (value) =>
-                    setState(() => _electricityBillerId = value),
+              SizedBox(height: AppSpacing.lg),
+              FilledButton(
+                onPressed: _continueToElectricityPayment,
+                style: FilledButton.styleFrom(
+                  backgroundColor: AppColors.primary,
+                  foregroundColor: Colors.white,
+                  minimumSize: const Size.fromHeight(54),
+                ),
+                child: const Text('Continue'),
               ),
-              SizedBox(height: AppSpacing.md),
             ],
-          ] else ...[
-            if (_isLoadingVtuCatalog && _localElectricityProviders.isEmpty) ...[
-              const _InfoPanel(
-                text: 'Loading VTPass electricity providers...',
-              ),
-              SizedBox(height: AppSpacing.md),
-            ] else if (_localElectricityProviders.isEmpty) ...[
-              const _InfoPanel(
-                text: 'No Nigerian electricity providers are available yet.',
-              ),
-              SizedBox(height: AppSpacing.md),
-            ] else ...[
-              _VtuProviderSelector(
-                label: 'Provider',
-                value: _vtuProvider,
-                providers: _localElectricityProviders,
-                onChanged: (value) => _setVtuProvider(value),
-              ),
-              SizedBox(height: AppSpacing.md),
-            ],
-          ],
-          _InputField(
-            controller: _recipientController,
-            label: 'Meter number',
-            keyboardType: TextInputType.number,
           ),
         ];
     }
+  }
+
+  Widget _buildSubmitButton(String label, String title) {
+    return FilledButton(
+      onPressed: _isSubmitting ? null : _submit,
+      style: FilledButton.styleFrom(
+        backgroundColor: AppColors.primary,
+        foregroundColor: Colors.white,
+        minimumSize: const Size.fromHeight(54),
+      ),
+      child: _isSubmitting
+          ? TrustPayLottie(
+              variant: TrustPayAnimationVariant.loading,
+              size: 30,
+              semanticsLabel: 'Submitting $title',
+            )
+          : Text(label),
+    );
   }
 
   HomeVirtualAccount? _preferredFundingAccount() {
@@ -2107,26 +2512,6 @@ class _CurrencySelector extends StatelessWidget {
       label: 'Currency',
       value: value,
       values: const ['NGN', 'GHS'],
-      onChanged: onChanged,
-    );
-  }
-}
-
-class _ProviderSelector extends StatelessWidget {
-  final String value;
-  final ValueChanged<String> onChanged;
-
-  const _ProviderSelector({
-    required this.value,
-    required this.onChanged,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return _ChoiceRow(
-      label: 'Provider',
-      value: value,
-      values: const ['paystack', 'flutterwave'],
       onChanged: onChanged,
     );
   }
@@ -2273,6 +2658,7 @@ class _InputField extends StatelessWidget {
   final TextInputType? keyboardType;
   final List<TextInputFormatter>? inputFormatters;
   final bool enabled;
+  final ValueChanged<String>? onChanged;
 
   const _InputField({
     required this.controller,
@@ -2280,6 +2666,7 @@ class _InputField extends StatelessWidget {
     this.keyboardType,
     this.inputFormatters,
     this.enabled = true,
+    this.onChanged,
   });
 
   @override
@@ -2289,6 +2676,7 @@ class _InputField extends StatelessWidget {
       keyboardType: keyboardType,
       inputFormatters: inputFormatters,
       enabled: enabled,
+      onChanged: onChanged,
       style: AppTextStyles.bodyM.copyWith(color: AppColors.textPrimary),
       decoration: _inputDecoration(label),
     );
@@ -2420,7 +2808,7 @@ class _FundingAccountPanel extends StatelessWidget {
                             ),
                             style: FilledButton.styleFrom(
                               backgroundColor: AppColors.primary,
-                              foregroundColor: AppColors.textPrimary,
+                              foregroundColor: Colors.white,
                             ),
                           ),
                         ),
@@ -2705,6 +3093,76 @@ class _InfoPanel extends StatelessWidget {
         text,
         style: AppTextStyles.bodyS.copyWith(color: AppColors.textPrimary),
       ),
+    );
+  }
+}
+
+class _FormStepSection extends StatelessWidget {
+  final String step;
+  final String title;
+  final String subtitle;
+  final List<Widget> children;
+
+  const _FormStepSection({
+    required this.step,
+    required this.title,
+    required this.subtitle,
+    required this.children,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              width: 30,
+              height: 30,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: AppColors.primary.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(AppRadius.full),
+                border: Border.all(
+                  color: AppColors.primary.withValues(alpha: 0.22),
+                ),
+              ),
+              child: Text(
+                step,
+                style: AppTextStyles.labelS.copyWith(
+                  color: AppColors.primary,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+            ),
+            SizedBox(width: AppSpacing.sm),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: AppTextStyles.labelL.copyWith(
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                  SizedBox(height: AppSpacing.xs),
+                  Text(
+                    subtitle,
+                    style: AppTextStyles.bodyS.copyWith(
+                      color: AppColors.textSecondary,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        SizedBox(height: AppSpacing.md),
+        ...children,
+      ],
     );
   }
 }
@@ -3722,27 +4180,14 @@ class _ExchangeSettlementScreenState extends State<ExchangeSettlementScreen> {
               ),
               sliver: SliverList.list(
                 children: [
-                  Row(
-                    children: [
-                      _IconButton(
-                        icon: Icons.arrow_back_ios_new_rounded,
-                        onTap: () => context.pop(),
-                      ),
-                      const Spacer(),
-                      const _StatusPill(label: 'Send to'),
-                    ],
+                  TpPageHeader(
+                    label: 'Send to',
                   ),
-                  const SizedBox(height: AppSpacing.xl),
-                  Text(
-                    'Where should we send it?',
-                    style: AppTextStyles.displayMedium,
-                  ),
-                  const SizedBox(height: AppSpacing.sm),
                   Text(
                     'Choose a bank or wallet. Add the account number.',
                     style: AppTextStyles.bodyL,
                   ),
-                  const SizedBox(height: AppSpacing.xl),
+                  const SizedBox(height: AppSpacing.lg),
                   if (receipt == null) ...[
                     const _InfoPanel(
                       text:
@@ -3905,31 +4350,17 @@ class _ExchangeSwapPanel extends StatelessWidget {
       clipBehavior: Clip.none,
       alignment: Alignment.center,
       children: [
-        Container(
-          padding: const EdgeInsets.all(AppSpacing.md),
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [
-                AppColors.surface,
-                AppColors.surfaceVariant,
-              ],
-            ),
-            borderRadius: BorderRadius.circular(AppRadius.lg),
-            border: Border.all(color: AppColors.border),
-          ),
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: AppSpacing.xs),
           child: Column(
             children: [
               _ExchangeLegCard(
                 title: 'You send',
                 currency: fromCurrency,
-                selectorLabel: 'Debit wallet',
                 amountController: amountController,
                 onCurrencyChanged: onFromChanged,
-                trailing: 'Wallet balance',
               ),
-              SizedBox(height: 58),
+              SizedBox(height: AppSpacing.xl + AppSpacing.md),
               _ExchangeLegResultCard(
                 title: 'You receive',
                 currency: toCurrency,
@@ -3947,12 +4378,12 @@ class _ExchangeSwapPanel extends StatelessWidget {
             borderRadius: BorderRadius.circular(AppRadius.full),
             pressedScale: 0.92,
             child: Container(
-              width: 62,
-              height: 62,
+              width: 52,
+              height: 52,
               decoration: BoxDecoration(
                 color: AppColors.background,
                 shape: BoxShape.circle,
-                border: Border.all(color: AppColors.border, width: 6),
+                border: Border.all(color: AppColors.border, width: 5),
                 boxShadow: [
                   BoxShadow(
                     color: AppColors.overlayLight,
@@ -3964,7 +4395,7 @@ class _ExchangeSwapPanel extends StatelessWidget {
               child: Icon(
                 Icons.swap_vert_rounded,
                 color: AppColors.primary,
-                size: 28,
+                size: 24,
               ),
             ),
           ),
@@ -3977,16 +4408,12 @@ class _ExchangeSwapPanel extends StatelessWidget {
 class _ExchangeLegCard extends StatelessWidget {
   final String title;
   final String currency;
-  final String selectorLabel;
-  final String trailing;
   final TextEditingController amountController;
   final ValueChanged<String> onCurrencyChanged;
 
   const _ExchangeLegCard({
     required this.title,
     required this.currency,
-    required this.selectorLabel,
-    required this.trailing,
     required this.amountController,
     required this.onCurrencyChanged,
   });
@@ -3999,24 +4426,20 @@ class _ExchangeLegCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: AppColors.surface.withValues(alpha: 0.88),
         borderRadius: BorderRadius.circular(AppRadius.lg),
+        border: Border.all(color: AppColors.border),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              Text(title, style: AppTextStyles.bodyM),
+              Text(title, style: AppTextStyles.labelM),
               const Spacer(),
-              Text(trailing, style: AppTextStyles.bodyS),
+              _ExchangeCurrencyPill(
+                currency: currency,
+                onChanged: onCurrencyChanged,
+              ),
             ],
-          ),
-          SizedBox(height: AppSpacing.md),
-          Align(
-            alignment: Alignment.centerLeft,
-            child: _ExchangeCurrencyPill(
-              currency: currency,
-              onChanged: onCurrencyChanged,
-            ),
           ),
           SizedBox(height: AppSpacing.sm),
           TextField(
@@ -4045,13 +4468,6 @@ class _ExchangeLegCard extends StatelessWidget {
               contentPadding: EdgeInsets.zero,
             ),
           ),
-          SizedBox(height: AppSpacing.sm),
-          Text(
-            _amountInWords(amountController.text, currency),
-            style: AppTextStyles.bodyS,
-          ),
-          SizedBox(height: 4),
-          Text(selectorLabel, style: AppTextStyles.bodyS),
         ],
       ),
     );
@@ -4083,18 +4499,20 @@ class _ExchangeLegResultCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: AppColors.surface.withValues(alpha: 0.88),
         borderRadius: BorderRadius.circular(AppRadius.lg),
+        border: Border.all(color: AppColors.border),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(title, style: AppTextStyles.bodyM),
-          SizedBox(height: AppSpacing.md),
-          Align(
-            alignment: Alignment.centerLeft,
-            child: _ExchangeCurrencyPill(
-              currency: currency,
-              onChanged: onCurrencyChanged,
-            ),
+          Row(
+            children: [
+              Text(title, style: AppTextStyles.labelM),
+              const Spacer(),
+              _ExchangeCurrencyPill(
+                currency: currency,
+                onChanged: onCurrencyChanged,
+              ),
+            ],
           ),
           SizedBox(height: AppSpacing.sm),
           SingleChildScrollView(
@@ -4110,39 +4528,32 @@ class _ExchangeLegResultCard extends StatelessWidget {
               style: AppTextStyles.displayMedium.copyWith(fontSize: 28),
             ),
           ),
-          SizedBox(height: AppSpacing.sm),
-          Text(
-            rateError != null
-                ? 'Rate unavailable'
-                : _amountInWords(amount, currency),
-            style: AppTextStyles.bodyS,
-          ),
-          SizedBox(height: AppSpacing.sm),
-          AnimatedSwitcher(
-            duration: const Duration(milliseconds: 180),
-            child: Row(
-              key: ValueKey('${isRateLoading}_${rateError ?? 'ready'}'),
-              children: [
-                if (isRateLoading) ...[
-                  const TrustPayLottie(
-                    variant: TrustPayAnimationVariant.loading,
-                    size: 12,
+          if (rateError != null || isRateLoading) ...[
+            SizedBox(height: AppSpacing.sm),
+            AnimatedSwitcher(
+              duration: const Duration(milliseconds: 180),
+              child: Row(
+                key: ValueKey('${isRateLoading}_${rateError ?? 'ready'}'),
+                children: [
+                  if (isRateLoading) ...[
+                    const TrustPayLottie(
+                      variant: TrustPayAnimationVariant.loading,
+                      size: 12,
+                    ),
+                    SizedBox(width: AppSpacing.xs),
+                  ],
+                  Expanded(
+                    child: Text(
+                      rateError != null
+                          ? 'Live rate unavailable'
+                          : 'Refreshing quote',
+                      style: AppTextStyles.bodyS,
+                    ),
                   ),
-                  SizedBox(width: AppSpacing.xs),
                 ],
-                Expanded(
-                  child: Text(
-                    rateError != null
-                        ? 'Live rate unavailable'
-                        : isRateLoading
-                            ? 'Refreshing quote'
-                            : 'Quote amount updates before submission',
-                    style: AppTextStyles.bodyS,
-                  ),
-                ),
-              ],
+              ),
             ),
-          ),
+          ],
         ],
       ),
     );
@@ -4559,30 +4970,6 @@ class _BarcodePainter extends CustomPainter {
   bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
 
-class _IconButton extends StatelessWidget {
-  final IconData icon;
-  final VoidCallback onTap;
-
-  const _IconButton({required this.icon, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: AppColors.surfaceVariant,
-      borderRadius: BorderRadius.circular(AppRadius.sm),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(AppRadius.sm),
-        onTap: onTap,
-        child: SizedBox(
-          width: 44,
-          height: 44,
-          child: Icon(icon, color: AppColors.textPrimary, size: 18),
-        ),
-      ),
-    );
-  }
-}
-
 InputDecoration _inputDecoration(String label) {
   return InputDecoration(
     labelText: label,
@@ -4618,8 +5005,8 @@ _ActionConfig _configFor(MoneyActionKind kind) {
   switch (kind) {
     case MoneyActionKind.fund:
       return const _ActionConfig(
-        title: 'Fund wallet',
-        subtitle: 'Request a Monnify account and transfer into it.',
+        title: 'Add money',
+        subtitle: 'Use your account number to transfer into your wallet.',
         buttonLabel: 'Copy account number',
         status: 'NGN transfer',
         icon: Icons.account_balance_wallet_rounded,
@@ -4629,15 +5016,15 @@ _ActionConfig _configFor(MoneyActionKind kind) {
         title: 'Send money',
         subtitle: 'Send to another TRUSTPAY user by email.',
         buttonLabel: 'Send transfer',
-        status: 'KYC gated',
+        status: 'Verification required',
         icon: Icons.near_me_rounded,
       );
     case MoneyActionKind.withdraw:
       return const _ActionConfig(
-        title: 'Withdraw',
+        title: 'Send to bank',
         subtitle: 'Send wallet funds to a bank account.',
-        buttonLabel: 'Submit withdrawal',
-        status: 'KYC gated',
+        buttonLabel: 'Send transfer',
+        status: 'Verification required',
         icon: Icons.account_balance_rounded,
       );
     case MoneyActionKind.exchange:
@@ -4784,10 +5171,9 @@ class MoneyActionFormValidator {
       case MoneyActionKind.withdraw:
         final account = accountNumber.trim();
         if (bankCode.trim().isEmpty ||
-            account.length < 8 ||
-            account.length > 16 ||
+            account.length != 10 ||
             !_digitsPattern.hasMatch(account)) {
-          return 'Enter a valid bank code and account number.';
+          return 'Choose a bank and enter a valid 10-digit account number.';
         }
         if (accountName.trim().length < 2) {
           return 'Enter the account name.';
@@ -4939,110 +5325,4 @@ String _currencySymbol(String currency) {
     default:
       return currency.toUpperCase();
   }
-}
-
-String _amountInWords(dynamic value, String currency) {
-  final rawValue = value is num ? value.toStringAsFixed(2) : value.toString();
-  final normalized = rawValue.replaceAll(',', '').trim();
-  final amount = double.tryParse(normalized);
-
-  if (normalized.isEmpty || amount == null || amount <= 0) {
-    return 'Enter an amount';
-  }
-
-  final parts = normalized.split('.');
-  final whole = int.tryParse(parts.first.isEmpty ? '0' : parts.first);
-  final decimals = parts.length > 1
-      ? int.tryParse(parts[1].padRight(2, '0').substring(0, 2)) ?? 0
-      : 0;
-
-  if (whole == null) return 'Amount is too large to spell out';
-
-  final labels = _currencyWordLabels(currency);
-  final majorWords = '${_numberToWords(whole)} ${labels.$1}';
-  if (decimals > 0) {
-    return '$majorWords, ${_numberToWords(decimals)} ${labels.$2}';
-  }
-
-  return majorWords;
-}
-
-(String, String) _currencyWordLabels(String currency) {
-  switch (currency.toUpperCase()) {
-    case 'NGN':
-      return ('naira', 'kobo');
-    case 'GHS':
-      return ('cedis', 'pesewas');
-    default:
-      return (currency.toUpperCase(), 'minor units');
-  }
-}
-
-String _numberToWords(int value) {
-  const small = [
-    'zero',
-    'one',
-    'two',
-    'three',
-    'four',
-    'five',
-    'six',
-    'seven',
-    'eight',
-    'nine',
-    'ten',
-    'eleven',
-    'twelve',
-    'thirteen',
-    'fourteen',
-    'fifteen',
-    'sixteen',
-    'seventeen',
-    'eighteen',
-    'nineteen',
-  ];
-  const tens = [
-    '',
-    '',
-    'twenty',
-    'thirty',
-    'forty',
-    'fifty',
-    'sixty',
-    'seventy',
-    'eighty',
-    'ninety',
-  ];
-  const scales = [
-    (1000000000000, 'trillion'),
-    (1000000000, 'billion'),
-    (1000000, 'million'),
-    (1000, 'thousand'),
-  ];
-
-  if (value < 20) return small[value];
-  if (value < 100) {
-    final ten = value ~/ 10;
-    final remainder = value % 10;
-    return remainder == 0 ? tens[ten] : '${tens[ten]} ${small[remainder]}';
-  }
-  if (value < 1000) {
-    final hundreds = value ~/ 100;
-    final remainder = value % 100;
-    return remainder == 0
-        ? '${small[hundreds]} hundred'
-        : '${small[hundreds]} hundred ${_numberToWords(remainder)}';
-  }
-
-  for (final scale in scales) {
-    if (value >= scale.$1) {
-      final count = value ~/ scale.$1;
-      final remainder = value % scale.$1;
-      return remainder == 0
-          ? '${_numberToWords(count)} ${scale.$2}'
-          : '${_numberToWords(count)} ${scale.$2} ${_numberToWords(remainder)}';
-    }
-  }
-
-  return value.toString();
 }

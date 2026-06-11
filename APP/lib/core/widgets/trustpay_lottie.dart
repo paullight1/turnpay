@@ -43,6 +43,17 @@ class TrustPayLottie extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    if (variant == TrustPayAnimationVariant.loading) {
+      return Semantics(
+        label: semanticsLabel ?? _label,
+        child: Icon(
+          Icons.sync_rounded,
+          color: AppColors.primary,
+          size: size,
+        ),
+      );
+    }
+
     final reduceMotion =
         MediaQuery.maybeOf(context)?.disableAnimations ?? false;
 
@@ -106,6 +117,17 @@ class TrustPayAnimatedState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    if (variant == TrustPayAnimationVariant.loading) {
+      return Center(
+        child: TrustPayLottie(
+          variant: variant,
+          size: animationSize,
+          repeat: true,
+          semanticsLabel: title,
+        ),
+      );
+    }
+
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(AppSpacing.lg),

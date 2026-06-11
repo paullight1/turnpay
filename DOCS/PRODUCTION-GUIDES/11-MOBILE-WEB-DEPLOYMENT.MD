@@ -37,6 +37,8 @@ Mobile build:
 ```env
 SUPABASE_URL=
 SUPABASE_PUBLISHABLE_KEY=
+API_BASE_URL=
+WEBSITE_BASE_URL=
 ```
 
 ## Sandbox Steps

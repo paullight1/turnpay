@@ -12,6 +12,7 @@ describe("BankingService", () => {
     virtualAccount: {
       findMany: jest.fn(),
       findUnique: jest.fn(),
+      update: jest.fn(),
       upsert: jest.fn(),
     },
     transaction: {
@@ -541,6 +542,62 @@ describe("BankingService", () => {
       where: { id: "event-1" },
       data: { status: "PROCESSED", processedAt: expect.any(Date) },
     });
+  });
+
+  it("promotes a pending virtual account to active when a valid deposit arrives", async () => {
+    prisma.providerEvent.findUnique.mockResolvedValue(null);
+    prisma.providerEvent.create.mockResolvedValue({ id: "event-1" });
+    prisma.virtualAccount.findUnique.mockResolvedValue({
+      id: "va-1",
+      userId: "user-1",
+      accountNumber: "6254727989",
+      currency: "NGN",
+      provider: "MONNIFY",
+      status: "PENDING",
+      user: {
+        id: "user-1",
+        isSuspended: false,
+        kycStatus: "VERIFIED",
+        kycTier: "TIER_2",
+      },
+    });
+    prisma.virtualAccount.update.mockResolvedValue({
+      id: "va-1",
+      status: "ACTIVE",
+    });
+    prisma.transaction.create.mockResolvedValue({
+      id: "tx-1",
+      reference: "MNF-2",
+      amount: new Decimal(2500),
+      currency: "NGN",
+    });
+    ledger.creditWallet.mockResolvedValue({ balanceAfter: new Decimal(2500) });
+
+    const result = await service.processVirtualAccountDeposit({
+      provider: "monnify",
+      eventType: "SUCCESSFUL_TRANSACTION",
+      providerReference: "MNF-2",
+      accountNumber: "6254727989",
+      amount: new Decimal(2500),
+      currency: "NGN",
+      rawPayload: {},
+    });
+
+    expect(result).toEqual({ received: true, processed: true });
+    expect(prisma.virtualAccount.update).toHaveBeenCalledWith({
+      where: { id: "va-1" },
+      data: { status: "ACTIVE" },
+    });
+    expect(ledger.creditWallet).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: "user-1",
+        currency: "NGN",
+        amount: new Decimal(2500),
+        transactionId: "tx-1",
+        reference: "MNF-2",
+      }),
+      prisma,
+    );
   });
 
   it("does not double-credit duplicate provider events", async () => {

@@ -46,10 +46,10 @@ export default function PricingPage() {
         description="TrustPay shows the fee, rate, and final amount before you make an exchange, bill payment, or withdrawal."
       >
         <Button asChild>
-          <Link href="/register">
-            Create Account
+          <a href="https://wa.me/233555507240?text=Hello%20TrustPay%2C%20I%20want%20to%20get%20started." target="_blank" rel="noreferrer">
+            Get Started on WhatsApp
             <ArrowRight data-icon="inline-end" aria-hidden="true" />
-          </Link>
+          </a>
         </Button>
         <Button variant="outline" asChild>
           <Link href="/support">Ask a Pricing Question</Link>

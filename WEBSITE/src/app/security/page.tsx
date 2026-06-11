@@ -39,10 +39,10 @@ export default function SecurityPage() {
         description="TrustPay protects sign in, wallet activity, payment retries, receipts, and admin work."
       >
         <Button asChild>
-          <Link href="/register">
-            Create account
+          <a href="https://wa.me/233555507240?text=Hello%20TrustPay%2C%20I%20want%20to%20get%20started." target="_blank" rel="noreferrer">
+            Get Started on WhatsApp
             <ArrowRight data-icon="inline-end" aria-hidden="true" />
-          </Link>
+          </a>
         </Button>
         <Button variant="outline" asChild>
           <Link href="/support">Report an Issue</Link>
@@ -85,7 +85,7 @@ export default function SecurityPage() {
             <h2 className="text-3xl font-semibold leading-tight text-balance md:text-5xl">
               Every money move should be traceable and retry-safe.
             </h2>
-            <p className="text-base leading-7 text-background/72">
+            <p className="text-base leading-7 text-white/72">
               TrustPay should stop duplicate payments, avoid silent balance changes,
               and show clear outcomes.
             </p>
@@ -93,7 +93,7 @@ export default function SecurityPage() {
           <div className="grid gap-3">
             {securityChecklist.map((item) => (
               <div key={item} className="flex items-center gap-3 rounded-lg border border-white/10 bg-white/[0.06] p-4">
-                <CheckCircle2 aria-hidden="true" className="size-5 text-orange-300" />
+                <CheckCircle2 aria-hidden="true" className="size-5 text-red-400" />
                 <span className="text-sm font-medium">{item}</span>
               </div>
             ))}

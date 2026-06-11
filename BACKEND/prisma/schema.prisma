@@ -29,6 +29,7 @@ enum KYCTier {
 enum KYCType {
   BVN
   NIN
+  GHANA_CARD
   PASSPORT
   DRIVERS_LICENSE
   VOTERS_CARD
@@ -38,6 +39,7 @@ enum KycVerificationProvider {
   MANUAL_REVIEW
   NIBSS
   MONNIFY
+  SMILE_ID
 }
 
 enum KycVerificationStatus {
@@ -72,6 +74,13 @@ enum TransactionStatus {
   SUCCESS
   FAILED
   REVERSED
+}
+
+enum ReferralStatus {
+  PENDING
+  ELIGIBLE
+  PAID
+  VOIDED
 }
 
 enum WalletCurrency {
@@ -162,24 +171,29 @@ enum VtuOrderStatus {
 }
 
 model User {
-  id                   String    @id @default(uuid())
-  email                String    @unique
-  phone                String    @unique
-  fullName             String?
-  password             String
-  role                 UserRole  @default(USER)
-  kycStatus            KYCStatus @default(PENDING)
-  kycTier              KYCTier   @default(TIER_0)
-  dailyWithdrawLimit   Decimal   @default(500000) @db.Decimal(15, 2)
-  monthlyWithdrawLimit Decimal   @default(5000000) @db.Decimal(15, 2)
-  dailyWithdrawn       Decimal   @default(0) @db.Decimal(15, 2)
-  monthlyWithdrawn     Decimal   @default(0) @db.Decimal(15, 2)
-  limitResetDate       DateTime?
-  isSuspended          Boolean   @default(false)
-  failedAttempts       Int       @default(0)
-  lockedUntil          DateTime?
-  createdAt            DateTime  @default(now())
-  updatedAt            DateTime  @updatedAt
+  id                      String    @id @default(uuid())
+  email                   String    @unique
+  phone                   String    @unique
+  fullName                String?
+  yearOfBirth             Int?
+  country                 String?
+  profileDetailsUpdatedAt DateTime?
+  referralCode            String?   @unique
+  referredById            String?
+  password                String
+  role                    UserRole  @default(USER)
+  kycStatus               KYCStatus @default(PENDING)
+  kycTier                 KYCTier   @default(TIER_0)
+  dailyWithdrawLimit      Decimal   @default(500000) @db.Decimal(15, 2)
+  monthlyWithdrawLimit    Decimal   @default(5000000) @db.Decimal(15, 2)
+  dailyWithdrawn          Decimal   @default(0) @db.Decimal(15, 2)
+  monthlyWithdrawn        Decimal   @default(0) @db.Decimal(15, 2)
+  limitResetDate          DateTime?
+  isSuspended             Boolean   @default(false)
+  failedAttempts          Int       @default(0)
+  lockedUntil             DateTime?
+  createdAt               DateTime  @default(now())
+  updatedAt               DateTime  @updatedAt
 
   wallets                    Wallet[]
   transactions               Transaction[]
@@ -193,12 +207,39 @@ model User {
   bankAccounts               BankAccount[]
   auditLogs                  AuditLog[]
   exchangeReceipts           ExchangeReceipt[]
-  exchangePayouts           ExchangePayout[]
-  rateOverridesRequested    RateOverride[]     @relation("RequestedOverrides")
-  rateOverridesApproved     RateOverride[]     @relation("ApprovedOverrides")
-  rateAlerts                RateAlert[]
+  exchangePayouts            ExchangePayout[]
+  rateOverridesRequested     RateOverride[]               @relation("RequestedOverrides")
+  rateOverridesApproved      RateOverride[]               @relation("ApprovedOverrides")
+  rateAlerts                 RateAlert[]
+  referredBy                 User?                        @relation("UserReferrals", fields: [referredById], references: [id])
+  referredUsers              User[]                       @relation("UserReferrals")
+  referralsGiven             ReferralReward[]             @relation("ReferralReferrer")
+  referralReward             ReferralReward?              @relation("ReferralReferred")
 
+  @@index([referredById])
   @@map("users")
+}
+
+model ReferralReward {
+  id             String         @id @default(uuid())
+  referrerId     String
+  referredUserId String         @unique
+  referralCode   String
+  amount         Decimal        @default(100) @db.Decimal(15, 2)
+  currency       WalletCurrency @default(NGN)
+  status         ReferralStatus @default(PENDING)
+  eligibleAt     DateTime?
+  paidAt         DateTime?
+  voidedAt       DateTime?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  referrer     User @relation("ReferralReferrer", fields: [referrerId], references: [id], onDelete: Cascade)
+  referredUser User @relation("ReferralReferred", fields: [referredUserId], references: [id], onDelete: Cascade)
+
+  @@index([referrerId, status])
+  @@index([referralCode])
+  @@map("referral_rewards")
 }
 
 model RefreshToken {
@@ -300,28 +341,28 @@ model ExchangeReceipt {
 }
 
 model ExchangePayout {
-  id                      String               @id @default(uuid())
-  userId                  String
-  transactionId           String               @unique
-  sourceCurrency          WalletCurrency       @default(NGN)
-  destinationCurrency     WalletCurrency       @default(GHS)
-  sourceAmount            Decimal              @db.Decimal(15, 2)
-  destinationAmount       Decimal              @db.Decimal(15, 2)
-  rate                    Decimal              @db.Decimal(18, 6)
-  fee                     Decimal              @default(0) @db.Decimal(15, 2)
-  destinationBankName     String
-  destinationBankCode     String?
+  id                       String               @id @default(uuid())
+  userId                   String
+  transactionId            String               @unique
+  sourceCurrency           WalletCurrency       @default(NGN)
+  destinationCurrency      WalletCurrency       @default(GHS)
+  sourceAmount             Decimal              @db.Decimal(15, 2)
+  destinationAmount        Decimal              @db.Decimal(15, 2)
+  rate                     Decimal              @db.Decimal(18, 6)
+  fee                      Decimal              @default(0) @db.Decimal(15, 2)
+  destinationBankName      String
+  destinationBankCode      String?
   destinationAccountNumber String
-  destinationAccountName  String
-  status                  ExchangePayoutStatus @default(PENDING_APPROVAL)
-  adminId                 String?
-  adminNote               String?
-  adminPaymentReceipt     String?
-  notificationSent        Boolean              @default(false)
-  reviewedAt              DateTime?
-  sentAt                  DateTime?
-  createdAt               DateTime             @default(now())
-  updatedAt               DateTime             @updatedAt
+  destinationAccountName   String
+  status                   ExchangePayoutStatus @default(PENDING_APPROVAL)
+  adminId                  String?
+  adminNote                String?
+  adminPaymentReceipt      String?
+  notificationSent         Boolean              @default(false)
+  reviewedAt               DateTime?
+  sentAt                   DateTime?
+  createdAt                DateTime             @default(now())
+  updatedAt                DateTime             @updatedAt
 
   user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
   transaction Transaction @relation(fields: [transactionId], references: [id])
@@ -635,16 +676,16 @@ model RateOverride {
 }
 
 model RateAlert {
-  id            String    @id @default(uuid())
-  userId        String
-  fromCurrency  String
-  toCurrency    String
-  targetRate    Decimal   @db.Decimal(10, 4)
-  direction     String    @default("ABOVE")
-  isActive      Boolean   @default(true)
-  triggeredAt   DateTime?
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  id           String    @id @default(uuid())
+  userId       String
+  fromCurrency String
+  toCurrency   String
+  targetRate   Decimal   @db.Decimal(10, 4)
+  direction    String    @default("ABOVE")
+  isActive     Boolean   @default(true)
+  triggeredAt  DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -670,8 +711,8 @@ model KycDocument {
   id            String    @id @default(uuid())
   userId        String
   type          KYCType
-  documentUrl   String
-  idNumber      String
+  documentUrl   String?
+  idNumber      String?
   status        KYCStatus @default(PENDING)
   rejectionNote String?
   reviewedBy    String?

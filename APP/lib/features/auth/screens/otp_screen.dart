@@ -3,8 +3,11 @@ import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/theme/app_theme.dart';
+import '../../../core/widgets/tp_back_button.dart';
+import '../../../core/widgets/tp_snackbar.dart';
 import '../../../core/widgets/trustpay_lottie.dart';
 import '../../../services/auth_service.dart';
+import '../widgets/auth_help_button.dart';
 import '../widgets/tp_button.dart';
 
 /// OTP Verification screen â€” 6-digit split input boxes.
@@ -159,14 +162,10 @@ class _OtpScreenState extends State<OtpScreen> {
       context.go('/login');
     } catch (error) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            authErrorMessage(error, 'OTP verification failed'),
-            style: AppTextStyles.bodyM.copyWith(color: AppColors.textPrimary),
-          ),
-          backgroundColor: AppColors.surfaceVariant,
-        ),
+      showTpSnackbar(
+        context,
+        authErrorMessage(error, 'OTP verification failed'),
+        type: TpSnackbarType.error,
       );
     } finally {
       if (mounted) {
@@ -186,14 +185,10 @@ class _OtpScreenState extends State<OtpScreen> {
       _startResendTimer();
     } catch (error) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            authErrorMessage(error, 'Could not resend OTP'),
-            style: AppTextStyles.bodyM.copyWith(color: AppColors.textPrimary),
-          ),
-          backgroundColor: AppColors.surfaceVariant,
-        ),
+      showTpSnackbar(
+        context,
+        authErrorMessage(error, 'Could not resend OTP'),
+        type: TpSnackbarType.error,
       );
     }
   }
@@ -218,25 +213,15 @@ class _OtpScreenState extends State<OtpScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // â”€â”€ Back Button â”€â”€
-              GestureDetector(
-                onTap: () => context.pop(),
-                child: Container(
-                  width: 44,
-                  height: 44,
-                  decoration: BoxDecoration(
-                    color: AppColors.surfaceVariant,
-                    borderRadius: BorderRadius.circular(AppRadius.sm),
-                  ),
-                  child: Icon(
-                    Icons.arrow_back_ios_new_rounded,
-                    color: AppColors.textPrimary,
-                    size: 18,
-                  ),
-                ),
+              Row(
+                children: [
+                  TpBackButton(),
+                  const Spacer(),
+                  const AuthHelpButton(),
+                ],
               ),
 
-              SizedBox(height: AppSpacing.xl),
+              const SizedBox(height: AppSpacing.xl),
 
               // â”€â”€ Icon â”€â”€
               TrustPayLottie(
@@ -247,15 +232,15 @@ class _OtpScreenState extends State<OtpScreen> {
                 semanticsLabel: 'OTP verification',
               ),
 
-              SizedBox(height: AppSpacing.lg),
+              const SizedBox(height: AppSpacing.lg),
 
               Text(heading, style: AppTextStyles.displayMedium),
 
-              SizedBox(height: AppSpacing.sm),
+              const SizedBox(height: AppSpacing.sm),
 
               Text(subtext, style: AppTextStyles.bodyL),
 
-              SizedBox(height: AppSpacing.xxl),
+              const SizedBox(height: AppSpacing.xxl),
 
               // â”€â”€ OTP Input Boxes â”€â”€
               LayoutBuilder(
@@ -285,7 +270,7 @@ class _OtpScreenState extends State<OtpScreen> {
                 },
               ),
 
-              SizedBox(height: AppSpacing.xl),
+              const SizedBox(height: AppSpacing.xl),
 
               // â”€â”€ Verify Button â”€â”€
               TpButton(
@@ -295,7 +280,7 @@ class _OtpScreenState extends State<OtpScreen> {
                 onTap: _onVerify,
               ),
 
-              SizedBox(height: AppSpacing.xl),
+              const SizedBox(height: AppSpacing.xl),
 
               // â”€â”€ Resend Code â”€â”€
               Row(
@@ -331,7 +316,7 @@ class _OtpScreenState extends State<OtpScreen> {
   String _maskPhone(String phone) {
     if (phone.length < 5) return phone;
     final visible = phone.substring(phone.length - 4);
-    final masked = 'â—â—â—â— â—â—â—â— ';
+    const masked = 'â—â—â—â— â—â—â—â— ';
     return '$masked$visible';
   }
 }

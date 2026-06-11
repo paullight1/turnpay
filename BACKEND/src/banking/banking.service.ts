@@ -313,8 +313,27 @@ export class BankingService {
           throw new NotFoundException("Virtual account not found");
         }
 
-        if (virtualAccount.status !== "ACTIVE") {
+        if (
+          virtualAccount.status === "FAILED" ||
+          virtualAccount.status === "DISABLED"
+        ) {
           throw new BadRequestException("Virtual account is not active");
+        }
+
+        if (virtualAccount.status !== "ACTIVE") {
+          await tx.virtualAccount.update({
+            where: { id: virtualAccount.id },
+            data: { status: "ACTIVE" },
+          });
+
+          this.logger.info(
+            {
+              virtualAccountId: virtualAccount.id,
+              provider,
+              accountNumberMasked: maskAccountNumber(event.accountNumber),
+            },
+            "Promoted pending virtual account to active after deposit",
+          );
         }
 
         const accountUser = virtualAccount.user as {
@@ -458,7 +477,8 @@ export class BankingService {
       if (
         document.type === "BVN" &&
         !explicitIdentifiers.bvn &&
-        !identifiers.bvn
+        !identifiers.bvn &&
+        document.idNumber
       ) {
         identifiers.bvn = this.decryptStoredKycIdentifier(document.idNumber);
       }
@@ -466,7 +486,8 @@ export class BankingService {
       if (
         document.type === "NIN" &&
         !explicitIdentifiers.nin &&
-        !identifiers.nin
+        !identifiers.nin &&
+        document.idNumber
       ) {
         identifiers.nin = this.decryptStoredKycIdentifier(document.idNumber);
       }

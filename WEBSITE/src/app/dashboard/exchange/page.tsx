@@ -326,6 +326,22 @@ export default function ExchangePage() {
     attemptKeyRef.current = null;
   };
 
+  const clearQuote = () => {
+    setQuote(null);
+    setCountdown(null);
+    setIsQuoteExpired(false);
+  };
+
+  const applyQuote = (nextQuote: ExchangeQuote) => {
+    setQuote(nextQuote);
+    const remaining = Math.max(
+      0,
+      Math.floor((new Date(nextQuote.expiresAt).getTime() - Date.now()) / 1000),
+    );
+    setCountdown(remaining);
+    setIsQuoteExpired(remaining <= 0);
+  };
+
   const resetReceiptAttempt = () => {
     receiptAttemptKeyRef.current = null;
   };
@@ -333,8 +349,6 @@ export default function ExchangePage() {
   // ── Countdown timer for quote expiry ──────────────────────────
   useEffect(() => {
     if (!quote) {
-      setCountdown(null);
-      setIsQuoteExpired(false);
       return;
     }
 
@@ -380,7 +394,7 @@ export default function ExchangePage() {
         to,
         amount: parseFloat(amount),
       });
-      setQuote(response.data);
+      applyQuote(response.data);
       resetAttempt();
       toast.success("Quote created");
     } catch (error) {
@@ -408,7 +422,7 @@ export default function ExchangePage() {
 
     if (new Date(quote.expiresAt) < new Date()) {
       toast.error("Quote has expired. Please create a new quote.");
-      setQuote(null);
+      clearQuote();
       return;
     }
 
@@ -427,7 +441,7 @@ export default function ExchangePage() {
       await exchangeApi.executeQuote(quote.id, idempotencyKey, transactionPin);
       setShowSuccessAnimation(true);
       toast.success("Exchange completed successfully");
-      setQuote(null);
+      clearQuote();
       setAmount("");
       setTransactionPin("");
       resetAttempt();
@@ -603,7 +617,7 @@ export default function ExchangePage() {
   const handleSwap = () => {
     setFrom(to);
     setTo(from);
-    setQuote(null);
+    clearQuote();
     resetAttempt();
   };
 
@@ -685,7 +699,7 @@ export default function ExchangePage() {
                   <div className="rounded-lg border bg-background p-4">
                     <div className="flex items-center justify-between gap-3">
                       <Label htmlFor="exchangeAmount">You send</Label>
-                      <Select value={from} onValueChange={(v) => { setFrom(v); setQuote(null); resetAttempt(); }}>
+                      <Select value={from} onValueChange={(v) => { setFrom(v); clearQuote(); resetAttempt(); }}>
                         <SelectTrigger className="h-9 w-[132px]">
                           <SelectValue />
                         </SelectTrigger>
@@ -710,7 +724,7 @@ export default function ExchangePage() {
                         value={amount}
                         onChange={(e) => {
                           setAmount(sanitizeDecimalInput(e.target.value));
-                          setQuote(null);
+                          clearQuote();
                           resetAttempt();
                         }}
                         className="h-auto min-w-0 overflow-x-auto border-0 bg-transparent p-0 text-right text-3xl font-semibold tracking-normal shadow-none focus-visible:ring-0 md:text-4xl"
@@ -736,7 +750,7 @@ export default function ExchangePage() {
                   <div className="rounded-lg border bg-muted/40 p-4">
                     <div className="flex items-center justify-between gap-3">
                       <Label>You receive</Label>
-                      <Select value={to} onValueChange={(v) => { setTo(v); setQuote(null); resetAttempt(); }}>
+                      <Select value={to} onValueChange={(v) => { setTo(v); clearQuote(); resetAttempt(); }}>
                         <SelectTrigger className="h-9 w-[132px] bg-background">
                           <SelectValue />
                         </SelectTrigger>

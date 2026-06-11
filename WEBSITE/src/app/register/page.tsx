@@ -3,16 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
-import {
-  CheckCircle2,
-  ChevronLeft,
-  Eye,
-  EyeOff,
-  KeyRound,
-  Loader2,
-  ShieldCheck,
-  UserRound,
-} from "lucide-react";
+import { ChevronLeft, Eye, EyeOff, Loader2 } from "lucide-react";
 import { AuthShell } from "@/components/auth/auth-shell";
 import { Button } from "@/components/ui/button";
 import { CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -27,7 +18,6 @@ type RegisterStep = {
   cardTitle: string;
   cardDescription: string;
   action: string;
-  icon: React.ComponentType<{ className?: string }>;
 };
 
 const REGISTER_STEPS: RegisterStep[] = [
@@ -37,7 +27,6 @@ const REGISTER_STEPS: RegisterStep[] = [
     cardTitle: "Account owner",
     cardDescription: "Use the name, email, and phone number you want verified.",
     action: "Continue",
-    icon: UserRound,
   },
   {
     title: "Secure account access.",
@@ -45,7 +34,6 @@ const REGISTER_STEPS: RegisterStep[] = [
     cardTitle: "Sign-in password",
     cardDescription: "Use at least 8 characters with uppercase, lowercase, and a number.",
     action: "Set password",
-    icon: ShieldCheck,
   },
   {
     title: "Protect money actions.",
@@ -53,7 +41,6 @@ const REGISTER_STEPS: RegisterStep[] = [
     cardTitle: "Transaction PIN",
     cardDescription: "Use digits only. TRUSTPAY will never show this PIN after setup.",
     action: "Review setup",
-    icon: KeyRound,
   },
   {
     title: "Review and finish.",
@@ -61,7 +48,6 @@ const REGISTER_STEPS: RegisterStep[] = [
     cardTitle: "Confirm setup",
     cardDescription: "Your password and PIN stay hidden for security.",
     action: "Create account",
-    icon: CheckCircle2,
   },
 ];
 
@@ -81,7 +67,6 @@ export default function RegisterPage() {
   const { signUp } = useAuth();
 
   const currentStep = REGISTER_STEPS[step];
-  const StepIcon = currentStep.icon;
   const isLastStep = step === REGISTER_STEPS.length - 1;
   const normalizedPhone = phone.replace(/\s+/g, "");
   const hasStrongPassword =
@@ -161,6 +146,8 @@ export default function RegisterPage() {
       title={currentStep.title}
       subtitle={currentStep.description}
       maxWidth="max-w-lg"
+      showHero={false}
+      mobileCardless
     >
       <CardHeader className="space-y-7 px-6 pt-6 sm:px-7 sm:pt-7">
         <div className="flex items-center justify-between gap-4">
@@ -181,9 +168,6 @@ export default function RegisterPage() {
         </div>
 
         <div className="space-y-4 text-left">
-          <div className="flex size-11 items-center justify-center rounded-md border border-primary/20 bg-primary/10 text-primary">
-            <StepIcon className="size-5" />
-          </div>
           <div>
             <CardTitle className="text-3xl font-black text-white">{currentStep.cardTitle}</CardTitle>
             <CardDescription className="mt-3 text-base leading-7 text-white/58">{currentStep.cardDescription}</CardDescription>
@@ -353,12 +337,12 @@ export default function RegisterPage() {
           ) : null}
 
           {isLastStep ? (
-            <Button type="submit" disabled={isLoading} className="mt-3 h-12 w-full rounded-full bg-orange-500 text-white hover:bg-orange-400">
+            <Button type="submit" disabled={isLoading} className="mt-3 h-12 w-full rounded-full bg-red-600 text-white hover:bg-red-700">
               {isLoading ? <Loader2 aria-hidden="true" className="size-4 animate-spin" /> : null}
               {isLoading ? "Creating account..." : currentStep.action}
             </Button>
           ) : (
-            <Button type="button" disabled={isLoading} className="mt-3 h-12 w-full rounded-full bg-orange-500 text-white hover:bg-orange-400" onClick={goNext}>
+            <Button type="button" disabled={isLoading} className="mt-3 h-12 w-full rounded-full bg-red-600 text-white hover:bg-red-700" onClick={goNext}>
               {currentStep.action}
             </Button>
           )}
@@ -367,7 +351,7 @@ export default function RegisterPage() {
         {step === 0 ? (
           <p className="mt-6 text-center text-sm text-white/54">
             Already have an account?{" "}
-            <Link href="/login" className="font-semibold text-orange-300 hover:text-orange-200">
+            <Link href="/login" className="font-semibold text-red-400 hover:text-red-300">
               Sign in
             </Link>
           </p>

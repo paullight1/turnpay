@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:dio/dio.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../core/router/app_router.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/widgets/trustpay_lottie.dart';
+import '../../../core/widgets/tp_page_header.dart';
 import '../../../services/auth_service.dart';
 import '../../../services/transaction_security_service.dart';
 
@@ -31,12 +34,10 @@ class _TransactionSecurityScreenState extends State<TransactionSecurityScreen> {
     });
   }
 
-  Future<void> _openPinSetup(TransactionSecurityConfig config) async {
+  Future<void> _openPinSetup() async {
     final saved = await Navigator.of(context).push<bool>(
       MaterialPageRoute(
-        builder: (_) => TransactionPinScreen.create(
-          initialPinLength: config.pinLength,
-        ),
+        builder: (_) => TransactionPinScreen.create(),
         fullscreenDialog: true,
       ),
     );
@@ -99,8 +100,6 @@ class _TransactionSecurityScreenState extends State<TransactionSecurityScreen> {
         child: FutureBuilder<TransactionSecurityConfig>(
           future: _future,
           builder: (context, snapshot) {
-            final config = snapshot.data;
-
             return CustomScrollView(
               physics: const BouncingScrollPhysics(),
               slivers: [
@@ -113,24 +112,19 @@ class _TransactionSecurityScreenState extends State<TransactionSecurityScreen> {
                   ),
                   sliver: SliverList.list(
                     children: [
-                      Row(
-                        children: [
-                          _TopIconButton(
-                            icon: Icons.arrow_back_ios_new_rounded,
-                            onTap: () => context.pop(),
-                          ),
-                          const SizedBox(width: AppSpacing.md),
-                          Expanded(
-                            child: Text(
-                              'Transaction Security',
-                              style: AppTextStyles.headingXL,
-                            ),
+                      TpPageHeader(
+                        label: 'Transaction Security',
+                        menuActions: [
+                          TpPageMenuAction(
+                            label: 'More',
+                            icon: Icons.more_horiz_rounded,
+                            onTap: () => context.push(AppRoutes.more),
                           ),
                         ],
                       ),
                       const SizedBox(height: AppSpacing.sm),
                       Text(
-                        'Protect money actions with a transaction PIN and optional biometric approval.',
+                        'Protect money actions with PIN and biometric approval.',
                         style: AppTextStyles.bodyM,
                       ),
                       const SizedBox(height: AppSpacing.xl),
@@ -154,39 +148,50 @@ class _TransactionSecurityScreenState extends State<TransactionSecurityScreen> {
                               'Could not load transaction security settings.',
                           icon: Icons.lock_clock_rounded,
                         )
-                      else ...[
-                        _SecurityStatusHero(config: config!),
-                        const SizedBox(height: AppSpacing.lg),
-                        _SecurityActionPanel(
-                          title: config.hasPin
-                              ? 'Update transaction PIN'
-                              : 'Create transaction PIN',
-                          detail: config.hasPin
-                              ? 'Your PIN is required before sensitive wallet actions.'
-                              : 'Set the PIN used for money action approvals.',
-                          icon: Icons.password_rounded,
-                          cta: config.hasPin ? 'Change PIN' : 'Create PIN',
-                          onTap: () => _openPinSetup(config),
+                      else
+                        Builder(
+                          builder: (context) {
+                            final config = snapshot.requireData;
+
+                            return Column(
+                              children: [
+                                _SecurityActionPanel(
+                                  title: config.hasPin
+                                      ? 'Update transaction PIN'
+                                      : 'Create transaction PIN',
+                                  detail: config.hasPin
+                                      ? 'Your PIN is required before sensitive wallet actions.'
+                                      : 'Set the PIN used for money action approvals.',
+                                  icon: Icons.password_rounded,
+                                  cta: config.hasPin
+                                      ? 'Change PIN'
+                                      : 'Create PIN',
+                                  onTap: _openPinSetup,
+                                ),
+                                const SizedBox(height: AppSpacing.md),
+                                _BiometricTogglePanel(
+                                  title: config.biometricLabel,
+                                  detail: config.hasBiometric
+                                      ? 'Use ${config.biometricLabel} to approve sensitive transactions after your PIN is set.'
+                                      : '${config.biometricLabel} is not available on this device or current build.',
+                                  icon: _biometricIcon(config),
+                                  value: config.biometricEnabled &&
+                                      config.hasBiometric,
+                                  enabled: config.hasBiometric,
+                                  onChanged: (value) =>
+                                      _toggleBiometric(config, value),
+                                ),
+                                const SizedBox(height: AppSpacing.md),
+                                const _SecurityInfoPanel(
+                                  title: 'Current behavior',
+                                  detail:
+                                      'Money action routes request your PIN before submission. Biometrics can unlock your PIN only when enabled and supported.',
+                                  icon: Icons.verified_user_outlined,
+                                ),
+                              ],
+                            );
+                          },
                         ),
-                        const SizedBox(height: AppSpacing.md),
-                        _BiometricTogglePanel(
-                          title: config.biometricLabel,
-                          detail: config.hasBiometric
-                              ? 'Use ${config.biometricLabel} to approve sensitive transactions after your PIN is set.'
-                              : '${config.biometricLabel} is not available on this device or current build.',
-                          icon: _biometricIcon(config),
-                          value: config.biometricEnabled && config.hasBiometric,
-                          enabled: config.hasBiometric,
-                          onChanged: (value) => _toggleBiometric(config, value),
-                        ),
-                        const SizedBox(height: AppSpacing.md),
-                        const _SecurityInfoPanel(
-                          title: 'Current behavior',
-                          detail:
-                              'Money action routes request your PIN before submission. Biometrics can unlock your PIN only when enabled and supported.',
-                          icon: Icons.verified_user_outlined,
-                        ),
-                      ],
                     ],
                   ),
                 ),
@@ -216,10 +221,10 @@ class TransactionPinScreen extends StatefulWidget {
     required this.subtitle,
   });
 
-  factory TransactionPinScreen.create({int initialPinLength = 4}) {
-    return TransactionPinScreen._(
+  factory TransactionPinScreen.create() {
+    return const TransactionPinScreen._(
       mode: PinScreenMode.create,
-      initialPinLength: initialPinLength,
+      initialPinLength: 4,
       allowBiometric: false,
       biometricLabel: 'Biometric approval',
       title: 'Create transaction PIN',
@@ -318,6 +323,13 @@ class _TransactionPinScreenState extends State<TransactionPinScreen> {
         await _authService.setTransactionPin(pin);
         await _securityService.savePin(pin, pinLength: _pinLength);
       } catch (error) {
+        if (isTransactionPinAlreadySetError(error)) {
+          await _securityService.savePin(pin, pinLength: _pinLength);
+          if (!mounted) return;
+          Navigator.of(context).pop(true);
+          return;
+        }
+
         setState(() {
           _buffer.clear();
           _firstPin = null;
@@ -394,42 +406,17 @@ class _TransactionPinScreenState extends State<TransactionPinScreen> {
             children: [
               Row(
                 children: [
-                  if (widget.mode == PinScreenMode.create)
-                    Expanded(
-                      child: Container(
-                        padding: const EdgeInsets.all(AppSpacing.xs),
-                        decoration: BoxDecoration(
-                          color: AppColors.surface,
-                          borderRadius: BorderRadius.circular(AppRadius.full),
-                          border: Border.all(color: AppColors.border),
-                        ),
-                        child: Row(
-                          children: [
-                            Expanded(
-                              child: _PinLengthChip(
-                                label: '4 digit',
-                                active: _pinLength == 4,
-                                onTap: () => setState(() => _pinLength = 4),
-                              ),
-                            ),
-                            const SizedBox(width: AppSpacing.xs),
-                            Expanded(
-                              child: _PinLengthChip(
-                                label: '6 digit',
-                                active: _pinLength == 6,
-                                onTap: () => setState(() => _pinLength = 6),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    )
-                  else
-                    const Spacer(),
+                  const Spacer(),
                   const SizedBox(width: AppSpacing.md),
                   _TopIconButton(
                     icon: Icons.close_rounded,
-                    onTap: () => context.pop(),
+                    onTap: () {
+                      if (context.canPop()) {
+                        context.pop();
+                      } else {
+                        context.go(AppRoutes.home);
+                      }
+                    },
                   ),
                 ],
               ),
@@ -445,16 +432,7 @@ class _TransactionPinScreenState extends State<TransactionPinScreen> {
                 style: AppTextStyles.bodyM,
                 textAlign: TextAlign.center,
               ),
-              const SizedBox(height: AppSpacing.xl),
-              TrustPayLottie(
-                variant: widget.mode == PinScreenMode.create
-                    ? TrustPayAnimationVariant.success
-                    : TrustPayAnimationVariant.send,
-                size: 72,
-                repeat: widget.mode != PinScreenMode.create,
-                semanticsLabel: currentTitle,
-              ),
-              const SizedBox(height: AppSpacing.md),
+              const SizedBox(height: AppSpacing.xxl),
               Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: List.generate(
@@ -523,65 +501,50 @@ class _TransactionPinScreenState extends State<TransactionPinScreen> {
   }
 }
 
-enum PinScreenMode { create, verify }
-
-class _SecurityStatusHero extends StatelessWidget {
-  final TransactionSecurityConfig config;
-
-  const _SecurityStatusHero({required this.config});
-
-  @override
-  Widget build(BuildContext context) {
-    final status = config.hasPin ? 'Protected' : 'Action required';
-    final detail = config.hasPin
-        ? 'Money actions can require transaction approval.'
-        : 'Create a PIN before sensitive transaction requests can be protected.';
-
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(AppSpacing.lg),
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            AppColors.surface,
-            AppColors.surfaceVariant,
-          ],
-        ),
-        borderRadius: BorderRadius.circular(AppRadius.lg),
-        border: Border.all(color: AppColors.border),
-      ),
-      child: Row(
-        children: [
-          SizedBox(
-            width: 68,
-            height: 68,
-            child: TrustPayLottie(
-              variant: config.hasPin
-                  ? TrustPayAnimationVariant.success
-                  : TrustPayAnimationVariant.loading,
-              size: 68,
-              repeat: !config.hasPin,
-              semanticsLabel: status,
-            ),
-          ),
-          const SizedBox(width: AppSpacing.md),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(status, style: AppTextStyles.headingM),
-                const SizedBox(height: AppSpacing.xs),
-                Text(detail, style: AppTextStyles.bodyM),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
+bool isTransactionPinAlreadySetError(Object error) {
+  if (error is! DioException) {
+    return false;
   }
+
+  if (error.response?.statusCode != 409) {
+    return false;
+  }
+
+  final message = _extractDioMessage(error.response?.data);
+  return message != null && message.toLowerCase().contains('already set');
 }
+
+String? _extractDioMessage(dynamic data) {
+  if (data is String && data.isNotEmpty) {
+    return data;
+  }
+
+  if (data is Map<String, dynamic>) {
+    final message = data['message'];
+    if (message is String && message.isNotEmpty) {
+      return message;
+    }
+    if (message is List && message.isNotEmpty) {
+      return message.whereType<String>().join('\n');
+    }
+    if (message is Map<String, dynamic>) {
+      return _extractDioMessage(message) ??
+          _extractDioMessage(message['error']);
+    }
+  }
+
+  if (data is List && data.isNotEmpty) {
+    final values = data.whereType<String>().where((value) => value.isNotEmpty);
+    final joined = values.join('\n');
+    if (joined.isNotEmpty) {
+      return joined;
+    }
+  }
+
+  return null;
+}
+
+enum PinScreenMode { create, verify }
 
 class _SecurityActionPanel extends StatelessWidget {
   final String title;
@@ -731,42 +694,6 @@ class _SecurityInfoPanel extends StatelessWidget {
             ),
           ),
         ],
-      ),
-    );
-  }
-}
-
-class _PinLengthChip extends StatelessWidget {
-  final String label;
-  final bool active;
-  final VoidCallback onTap;
-
-  const _PinLengthChip({
-    required this.label,
-    required this.active,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 180),
-        curve: Curves.easeOut,
-        padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
-        decoration: BoxDecoration(
-          color: active ? AppColors.primary : Colors.transparent,
-          borderRadius: BorderRadius.circular(AppRadius.full),
-        ),
-        child: Center(
-          child: Text(
-            label,
-            style: AppTextStyles.labelS.copyWith(
-              color: active ? Colors.white : AppColors.textSecondary,
-            ),
-          ),
-        ),
       ),
     );
   }

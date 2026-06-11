@@ -1,4 +1,4 @@
-import { Injectable } from "@nestjs/common";
+import { Injectable, UnauthorizedException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import {
   createClient,
@@ -55,7 +55,7 @@ export class SupabaseService {
     const { data, error } = await this.authClient.auth.getUser(accessToken);
 
     if (error || !data.user) {
-      throw new Error(`Invalid Supabase token: ${error?.message}`);
+      throw new UnauthorizedException("Session expired. Please sign in again.");
     }
 
     return data.user;

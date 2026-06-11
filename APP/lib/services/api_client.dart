@@ -10,9 +10,9 @@ class ApiClient {
   static const _refreshTokenKey = 'trustpay_refresh_token';
   static const _storage = FlutterSecureStorage();
   static const _uuid = Uuid();
+  static Future<String?>? _refreshInFlight;
 
   late final Dio _dio;
-  Future<String?>? _refreshInFlight;
 
   ApiClient() {
     _dio = Dio(
@@ -129,6 +129,7 @@ class ApiClient {
       final response = await refreshClient.post<dynamic>(
         '/api/auth/refresh',
         data: {'refreshToken': refreshToken},
+        options: Options(headers: {'Idempotency-Key': _uuid.v4()}),
       );
 
       final data = response.data;
@@ -245,6 +246,7 @@ class ApiLogRedactor {
     RegExp(r'/api/payments', caseSensitive: false),
     RegExp(r'/api/transfers', caseSensitive: false),
     RegExp(r'/api/exchange', caseSensitive: false),
+    RegExp(r'/api/kyc', caseSensitive: false),
     RegExp(r'/api/vtu', caseSensitive: false),
     RegExp(r'/api/banking/accounts', caseSensitive: false),
   ];

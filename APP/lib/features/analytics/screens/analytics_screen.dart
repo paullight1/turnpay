@@ -16,34 +16,9 @@ class SpendCategory {
   });
 }
 
-final _spendCategories = [
-  SpendCategory(
-    name: 'Transfers',
-    amount: 2800.00,
-    percentage: 43,
-    color: Color(0xFF7C3AED),
-  ),
-  SpendCategory(
-    name: 'VTU / Bills',
-    amount: 960.50,
-    percentage: 15,
-    color: Color(0xFFF59E0B),
-  ),
-  SpendCategory(
-    name: 'Exchange',
-    amount: 1960.50,
-    percentage: 30,
-    color: Color(0xFF2563EB),
-  ),
-  SpendCategory(
-    name: 'Other',
-    amount: 780.00,
-    percentage: 12,
-    color: Color(0xFF059669),
-  ),
-];
+final _spendCategories = <SpendCategory>[];
 
-final _weeklyData = [0.4, 0.6, 0.35, 1.0, 0.7, 0.5, 0.65]; // Normalized heights
+final _weeklyData = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
 final _weekLabels = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
 
 // â”€â”€â”€ ANALYTICS SCREEN â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -295,10 +270,7 @@ class _SummaryCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final amount = tabIndex == 0 ? 'GHâ‚µ 6,542.18' : 'GHâ‚µ 4,501.00';
-    final change =
-        tabIndex == 0 ? '+4.9% From last week' : '-2.1% From last week';
-    final isPositive = tabIndex == 0;
+    const amount = 'GHS 0.00';
 
     return Container(
       padding: const EdgeInsets.all(AppSpacing.lg),
@@ -333,19 +305,16 @@ class _SummaryCard extends StatelessWidget {
                 Row(
                   children: [
                     Icon(
-                      isPositive
-                          ? Icons.arrow_upward_rounded
-                          : Icons.arrow_downward_rounded,
-                      color: isPositive ? AppColors.success : AppColors.error,
+                      Icons.info_outline_rounded,
+                      color: AppColors.textSecondary,
                       size: 14,
                     ),
                     SizedBox(width: 4),
                     Flexible(
                       child: Text(
-                        change,
+                        'Real analytics will appear after transactions settle',
                         style: AppTextStyles.bodyS.copyWith(
-                          color:
-                              isPositive ? AppColors.success : AppColors.error,
+                          color: AppColors.textSecondary,
                           fontWeight: FontWeight.w600,
                         ),
                         maxLines: 1,
@@ -444,6 +413,8 @@ class _DonutChartSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final hasCategories = categories.isNotEmpty;
+
     return Column(
       children: [
         // Donut + center text
@@ -462,14 +433,14 @@ class _DonutChartSection extends StatelessWidget {
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Text(
-                        '73%',
+                        hasCategories ? '0%' : 'No data',
                         style: AppTextStyles.displayMedium.copyWith(
                           fontWeight: FontWeight.w900,
-                          fontSize: 38,
+                          fontSize: hasCategories ? 38 : 28,
                         ),
                       ),
                       Text(
-                        'Total Spend',
+                        hasCategories ? 'Total Spend' : 'Transactions pending',
                         style: AppTextStyles.bodyM,
                       ),
                     ],
@@ -483,28 +454,34 @@ class _DonutChartSection extends StatelessWidget {
         SizedBox(height: AppSpacing.md),
 
         // Legend row
-        Wrap(
-          spacing: AppSpacing.md,
-          runSpacing: AppSpacing.xs,
-          alignment: WrapAlignment.center,
-          children: categories.map((c) {
-            return Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Container(
-                  width: 10,
-                  height: 10,
-                  decoration: BoxDecoration(
-                    color: c.color,
-                    shape: BoxShape.circle,
+        if (hasCategories)
+          Wrap(
+            spacing: AppSpacing.md,
+            runSpacing: AppSpacing.xs,
+            alignment: WrapAlignment.center,
+            children: categories.map((c) {
+              return Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    width: 10,
+                    height: 10,
+                    decoration: BoxDecoration(
+                      color: c.color,
+                      shape: BoxShape.circle,
+                    ),
                   ),
-                ),
-                SizedBox(width: 6),
-                Text(c.name, style: AppTextStyles.bodyS),
-              ],
-            );
-          }).toList(),
-        ),
+                  SizedBox(width: 6),
+                  Text(c.name, style: AppTextStyles.bodyS),
+                ],
+              );
+            }).toList(),
+          )
+        else
+          Text(
+            'No spending categories yet',
+            style: AppTextStyles.bodyS.copyWith(color: AppColors.textSecondary),
+          ),
       ],
     );
   }
@@ -597,23 +574,33 @@ class _SpendBreakdownCard extends StatelessWidget {
           // Divider
           Divider(height: 1, color: AppColors.divider),
 
-          // Rows
-          ...categories.asMap().entries.map((entry) {
-            final i = entry.key;
-            final cat = entry.value;
-            return Column(
-              children: [
-                _BreakdownRow(category: cat),
-                if (i < categories.length - 1)
-                  Divider(
-                    height: 1,
-                    color: AppColors.divider,
-                    indent: AppSpacing.lg,
-                    endIndent: AppSpacing.lg,
-                  ),
-              ],
-            );
-          }),
+          if (categories.isEmpty)
+            Padding(
+              padding: const EdgeInsets.all(AppSpacing.lg),
+              child: Text(
+                'Your settled transfers, bills, and exchange activity will appear here.',
+                style: AppTextStyles.bodyM.copyWith(
+                  color: AppColors.textSecondary,
+                ),
+              ),
+            )
+          else
+            ...categories.asMap().entries.map((entry) {
+              final i = entry.key;
+              final cat = entry.value;
+              return Column(
+                children: [
+                  _BreakdownRow(category: cat),
+                  if (i < categories.length - 1)
+                    Divider(
+                      height: 1,
+                      color: AppColors.divider,
+                      indent: AppSpacing.lg,
+                      endIndent: AppSpacing.lg,
+                    ),
+                ],
+              );
+            }),
 
           SizedBox(height: AppSpacing.sm),
         ],
@@ -653,7 +640,7 @@ class _BreakdownRow extends StatelessWidget {
 
           // Amount
           Text(
-            'GHâ‚µ ${category.amount.toStringAsFixed(2)}',
+            'GHS ${category.amount.toStringAsFixed(2)}',
             style: AppTextStyles.labelM.copyWith(
               fontWeight: FontWeight.w700,
             ),

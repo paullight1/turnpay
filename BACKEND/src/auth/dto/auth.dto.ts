@@ -5,7 +5,7 @@ import {
   MaxLength,
   MinLength,
   Matches,
-} from "class-validator";
+} from 'class-validator';
 
 export class RegisterDto {
   @IsString()
@@ -18,20 +18,20 @@ export class RegisterDto {
 
   @IsString()
   @Matches(/^(\+?\d{10,15})$/, {
-    message: "Phone number must be a valid format",
+    message: 'Phone number must be a valid format',
   })
   phone: string;
 
   @IsString()
   @MinLength(8)
   @Matches(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/, {
-    message: "Password must contain uppercase, lowercase, and number",
+    message: 'Password must contain uppercase, lowercase, and number',
   })
   password: string;
 
   @IsString()
   @Matches(/^\d{4,6}$/, {
-    message: "Transaction PIN must be 4 to 6 digits",
+    message: 'Transaction PIN must be 4 to 6 digits',
   })
   transactionPin: string;
 
@@ -39,6 +39,14 @@ export class RegisterDto {
   @IsOptional()
   @MaxLength(120)
   deviceName?: string;
+
+  @IsString()
+  @IsOptional()
+  @MaxLength(20)
+  @Matches(/^[A-Za-z0-9]+$/, {
+    message: 'Referral code must contain letters and numbers only',
+  })
+  referralCode?: string;
 }
 
 export class LoginDto {
@@ -61,7 +69,7 @@ export class ChangePasswordDto {
   @IsString()
   @MinLength(8)
   @Matches(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/, {
-    message: "Password must contain uppercase, lowercase, and number",
+    message: 'Password must contain uppercase, lowercase, and number',
   })
   newPassword: string;
 }
@@ -90,7 +98,7 @@ export class EmailDto {
 export class PhoneDto {
   @IsString()
   @Matches(/^(\+?\d{10,15})$/, {
-    message: "Phone number must be a valid format",
+    message: 'Phone number must be a valid format',
   })
   phone: string;
 }
@@ -106,7 +114,7 @@ export class VerifyOtpDto {
 export class SetTransactionPinDto {
   @IsString()
   @Matches(/^\d{4,6}$/, {
-    message: "Transaction PIN must be 4 to 6 digits",
+    message: 'Transaction PIN must be 4 to 6 digits',
   })
   pin: string;
 }
@@ -114,21 +122,21 @@ export class SetTransactionPinDto {
 export class ResetTransactionPinDto {
   @IsString()
   @Matches(/^\d{4,6}$/, {
-    message: "Transaction PIN must be 4 to 6 digits",
+    message: 'Transaction PIN must be 4 to 6 digits',
   })
   newPin: string;
 
   @IsString()
   @IsOptional()
   @Matches(/^\d{4,6}$/, {
-    message: "Current transaction PIN must be 4 to 6 digits",
+    message: 'Current transaction PIN must be 4 to 6 digits',
   })
   currentPin?: string;
 
   @IsString()
   @IsOptional()
   @Matches(/^\d{6}$/, {
-    message: "OTP must be 6 digits",
+    message: 'OTP must be 6 digits',
   })
   otp?: string;
 }

@@ -6,6 +6,10 @@ import { PinoLogger } from "nestjs-pino";
 @Injectable()
 export class RedisService implements OnModuleInit, OnModuleDestroy {
   private client: IORedis;
+  private readonly memoryStore = new Map<
+    string,
+    { value: string; expiresAt?: number }
+  >();
 
   constructor(
     private configService: ConfigService,
@@ -51,18 +55,31 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
   }
 
   async onModuleDestroy() {
-    await this.client.quit();
+    try {
+      await this.client.quit();
+    } catch (err) {
+      this.logger.warn({ err }, "Redis client was already closed");
+    }
   }
 
   async get(key: string): Promise<string | null> {
+    if (!this.isRedisReady()) {
+      return this.getFromMemory(key);
+    }
+
     try {
       return await this.client.get(key);
     } catch {
-      return null;
+      return this.getFromMemory(key);
     }
   }
 
   async set(key: string, value: string, ttl?: number): Promise<void> {
+    if (!this.isRedisReady()) {
+      this.setInMemory(key, value, ttl);
+      return;
+    }
+
     try {
       if (ttl) {
         await this.client.setex(key, ttl, value);
@@ -71,14 +88,21 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
       }
     } catch {
       this.logger.warn({ key }, "Failed to set Redis key");
+      this.setInMemory(key, value, ttl);
     }
   }
 
   async del(key: string): Promise<void> {
+    if (!this.isRedisReady()) {
+      this.memoryStore.delete(key);
+      return;
+    }
+
     try {
       await this.client.del(key);
     } catch {
       this.logger.warn({ key }, "Failed to delete Redis key");
+      this.memoryStore.delete(key);
     }
   }
 
@@ -87,21 +111,29 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
     value: string,
     ttlSeconds: number,
   ): Promise<boolean> {
+    if (!this.isRedisReady()) {
+      return this.setInMemoryIfNotExists(key, value, ttlSeconds);
+    }
+
     try {
       const result = await this.client.set(key, value, "EX", ttlSeconds, "NX");
       return result === "OK";
     } catch {
       this.logger.warn({ key }, "Failed to acquire Redis lock");
-      return false;
+      return this.setInMemoryIfNotExists(key, value, ttlSeconds);
     }
   }
 
   async exists(key: string): Promise<boolean> {
+    if (!this.isRedisReady()) {
+      return this.getFromMemory(key) !== null;
+    }
+
     try {
       const result = await this.client.exists(key);
       return result === 1;
     } catch {
-      return false;
+      return this.getFromMemory(key) !== null;
     }
   }
 
@@ -110,6 +142,47 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
   }
 
   isAvailable(): boolean {
+    return true;
+  }
+
+  isRedisAvailable(): boolean {
+    return this.isRedisReady();
+  }
+
+  getMode(): "redis" | "memory" {
+    return this.isRedisReady() ? "redis" : "memory";
+  }
+
+  private isRedisReady(): boolean {
     return this.client.status === "ready";
+  }
+
+  private getFromMemory(key: string): string | null {
+    const item = this.memoryStore.get(key);
+    if (!item) return null;
+    if (item.expiresAt && item.expiresAt <= Date.now()) {
+      this.memoryStore.delete(key);
+      return null;
+    }
+    return item.value;
+  }
+
+  private setInMemory(key: string, value: string, ttl?: number) {
+    this.memoryStore.set(key, {
+      value,
+      expiresAt: ttl ? Date.now() + ttl * 1000 : undefined,
+    });
+  }
+
+  private setInMemoryIfNotExists(
+    key: string,
+    value: string,
+    ttlSeconds: number,
+  ): boolean {
+    if (this.getFromMemory(key) !== null) {
+      return false;
+    }
+    this.setInMemory(key, value, ttlSeconds);
+    return true;
   }
 }

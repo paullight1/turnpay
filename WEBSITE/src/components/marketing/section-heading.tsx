@@ -24,7 +24,7 @@ export function SectionHeading({
         className
       )}
     >
-      <Badge variant="secondary" className="w-fit border-white/10 bg-white/[0.06] text-orange-200">
+      <Badge variant="secondary" className="w-fit border-white/10 bg-white/[0.06] text-red-200">
         {eyebrow}
       </Badge>
       <h2 className="text-3xl font-semibold leading-tight text-balance md:text-5xl">

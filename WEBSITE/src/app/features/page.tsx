@@ -30,10 +30,10 @@ export default function FeaturesPage() {
         description="Exchange NGN and GHS, pay VTU bills, and track each receipt."
       >
         <Button asChild>
-          <Link href="/register">
+          <a href="https://wa.me/233555507240?text=Hello%20TrustPay%2C%20I%20want%20to%20get%20started." target="_blank" rel="noreferrer">
             Create wallet
             <ArrowRight data-icon="inline-end" aria-hidden="true" />
-          </Link>
+          </a>
         </Button>
         <Button variant="outline" asChild>
           <Link href="/security">See Trust Controls</Link>
@@ -132,7 +132,7 @@ export default function FeaturesPage() {
                 </p>
               </div>
               <Button variant="outline" asChild className="w-fit">
-                <Link href="/dashboard">View Dashboard</Link>
+                <a href="https://wa.me/233555507240?text=Hello%20TrustPay%2C%20I%20want%20to%20get%20started." target="_blank" rel="noreferrer">Get Started on WhatsApp</a>
               </Button>
             </div>
           </div>

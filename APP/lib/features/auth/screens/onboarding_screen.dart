@@ -3,22 +3,20 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../../core/theme/app_theme.dart';
 import '../../../core/router/app_router.dart';
-import '../../../core/widgets/trustpay_lottie.dart';
+import '../../../core/theme/app_theme.dart';
+import '../widgets/auth_help_button.dart';
+import '../widgets/legal_page_link.dart';
 
-// â”€â”€â”€ ONBOARDING DATA â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 class _OnboardingPage {
   final String title;
   final String subtitle;
-  final IconData icon;
-  final TrustPayAnimationVariant animation;
+  final String imageAsset;
 
   const _OnboardingPage({
     required this.title,
     required this.subtitle,
-    required this.icon,
-    required this.animation,
+    required this.imageAsset,
   });
 }
 
@@ -27,28 +25,22 @@ const _pages = [
     title: 'Send money\nwithout limits.',
     subtitle:
         'Transfer between GHS and NGN instantly at the best market rates.',
-    icon: Icons.send_rounded,
-    animation: TrustPayAnimationVariant.send,
+    imageAsset: 'assets/images/onboarding_transfer.jpg',
   ),
   _OnboardingPage(
-    title: 'Pay your bills\nin seconds.',
+    title: 'Swap cedis to naira\nin seconds.',
     subtitle:
-        'Top up airtime, pay for data, electricity and cable TV â€” all in one place.',
-    icon: Icons.receipt_long_rounded,
-    animation: TrustPayAnimationVariant.loading,
+        'Move between GHS and NGN instantly, then keep airtime, data, electricity, and cable TV in one wallet.',
+    imageAsset: 'assets/images/onboarding_bills.jpg',
   ),
   _OnboardingPage(
     title: 'Your money,\nalways safe.',
     subtitle:
         'Bank-grade encryption and two-factor authentication protect every transaction.',
-    icon: Icons.shield_rounded,
-    animation: TrustPayAnimationVariant.success,
+    imageAsset: 'assets/images/onboarding_security.jpg',
   ),
 ];
 
-// â”€â”€â”€ ONBOARDING SCREEN â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-/// SeatGeek-inspired full-screen onboarding with large hero illustrations,
-/// dot page indicators, and dual Sign Up / Log In bottom CTAs.
 class OnboardingScreen extends StatefulWidget {
   const OnboardingScreen({super.key});
 
@@ -56,8 +48,7 @@ class OnboardingScreen extends StatefulWidget {
   State<OnboardingScreen> createState() => _OnboardingScreenState();
 }
 
-class _OnboardingScreenState extends State<OnboardingScreen>
-    with TickerProviderStateMixin {
+class _OnboardingScreenState extends State<OnboardingScreen> {
   final PageController _pageController = PageController();
   Timer? _autoScrollTimer;
   int _currentPage = 0;
@@ -91,10 +82,9 @@ class _OnboardingScreenState extends State<OnboardingScreen>
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor: const Color(0xFF0D0E14),
       body: Stack(
         children: [
-          // â”€â”€ Full-screen PageView â”€â”€
           PageView.builder(
             controller: _pageController,
             itemCount: _pages.length,
@@ -103,34 +93,40 @@ class _OnboardingScreenState extends State<OnboardingScreen>
               return _OnboardingPageView(page: _pages[index]);
             },
           ),
-
-          // â”€â”€ Skip Button â”€â”€
           Positioned(
             top: 56,
             right: AppSpacing.lg,
-            child: GestureDetector(
-              onTap: () => context.go(AppRoutes.login),
-              child: Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: AppSpacing.md,
-                  vertical: AppSpacing.sm,
-                ),
-                decoration: BoxDecoration(
-                  color: AppColors.surfaceVariant,
-                  borderRadius: BorderRadius.circular(AppRadius.full),
-                ),
-                child: Text(
-                  'SKIP',
-                  style: AppTextStyles.labelS.copyWith(
-                    color: AppColors.textSecondary,
-                    letterSpacing: 1.5,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const AuthHelpButton(onDark: true),
+                const SizedBox(width: AppSpacing.sm),
+                GestureDetector(
+                  onTap: () => context.go(AppRoutes.login),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: AppSpacing.md,
+                      vertical: AppSpacing.sm,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.18),
+                      borderRadius: BorderRadius.circular(AppRadius.full),
+                      border: Border.all(
+                        color: Colors.white.withValues(alpha: 0.18),
+                      ),
+                    ),
+                    child: Text(
+                      'SKIP',
+                      style: AppTextStyles.labelS.copyWith(
+                        color: Colors.white.withValues(alpha: 0.86),
+                        letterSpacing: 1.5,
+                      ),
+                    ),
                   ),
                 ),
-              ),
+              ],
             ),
           ),
-
-          // â”€â”€ Bottom Section (Dots + Buttons) â”€â”€
           Positioned(
             left: 0,
             right: 0,
@@ -146,7 +142,6 @@ class _OnboardingScreenState extends State<OnboardingScreen>
   }
 }
 
-// â”€â”€â”€ INDIVIDUAL PAGE â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 class _OnboardingPageView extends StatelessWidget {
   final _OnboardingPage page;
 
@@ -154,29 +149,31 @@ class _OnboardingPageView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final size = MediaQuery.sizeOf(context);
-
     return Stack(
+      fit: StackFit.expand,
       children: [
-        Positioned(
-          top: 0,
-          left: 0,
-          right: 0,
-          height: size.height * 0.60,
-          child: Container(
-            color: AppColors.background,
-            child: Center(
-              child: _HeroIllustration(
-                icon: page.icon,
-                animation: page.animation,
-              ),
+        Image.asset(
+          page.imageAsset,
+          fit: BoxFit.cover,
+          alignment: Alignment.center,
+        ),
+        DecoratedBox(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              stops: const [0, 0.36, 0.66, 1],
+              colors: [
+                Colors.black.withValues(alpha: 0.18),
+                Colors.black.withValues(alpha: 0.05),
+                Colors.black.withValues(alpha: 0.62),
+                Colors.black.withValues(alpha: 0.94),
+              ],
             ),
           ),
         ),
-
-        // Text Content Overlay (bottom 55%)
         Positioned(
-          bottom: 170, // above the CTA buttons
+          bottom: 214,
           left: AppSpacing.lg,
           right: AppSpacing.lg,
           child: Column(
@@ -184,12 +181,25 @@ class _OnboardingPageView extends StatelessWidget {
             children: [
               Text(
                 page.title,
-                style: AppTextStyles.displayLarge,
+                style: AppTextStyles.displayLarge.copyWith(
+                  color: Colors.white,
+                  height: 1.08,
+                  shadows: [
+                    Shadow(
+                      color: Colors.black.withValues(alpha: 0.28),
+                      blurRadius: 18,
+                      offset: const Offset(0, 6),
+                    ),
+                  ],
+                ),
               ),
-              SizedBox(height: AppSpacing.md),
+              const SizedBox(height: AppSpacing.md),
               Text(
                 page.subtitle,
-                style: AppTextStyles.bodyL,
+                style: AppTextStyles.bodyL.copyWith(
+                  color: Colors.white.withValues(alpha: 0.82),
+                  height: 1.35,
+                ),
               ),
             ],
           ),
@@ -199,54 +209,6 @@ class _OnboardingPageView extends StatelessWidget {
   }
 }
 
-// â”€â”€â”€ HERO ILLUSTRATION (placeholder icon with glow) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-class _HeroIllustration extends StatelessWidget {
-  final IconData icon;
-  final TrustPayAnimationVariant animation;
-
-  const _HeroIllustration({
-    required this.icon,
-    required this.animation,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Stack(
-      alignment: Alignment.center,
-      children: [
-        TrustPayLottie(
-          variant: animation,
-          size: 180,
-          repeat: animation != TrustPayAnimationVariant.success,
-          semanticsLabel: 'TRUSTPAY onboarding',
-        ),
-        Container(
-          width: 86,
-          height: 86,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            color: AppColors.surfaceVariant.withValues(alpha: 0.92),
-            border: Border.all(color: AppColors.border),
-            boxShadow: [
-              BoxShadow(
-                color: AppColors.overlayLight,
-                blurRadius: 24,
-                offset: const Offset(0, 12),
-              ),
-            ],
-          ),
-          child: Icon(
-            icon,
-            size: 38,
-            color: AppColors.primary,
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-// â”€â”€â”€ BOTTOM SECTION â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 class _BottomSection extends StatelessWidget {
   final int currentPage;
   final int totalPages;
@@ -265,13 +227,9 @@ class _BottomSection extends StatelessWidget {
         AppSpacing.lg,
         40,
       ),
-      decoration: BoxDecoration(
-        color: AppColors.background,
-      ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          // Page Indicator Dots
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: List.generate(totalPages, (index) {
@@ -283,16 +241,15 @@ class _BottomSection extends StatelessWidget {
                 width: isActive ? 24 : 8,
                 height: 8,
                 decoration: BoxDecoration(
-                  color: isActive ? AppColors.primary : AppColors.border,
+                  color: isActive
+                      ? AppColors.primary
+                      : Colors.white.withValues(alpha: 0.36),
                   borderRadius: BorderRadius.circular(AppRadius.full),
                 ),
               );
             }),
           ),
-
-          SizedBox(height: AppSpacing.lg),
-
-          // CTA Buttons Row (Sign up | Log in)
+          const SizedBox(height: AppSpacing.lg),
           Row(
             children: [
               Expanded(
@@ -302,7 +259,7 @@ class _BottomSection extends StatelessWidget {
                   onTap: () => context.push(AppRoutes.register),
                 ),
               ),
-              SizedBox(width: AppSpacing.md),
+              const SizedBox(width: AppSpacing.md),
               Expanded(
                 child: _AuthButton(
                   label: 'Log in',
@@ -312,19 +269,35 @@ class _BottomSection extends StatelessWidget {
               ),
             ],
           ),
-
-          SizedBox(height: AppSpacing.lg),
-
-          // Legal links
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
+          const SizedBox(height: AppSpacing.lg),
+          Wrap(
+            alignment: WrapAlignment.center,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            spacing: AppSpacing.sm,
+            runSpacing: AppSpacing.xs,
             children: [
-              Text('Terms of use', style: AppTextStyles.caption),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm),
-                child: Text('|', style: AppTextStyles.caption),
+              LegalPageLink(
+                label: 'Terms of use',
+                fragment: 'terms',
+                style: AppTextStyles.caption.copyWith(
+                  color: Colors.white.withValues(alpha: 0.74),
+                  fontWeight: FontWeight.w600,
+                ),
               ),
-              Text('Privacy Policy', style: AppTextStyles.caption),
+              Text(
+                '|',
+                style: AppTextStyles.caption.copyWith(
+                  color: Colors.white.withValues(alpha: 0.48),
+                ),
+              ),
+              LegalPageLink(
+                label: 'Privacy Policy',
+                fragment: 'privacy',
+                style: AppTextStyles.caption.copyWith(
+                  color: Colors.white.withValues(alpha: 0.74),
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
             ],
           ),
         ],
@@ -351,17 +324,22 @@ class _AuthButton extends StatelessWidget {
       child: Container(
         height: 54,
         decoration: BoxDecoration(
-          color: isPrimary ? AppColors.primary : AppColors.surface,
+          color: isPrimary
+              ? AppColors.primary
+              : Colors.white.withValues(alpha: 0.14),
           borderRadius: BorderRadius.circular(AppRadius.full),
           border: isPrimary
               ? null
-              : Border.all(color: AppColors.border, width: 1.5),
+              : Border.all(
+                  color: Colors.white.withValues(alpha: 0.42),
+                  width: 1.5,
+                ),
         ),
         child: Center(
           child: Text(
             label,
             style: AppTextStyles.labelL.copyWith(
-              color: isPrimary ? Colors.white : AppColors.textPrimary,
+              color: Colors.white,
             ),
           ),
         ),

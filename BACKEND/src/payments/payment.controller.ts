@@ -2,7 +2,12 @@ import { Controller, Post, Get, Body, UseGuards, Param } from "@nestjs/common";
 import { PaymentService } from "./payment.service";
 import { JwtAuthGuard } from "../auth/guards/jwt-auth.guard";
 import { CurrentUser } from "../common/decorators/current-user.decorator";
-import { FundWalletDto, WithdrawDto, ResolveBankDto } from "./dto/payment.dto";
+import {
+  AuthorizeWithdrawalDto,
+  FundWalletDto,
+  WithdrawDto,
+  ResolveBankDto,
+} from "./dto/payment.dto";
 import { Throttle } from "@nestjs/throttler";
 
 @Controller("payments")
@@ -34,6 +39,29 @@ export class PaymentController {
     @Param("reference") reference: string,
   ) {
     return this.paymentService.getWithdrawal(user.userId, reference);
+  }
+
+  @Post("withdrawals/:reference/authorize")
+  @Throttle({ default: { limit: 3, ttl: 60000 } })
+  async authorizeWithdrawal(
+    @CurrentUser() user: { userId: string },
+    @Param("reference") reference: string,
+    @Body() dto: AuthorizeWithdrawalDto,
+  ) {
+    return this.paymentService.authorizeWithdrawal(
+      user.userId,
+      reference,
+      dto.authorizationCode,
+    );
+  }
+
+  @Post("withdrawals/:reference/resend-otp")
+  @Throttle({ default: { limit: 3, ttl: 60000 } })
+  async resendWithdrawalOtp(
+    @CurrentUser() user: { userId: string },
+    @Param("reference") reference: string,
+  ) {
+    return this.paymentService.resendWithdrawalOtp(user.userId, reference);
   }
 
   @Get("verify/:reference")

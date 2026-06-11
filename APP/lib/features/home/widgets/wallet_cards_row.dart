@@ -63,10 +63,10 @@ class WalletCardsRow extends StatelessWidget {
                 flag: 'ðŸ‡¬ðŸ‡­',
                 label: 'Ghana Cedi',
                 balance: 17298.92,
-                gradientColors: const [
-                  Color(0xFF6B21A8),
-                  Color(0xFF7C3AED),
-                  Color(0xFF9333EA),
+                gradientColors: [
+                  AppColors.primaryDark,
+                  AppColors.primary,
+                  AppColors.primaryLight,
                 ],
                 lastFour: '4269',
               ),
@@ -79,10 +79,10 @@ class WalletCardsRow extends StatelessWidget {
                 flag: 'ðŸ‡³ðŸ‡¬',
                 label: 'Naira',
                 balance: 5240000,
-                gradientColors: const [
-                  Color(0xFF1E3A5F),
-                  Color(0xFF2563EB),
-                  Color(0xFF3B82F6),
+                gradientColors: [
+                  AppColors.primary,
+                  AppColors.primaryLight,
+                  AppColors.primaryLight,
                 ],
                 lastFour: '4258',
               ),
@@ -160,7 +160,7 @@ class _WalletCard extends StatelessWidget {
                       width: 6,
                       height: 6,
                       decoration: BoxDecoration(
-                        color: Colors.greenAccent,
+                        color: AppColors.success,
                         shape: BoxShape.circle,
                       ),
                     ),

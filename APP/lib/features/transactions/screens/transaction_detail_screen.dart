@@ -2,8 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
+import '../../../core/router/app_router.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/widgets/micro_interactions.dart';
+import '../../../core/widgets/tp_page_header.dart';
 import '../../../services/wallet_service.dart';
 
 class TransactionDetailScreen extends StatefulWidget {
@@ -23,14 +25,12 @@ class _TransactionDetailScreenState extends State<TransactionDetailScreen> {
   @override
   void initState() {
     super.initState();
-    _detailFuture =
-        _walletService.fetchTransactionDetail(widget.reference);
+    _detailFuture = _walletService.fetchTransactionDetail(widget.reference);
   }
 
   void _refresh() {
     setState(() {
-      _detailFuture =
-          _walletService.fetchTransactionDetail(widget.reference);
+      _detailFuture = _walletService.fetchTransactionDetail(widget.reference);
     });
   }
 
@@ -38,12 +38,20 @@ class _TransactionDetailScreenState extends State<TransactionDetailScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.background,
-      appBar: AppBar(
-        title: const Text('Transaction Details'),
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back_rounded),
-          onPressed: () => context.pop(),
-        ),
+      appBar: TpAppHeader(
+        label: 'Transaction Details',
+        menuActions: [
+          TpPageMenuAction(
+            label: 'Refresh',
+            icon: Icons.refresh_rounded,
+            onTap: _refresh,
+          ),
+          TpPageMenuAction(
+            label: 'Home',
+            icon: Icons.home_rounded,
+            onTap: () => context.go(AppRoutes.home),
+          ),
+        ],
       ),
       body: FutureBuilder<TransactionDetail?>(
         future: _detailFuture,
@@ -157,8 +165,7 @@ class _AmountHero extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final symbol = detail.currency == 'NGN' ? '₦' : 'GH₵';
-    final formatted =
-        NumberFormat('#,##0.00').format(detail.amount);
+    final formatted = NumberFormat('#,##0.00').format(detail.amount);
 
     final typeIcon = _iconForType(detail.type);
     final statusColor = _colorForStatus(detail.status);
@@ -269,8 +276,7 @@ class _AmountHero extends StatelessWidget {
       case 'CABLE':
         return 'Cable TV';
       default:
-        return type[0].toUpperCase() +
-            type.substring(1).toLowerCase();
+        return type[0].toUpperCase() + type.substring(1).toLowerCase();
     }
   }
 }
@@ -366,11 +372,9 @@ class _FeeBreakdown extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final symbol = detail.currency == 'NGN' ? '₦' : 'GH₵';
-    final feeFormatted =
-        NumberFormat('#,##0.00').format(detail.fee);
+    final feeFormatted = NumberFormat('#,##0.00').format(detail.fee);
     final netAmount = detail.amount - detail.fee;
-    final netFormatted =
-        NumberFormat('#,##0.00').format(netAmount);
+    final netFormatted = NumberFormat('#,##0.00').format(netAmount);
 
     return Container(
       padding: const EdgeInsets.all(AppSpacing.md),
@@ -391,9 +395,7 @@ class _FeeBreakdown extends StatelessWidget {
           SizedBox(height: AppSpacing.sm),
           _DetailRow(
             label: 'Fee',
-            value: feeFormatted == '0.00'
-                ? 'Free'
-                : '$symbol$feeFormatted',
+            value: feeFormatted == '0.00' ? 'Free' : '$symbol$feeFormatted',
           ),
           const Divider(height: AppSpacing.lg),
           _DetailRow(
@@ -437,13 +439,11 @@ class _LedgerEntriesCard extends StatelessWidget {
           SizedBox(height: AppSpacing.md),
           ...entries.map((entry) {
             final isDebit = entry.direction.toUpperCase() == 'DEBIT';
-            final entryColor =
-                isDebit ? AppColors.error : AppColors.success;
+            final entryColor = isDebit ? AppColors.error : AppColors.success;
             final prefix = isDebit ? '−' : '+';
-            final symbol =
-                entry.currency == 'NGN' ? '₦' : 'GH₵';
-            final amountFormatted = NumberFormat('#,##0.00')
-                .format(entry.amount);
+            final symbol = entry.currency == 'NGN' ? '₦' : 'GH₵';
+            final amountFormatted =
+                NumberFormat('#,##0.00').format(entry.amount);
 
             return Padding(
               padding: const EdgeInsets.only(bottom: AppSpacing.sm),
@@ -459,10 +459,8 @@ class _LedgerEntriesCard extends StatelessWidget {
                       width: 32,
                       height: 32,
                       decoration: BoxDecoration(
-                        color:
-                            entryColor.withValues(alpha: 0.12),
-                        borderRadius:
-                            BorderRadius.circular(AppRadius.xs),
+                        color: entryColor.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(AppRadius.xs),
                       ),
                       child: Icon(
                         isDebit
@@ -475,8 +473,7 @@ class _LedgerEntriesCard extends StatelessWidget {
                     SizedBox(width: AppSpacing.sm),
                     Expanded(
                       child: Column(
-                        crossAxisAlignment:
-                            CrossAxisAlignment.start,
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
                             entry.source,
@@ -541,12 +538,8 @@ class _TransferAttemptsCard extends StatelessWidget {
           ),
           SizedBox(height: AppSpacing.md),
           ...attempts.map((attempt) {
-            final statusColor = _attemptStatusColor(
-              attempt.status,
-            );
             return Padding(
-              padding:
-                  const EdgeInsets.only(bottom: AppSpacing.sm),
+              padding: const EdgeInsets.only(bottom: AppSpacing.sm),
               child: _DetailRow(
                 label: attempt.provider,
                 value:
@@ -557,18 +550,6 @@ class _TransferAttemptsCard extends StatelessWidget {
         ],
       ),
     );
-  }
-
-  Color _attemptStatusColor(String status) {
-    switch (status.toUpperCase()) {
-      case 'SUCCESS':
-        return AppColors.success;
-      case 'FAILED':
-      case 'REVERSED':
-        return AppColors.error;
-      default:
-        return AppColors.warning;
-    }
   }
 }
 
@@ -608,8 +589,7 @@ class _ExchangeReceiptCard extends StatelessWidget {
           SizedBox(height: AppSpacing.sm),
           _DetailRow(
             label: 'Rate',
-            value: NumberFormat('#,##0.0000')
-                .format(receipt.rate),
+            value: NumberFormat('#,##0.0000').format(receipt.rate),
           ),
           SizedBox(height: AppSpacing.sm),
           _DetailRow(
@@ -689,7 +669,8 @@ class _ExchangePayoutCard extends StatelessWidget {
           SizedBox(height: AppSpacing.sm),
           _DetailRow(
             label: 'Account',
-            value: '*****${payout.destinationAccountNumber.substring(payout.destinationAccountNumber.length - 4)}',
+            value:
+                '*****${payout.destinationAccountNumber.substring(payout.destinationAccountNumber.length - 4)}',
           ),
           SizedBox(height: AppSpacing.sm),
           _DetailRow(
@@ -741,8 +722,7 @@ class _VtuOrderCard extends StatelessWidget {
             label: 'Provider',
             value: order.provider,
           ),
-          if (order.targetMasked != null &&
-              order.targetMasked!.isNotEmpty) ...[
+          if (order.targetMasked != null && order.targetMasked!.isNotEmpty) ...[
             SizedBox(height: AppSpacing.sm),
             _DetailRow(
               label: 'Target',
@@ -804,8 +784,7 @@ class _RetryAction extends StatelessWidget {
             ),
             decoration: BoxDecoration(
               color: AppColors.primary.withValues(alpha: 0.12),
-              borderRadius:
-                  BorderRadius.circular(AppRadius.full),
+              borderRadius: BorderRadius.circular(AppRadius.full),
               border: Border.all(
                 color: AppColors.primary.withValues(alpha: 0.3),
               ),
@@ -854,18 +833,15 @@ class _MetadataCard extends StatelessWidget {
           Text('Provider Metadata', style: AppTextStyles.labelM),
           SizedBox(height: AppSpacing.md),
           ...metadata.entries
-              .where((e) =>
-                  e.value != null &&
-                  e.key != 'rawPayload')
+              .where((e) => e.value != null && e.key != 'rawPayload')
               .map((entry) {
             final value = entry.value is String
                 ? entry.value as String
                 : entry.value.toString();
             // Mask sensitive keys
-            final displayValue =
-                _isSensitiveKey(entry.key)
-                    ? '*****${value.substring(value.length > 4 ? value.length - 4 : 0)}'
-                    : value;
+            final displayValue = _isSensitiveKey(entry.key)
+                ? '*****${value.substring(value.length > 4 ? value.length - 4 : 0)}'
+                : value;
 
             return Padding(
               padding: const EdgeInsets.only(
@@ -899,10 +875,8 @@ class _MetadataCard extends StatelessWidget {
         )
         .trim()
         .split(' ')
-        .map((w) =>
-            w.isNotEmpty
-                ? '${w[0].toUpperCase()}${w.substring(1)}'
-                : '')
+        .map(
+            (w) => w.isNotEmpty ? '${w[0].toUpperCase()}${w.substring(1)}' : '')
         .join(' ');
   }
 }

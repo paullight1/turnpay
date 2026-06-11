@@ -1,6 +1,7 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  allowedDevOrigins: ["127.0.0.1"],
   turbopack: {
     root: process.cwd(),
   },
@@ -60,7 +61,7 @@ const nextConfig: NextConfig = {
               "font-src 'self' data:",
               "style-src 'self' 'unsafe-inline'",
               "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
-              "connect-src 'self' https: http://localhost:* http://127.0.0.1:*",
+              "connect-src 'self' https: http://localhost:* http://127.0.0.1:* http://[::1]:*",
             ].join("; "),
           },
         ],

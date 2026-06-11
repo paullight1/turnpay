@@ -2,6 +2,7 @@ node_modules/
 **/node_modules/
 
 .tooling/
+.opencode/
 .claude/settings.local.json
 .dart_tool/
 **/.dart_tool/
@@ -23,3 +24,4 @@ coverage/
 *.log
 *.tsbuildinfo
 .DS_Store
+withdraw-bank-selector-v14.png

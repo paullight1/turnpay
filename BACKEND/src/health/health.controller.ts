@@ -1,4 +1,5 @@
 import { Controller, Get, ServiceUnavailableException } from "@nestjs/common";
+import { ConfigService } from "@nestjs/config";
 import { PrismaService } from "../prisma/prisma.service";
 import { RedisService } from "../redis/redis.service";
 
@@ -7,6 +8,7 @@ export class HealthController {
   constructor(
     private readonly prisma: PrismaService,
     private readonly redis: RedisService,
+    private readonly configService: ConfigService,
   ) {}
 
   @Get()
@@ -22,12 +24,20 @@ export class HealthController {
       isHealthy = false;
     }
 
+    const isProduction =
+      this.configService.get<string>("NODE_ENV") === "production";
+
     try {
+      if (!this.redis.isRedisAvailable()) {
+        throw new Error("Redis is not ready");
+      }
       await this.redis.getClient().ping();
       checks.redis = "connected";
     } catch {
-      checks.redis = "disconnected";
-      isHealthy = false;
+      checks.redis = "memory-fallback";
+      if (isProduction) {
+        isHealthy = false;
+      }
     }
 
     const response = {

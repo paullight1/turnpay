@@ -1,8 +1,8 @@
 # TRUSTPAY KYC Verification Guide
 
-Last reviewed: 2026-05-21
+Last reviewed: 2026-06-10
 
-This guide defines the minimum KYC setup needed before enabling TRUSTPAY money movement in Nigeria-focused flows.
+This guide defines the minimum KYC setup needed before enabling TRUSTPAY money movement in Nigeria and Ghana-focused flows.
 
 ## Current Security Posture
 
@@ -10,7 +10,7 @@ This guide defines the minimum KYC setup needed before enabling TRUSTPAY money m
 - Withdrawals, internal transfers, virtual-account provisioning, deposits, beneficiary management, and VTU purchases are gated by `kycStatus === VERIFIED` and at least `TIER_2`.
 - KYC identifier values are treated as sensitive PII. New submissions are encrypted with `PII_ENCRYPTION_KEY`, and API responses return masked identifiers only.
 - KYC document upload uses Supabase Storage signed upload tokens. The application stores only private object keys and mints short-lived admin review URLs.
-- KYC submissions create a `KycVerification` record through a provider gateway. The default gateway is manual review until a licensed/contracted BVN/NIN provider is configured.
+- KYC submissions create a `KycVerification` record through a provider gateway. The default gateway is manual review until the Smile ID adapter is configured and tested in sandbox.
 - Admin KYC decisions require a review reason and create an `AuditLog` entry.
 
 ## Regulatory Baseline
@@ -40,24 +40,85 @@ References:
 
 For TRUSTPAY launch, use Tier 2 as the minimum for transfers, withdrawals, and virtual-account provisioning.
 
-## Provider Setup
+## Smile ID Provider Setup
 
-1. Open a NIBSS Developer Portal relationship for Financial Authentication Service access.
-2. Request sandbox and production credentials for BVN validation, NIN validation, and vNIN validation.
-3. Confirm contract terms for storing returned identity attributes. Store the minimum needed for audit and risk decisions.
-4. Store provider credentials only in environment variables or a secret manager.
-5. Use the implemented `KycProviderGateway` abstraction before wiring provider code:
-   - `verifyBvn(input)`
-   - `verifyNin(input)`
-   - `verifyVirtualNin(input)`
-   - `normalizeProviderResult(result)`
-   The current implementation uses `ManualKycProvider`, which deliberately does not fake BVN/NIN verification.
-6. Persist verification outcomes separately from raw submitted numbers:
+TRUSTPAY should use Smile ID as the first production KYC provider, behind the existing `KycProviderGateway` boundary. Smile ID's web/mobile web integration is hosted and handles image capture, user consent, job submission, and client-side errors. Smile ID jobs are asynchronous, so TRUSTPAY must expose a callback endpoint and process final status server-side.
+
+Official anchors:
+
+- Smile ID Web Integration: https://docs.usesmileid.com/integration-options/web-mobile-web/web-integration
+- Smile ID Web Integration usage: https://docs.usesmileid.com/integration-options/web-mobile-web/web-integration/usage
+- Smile ID callback security overview: https://docs.usesmileid.com/further-reading/security-overview
+- Smile ID request and callback signing: https://docs.usesmileid.com/integration-options/rest-api/signing-your-api-request/generate-signature
+- Smile ID job status API: https://docs.usesmileid.com/further-reading/job-status
+- Smile ID Basic KYC result codes: https://docs.usesmileid.com/products/for-individuals-kyc/basic-kyc
+
+Required setup:
+
+1. Complete Smile ID sandbox onboarding, then live onboarding after compliance approval.
+2. Apply the Smile ID migration so `SMILE_ID`, `GHANA_CARD`, and provider-hosted KYC records are available.
+3. Use the Smile ID provider adapter behind the existing `KycProviderGateway` boundary.
+4. Create sessions through the authenticated, idempotent `POST /api/kyc/smile-id/session` endpoint.
+5. Receive provider results on the unauthenticated `POST /api/webhooks/kyc/smile-id` callback endpoint outside `JwtAuthGuard`, protected by Smile ID callback signature verification, IP allowlisting where infrastructure supports it, replay protection, and payload validation.
+6. Generate Smile ID web tokens on the backend only. The Flutter app should receive a short-lived token/session response, never Smile API keys.
+7. Set Smile ID `user_id` to the TRUSTPAY user ID or a stable KYC-scoped alias, and set Smile ID `job_id` to the TRUSTPAY `KycVerification.id` or another server-generated idempotent reference.
+8. Persist verification outcomes separately from raw submitted numbers:
    - masked identifier
    - provider reference
    - match result
    - watchlist/sanctions flags where legally available
    - reviewed/admin decision metadata
+9. Use manual review as the fallback for partial match, timeout, unsupported ID type, sanctions/risk flags, unclear provider responses, or callback/job-status inconsistency.
+
+Suggested environment variables:
+
+```env
+KYC_PROVIDER=smile_id
+SMILE_ID_PARTNER_ID=
+SMILE_ID_API_KEY=
+SMILE_ID_SERVER=sandbox
+SMILE_ID_CALLBACK_URL=https://api.example.com/api/webhooks/kyc/smile-id
+SMILE_ID_PRODUCT=biometric_kyc
+SMILE_ID_CALLBACK_MAX_SKEW_SECONDS=300
+```
+
+Do not log or return `SMILE_ID_API_KEY`, callback signatures, raw national identifiers, image links, document URLs, or full provider payloads.
+
+### Smile ID Session Flow
+
+1. Flutter calls `POST /api/kyc/smile-id/session` with an `Idempotency-Key`.
+2. Backend validates the authenticated user, ensures no active KYC submission is already pending, creates or reuses a `KycDocument` and `KycVerification`, and requests a Smile ID web token.
+3. Backend returns only the Smile web token/session payload needed by Flutter plus the TRUSTPAY verification ID.
+4. Flutter launches the Smile ID hosted capture flow.
+5. Smile ID posts the asynchronous callback to the backend.
+6. Backend verifies the callback signature before trusting the body.
+7. Backend idempotently upserts or updates the provider event / `KycVerification` using `provider=SMILE_ID` and `reference=SmileJobID || job_id`.
+8. Backend normalizes the result into TRUSTPAY KYC status and tier, writes audit metadata, and redacts provider data before persistence.
+9. Flutter polls `GET /api/kyc/status` until the user is `VERIFIED`, `REJECTED`, or `REVIEW_REQUIRED`.
+
+### Smile ID Callback Contract
+
+Smile ID callback verification must use the Smile signing contract: HMAC-SHA256 with the environment API key, updated with `timestamp`, `partner_id`, and `sid_request`, encoded in base64. Compare signatures with a timing-safe comparison. Reject callbacks when:
+
+- `timestamp` or `signature` is missing.
+- signature verification fails.
+- timestamp skew exceeds `SMILE_ID_CALLBACK_MAX_SKEW_SECONDS`.
+- `user_id`, `job_id`, or the expected TRUSTPAY verification reference cannot be mapped.
+- the provider reference already exists with a conflicting payload hash.
+
+Process duplicate callbacks idempotently by `provider=SMILE_ID` plus `reference=SmileJobID || job_id`. A replay with the same normalized payload should return the same acknowledgement without creating another audit record, provider event, or user tier update.
+
+### Smile ID Status Normalization
+
+| Smile ID condition                                                               | TRUSTPAY `KycVerification.status`                    | TRUSTPAY user status                                          | Tier handling                                                         |
+| -------------------------------------------------------------------------------- | ---------------------------------------------------- | ------------------------------------------------------------- | --------------------------------------------------------------------- |
+| `job_complete=false`                                                             | `PENDING`                                            | `SUBMITTED`                                                   | no promotion                                                          |
+| approved exact match, for example Basic KYC `1020`                               | `VERIFIED`                                           | `VERIFIED`                                                    | BVN or NIN promotes at least `TIER_1`; BVN plus NIN promotes `TIER_2` |
+| partial match, for example Basic KYC `1021`                                      | `REVIEW_REQUIRED`                                    | `SUBMITTED`                                                   | no automatic promotion; admin/manual review required                  |
+| no match / invalid ID / provider rejection, for example `1013` or `1022`         | `REJECTED`                                           | `REJECTED` unless the user already has a higher verified tier | no promotion                                                          |
+| provider/system error, invalid job, unavailable ID authority, missing parameters | `FAILED` or `REVIEW_REQUIRED` depending retryability | `SUBMITTED`                                                   | no promotion; retry or manual review                                  |
+
+Do not infer a successful KYC tier from `job_success` alone. Use the final result code/category and TRUSTPAY's verified-document history.
 
 ### Manual Provider Default
 
@@ -98,14 +159,15 @@ Reference: Supabase signed upload URLs are generated with `createSignedUploadUrl
 
 ## Third-Party API Notes
 
-| Provider             | Required practice before production                                                                                                                                                                                                      |
-| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| NIBSS/NIMC           | Complete institutional onboarding for BVN, NIN, and vNIN verification. Do not fake provider verification; keep manual review until credentials are active.                                                                               |
+| Provider             | Required practice before production                                                                                                                                                                                                                                                                                                                                                         |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Smile ID             | Use Smile ID as the primary hosted KYC provider for Nigeria/Ghana onboarding. Generate web tokens server-side, verify callback signatures before processing, deduplicate by `SmileJobID \|\| job_id`, redact payloads before persistence, and keep manual review fallback.                                                                                                                  |
+| NIBSS/NIMC           | Complete institutional onboarding for BVN, NIN, and vNIN verification. Do not fake provider verification; keep manual review until credentials are active.                                                                                                                                                                                                                                  |
 | Monnify              | Capture and verify BVN or NIN before reserving virtual accounts. Monnify guidance says new virtual-account flows should supply BVN/NIN, and maximum limits require both where applicable. TRUSTPAY virtual-account creation now reuses verified BVN/NIN already stored from KYC when DTO values are absent, instead of asking the user to re-enter identifiers during account provisioning. |
-| Monnify webhooks     | Validate `monnify-signature`, deduplicate provider events, and acknowledge quickly before heavy processing.                                                                                                                              |
-| Paystack webhooks    | Validate `x-paystack-signature` using HMAC SHA-512 and keep webhook processing idempotent.                                                                                                                                               |
-| Flutterwave webhooks | Use the selected Flutterwave API generation consistently. Current docs describe HMAC-SHA256 over the raw body with `flutterwave-signature`; older docs use `verif-hash`, so production must configure and test the exact dashboard mode. |
-| Reloadly             | Use OAuth client-credentials token flow with sandbox/live credentials separated. Cache tokens in Redis and do not log client secrets or access tokens.                                                                                   |
+| Monnify webhooks     | Validate `monnify-signature`, deduplicate provider events, and acknowledge quickly before heavy processing.                                                                                                                                                                                                                                                                                 |
+| Paystack webhooks    | Validate `x-paystack-signature` using HMAC SHA-512 and keep webhook processing idempotent.                                                                                                                                                                                                                                                                                                  |
+| Flutterwave webhooks | Use the selected Flutterwave API generation consistently. Current docs describe HMAC-SHA256 over the raw body with `flutterwave-signature`; older docs use `verif-hash`, so production must configure and test the exact dashboard mode.                                                                                                                                                    |
+| Reloadly             | Use OAuth client-credentials token flow with sandbox/live credentials separated. Cache tokens in Redis and do not log client secrets or access tokens.                                                                                                                                                                                                                                      |
 
 ## Data Handling Rules
 
@@ -138,9 +200,14 @@ Before any debit or transfer:
 - [ ] `PII_ENCRYPTION_KEY` configured and backed by a secret manager.
 - [ ] `PII_KEY_VERSION` set for the active KYC identifier encryption key.
 - [ ] `TRANSACTION_PIN_REQUIRED=true` in production.
-- [ ] NIBSS/NIMC provider onboarding completed.
+- [ ] Smile ID provider onboarding completed.
+- [ ] Smile ID sandbox callback and job-status tests passing.
+- [ ] NIBSS/NIMC provider onboarding completed if direct institutional BVN/NIN verification is still required outside Smile ID.
 - [ ] BVN/NIN verification provider sandbox tests passing.
 - [ ] KYC provider payloads redacted before logging.
+- [ ] Smile ID callback signature verification implemented with timing-safe comparison.
+- [ ] Smile ID callback replay/idempotency test passing.
+- [ ] Smile ID partial-match path routes to manual review without tier promotion.
 - [x] Private document storage and signed admin access implemented.
 - [x] KYC tier column and verification-result model implemented.
 - [x] Manual-review provider gateway implemented as the safe default.
@@ -178,6 +245,13 @@ KYC_ADMIN_DOCUMENT_URL_TTL_SECONDS=300
 PII_ENCRYPTION_KEY=
 PII_KEY_VERSION=1
 TRANSACTION_PIN_REQUIRED=true
+KYC_PROVIDER=smile_id
+SMILE_ID_PARTNER_ID=
+SMILE_ID_API_KEY=
+SMILE_ID_SERVER=sandbox
+SMILE_ID_CALLBACK_URL=
+SMILE_ID_PRODUCT=biometric_kyc
+SMILE_ID_CALLBACK_MAX_SKEW_SECONDS=300
 ```
 
 Required backend env vars when Monnify virtual accounts are enabled:

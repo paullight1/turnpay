@@ -481,8 +481,15 @@ export class PaymentService {
     let finalStatus: TransactionStatus = "PENDING";
     let providerTransferId: number | undefined;
     let transferRequestSent = false;
+    let withdrawalRecord:
+      | {
+          id: string;
+          reference: string;
+          transferAttemptId: string;
+        }
+      | null = null;
 
-    const transactionRecord = await this.prisma.$transaction(async (tx) => {
+    withdrawalRecord = await this.prisma.$transaction(async (tx) => {
       const now = new Date();
       const nextResetDate = new Date(now.getFullYear(), now.getMonth() + 1, 1);
 
@@ -613,7 +620,6 @@ export class PaymentService {
     });
 
     try {
-      transferRequestSent = true;
       const sourceAccountNumber = this.getMonnifySourceAccountNumber();
       const transfer = await this.monnifyBanks.initiateTransfer({
         amount: toProviderDecimalString(amount),
@@ -622,19 +628,20 @@ export class PaymentService {
         accountName: destination.accountName,
         sourceAccountNumber,
         currency: "NGN",
-        reference: transactionRecord.reference,
+        reference: withdrawalRecord.reference,
       });
 
+      transferRequestSent = true;
       transferStatus = transfer.status;
       finalStatus = this.mapTransferStatus(transferStatus);
 
       await this.prisma.transaction.update({
-        where: { reference: transactionRecord.reference },
+        where: { reference: withdrawalRecord.reference },
         data: { status: finalStatus },
       });
 
       await this.prisma.transferAttempt.update({
-        where: { id: transactionRecord.transferAttemptId },
+        where: { id: withdrawalRecord.transferAttemptId },
         data: {
           providerStatus: transferStatus,
           status: finalStatus,
@@ -657,12 +664,12 @@ export class PaymentService {
           userId,
           dto.currency,
           amount,
-          transactionRecord,
+          withdrawalRecord,
           destination,
         );
 
         this.logger.error(
-          { reference: transactionRecord.reference, transferStatus },
+          { reference: withdrawalRecord.reference, transferStatus },
           "Transfer failed, balance reversed",
         );
         throw new BadRequestException(
@@ -670,29 +677,95 @@ export class PaymentService {
         );
       }
     } catch (error) {
-      if (error instanceof BadRequestException) {
+      if (error instanceof BadRequestException && transferRequestSent) {
+        throw error;
+      }
+
+      if (!withdrawalRecord) {
         throw error;
       }
 
       if (!transferRequestSent) {
-        await this.prisma.transaction.update({
-          where: { reference: transactionRecord.reference },
-          data: { status: "FAILED" },
-        });
-
-        await this.reverseWithdrawal(
-          userId,
-          dto.currency,
-          amount,
-          transactionRecord,
-          destination,
+        const reconciledTransfer = await this.refreshWithdrawalTransferStatus(
+          withdrawalRecord.reference,
         );
 
+        if (reconciledTransfer) {
+          const reconciledStatus = this.mapTransferStatus(
+            reconciledTransfer.status,
+          );
+
+          await this.prisma.transaction.update({
+            where: { reference: withdrawalRecord.reference },
+            data: { status: reconciledStatus },
+          });
+
+          await this.prisma.transferAttempt.update({
+            where: { id: withdrawalRecord.transferAttemptId },
+            data: {
+              providerStatus: reconciledTransfer.status,
+              status: reconciledStatus,
+              lastCheckedAt: new Date(),
+              metadata: {
+                beneficiaryId: destination.beneficiaryId,
+                bankCode: destination.bankCode,
+                bankName: destination.bankName,
+                accountName: destination.accountName,
+                accountNumberMasked: destination.accountNumberMasked,
+                providerTransactionReference:
+                  reconciledTransfer.reference || withdrawalRecord.reference,
+                errorMessage:
+                  error instanceof Error
+                    ? error.message
+                    : "Unknown provider error",
+              },
+            },
+          });
+
+          if (["FAILED", "REVERSED"].includes(reconciledStatus)) {
+            await this.reverseWithdrawal(
+              userId,
+              dto.currency,
+              amount,
+              withdrawalRecord,
+              destination,
+            );
+
+            this.logger.error(
+              {
+                reference: withdrawalRecord.reference,
+                transferStatus: reconciledTransfer.status,
+              },
+              "Transfer failed after provider reconciliation, balance reversed",
+            );
+            throw new BadRequestException(
+              "Transfer failed. Balance has been reversed.",
+            );
+          }
+
+          this.logger.info(
+            {
+              reference: withdrawalRecord.reference,
+              transferStatus: reconciledTransfer.status,
+            },
+            "Transfer reconciliation completed",
+          );
+
+          return {
+            reference: withdrawalRecord.reference,
+            status: reconciledStatus,
+            message:
+              reconciledStatus === "SUCCESS"
+                ? "Withdrawal completed successfully"
+                : "Withdrawal submitted and pending provider confirmation",
+          };
+        }
+
         await this.prisma.transferAttempt.update({
-          where: { id: transactionRecord.transferAttemptId },
+          where: { id: withdrawalRecord.transferAttemptId },
           data: {
-            providerStatus: "NOT_CREATED",
-            status: "FAILED",
+            providerStatus: "UNKNOWN",
+            status: "PENDING",
             lastCheckedAt: new Date(),
             metadata: {
               beneficiaryId: destination.beneficiaryId,
@@ -700,7 +773,7 @@ export class PaymentService {
               bankName: destination.bankName,
               accountName: destination.accountName,
               accountNumberMasked: destination.accountNumberMasked,
-              providerTransactionReference: transactionRecord.reference,
+              providerTransactionReference: withdrawalRecord.reference,
               errorMessage:
                 error instanceof Error
                   ? error.message
@@ -711,24 +784,27 @@ export class PaymentService {
 
         this.logger.error(
           {
-            reference: transactionRecord.reference,
+            reference: withdrawalRecord.reference,
             error: error instanceof Error ? error.message : "Unknown error",
           },
-          "Transfer was not created, balance reversed",
+          "Transfer submission could not be confirmed, withdrawal left pending",
         );
 
-        throw new BadRequestException(
-          "Transfer could not be created. Balance has been reversed.",
-        );
+        return {
+          reference: withdrawalRecord.reference,
+          status: "PENDING",
+          message:
+            "Withdrawal submitted and pending provider confirmation. Funds remain reserved until verification completes.",
+        };
       }
 
       await this.prisma.transaction.update({
-        where: { reference: transactionRecord.reference },
+        where: { reference: withdrawalRecord.reference },
         data: { status: "PENDING" },
       });
 
       await this.prisma.transferAttempt.update({
-        where: { id: transactionRecord.transferAttemptId },
+        where: { id: withdrawalRecord.transferAttemptId },
         data: {
           providerStatus: "UNKNOWN",
           status: "PENDING",
@@ -739,7 +815,7 @@ export class PaymentService {
             bankName: destination.bankName,
             accountName: destination.accountName,
             accountNumberMasked: destination.accountNumberMasked,
-            providerTransactionReference: transactionRecord.reference,
+            providerTransactionReference: withdrawalRecord.reference,
             errorMessage:
               error instanceof Error ? error.message : "Unknown provider error",
           },
@@ -748,14 +824,14 @@ export class PaymentService {
 
       this.logger.warn(
         {
-          reference: transactionRecord.reference,
+          reference: withdrawalRecord.reference,
           error: error instanceof Error ? error.message : "Unknown error",
         },
         "Transfer provider result unknown, withdrawal left pending",
       );
 
       return {
-        reference: transactionRecord.reference,
+        reference: withdrawalRecord.reference,
         status: "PENDING",
         message:
           "Withdrawal submitted and pending provider confirmation. Funds remain reserved until verification completes.",
@@ -765,7 +841,7 @@ export class PaymentService {
     this.logger.info(
       {
         userId,
-        reference: transactionRecord.reference,
+        reference: withdrawalRecord.reference,
         amount: amount.toString(),
         currency: dto.currency,
       },
@@ -773,7 +849,7 @@ export class PaymentService {
     );
 
     return {
-      reference: transactionRecord.reference,
+      reference: withdrawalRecord.reference,
       status: finalStatus,
       message:
         finalStatus === "SUCCESS"
@@ -1199,6 +1275,21 @@ export class PaymentService {
         data: { monthlyWithdrawn: { decrement: amount } },
       });
     });
+  }
+
+  private async refreshWithdrawalTransferStatus(reference: string) {
+    try {
+      return await this.monnifyBanks.getTransferStatus(reference);
+    } catch (error) {
+      this.logger.warn(
+        {
+          reference,
+          error: error instanceof Error ? error.message : "Unknown error",
+        },
+        "Could not refresh withdrawal transfer status",
+      );
+      return null;
+    }
   }
 
   private async loadWithdrawal(userId: string, reference: string) {

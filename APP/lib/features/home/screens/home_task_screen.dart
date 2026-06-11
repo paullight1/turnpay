@@ -1,8 +1,9 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/router/app_router.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../core/widgets/tp_page_header.dart';
 
 class HomeTaskScreen extends StatelessWidget {
   const HomeTaskScreen({super.key});
@@ -27,12 +28,6 @@ class HomeTaskScreen extends StatelessWidget {
         subtitle: 'Send wallet funds to a bank',
         icon: Icons.account_balance_rounded,
         route: AppRoutes.withdraw,
-      ),
-      _FeatureItem(
-        title: 'Exchange',
-        subtitle: 'NGN and GHS conversion flow',
-        icon: Icons.currency_exchange_rounded,
-        route: AppRoutes.exchange,
       ),
       _FeatureItem(
         title: 'Airtime',
@@ -74,9 +69,9 @@ class HomeTaskScreen extends StatelessWidget {
 
     const comingSoon = [
       _FeatureItem(
-        title: 'Get accounts',
-        subtitle: 'Multi-country receiving accounts',
-        icon: Icons.language_rounded,
+        title: 'Airtime to cash',
+        subtitle: 'Convert airtime into wallet balance',
+        icon: Icons.swap_horiz_rounded,
       ),
       _FeatureItem(
         title: 'Virtual cards',
@@ -120,31 +115,10 @@ class HomeTaskScreen extends StatelessWidget {
               ),
               sliver: SliverList.list(
                 children: [
-                  Row(
-                    children: [
-                      _IconButton(
-                        icon: Icons.arrow_back_ios_new_rounded,
-                        onTap: () => context.pop(),
-                      ),
-                      const Spacer(),
-                      const _StatusPill(label: 'Feature hub'),
-                    ],
+                  TpPageHeader(
+                    label: 'Feature hub',
                   ),
                   SizedBox(height: AppSpacing.xl),
-                  Container(
-                    width: 56,
-                    height: 56,
-                    decoration: BoxDecoration(
-                      color: AppColors.surfaceVariant,
-                      borderRadius: BorderRadius.circular(AppRadius.md),
-                    ),
-                    child: Icon(
-                      Icons.apps_rounded,
-                      color: AppColors.primary,
-                      size: 26,
-                    ),
-                  ),
-                  SizedBox(height: AppSpacing.lg),
                   Text('Explore features', style: AppTextStyles.displayMedium),
                   SizedBox(height: AppSpacing.sm),
                   Text(
@@ -152,8 +126,6 @@ class HomeTaskScreen extends StatelessWidget {
                     style: AppTextStyles.bodyL,
                   ),
                   SizedBox(height: AppSpacing.xl),
-                  Text('Available now', style: AppTextStyles.headingM),
-                  SizedBox(height: AppSpacing.md),
                   const _FeatureGrid(items: liveFeatures),
                   SizedBox(height: AppSpacing.xl),
                   Text('Coming soon', style: AppTextStyles.headingM),
@@ -188,14 +160,14 @@ class _FeatureGrid extends StatelessWidget {
       physics: const NeverScrollableScrollPhysics(),
       itemCount: items.length,
       gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 2,
+        crossAxisCount: 3,
         crossAxisSpacing: AppSpacing.sm,
         mainAxisSpacing: AppSpacing.sm,
-        childAspectRatio: 1.18,
+        childAspectRatio: 0.82,
       ),
       itemBuilder: (context, index) {
         final item = items[index];
-        return _FeatureCard(item: item);
+        return _FeatureCard(item: item, index: index);
       },
     );
   }
@@ -203,41 +175,48 @@ class _FeatureGrid extends StatelessWidget {
 
 class _FeatureCard extends StatelessWidget {
   final _FeatureItem item;
+  final int index;
 
-  const _FeatureCard({required this.item});
+  const _FeatureCard({
+    required this.item,
+    required this.index,
+  });
 
   @override
   Widget build(BuildContext context) {
+    final color = _featureColor(index);
+
     return Material(
-      color: AppColors.surfaceVariant,
-      borderRadius: BorderRadius.circular(AppRadius.sm),
+      color: color.withValues(alpha: 0.1),
+      borderRadius: BorderRadius.circular(AppRadius.md),
       child: InkWell(
-        borderRadius: BorderRadius.circular(AppRadius.sm),
+        borderRadius: BorderRadius.circular(AppRadius.md),
         onTap: item.route == null ? null : () => context.push(item.route!),
         child: Padding(
-          padding: const EdgeInsets.all(AppSpacing.md),
+          padding: const EdgeInsets.all(AppSpacing.sm),
           child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisAlignment: MainAxisAlignment.center,
             children: [
               Container(
-                width: 42,
-                height: 42,
+                width: 46,
+                height: 46,
                 decoration: BoxDecoration(
-                  color: AppColors.inputFill,
-                  borderRadius: BorderRadius.circular(AppRadius.sm),
+                  color: color.withValues(alpha: 0.16),
+                  borderRadius: BorderRadius.circular(AppRadius.md),
+                  border: Border.all(color: color.withValues(alpha: 0.22)),
                 ),
-                child: Icon(item.icon, color: AppColors.primary, size: 22),
+                child: Icon(item.icon, color: color, size: 24),
               ),
-              const Spacer(),
-              Text(item.title, style: AppTextStyles.labelL),
-              SizedBox(height: 2),
+              SizedBox(height: AppSpacing.sm),
               Text(
-                item.subtitle,
-                style: AppTextStyles.bodyS.copyWith(
-                  color: AppColors.textSecondary,
+                item.title,
+                style: AppTextStyles.labelM.copyWith(
+                  color: AppColors.textPrimary,
+                  fontWeight: FontWeight.w900,
                 ),
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.center,
               ),
             ],
           ),
@@ -245,6 +224,19 @@ class _FeatureCard extends StatelessWidget {
       ),
     );
   }
+}
+
+Color _featureColor(int index) {
+  final colors = [
+    AppColors.primary,
+    AppColors.success,
+    AppColors.warning,
+    const Color(0xFF2563EB),
+    const Color(0xFF0EA5E9),
+    const Color(0xFF7C3AED),
+  ];
+
+  return colors[index % colors.length];
 }
 
 class _ComingSoonRow extends StatelessWidget {
@@ -327,31 +319,3 @@ class _StatusPill extends StatelessWidget {
     );
   }
 }
-
-class _IconButton extends StatelessWidget {
-  final IconData icon;
-  final VoidCallback onTap;
-
-  const _IconButton({
-    required this.icon,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: AppColors.surfaceVariant,
-      borderRadius: BorderRadius.circular(AppRadius.sm),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(AppRadius.sm),
-        onTap: onTap,
-        child: SizedBox(
-          width: 44,
-          height: 44,
-          child: Icon(icon, color: AppColors.textPrimary, size: 18),
-        ),
-      ),
-    );
-  }
-}
-

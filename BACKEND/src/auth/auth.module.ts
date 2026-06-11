@@ -1,11 +1,12 @@
-import { Module } from "@nestjs/common";
-import { PassportModule } from "@nestjs/passport";
-import { AuthService } from "./auth.service";
-import { AuthController } from "./auth.controller";
-import { UsersModule } from "../users/users.module";
-import { WalletsModule } from "../wallets/wallets.module";
-import { OtpModule } from "../otp/otp.module";
-import { SupabaseModule } from "../supabase/supabase.module";
+import { Module } from '@nestjs/common';
+import { PassportModule } from '@nestjs/passport';
+import { AuthService } from './auth.service';
+import { AuthController } from './auth.controller';
+import { UsersModule } from '../users/users.module';
+import { WalletsModule } from '../wallets/wallets.module';
+import { OtpModule } from '../otp/otp.module';
+import { SupabaseModule } from '../supabase/supabase.module';
+import { ReferralsModule } from '../referrals/referrals.module';
 
 @Module({
   imports: [
@@ -14,6 +15,7 @@ import { SupabaseModule } from "../supabase/supabase.module";
     OtpModule,
     PassportModule,
     SupabaseModule,
+    ReferralsModule,
   ],
   controllers: [AuthController],
   providers: [AuthService],

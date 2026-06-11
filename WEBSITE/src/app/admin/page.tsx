@@ -510,17 +510,21 @@ function StatTile({
   loading?: boolean;
 }) {
   return (
-    <Card className="overflow-hidden">
+    <Card className={cn(
+      "group overflow-hidden transition-all duration-200 hover:translate-y-[-2px] hover:shadow-lg",
+      tone === "money" && "hover:shadow-emerald-500/10",
+      tone === "risk" && "hover:shadow-red-500/10",
+    )}>
       <CardHeader className="flex flex-row items-center justify-between pb-2">
-        <CardTitle className="text-sm font-medium">{label}</CardTitle>
+        <CardTitle className="text-sm font-medium text-muted-foreground group-hover:text-foreground transition-colors">{label}</CardTitle>
         <span
           className={cn(
-            "flex size-8 items-center justify-center rounded-lg border",
+            "flex size-8 items-center justify-center rounded-lg border transition-all duration-200",
             tone === "money" &&
-              "border-emerald-500/30 bg-emerald-500/10 text-emerald-300",
-            tone === "risk" && "border-red-500/30 bg-red-500/10 text-red-300",
+              "border-emerald-500/30 bg-emerald-500/10 text-emerald-300 group-hover:bg-emerald-500/20 group-hover:shadow-sm group-hover:shadow-emerald-500/20",
+            tone === "risk" && "border-red-500/30 bg-red-500/10 text-red-300 group-hover:bg-red-500/20 group-hover:shadow-sm group-hover:shadow-red-500/20",
             tone === "default" &&
-              "border-border bg-muted text-muted-foreground",
+              "border-border bg-muted text-muted-foreground group-hover:bg-muted/80",
           )}
         >
           <Icon className="size-4" />
@@ -531,7 +535,7 @@ function StatTile({
           <Skeleton className="h-8 w-28" />
         ) : (
           <>
-            <div className="text-2xl font-semibold">{value}</div>
+            <div className="text-2xl font-semibold tracking-tight">{value}</div>
             <p className="mt-1 text-xs text-muted-foreground">{detail}</p>
           </>
         )}

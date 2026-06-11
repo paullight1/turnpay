@@ -383,12 +383,6 @@ export default function TransactionDetailPage() {
             <CardContent className="flex flex-col gap-3">
               {transferAttempts.map((attempt) => {
                 const attemptStatus = attempt.status.toUpperCase();
-                const statusColor =
-                  attemptStatus === "SUCCESS"
-                    ? "text-green-500"
-                    : attemptStatus === "FAILED" || attemptStatus === "REVERSED"
-                      ? "text-red-500"
-                      : "text-yellow-500";
                 return (
                   <div
                     key={attempt.id}

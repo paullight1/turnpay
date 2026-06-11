@@ -31,6 +31,13 @@ describe("WebhookController", () => {
     debug: jest.fn(),
   };
 
+  const prisma = {
+    webhookLog: {
+      create: jest.fn(),
+      update: jest.fn(),
+    },
+  };
+
   const webhookBody = {
     eventType: "SUCCESSFUL_TRANSACTION",
     eventData: {
@@ -68,7 +75,10 @@ describe("WebhookController", () => {
       exchangeService as any,
       configService as any,
       logger as any,
+      prisma as any,
     );
+    prisma.webhookLog.create.mockResolvedValue({ id: "webhook-log-1" });
+    prisma.webhookLog.update.mockResolvedValue({ id: "webhook-log-1" });
 
     bankingService.processVirtualAccountDeposit.mockResolvedValue({
       received: true,
