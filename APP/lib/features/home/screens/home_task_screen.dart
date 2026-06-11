@@ -72,31 +72,43 @@ class HomeTaskScreen extends StatelessWidget {
         title: 'Airtime to cash',
         subtitle: 'Convert airtime into wallet balance',
         icon: Icons.swap_horiz_rounded,
+        backgroundAsset: 'assets/images/onboarding_transfer.jpg',
+        backgroundAlignment: Alignment.centerLeft,
       ),
       _FeatureItem(
         title: 'Virtual cards',
         subtitle: 'Create and freeze cards instantly',
         icon: Icons.credit_card_rounded,
+        backgroundAsset: 'assets/images/onboarding_security.jpg',
+        backgroundAlignment: Alignment.centerRight,
       ),
       _FeatureItem(
         title: 'Book hotels',
         subtitle: 'Travel booking from your wallet',
         icon: Icons.hotel_rounded,
+        backgroundAsset: 'assets/images/onboarding_bills.jpg',
+        backgroundAlignment: Alignment.center,
       ),
       _FeatureItem(
         title: 'Pay for flights',
         subtitle: 'Air travel checkout and receipts',
         icon: Icons.flight_takeoff_rounded,
+        backgroundAsset: 'assets/images/onboarding_transfer.jpg',
+        backgroundAlignment: Alignment.topCenter,
       ),
       _FeatureItem(
         title: 'Betting wallet',
         subtitle: 'Fast pay-ins and payouts',
         icon: Icons.sports_esports_rounded,
+        backgroundAsset: 'assets/images/onboarding_security.jpg',
+        backgroundAlignment: Alignment.bottomCenter,
       ),
       _FeatureItem(
         title: 'Gift cards',
         subtitle: 'Buy and redeem digital cards',
         icon: Icons.card_giftcard_rounded,
+        backgroundAsset: 'assets/images/onboarding_bills.jpg',
+        backgroundAlignment: Alignment.centerLeft,
       ),
     ];
 
@@ -135,8 +147,11 @@ class HomeTaskScreen extends StatelessWidget {
                     style: AppTextStyles.bodyM,
                   ),
                   SizedBox(height: AppSpacing.md),
-                  ...comingSoon.map(
-                    (item) => _ComingSoonRow(item: item),
+                  ...comingSoon.asMap().entries.map(
+                    (entry) => _ComingSoonCard(
+                      item: entry.value,
+                      index: entry.key,
+                    ),
                   ),
                 ],
               ),
@@ -239,45 +254,96 @@ Color _featureColor(int index) {
   return colors[index % colors.length];
 }
 
-class _ComingSoonRow extends StatelessWidget {
+class _ComingSoonCard extends StatelessWidget {
   final _FeatureItem item;
+  final int index;
 
-  const _ComingSoonRow({required this.item});
+  const _ComingSoonCard({
+    required this.item,
+    required this.index,
+  });
 
   @override
   Widget build(BuildContext context) {
+    final accent = _featureColor(index);
+
     return Container(
       margin: const EdgeInsets.only(bottom: AppSpacing.sm),
-      padding: const EdgeInsets.all(AppSpacing.md),
       decoration: BoxDecoration(
         color: AppColors.surfaceVariant,
-        borderRadius: BorderRadius.circular(AppRadius.sm),
+        borderRadius: BorderRadius.circular(AppRadius.md),
         border: Border.all(color: AppColors.border),
+        boxShadow: [
+          BoxShadow(
+            color: AppColors.overlayLight,
+            blurRadius: 20,
+            offset: const Offset(0, 10),
+          ),
+        ],
       ),
-      child: Row(
+      clipBehavior: Clip.antiAlias,
+      child: Stack(
         children: [
-          Container(
-            width: 40,
-            height: 40,
-            decoration: BoxDecoration(
-              color: AppColors.inputFill,
-              borderRadius: BorderRadius.circular(AppRadius.sm),
-            ),
-            child: Icon(item.icon, color: AppColors.primary, size: 20),
-          ),
-          SizedBox(width: AppSpacing.md),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(item.title, style: AppTextStyles.labelL),
-                SizedBox(height: 2),
-                Text(item.subtitle, style: AppTextStyles.bodyS),
-              ],
+          Positioned.fill(
+            child: Opacity(
+              opacity: 0.16,
+              child: Image.asset(
+                item.backgroundAsset ?? 'assets/images/onboarding_transfer.jpg',
+                fit: BoxFit.cover,
+                alignment: item.backgroundAlignment,
+              ),
             ),
           ),
-          SizedBox(width: AppSpacing.sm),
-          const _StatusPill(label: 'Coming soon'),
+          Positioned.fill(
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    AppColors.surface.withValues(alpha: 0.92),
+                    AppColors.surfaceVariant.withValues(alpha: 0.74),
+                    accent.withValues(alpha: 0.08),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          Positioned(
+            top: AppSpacing.sm,
+            right: AppSpacing.sm,
+            child: _LockBadge(accent: accent),
+          ),
+          Padding(
+            padding: const EdgeInsets.all(AppSpacing.md),
+            child: SizedBox(
+              height: 118,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  Text(
+                    item.title,
+                    style: AppTextStyles.labelL.copyWith(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w800,
+                    ),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    item.subtitle,
+                    style: AppTextStyles.bodyM.copyWith(
+                      color: AppColors.textSecondary,
+                    ),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ),
+            ),
+          ),
         ],
       ),
     );
@@ -289,33 +355,41 @@ class _FeatureItem {
   final String subtitle;
   final IconData icon;
   final String? route;
+  final String? backgroundAsset;
+  final Alignment backgroundAlignment;
 
   const _FeatureItem({
     required this.title,
     required this.subtitle,
     required this.icon,
     this.route,
+    this.backgroundAsset,
+    this.backgroundAlignment = Alignment.center,
   });
 }
 
-class _StatusPill extends StatelessWidget {
-  final String label;
+class _LockBadge extends StatelessWidget {
+  final Color accent;
 
-  const _StatusPill({required this.label});
+  const _LockBadge({required this.accent});
 
   @override
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.symmetric(
-        horizontal: AppSpacing.md,
-        vertical: AppSpacing.sm,
+        horizontal: AppSpacing.sm,
+        vertical: AppSpacing.xs,
       ),
       decoration: BoxDecoration(
-        color: AppColors.surfaceVariant,
+        color: AppColors.surface.withValues(alpha: 0.78),
         borderRadius: BorderRadius.circular(AppRadius.full),
-        border: Border.all(color: AppColors.border),
+        border: Border.all(color: accent.withValues(alpha: 0.22)),
       ),
-      child: Text(label, style: AppTextStyles.labelS),
+      child: Icon(
+        Icons.lock_rounded,
+        size: 16,
+        color: accent,
+      ),
     );
   }
 }
