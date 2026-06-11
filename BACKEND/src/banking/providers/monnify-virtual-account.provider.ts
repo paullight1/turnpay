@@ -102,6 +102,7 @@ export class MonnifyVirtualAccountProvider {
       );
     }
 
+    const contractCode = this.requireMonnifyContractCode();
     const token = await this.getAccessToken();
     const accountReference = this.buildAccountReference(input);
     const accountName = this.buildAccountName(input);
@@ -114,9 +115,7 @@ export class MonnifyVirtualAccountProvider {
       accountReference,
       accountName,
       currencyCode: input.currency,
-      contractCode: this.configService.getOrThrow<string>(
-        "MONNIFY_CONTRACT_CODE",
-      ),
+      contractCode,
       customerEmail: input.email,
       customerName: accountName,
       getAllAvailableBanks: this.configService.get<boolean>(
@@ -306,9 +305,8 @@ export class MonnifyVirtualAccountProvider {
       return this.accessToken;
     }
 
-    const apiKey = this.configService.getOrThrow<string>("MONNIFY_API_KEY");
-    const secretKey =
-      this.configService.getOrThrow<string>("MONNIFY_SECRET_KEY");
+    const apiKey = this.requireMonnifyApiKey();
+    const secretKey = this.requireMonnifySecretKey();
     const basicToken = Buffer.from(`${apiKey}:${secretKey}`).toString("base64");
 
     const response = await this.fetchMonnify<MonnifyAuthResponse>(
@@ -338,6 +336,46 @@ export class MonnifyVirtualAccountProvider {
     this.tokenExpiresAt = now + expiresIn * 1000;
 
     return accessToken;
+  }
+
+  private requireMonnifyApiKey() {
+    const apiKey = this.configService.get<string>("MONNIFY_API_KEY")?.trim();
+
+    if (!apiKey) {
+      throw new BadRequestException(
+        "Monnify API credentials are not configured for this environment",
+      );
+    }
+
+    return apiKey;
+  }
+
+  private requireMonnifySecretKey() {
+    const secretKey = this.configService
+      .get<string>("MONNIFY_SECRET_KEY")
+      ?.trim();
+
+    if (!secretKey) {
+      throw new BadRequestException(
+        "Monnify API credentials are not configured for this environment",
+      );
+    }
+
+    return secretKey;
+  }
+
+  private requireMonnifyContractCode() {
+    const contractCode = this.configService
+      .get<string>("MONNIFY_CONTRACT_CODE")
+      ?.trim();
+
+    if (!contractCode) {
+      throw new BadRequestException(
+        "Monnify contract code is not configured for this environment",
+      );
+    }
+
+    return contractCode;
   }
 
   private get baseUrl() {

@@ -39,13 +39,13 @@ services:
       - key: TRANSACTION_PIN_REQUIRED
         value: "true"
       - key: BANKING_ENABLED
-        value: "false"
-      - key: VIRTUAL_ACCOUNTS_ENABLED
-        value: "false"
-      - key: WITHDRAWALS_ENABLED
-        value: "false"
-      - key: BANKING_SANDBOX_MODE
         value: "true"
+      - key: VIRTUAL_ACCOUNTS_ENABLED
+        value: "true"
+      - key: WITHDRAWALS_ENABLED
+        value: "true"
+      - key: BANKING_SANDBOX_MODE
+        value: "false"
       - key: KYC_PROVIDER
         value: "manual"
       - key: KYC_DOCUMENT_BUCKET
@@ -71,6 +71,28 @@ services:
       - key: SUPABASE_ANON_KEY
         sync: false
       - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: MONNIFY_API_KEY
+        sync: false
+      - key: MONNIFY_SECRET_KEY
+        sync: false
+      - key: MONNIFY_CONTRACT_CODE
+        sync: false
+      - key: MONNIFY_BASE_URL
+        value: "https://api.monnify.com"
+      - key: MONNIFY_WEBHOOK_SECRET
+        sync: false
+      - key: MONNIFY_WEBHOOK_URL
+        value: "https://turnpay.onrender.com/api/webhooks/monnify"
+      - key: MONNIFY_GET_ALL_AVAILABLE_BANKS
+        value: "true"
+      - key: MONNIFY_RESTRICT_PAYMENT_SOURCE
+        value: "false"
+      - key: MONNIFY_SANDBOX_TEST_KYC_BYPASS
+        value: "false"
+      - key: MONNIFY_TEST_BVN
+        sync: false
+      - key: MONNIFY_TEST_NIN
         sync: false
       - key: PAYSTACK_SECRET_KEY
         sync: false
