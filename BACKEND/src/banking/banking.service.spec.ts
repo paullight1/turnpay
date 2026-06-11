@@ -70,6 +70,22 @@ describe("BankingService", () => {
     );
   });
 
+  it("returns full account numbers to the authenticated account owner", async () => {
+    prisma.virtualAccount.findMany.mockResolvedValue([]);
+
+    await service.getVirtualAccounts("user-1");
+
+    expect(prisma.virtualAccount.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { userId: "user-1" },
+        select: expect.objectContaining({
+          accountNumber: true,
+          accountNumberMasked: true,
+        }),
+      }),
+    );
+  });
+
   it("requires verified KYC before provisioning a virtual account", async () => {
     prisma.user.findUnique.mockResolvedValue({
       id: "user-1",
@@ -169,7 +185,7 @@ describe("BankingService", () => {
     );
   });
 
-  it("upserts a Monnify virtual account without exposing raw provider internals", async () => {
+  it("upserts a Monnify virtual account and returns owner-visible account details without raw provider internals", async () => {
     prisma.user.findUnique.mockResolvedValue({
       id: "user-1",
       email: "user@example.com",
@@ -216,11 +232,13 @@ describe("BankingService", () => {
             currency: "NGN",
           },
         },
-        select: expect.not.objectContaining({
+        select: expect.objectContaining({
           accountNumber: true,
+          accountNumberMasked: true,
         }),
       }),
     );
+    expect(result.accountNumber).toBe("6254727989");
     expect(result.accountNumberMasked).toBe("******7989");
   });
 

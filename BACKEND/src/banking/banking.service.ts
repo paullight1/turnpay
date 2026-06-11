@@ -45,6 +45,7 @@ export class BankingService {
       select: {
         id: true,
         provider: true,
+        accountNumber: true,
         accountNumberMasked: true,
         accountName: true,
         bankName: true,
