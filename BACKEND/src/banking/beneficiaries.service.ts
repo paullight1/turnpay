@@ -10,7 +10,6 @@ import { encryptSensitiveValue } from "../common/utils/encryption";
 import { maskAccountNumber } from "../common/utils/masking";
 import { formatKycTier, isKycTierAtLeast } from "../common/utils/kyc-tier";
 import { CreateBeneficiaryDto, ResolveBankAccountDto } from "./dto/banking.dto";
-import { PaystackVirtualAccountProvider } from "./providers/paystack-virtual-account.provider";
 import { MonnifyVirtualAccountProvider } from "./providers/monnify-virtual-account.provider";
 
 type ResolvedBankAccount = {
@@ -23,7 +22,6 @@ type ResolvedBankAccount = {
 export class BeneficiariesService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly paystackBanks: PaystackVirtualAccountProvider,
     private readonly monnifyBanks: MonnifyVirtualAccountProvider,
     private readonly configService: ConfigService,
   ) {}
@@ -33,14 +31,6 @@ export class BeneficiariesService {
   }
 
   resolveBankAccount(dto: ResolveBankAccountDto): Promise<ResolvedBankAccount> {
-    const provider = dto.provider || "monnify";
-    if (provider === "paystack") {
-      return this.paystackBanks.resolveBankAccount(
-        dto.accountNumber,
-        dto.bankCode,
-      );
-    }
-
     return this.monnifyBanks.resolveBankAccount(
       dto.accountNumber,
       dto.bankCode,
@@ -142,16 +132,12 @@ export class BeneficiariesService {
     }
   }
 
-  private normalizeProvider(provider: string) {
+  private normalizeProvider(provider: string): "MONNIFY" {
     const normalized = provider.toUpperCase();
-    if (
-      normalized !== "PAYSTACK" &&
-      normalized !== "FLUTTERWAVE" &&
-      normalized !== "MONNIFY"
-    ) {
+    if (normalized !== "MONNIFY") {
       throw new BadRequestException("Unsupported provider");
     }
-    return normalized;
+    return "MONNIFY";
   }
 
   private readonly beneficiarySelect = {

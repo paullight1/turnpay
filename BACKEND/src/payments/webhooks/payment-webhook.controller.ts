@@ -54,6 +54,8 @@ interface MonnifyWebhookEvent {
   eventData?: {
     transactionReference?: string;
     paymentReference?: string;
+    status?: string;
+    transactionStatus?: string;
     amountPaid?: number;
     totalPayable?: number;
     settlementAmount?: number;
@@ -267,7 +269,31 @@ export class WebhookController {
       );
     }
 
+    const upperEventType = (eventType || "").toUpperCase();
+
     if (
+      upperEventType.includes("DISBURSEMENT") &&
+      providerReference
+    ) {
+      const providerStatus =
+        data?.status ||
+        data?.transactionStatus ||
+        (upperEventType.includes("SUCCESSFUL")
+          ? "SUCCESS"
+          : upperEventType.includes("REVERSED")
+            ? "REVERSED"
+            : upperEventType.includes("FAILED")
+              ? "FAILED"
+              : "PENDING");
+
+      await this.paymentService.processTransferWebhook({
+        provider: "monnify",
+        eventType,
+        providerReference,
+        providerStatus,
+        rawPayload: body as unknown as Record<string, unknown>,
+      });
+    } else if (
       eventType === "SUCCESSFUL_TRANSACTION" &&
       paymentStatus === "PAID" &&
       providerReference &&

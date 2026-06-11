@@ -45,6 +45,11 @@ describe("PaymentService withdrawals", () => {
     createTransferRecipient: jest.fn(),
     initiateTransfer: jest.fn(),
   };
+  const monnifyBanks = {
+    listBanks: jest.fn(),
+    resolveBankAccount: jest.fn(),
+    initiateTransfer: jest.fn(),
+  };
   const flutterwave = {};
   const config = {
     get: jest.fn((key: string) =>
@@ -78,6 +83,7 @@ describe("PaymentService withdrawals", () => {
       users as any,
       paystack as any,
       flutterwave as any,
+      monnifyBanks as any,
       config as any,
       logger as any,
       http as any,
@@ -112,7 +118,7 @@ describe("PaymentService withdrawals", () => {
       ),
       accountNumberMasked: "******6789",
       currency: "NGN",
-      provider: "PAYSTACK",
+      provider: "MONNIFY",
     });
     prisma.transaction.create.mockResolvedValue({
       id: "tx-1",
@@ -122,14 +128,14 @@ describe("PaymentService withdrawals", () => {
     ledger.debitWallet.mockResolvedValue({
       balanceAfter: new Decimal(4000),
     });
-    paystack.createTransferRecipient.mockResolvedValue({
-      recipientCode: "RCP_123",
+    monnifyBanks.resolveBankAccount.mockResolvedValue({
+      accountName: "ADA LOVELACE",
+      bankName: "Test Bank",
+      bankCode: "044",
     });
-    paystack.initiateTransfer.mockResolvedValue({
-      data: {
-        status: "pending",
-        reference: "WD-1",
-      },
+    monnifyBanks.initiateTransfer.mockResolvedValue({
+      reference: "WD-1",
+      status: "SUCCESS",
     });
     prisma.transferAttempt.create.mockResolvedValue({
       id: "attempt-1",
@@ -139,7 +145,7 @@ describe("PaymentService withdrawals", () => {
       amount: "1000",
       currency: "NGN",
       beneficiaryId: "beneficiary-1",
-      provider: "paystack",
+      provider: "monnify",
     } as any);
 
     expect(ledger.debitWallet).toHaveBeenCalledWith(
@@ -164,7 +170,7 @@ describe("PaymentService withdrawals", () => {
     expect(prisma.transferAttempt.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         transactionId: "tx-1",
-        provider: "PAYSTACK",
+        provider: "MONNIFY",
         providerReference: "WD-1",
         providerStatus: "RESERVED",
         status: "PENDING",
@@ -174,8 +180,8 @@ describe("PaymentService withdrawals", () => {
     expect(prisma.transferAttempt.update).toHaveBeenCalledWith({
       where: { id: "attempt-1" },
       data: expect.objectContaining({
-        providerStatus: "pending",
-        status: "PENDING",
+        providerStatus: "SUCCESS",
+        status: "SUCCESS",
       }),
     });
     expect(result.reference).toBe("WD-1");
@@ -207,7 +213,7 @@ describe("PaymentService withdrawals", () => {
       ),
       accountNumberMasked: "******6789",
       currency: "NGN",
-      provider: "PAYSTACK",
+      provider: "MONNIFY",
     });
     prisma.transaction.create.mockResolvedValue({
       id: "tx-1",
@@ -217,14 +223,14 @@ describe("PaymentService withdrawals", () => {
     ledger.debitWallet.mockResolvedValue({
       balanceAfter: new Decimal(4000),
     });
-    paystack.createTransferRecipient.mockResolvedValue({
-      recipientCode: "RCP_123",
+    monnifyBanks.resolveBankAccount.mockResolvedValue({
+      accountName: "ADA LOVELACE",
+      bankName: "Test Bank",
+      bankCode: "044",
     });
-    paystack.initiateTransfer.mockResolvedValue({
-      data: {
-        status: "failed",
-        reference: "WD-1",
-      },
+    monnifyBanks.initiateTransfer.mockResolvedValue({
+      reference: "WD-1",
+      status: "FAILED",
     });
     prisma.transferAttempt.create.mockResolvedValue({
       id: "attempt-1",
@@ -235,7 +241,7 @@ describe("PaymentService withdrawals", () => {
         amount: "1000",
         currency: "NGN",
         beneficiaryId: "beneficiary-1",
-        provider: "paystack",
+        provider: "monnify",
       } as any),
     ).rejects.toBeInstanceOf(BadRequestException);
 
@@ -251,7 +257,7 @@ describe("PaymentService withdrawals", () => {
     expect(prisma.transferAttempt.update).toHaveBeenCalledWith({
       where: { id: "attempt-1" },
       data: expect.objectContaining({
-        providerStatus: "failed",
+        providerStatus: "FAILED",
         status: "FAILED",
       }),
     });
@@ -280,15 +286,15 @@ describe("PaymentService withdrawals", () => {
     prisma.transaction.updateMany.mockResolvedValue({ count: 1 });
 
     const result = await service.processTransferWebhook({
-      provider: "paystack",
-      eventType: "transfer.success",
+      provider: "monnify",
+      eventType: "SUCCESSFUL_DISBURSEMENT",
       providerReference: "WD-1",
-      providerStatus: "success",
+      providerStatus: "SUCCESS",
       rawPayload: {
-        event: "transfer.success",
+        eventType: "SUCCESSFUL_DISBURSEMENT",
         data: {
           reference: "WD-1",
-          status: "success",
+          status: "SUCCESS",
           account_number: "0123456789",
         },
       },
@@ -297,8 +303,8 @@ describe("PaymentService withdrawals", () => {
     expect(result).toEqual({ received: true, processed: true });
     expect(prisma.providerEvent.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
-        provider: "PAYSTACK",
-        eventType: "transfer.success",
+        provider: "MONNIFY",
+        eventType: "SUCCESSFUL_DISBURSEMENT",
         providerReference: "WD-1",
         status: "PROCESSING",
         payload: expect.objectContaining({
@@ -317,7 +323,7 @@ describe("PaymentService withdrawals", () => {
       expect.objectContaining({
         where: { id: "attempt-1" },
         data: expect.objectContaining({
-          providerStatus: "success",
+          providerStatus: "SUCCESS",
           status: "SUCCESS",
         }),
       }),
@@ -337,15 +343,15 @@ describe("PaymentService withdrawals", () => {
     prisma.providerEvent.create.mockRejectedValue(duplicateError);
 
     const result = await service.processTransferWebhook({
-      provider: "paystack",
-      eventType: "transfer.success",
+      provider: "monnify",
+      eventType: "SUCCESSFUL_DISBURSEMENT",
       providerReference: "WD-1",
-      providerStatus: "success",
+      providerStatus: "SUCCESS",
       rawPayload: {
-        event: "transfer.success",
+        eventType: "SUCCESSFUL_DISBURSEMENT",
         data: {
           reference: "WD-1",
-          status: "success",
+          status: "SUCCESS",
         },
       },
     });
@@ -369,15 +375,15 @@ describe("PaymentService withdrawals", () => {
     prisma.transaction.findUnique.mockResolvedValue(null);
 
     const result = await service.processTransferWebhook({
-      provider: "paystack",
-      eventType: "transfer.failed",
+      provider: "monnify",
+      eventType: "FAILED_DISBURSEMENT",
       providerReference: "WD-MISSING",
-      providerStatus: "failed",
+      providerStatus: "FAILED",
       rawPayload: {
-        event: "transfer.failed",
+        eventType: "FAILED_DISBURSEMENT",
         data: {
           reference: "WD-MISSING",
-          status: "failed",
+          status: "FAILED",
         },
       },
     });
@@ -413,13 +419,13 @@ describe("PaymentService withdrawals", () => {
     prisma.ledgerEntry.findFirst.mockResolvedValue(null);
 
     await service.processTransferWebhook({
-      provider: "paystack",
-      eventType: "transfer.failed",
+      provider: "monnify",
+      eventType: "FAILED_DISBURSEMENT",
       providerReference: "WD-1",
-      providerStatus: "failed",
+      providerStatus: "FAILED",
       rawPayload: {
-        event: "transfer.failed",
-        data: { reference: "WD-1", status: "failed" },
+        eventType: "FAILED_DISBURSEMENT",
+        data: { reference: "WD-1", status: "FAILED" },
       },
     });
 
@@ -460,7 +466,7 @@ describe("PaymentService withdrawals", () => {
       ),
       accountNumberMasked: "******6789",
       currency: "NGN",
-      provider: "PAYSTACK",
+      provider: "MONNIFY",
     });
     prisma.transaction.create.mockResolvedValue({
       id: "tx-1",
@@ -472,14 +478,14 @@ describe("PaymentService withdrawals", () => {
     ledger.debitWallet.mockResolvedValue({
       balanceAfter: new Decimal(4000),
     });
-    paystack.createTransferRecipient.mockResolvedValue({
-      recipientCode: "RCP_123",
+    monnifyBanks.resolveBankAccount.mockResolvedValue({
+      accountName: "ADA LOVELACE",
+      bankName: "Test Bank",
+      bankCode: "044",
     });
-    paystack.initiateTransfer.mockResolvedValue({
-      data: {
-        status: "pending",
-        reference: "WD-1",
-      },
+    monnifyBanks.initiateTransfer.mockResolvedValue({
+      reference: "WD-1",
+      status: "SUCCESS",
     });
     prisma.transferAttempt.create.mockResolvedValue({
       id: "attempt-1",
@@ -489,7 +495,7 @@ describe("PaymentService withdrawals", () => {
       amount: "1000",
       currency: "NGN",
       beneficiaryId: "beneficiary-1",
-      provider: "paystack",
+      provider: "monnify",
     } as any);
 
     expect(prisma.user.updateMany).toHaveBeenNthCalledWith(
@@ -534,13 +540,13 @@ describe("PaymentService withdrawals", () => {
     prisma.ledgerEntry.findFirst.mockResolvedValue(null);
 
     await service.processTransferWebhook({
-      provider: "paystack",
-      eventType: "transfer.reversed",
+      provider: "monnify",
+      eventType: "REVERSED_DISBURSEMENT",
       providerReference: "WD-1",
-      providerStatus: "reversed",
+      providerStatus: "REVERSED",
       rawPayload: {
-        event: "transfer.reversed",
-        data: { reference: "WD-1", status: "reversed" },
+        eventType: "REVERSED_DISBURSEMENT",
+        data: { reference: "WD-1", status: "REVERSED" },
       },
     });
 

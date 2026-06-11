@@ -3,7 +3,6 @@ import { HttpModule } from "@nestjs/axios";
 import { BankingController } from "./banking.controller";
 import { BankingService } from "./banking.service";
 import { BeneficiariesService } from "./beneficiaries.service";
-import { PaystackVirtualAccountProvider } from "./providers/paystack-virtual-account.provider";
 import { MonnifyVirtualAccountProvider } from "./providers/monnify-virtual-account.provider";
 import { WalletsModule } from "../wallets/wallets.module";
 
@@ -19,9 +18,8 @@ import { WalletsModule } from "../wallets/wallets.module";
   providers: [
     BankingService,
     BeneficiariesService,
-    PaystackVirtualAccountProvider,
     MonnifyVirtualAccountProvider,
   ],
-  exports: [BankingService, BeneficiariesService],
+  exports: [BankingService, BeneficiariesService, MonnifyVirtualAccountProvider],
 })
 export class BankingModule {}

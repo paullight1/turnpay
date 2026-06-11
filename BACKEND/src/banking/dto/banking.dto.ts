@@ -9,7 +9,7 @@ import {
 const SUPPORTED_CURRENCIES = ["NGN", "GHS"] as const;
 const VIRTUAL_ACCOUNT_CURRENCIES = ["NGN"] as const;
 const VIRTUAL_ACCOUNT_PROVIDERS = ["monnify"] as const;
-const BANK_RESOLVE_PROVIDERS = ["monnify", "paystack"] as const;
+const BANK_RESOLVE_PROVIDERS = ["monnify"] as const;
 
 export class ProvisionVirtualAccountDto {
   @IsString()

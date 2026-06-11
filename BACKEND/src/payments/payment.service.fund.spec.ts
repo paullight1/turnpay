@@ -18,6 +18,7 @@ describe("PaymentService funding", () => {
   const flutterwave = {
     initializePayment: jest.fn(),
   };
+  const monnifyBanks = {};
   const config: {
     get: jest.Mock<string | undefined, [string]>;
     getOrThrow: jest.Mock<string, [string]>;
@@ -61,6 +62,7 @@ describe("PaymentService funding", () => {
       users as any,
       paystack as any,
       flutterwave as any,
+      monnifyBanks as any,
       config as any,
       logger as any,
       http as any,

@@ -23,6 +23,7 @@ describe("PaymentService deposits", () => {
   const flutterwave = {
     verifyPayment: jest.fn(),
   };
+  const monnifyBanks = {};
   const config = {
     get: jest.fn(),
     getOrThrow: jest.fn(() => "secret"),
@@ -55,6 +56,7 @@ describe("PaymentService deposits", () => {
       users as any,
       paystack as any,
       flutterwave as any,
+      monnifyBanks as any,
       config as any,
       logger as any,
       http as any,

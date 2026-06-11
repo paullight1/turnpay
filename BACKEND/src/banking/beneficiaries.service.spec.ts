@@ -14,11 +14,6 @@ describe("BeneficiariesService", () => {
     },
   };
 
-  const paystackBanks = {
-    resolveBankAccount: jest.fn(),
-    listBanks: jest.fn(),
-  };
-
   const monnifyBanks = {
     resolveBankAccount: jest.fn(),
     listBanks: jest.fn(),
@@ -43,7 +38,6 @@ describe("BeneficiariesService", () => {
     });
     service = new BeneficiariesService(
       prisma as any,
-      paystackBanks as any,
       monnifyBanks as any,
       config as unknown as ConfigService,
     );
@@ -61,7 +55,7 @@ describe("BeneficiariesService", () => {
       accountName: "ADA LOVELACE",
       accountNumberMasked: "******7890",
       currency: "NGN",
-      provider: "PAYSTACK",
+      provider: "MONNIFY",
       isDeleted: false,
       createdAt: new Date(),
       updatedAt: new Date(),
@@ -98,7 +92,7 @@ describe("BeneficiariesService", () => {
         accountName: "ADA LOVELACE",
         accountNumberMasked: "******7890",
         currency: "NGN",
-        provider: "PAYSTACK",
+        provider: "MONNIFY",
         createdAt: new Date(),
         updatedAt: new Date(),
       },

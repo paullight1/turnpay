@@ -18,6 +18,7 @@ import { UsersService } from "../users/users.service";
 import { Prisma, Transaction, TransactionStatus } from "@prisma/client";
 import { Decimal } from "@prisma/client/runtime/library";
 import { LedgerService } from "../wallets/ledger.service";
+import { MonnifyVirtualAccountProvider } from "../banking/providers/monnify-virtual-account.provider";
 import { decryptSensitiveValue } from "../common/utils/encryption";
 import { maskAccountNumber } from "../common/utils/masking";
 import { TransactionPinService } from "../common/services/transaction-pin.service";
@@ -28,7 +29,7 @@ import {
   toProviderDecimalString,
 } from "./utils/provider-amount";
 
-type WithdrawalProvider = "paystack" | "flutterwave";
+type WithdrawalProvider = "monnify";
 type PaymentProviderName = "paystack" | "flutterwave";
 
 interface WithdrawalDestination {
@@ -49,6 +50,7 @@ export class PaymentService {
     private readonly usersService: UsersService,
     private readonly paystack: PaystackProvider,
     private readonly flutterwave: FlutterwaveProvider,
+    private readonly monnifyBanks: MonnifyVirtualAccountProvider,
     private readonly configService: ConfigService,
     private readonly logger: PinoLogger,
     private readonly httpService: HttpService,
@@ -444,16 +446,19 @@ export class PaymentService {
     }
 
     const destination = await this.resolveWithdrawalDestination(userId, dto);
-    const provider =
-      dto.provider ||
-      destination.provider ||
-      this.getDefaultProvider(dto.currency);
-    if (provider !== "paystack" && provider !== "flutterwave") {
+    const provider = dto.provider || destination.provider || "monnify";
+    if (provider !== "monnify") {
       throw new BadRequestException("Unsupported withdrawal provider");
+    }
+    if (dto.currency !== "NGN") {
+      throw new BadRequestException(
+        "Monnify withdrawals are currently supported for NGN only",
+      );
     }
 
     const reference = `WD-${Date.now()}-${uuidv4().slice(0, 8)}`;
     let transferStatus = "pending";
+    let finalStatus: TransactionStatus = "PENDING";
     let providerTransferId: number | undefined;
     let transferRequestSent = false;
 
@@ -565,7 +570,7 @@ export class PaymentService {
       const transferAttempt = await tx.transferAttempt.create({
         data: {
           transactionId: transaction.id,
-          provider: provider.toUpperCase() as "PAYSTACK" | "FLUTTERWAVE",
+          provider: provider.toUpperCase() as "MONNIFY",
           providerReference: transaction.reference,
           providerStatus: "RESERVED",
           status: "PENDING",
@@ -588,40 +593,18 @@ export class PaymentService {
     });
 
     try {
-      if (provider === "paystack") {
-        const recipient = await this.paystack.createTransferRecipient({
-          accountNumber: destination.accountNumber,
-          bankCode: destination.bankCode,
-          name: destination.accountName,
-          currency: dto.currency,
-        });
+      transferRequestSent = true;
+      const transfer = await this.monnifyBanks.initiateTransfer({
+        amount: toProviderDecimalString(amount),
+        bankCode: destination.bankCode,
+        accountNumber: destination.accountNumber,
+        accountName: destination.accountName,
+        currency: "NGN",
+        reference: transactionRecord.reference,
+      });
 
-        transferRequestSent = true;
-        const transfer = await this.paystack.initiateTransfer({
-          amountMinor: toMinorUnit(amount),
-          recipientCode: recipient.recipientCode,
-          currency: dto.currency,
-          reference: transactionRecord.reference,
-        });
-
-        transferStatus = transfer.data.status;
-      } else if (provider === "flutterwave") {
-        transferRequestSent = true;
-        const transfer = await this.flutterwave.initiateTransfer({
-          amount: toProviderDecimalString(amount),
-          bankCode: destination.bankCode,
-          accountNumber: destination.accountNumber,
-          currency: dto.currency,
-          reference: transactionRecord.reference,
-        });
-
-        transferStatus = transfer.status;
-        providerTransferId = transfer.id;
-      } else {
-        throw new BadRequestException("Unsupported withdrawal provider");
-      }
-
-      const finalStatus = this.mapTransferStatus(transferStatus);
+      transferStatus = transfer.status;
+      finalStatus = this.mapTransferStatus(transferStatus);
 
       await this.prisma.transaction.update({
         where: { reference: transactionRecord.reference },
@@ -641,6 +624,8 @@ export class PaymentService {
             accountName: destination.accountName,
             accountNumberMasked: destination.accountNumberMasked,
             providerTransferId,
+            providerTransactionReference:
+              transfer.transactionReference || transfer.reference,
           },
         },
       });
@@ -693,6 +678,7 @@ export class PaymentService {
               bankName: destination.bankName,
               accountName: destination.accountName,
               accountNumberMasked: destination.accountNumberMasked,
+              providerTransactionReference: transactionRecord.reference,
               errorMessage:
                 error instanceof Error
                   ? error.message
@@ -731,6 +717,7 @@ export class PaymentService {
             bankName: destination.bankName,
             accountName: destination.accountName,
             accountNumberMasked: destination.accountNumberMasked,
+            providerTransactionReference: transactionRecord.reference,
             errorMessage:
               error instanceof Error ? error.message : "Unknown provider error",
           },
@@ -765,8 +752,11 @@ export class PaymentService {
 
     return {
       reference: transactionRecord.reference,
-      status: "PENDING",
-      message: "Withdrawal submitted successfully",
+      status: finalStatus,
+      message:
+        finalStatus === "SUCCESS"
+          ? "Withdrawal completed successfully"
+          : "Withdrawal submitted and pending provider confirmation",
     };
   }
 
@@ -818,13 +808,16 @@ export class PaymentService {
   }
 
   async processTransferWebhook(input: {
-    provider: "paystack" | "flutterwave";
+    provider: "paystack" | "flutterwave" | "monnify";
     eventType: string;
     providerReference: string;
     providerStatus: string;
     rawPayload: Record<string, unknown>;
   }) {
-    const provider = input.provider.toUpperCase() as "PAYSTACK" | "FLUTTERWAVE";
+    const provider = input.provider.toUpperCase() as
+      | "PAYSTACK"
+      | "FLUTTERWAVE"
+      | "MONNIFY";
     const payload = this.sanitizeProviderPayload(input.rawPayload);
 
     let providerEvent: { id: string; status: string };
@@ -979,32 +972,50 @@ export class PaymentService {
         throw new NotFoundException("Beneficiary not found");
       }
 
+      const decryptedAccountNumber = decryptSensitiveValue(
+        beneficiary.accountNumberEncrypted,
+        this.getBankAccountEncryptionKey(),
+      );
+      const resolved = await this.monnifyBanks.resolveBankAccount(
+        decryptedAccountNumber,
+        beneficiary.bankCode,
+      );
+      this.assertAccountNameMatches(
+        beneficiary.accountName,
+        resolved.accountName,
+      );
+
       return {
         beneficiaryId: beneficiary.id,
-        provider: beneficiary.provider
-          ? (beneficiary.provider.toLowerCase() as WithdrawalProvider)
-          : undefined,
-        bankCode: beneficiary.bankCode,
-        bankName: beneficiary.bankName,
-        accountName: beneficiary.accountName,
-        accountNumber: decryptSensitiveValue(
-          beneficiary.accountNumberEncrypted,
-          this.getBankAccountEncryptionKey(),
-        ),
+        provider: "monnify",
+        bankCode: resolved.bankCode || beneficiary.bankCode,
+        bankName: resolved.bankName || beneficiary.bankName,
+        accountName: resolved.accountName,
+        accountNumber: decryptedAccountNumber,
         accountNumberMasked: beneficiary.accountNumberMasked,
       };
     }
 
-    if (!dto.bankCode || !dto.accountNumber || !dto.accountName) {
+    if (!dto.bankCode || !dto.accountNumber) {
       throw new BadRequestException(
-        "Provide beneficiaryId or bankCode, accountNumber, and accountName",
+        "Provide beneficiaryId or bankCode and accountNumber",
       );
     }
 
+    const resolved = await this.monnifyBanks.resolveBankAccount(
+      dto.accountNumber,
+      dto.bankCode,
+    );
+
+    if (dto.accountName) {
+      this.assertAccountNameMatches(dto.accountName, resolved.accountName);
+    }
+
     return {
-      provider: dto.provider,
-      bankCode: dto.bankCode,
-      accountName: dto.accountName,
+      provider: "monnify",
+      bankCode: resolved.bankCode || dto.bankCode,
+      bankName: resolved.bankName,
+      accountName: resolved.accountName,
       accountNumber: dto.accountNumber,
       accountNumberMasked: maskAccountNumber(dto.accountNumber),
     };
@@ -1069,11 +1080,44 @@ export class PaymentService {
       return "REVERSED";
     }
 
-    if (["failed", "abandoned", "blocked", "rejected"].includes(normalized)) {
+    if (
+      [
+        "failed",
+        "abandoned",
+        "blocked",
+        "rejected",
+        "expired",
+        "otp_email_dispatch_failed",
+      ].includes(normalized)
+    ) {
       return "FAILED";
     }
 
+    if (
+      [
+        "pending",
+        "awaiting_processing",
+        "in_progress",
+        "processing",
+        "pending_authorization",
+        "transaction_processing_in_progress",
+      ].includes(normalized)
+    ) {
+      return "PENDING";
+    }
+
     return "PENDING";
+  }
+
+  private assertAccountNameMatches(expected: string, actual: string) {
+    const normalize = (value: string) =>
+      value.trim().replace(/\s+/g, " ").toUpperCase();
+
+    if (normalize(expected) !== normalize(actual)) {
+      throw new BadRequestException(
+        "Account name does not match the selected bank account",
+      );
+    }
   }
 
   private getBankAccountEncryptionKey() {
@@ -1139,11 +1183,14 @@ export class PaymentService {
   }
 
   async resolveBank(dto: ResolveBankDto) {
-    return this.paystack.resolveBankAccount(dto.accountNumber, dto.bankCode);
+    return this.monnifyBanks.resolveBankAccount(
+      dto.accountNumber,
+      dto.bankCode,
+    );
   }
 
   async listBanks() {
-    return this.paystack.listBanks();
+    return this.monnifyBanks.listBanks();
   }
 
   verifyPaystackSignature(rawBody: string, signature: string): boolean {

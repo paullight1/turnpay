@@ -14,6 +14,7 @@ import {
 const SUPPORTED_CURRENCIES = ["NGN", "GHS"] as const;
 const PAYMENT_CHANNELS = ["card", "bank", "ussd", "mobile_money"] as const;
 const PAYMENT_PROVIDERS = ["paystack", "flutterwave"] as const;
+const WITHDRAWAL_PROVIDERS = ["monnify"] as const;
 
 export class FundWalletDto {
   @Transform(({ value }) => normalizeDecimalInput(value))
@@ -66,7 +67,7 @@ export class WithdrawDto {
 
   @IsOptional()
   @IsString()
-  @Matches(/^\d{6,20}$/)
+  @Matches(/^\d{10}$/)
   accountNumber?: string;
 
   @IsOptional()
@@ -76,8 +77,8 @@ export class WithdrawDto {
 
   @IsOptional()
   @IsString()
-  @IsIn(PAYMENT_PROVIDERS)
-  provider?: (typeof PAYMENT_PROVIDERS)[number];
+  @IsIn(WITHDRAWAL_PROVIDERS)
+  provider?: (typeof WITHDRAWAL_PROVIDERS)[number];
 
   @IsOptional()
   @IsString()
@@ -87,7 +88,7 @@ export class WithdrawDto {
 
 export class ResolveBankDto {
   @IsString()
-  @Matches(/^\d{6,20}$/)
+  @Matches(/^\d{10}$/)
   accountNumber: string;
 
   @IsString()

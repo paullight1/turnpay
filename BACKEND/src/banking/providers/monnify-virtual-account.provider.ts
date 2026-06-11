@@ -60,6 +60,22 @@ interface MonnifyAccountValidationResponse {
   };
 }
 
+interface MonnifyDisbursementResponse {
+  requestSuccessful: boolean;
+  responseMessage?: string;
+  responseCode?: string;
+  responseBody?: {
+    transactionReference?: string;
+    paymentReference?: string;
+    status?: string;
+    amount?: number;
+    destinationBankCode?: string;
+    destinationAccountNumber?: string;
+    destinationAccountName?: string;
+    narration?: string;
+  };
+}
+
 @Injectable()
 export class MonnifyVirtualAccountProvider {
   private accessToken?: string;
@@ -212,6 +228,61 @@ export class MonnifyVirtualAccountProvider {
       accountName: body.accountName,
       bankName: body.bankName,
       bankCode: body.bankCode,
+    };
+  }
+
+  async initiateTransfer(input: {
+    amount: string;
+    reference: string;
+    bankCode: string;
+    accountNumber: string;
+    accountName: string;
+    narration?: string;
+    currency?: "NGN";
+    async?: boolean;
+  }): Promise<{
+    reference: string;
+    transactionReference?: string;
+    status: string;
+    responseMessage?: string;
+    raw: Record<string, unknown>;
+  }> {
+    const token = await this.getAccessToken();
+    const response = await firstValueFrom(
+      this.httpService.post<MonnifyDisbursementResponse>(
+        `${this.baseUrl}/api/v2/disbursements/single`,
+        {
+          amount: Number(input.amount),
+          reference: input.reference,
+          narration: input.narration || "TrustPay withdrawal",
+          destinationBankCode: input.bankCode,
+          destinationAccountNumber: input.accountNumber,
+          destinationAccountName: input.accountName,
+          currencyCode: input.currency || "NGN",
+          ...(typeof input.async === "boolean" ? { async: input.async } : {}),
+        },
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+        },
+      ),
+    );
+
+    if (!response.data.requestSuccessful) {
+      throw new BadRequestException(
+        response.data.responseMessage || "Could not initiate Monnify transfer",
+      );
+    }
+
+    return {
+      reference:
+        response.data.responseBody?.transactionReference || input.reference,
+      transactionReference: response.data.responseBody?.transactionReference,
+      status: response.data.responseBody?.status || "PENDING",
+      responseMessage: response.data.responseMessage,
+      raw: response.data as unknown as Record<string, unknown>,
     };
   }
 
