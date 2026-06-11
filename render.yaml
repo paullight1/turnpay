@@ -45,7 +45,7 @@ services:
       - key: WITHDRAWALS_ENABLED
         value: "true"
       - key: BANKING_SANDBOX_MODE
-        value: "false"
+        value: "true"
       - key: KYC_PROVIDER
         value: "manual"
       - key: KYC_DOCUMENT_BUCKET
@@ -79,7 +79,7 @@ services:
       - key: MONNIFY_CONTRACT_CODE
         sync: false
       - key: MONNIFY_BASE_URL
-        value: "https://api.monnify.com"
+        value: "https://sandbox.monnify.com"
       - key: MONNIFY_WEBHOOK_SECRET
         sync: false
       - key: MONNIFY_WEBHOOK_URL
@@ -89,7 +89,7 @@ services:
       - key: MONNIFY_RESTRICT_PAYMENT_SOURCE
         value: "false"
       - key: MONNIFY_SANDBOX_TEST_KYC_BYPASS
-        value: "false"
+        value: "true"
       - key: MONNIFY_TEST_BVN
         sync: false
       - key: MONNIFY_TEST_NIN
