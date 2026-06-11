@@ -172,21 +172,30 @@ export class MonnifyVirtualAccountProvider {
       payload.allowedPaymentSources = { bvns: [input.bvn] };
     }
 
-    const response = await this.fetchMonnify<MonnifyReservedAccountResponse>(
-      firstValueFrom(
-        this.httpService.post<MonnifyReservedAccountResponse>(
-          `${this.baseUrl}/api/v2/bank-transfer/reserved-accounts`,
-          payload,
-          {
-            headers: {
-              Authorization: `Bearer ${token}`,
-              "Content-Type": "application/json",
+    let response: AxiosResponse<MonnifyReservedAccountResponse>;
+    try {
+      response = await this.fetchMonnify<MonnifyReservedAccountResponse>(
+        firstValueFrom(
+          this.httpService.post<MonnifyReservedAccountResponse>(
+            `${this.baseUrl}/api/v2/bank-transfer/reserved-accounts`,
+            payload,
+            {
+              headers: {
+                Authorization: `Bearer ${token}`,
+                "Content-Type": "application/json",
+              },
             },
-          },
+          ),
         ),
-      ),
-      "Could not provision Monnify reserved account",
-    );
+        "Could not provision Monnify reserved account",
+      );
+    } catch (error) {
+      if (this.isDuplicateReservedAccountError(error)) {
+        return this.getReservedAccountByReference(accountReference, token);
+      }
+
+      throw error;
+    }
 
     const body = response.data.responseBody;
     const account = body?.accounts?.[0];
@@ -200,6 +209,47 @@ export class MonnifyVirtualAccountProvider {
       bankName: account?.bankName || "Moniepoint Microfinance Bank",
       bankCode: account?.bankCode,
       currency: input.currency,
+      status: body?.status === "ACTIVE" ? "ACTIVE" : "PENDING",
+      raw: response.data as unknown as Record<string, unknown>,
+    };
+  }
+
+  private async getReservedAccountByReference(
+    accountReference: string,
+    token: string,
+  ): Promise<ProviderVirtualAccount> {
+    const response = await this.fetchMonnify<MonnifyReservedAccountResponse>(
+      firstValueFrom(
+        this.httpService.get<MonnifyReservedAccountResponse>(
+          `${this.baseUrl}/api/v2/bank-transfer/reserved-accounts/${encodeURIComponent(accountReference)}`,
+          {
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+          },
+        ),
+      ),
+      "Could not fetch Monnify reserved account",
+    );
+
+    const body = response.data.responseBody;
+    const account = body?.accounts?.[0];
+
+    if (!account?.accountNumber) {
+      throw new BadRequestException(
+        "Could not fetch existing Monnify reserved account details",
+      );
+    }
+
+    return {
+      provider: "monnify",
+      providerAccountId: body?.reservationReference || body?.accountReference,
+      providerCustomerId: body?.customerEmail,
+      accountNumber: account.accountNumber,
+      accountName: account.accountName || "",
+      bankName: account.bankName || "Moniepoint Microfinance Bank",
+      bankCode: account.bankCode,
+      currency: "NGN",
       status: body?.status === "ACTIVE" ? "ACTIVE" : "PENDING",
       raw: response.data as unknown as Record<string, unknown>,
     };
@@ -604,6 +654,17 @@ export class MonnifyVirtualAccountProvider {
     }
 
     return fallbackMessage;
+  }
+
+  private isDuplicateReservedAccountError(error: unknown) {
+    const message = this.describeMonnifyError(error, "");
+    const normalized = message.toLowerCase();
+
+    return (
+      normalized.includes("same reference") ||
+      normalized.includes("existing active reserved account") ||
+      normalized.includes("same customeremail")
+    );
   }
 
   private buildAccountReference(input: ProvisionVirtualAccountInput) {
