@@ -272,7 +272,7 @@ export class MonnifyVirtualAccountProvider {
             destinationBankCode: input.bankCode,
             destinationAccountNumber: input.accountNumber,
             destinationAccountName: input.accountName,
-            currencyCode: input.currency || "NGN",
+            currency: input.currency || "NGN",
             ...(typeof input.async === "boolean" ? { async: input.async } : {}),
           },
           {
