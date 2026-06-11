@@ -34,10 +34,12 @@ export class IdempotencyInterceptor implements NestInterceptor {
     const request = context.switchToHttp().getRequest<AuthenticatedRequest>();
     const method = request.method.toUpperCase();
     const path = request.originalUrl || request.url || "";
+    const normalizedPath = path.split("?")[0];
     const shouldProcess =
       ["POST", "PUT", "PATCH", "DELETE"].includes(method) &&
-      !path.startsWith("/api/webhooks") &&
-      !path.startsWith("/api/auth");
+      !normalizedPath.startsWith("/api/webhooks") &&
+      !normalizedPath.startsWith("/api/auth") &&
+      !this.isIdempotencyExemptRoute(normalizedPath);
 
     if (!shouldProcess) {
       return next.handle();
@@ -52,7 +54,6 @@ export class IdempotencyInterceptor implements NestInterceptor {
     }
 
     const userId = request.user?.userId || "anonymous";
-    const normalizedPath = path.split("?")[0];
     const requestHash = this.hashRequestBody(request.body);
     const scope = `${userId}:${method}:${normalizedPath}`;
     const expiresAt = new Date(Date.now() + IDEMPOTENCY_TTL * 1000);
@@ -185,6 +186,13 @@ export class IdempotencyInterceptor implements NestInterceptor {
         await this.redis.del(lockKey);
       }
     }
+  }
+
+  private isIdempotencyExemptRoute(path: string) {
+    return (
+      path === "/api/payments/banks/resolve" ||
+      path === "/api/banking/banks/resolve"
+    );
   }
 
   private hashRequestBody(body: unknown) {

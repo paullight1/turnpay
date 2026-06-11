@@ -149,6 +149,33 @@ describe("IdempotencyInterceptor", () => {
     await expect(lastValueFrom(response)).resolves.toEqual({ received: true });
   });
 
+  it("skips idempotency checks for bank account resolve lookups", async () => {
+    const interceptor = new IdempotencyInterceptor(
+      redis as any,
+      prisma as any,
+      logger as any,
+    );
+    const response = await interceptor.intercept(
+      {
+        switchToHttp: () => ({
+          getRequest: () => ({
+            method: "POST",
+            originalUrl: "/api/payments/banks/resolve",
+            headers: {},
+            user: { userId: "user-1" },
+            body: { accountNumber: "3081245010", bankCode: "011" },
+          }),
+        }),
+      } as any,
+      { handle: () => of({ accountName: "NWOSU PAUL CHIBUIKE" }) },
+    );
+
+    await expect(lastValueFrom(response)).resolves.toEqual({
+      accountName: "NWOSU PAUL CHIBUIKE",
+    });
+    expect(prisma.idempotencyRecord.create).not.toHaveBeenCalled();
+  });
+
   it("persists structured failed responses for handler errors", async () => {
     const interceptor = new IdempotencyInterceptor(
       redis as any,
