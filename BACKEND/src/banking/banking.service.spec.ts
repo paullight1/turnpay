@@ -60,6 +60,7 @@ describe("BankingService", () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    prisma.virtualAccount.findUnique.mockReset();
     prisma.kycDocument.findMany.mockResolvedValue([]);
     service = new BankingService(
       prisma,
@@ -107,6 +108,43 @@ describe("BankingService", () => {
     expect(
       monnifyVirtualAccounts.provisionVirtualAccount,
     ).not.toHaveBeenCalled();
+  });
+
+  it("returns an existing virtual account without reprovisioning", async () => {
+    prisma.user.findUnique.mockResolvedValue({
+      id: "user-1",
+      email: "user@example.com",
+      phone: "+2348012345678",
+      kycStatus: "VERIFIED",
+      kycTier: "TIER_2",
+      isSuspended: false,
+    });
+    prisma.virtualAccount.findUnique.mockResolvedValue({
+      id: "va-1",
+      provider: "MONNIFY",
+      accountNumber: "3397990020",
+      accountNumberMasked: "******0020",
+      accountName: "Trust Pay",
+      bankName: "Wema bank",
+      bankCode: "035",
+      currency: "NGN",
+      status: "ACTIVE",
+      createdAt: new Date("2026-06-10T00:00:00.000Z"),
+      updatedAt: new Date("2026-06-10T00:00:00.000Z"),
+    });
+
+    const result = await service.provisionVirtualAccount("user-1", {
+      currency: "NGN",
+      provider: "monnify",
+      firstName: "Ada",
+      lastName: "Lovelace",
+      country: "NG",
+    });
+
+    expect(result.accountNumber).toBe("3397990020");
+    expect(result.accountNumberMasked).toBe("******0020");
+    expect(monnifyVirtualAccounts.provisionVirtualAccount).not.toHaveBeenCalled();
+    expect(prisma.virtualAccount.upsert).not.toHaveBeenCalled();
   });
 
   it("uses explicit sandbox test KYC only when the development bypass is enabled", async () => {

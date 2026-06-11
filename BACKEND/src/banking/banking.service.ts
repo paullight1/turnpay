@@ -88,6 +88,43 @@ export class BankingService {
       throw new ForbiddenException("User is suspended");
     }
 
+    const existingAccount = await this.prisma.virtualAccount.findUnique({
+      where: {
+        userId_provider_currency: {
+          userId,
+          provider: normalizedProvider,
+          currency: dto.currency,
+        },
+      },
+      select: {
+        id: true,
+        provider: true,
+        accountNumber: true,
+        accountNumberMasked: true,
+        accountName: true,
+        bankName: true,
+        bankCode: true,
+        currency: true,
+        status: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    });
+
+    if (
+      existingAccount?.accountNumber &&
+      existingAccount.accountName &&
+      existingAccount.bankName &&
+      existingAccount.bankCode
+    ) {
+      this.logger.info(
+        { userId, provider: normalizedProvider, currency: dto.currency },
+        "Reusing existing virtual account",
+      );
+
+      return existingAccount;
+    }
+
     const canUseSandboxKycBypass = this.canUseSandboxKycBypass();
 
     if (user.kycStatus !== "VERIFIED" && !canUseSandboxKycBypass) {
