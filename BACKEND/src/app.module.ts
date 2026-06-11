@@ -95,9 +95,14 @@ const defaultNodeEnv =
           .min(60)
           .max(900)
           .default(300),
-        MONNIFY_EXCHANGE_COLLECTION_ACCOUNT_NUMBER: Joi.string()
-          .allow("")
-          .optional(),
+        MONNIFY_EXCHANGE_COLLECTION_ACCOUNT_NUMBER: Joi.when(
+          "WITHDRAWALS_ENABLED",
+          {
+            is: true,
+            then: Joi.string().min(1).required(),
+            otherwise: Joi.string().allow("").optional(),
+          },
+        ),
         REDIS_URL: Joi.when("NODE_ENV", {
           is: deployedEnvironment,
           then: Joi.string()

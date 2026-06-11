@@ -479,7 +479,6 @@ export class PaymentService {
     const reference = `WD-${Date.now()}-${uuidv4().slice(0, 8)}`;
     let transferStatus = "pending";
     let finalStatus: TransactionStatus = "PENDING";
-    let providerTransferId: number | undefined;
     let transferRequestSent = false;
     let withdrawalRecord:
       | {
@@ -652,7 +651,6 @@ export class PaymentService {
             bankName: destination.bankName,
             accountName: destination.accountName,
             accountNumberMasked: destination.accountNumberMasked,
-            providerTransferId,
             providerTransactionReference:
               transfer.transactionReference || transfer.reference,
           },
