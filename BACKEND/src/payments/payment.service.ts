@@ -594,11 +594,13 @@ export class PaymentService {
 
     try {
       transferRequestSent = true;
+      const sourceAccountNumber = this.getMonnifySourceAccountNumber();
       const transfer = await this.monnifyBanks.initiateTransfer({
         amount: toProviderDecimalString(amount),
         bankCode: destination.bankCode,
         accountNumber: destination.accountNumber,
         accountName: destination.accountName,
+        sourceAccountNumber,
         currency: "NGN",
         reference: transactionRecord.reference,
       });
@@ -1429,5 +1431,20 @@ export class PaymentService {
 
   private getDefaultProvider(currency: string): string {
     return currency === "NGN" ? "paystack" : "flutterwave";
+  }
+
+  private getMonnifySourceAccountNumber() {
+    const sourceAccountNumber = (
+      this.configService.get<string>("MONNIFY_EXCHANGE_COLLECTION_ACCOUNT_NUMBER") ||
+      ""
+    ).trim();
+
+    if (!sourceAccountNumber) {
+      throw new BadRequestException(
+        "Monnify source account number is not configured",
+      );
+    }
+
+    return sourceAccountNumber;
   }
 }

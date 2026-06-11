@@ -246,6 +246,7 @@ export class MonnifyVirtualAccountProvider {
     bankCode: string;
     accountNumber: string;
     accountName: string;
+    sourceAccountNumber?: string;
     narration?: string;
     currency?: "NGN";
     async?: boolean;
@@ -265,6 +266,9 @@ export class MonnifyVirtualAccountProvider {
             amount: Number(input.amount),
             reference: input.reference,
             narration: input.narration || "TrustPay withdrawal",
+            ...(input.sourceAccountNumber
+              ? { sourceAccountNumber: input.sourceAccountNumber }
+              : {}),
             destinationBankCode: input.bankCode,
             destinationAccountNumber: input.accountNumber,
             destinationAccountName: input.accountName,
