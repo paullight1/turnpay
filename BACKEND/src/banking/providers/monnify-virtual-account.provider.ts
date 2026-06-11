@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable } from "@nestjs/common";
 import { HttpService } from "@nestjs/axios";
 import { ConfigService } from "@nestjs/config";
+import { AxiosResponse, isAxiosError } from "axios";
 import { firstValueFrom } from "rxjs";
 import {
   ProviderVirtualAccount,
@@ -137,17 +138,20 @@ export class MonnifyVirtualAccountProvider {
       payload.allowedPaymentSources = { bvns: [input.bvn] };
     }
 
-    const response = await firstValueFrom(
-      this.httpService.post<MonnifyReservedAccountResponse>(
-        `${this.baseUrl}/api/v2/bank-transfer/reserved-accounts`,
-        payload,
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json",
+    const response = await this.fetchMonnify<MonnifyReservedAccountResponse>(
+      firstValueFrom(
+        this.httpService.post<MonnifyReservedAccountResponse>(
+          `${this.baseUrl}/api/v2/bank-transfer/reserved-accounts`,
+          payload,
+          {
+            headers: {
+              Authorization: `Bearer ${token}`,
+              "Content-Type": "application/json",
+            },
           },
-        },
+        ),
       ),
+      "Could not provision Monnify reserved account",
     );
 
     const body = response.data.responseBody;
@@ -171,15 +175,18 @@ export class MonnifyVirtualAccountProvider {
     Array<{ name: string; code: string; slug: string }>
   > {
     const token = await this.getAccessToken();
-    const response = await firstValueFrom(
-      this.httpService.get<MonnifyBanksResponse>(
-        `${this.baseUrl}/api/v1/banks`,
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
+    const response = await this.fetchMonnify<MonnifyBanksResponse>(
+      firstValueFrom(
+        this.httpService.get<MonnifyBanksResponse>(
+          `${this.baseUrl}/api/v1/banks`,
+          {
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
           },
-        },
+        ),
       ),
+      "Could not load Monnify banks",
     );
 
     if (!response.data.requestSuccessful) {
@@ -202,19 +209,22 @@ export class MonnifyVirtualAccountProvider {
     bankCode: string,
   ): Promise<{ accountName: string; bankName?: string; bankCode?: string }> {
     const token = await this.getAccessToken();
-    const response = await firstValueFrom(
-      this.httpService.get<MonnifyAccountValidationResponse>(
-        `${this.baseUrl}/api/v1/disbursements/account/validate`,
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
+    const response = await this.fetchMonnify<MonnifyAccountValidationResponse>(
+      firstValueFrom(
+        this.httpService.get<MonnifyAccountValidationResponse>(
+          `${this.baseUrl}/api/v1/disbursements/account/validate`,
+          {
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+            params: {
+              accountNumber,
+              bankCode,
+            },
           },
-          params: {
-            accountNumber,
-            bankCode,
-          },
-        },
+        ),
       ),
+      "Could not validate bank account",
     );
 
     const body = response.data.responseBody;
@@ -248,26 +258,29 @@ export class MonnifyVirtualAccountProvider {
     raw: Record<string, unknown>;
   }> {
     const token = await this.getAccessToken();
-    const response = await firstValueFrom(
-      this.httpService.post<MonnifyDisbursementResponse>(
-        `${this.baseUrl}/api/v2/disbursements/single`,
-        {
-          amount: Number(input.amount),
-          reference: input.reference,
-          narration: input.narration || "TrustPay withdrawal",
-          destinationBankCode: input.bankCode,
-          destinationAccountNumber: input.accountNumber,
-          destinationAccountName: input.accountName,
-          currencyCode: input.currency || "NGN",
-          ...(typeof input.async === "boolean" ? { async: input.async } : {}),
-        },
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json",
+    const response = await this.fetchMonnify<MonnifyDisbursementResponse>(
+      firstValueFrom(
+        this.httpService.post<MonnifyDisbursementResponse>(
+          `${this.baseUrl}/api/v2/disbursements/single`,
+          {
+            amount: Number(input.amount),
+            reference: input.reference,
+            narration: input.narration || "TrustPay withdrawal",
+            destinationBankCode: input.bankCode,
+            destinationAccountNumber: input.accountNumber,
+            destinationAccountName: input.accountName,
+            currencyCode: input.currency || "NGN",
+            ...(typeof input.async === "boolean" ? { async: input.async } : {}),
           },
-        },
+          {
+            headers: {
+              Authorization: `Bearer ${token}`,
+              "Content-Type": "application/json",
+            },
+          },
+        ),
       ),
+      "Could not initiate Monnify transfer",
     );
 
     if (!response.data.requestSuccessful) {
@@ -298,17 +311,20 @@ export class MonnifyVirtualAccountProvider {
       this.configService.getOrThrow<string>("MONNIFY_SECRET_KEY");
     const basicToken = Buffer.from(`${apiKey}:${secretKey}`).toString("base64");
 
-    const response = await firstValueFrom(
-      this.httpService.post<MonnifyAuthResponse>(
-        `${this.baseUrl}/api/v1/auth/login`,
-        {},
-        {
-          headers: {
-            Authorization: `Basic ${basicToken}`,
-            "Content-Type": "application/json",
+    const response = await this.fetchMonnify<MonnifyAuthResponse>(
+      firstValueFrom(
+        this.httpService.post<MonnifyAuthResponse>(
+          `${this.baseUrl}/api/v1/auth/login`,
+          {},
+          {
+            headers: {
+              Authorization: `Basic ${basicToken}`,
+              "Content-Type": "application/json",
+            },
           },
-        },
+        ),
       ),
+      "Monnify authentication failed",
     );
 
     const accessToken = response.data.responseBody?.accessToken;
@@ -339,6 +355,51 @@ export class MonnifyVirtualAccountProvider {
     return sandboxMode
       ? "https://sandbox.monnify.com"
       : "https://api.monnify.com";
+  }
+
+  private async fetchMonnify<T>(
+    request: Promise<AxiosResponse<T>>,
+    fallbackMessage: string,
+  ): Promise<AxiosResponse<T>> {
+    try {
+      return await request;
+    } catch (error) {
+      throw new BadRequestException(
+        this.describeMonnifyError(error, fallbackMessage),
+      );
+    }
+  }
+
+  private describeMonnifyError(error: unknown, fallbackMessage: string) {
+    if (isAxiosError(error)) {
+      const responseData = error.response?.data as
+        | {
+            responseMessage?: unknown;
+            message?: unknown;
+            error?: unknown;
+          }
+        | undefined;
+
+      const providerMessage = [
+        responseData?.responseMessage,
+        responseData?.message,
+        responseData?.error,
+      ].find((value) => typeof value === "string" && value.trim().length > 0);
+
+      if (typeof providerMessage === "string") {
+        return providerMessage;
+      }
+
+      if (error.message.trim()) {
+        return error.message;
+      }
+    }
+
+    if (error instanceof Error && error.message.trim()) {
+      return error.message;
+    }
+
+    return fallbackMessage;
   }
 
   private buildAccountReference(input: ProvisionVirtualAccountInput) {
