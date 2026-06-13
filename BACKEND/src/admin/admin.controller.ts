@@ -16,6 +16,7 @@ import { Roles } from "../common/decorators/roles.decorator";
 import { CurrentUser } from "../common/decorators/current-user.decorator";
 import {
   AdminActionReasonDto,
+  AdminAuditLogsQueryDto,
   AdminCreateVtuPricingRuleDto,
   AdminProviderEventsQueryDto,
   AdminTransactionStatusDto,
@@ -43,12 +44,29 @@ export class AdminController {
       query.limit,
       query.role,
       query.kycStatus,
+      query.q,
     );
   }
 
   @Get("users/:userId")
   async getUserById(@Param("userId") userId: string) {
     return this.adminService.getUserById(userId);
+  }
+
+  @Post("users/:userId/sessions/:sessionId/revoke")
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  async revokeUserSession(
+    @CurrentUser() user: { userId: string },
+    @Param("userId") userId: string,
+    @Param("sessionId") sessionId: string,
+    @Body() dto: AdminActionReasonDto,
+  ) {
+    return this.adminService.revokeUserSession(
+      userId,
+      sessionId,
+      dto,
+      user.userId,
+    );
   }
 
   @Put("users/:userId")
@@ -81,6 +99,12 @@ export class AdminController {
   @Get("stats")
   async getStats() {
     return this.adminService.getStats();
+  }
+
+  @Get("ops/summary")
+  @Throttle({ default: { limit: 20, ttl: 60000 } })
+  async getOpsSummary(@Query() query: LimitQueryDto) {
+    return this.adminService.getOpsSummary(query.limit);
   }
 
   @Get("transactions")
@@ -215,7 +239,8 @@ export class AdminController {
   }
 
   @Get("audit-logs")
-  async getAuditLogs(@Query() query: LimitQueryDto) {
-    return this.adminService.getAuditLogs(query.limit);
+  @Throttle({ default: { limit: 20, ttl: 60000 } })
+  async getAuditLogs(@Query() query: AdminAuditLogsQueryDto) {
+    return this.adminService.getAuditLogs(query);
   }
 }

@@ -1,4 +1,9 @@
-import { PrismaClient, UserRole, KYCStatus, WalletCurrency } from '@prisma/client';
+import {
+  PrismaClient,
+  UserRole,
+  KYCStatus,
+  WalletCurrency,
+} from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 
 const prisma = new PrismaClient();
@@ -11,13 +16,23 @@ async function main() {
     where: { email: 'admin@trustpay.com' },
   });
 
-  if (existingAdmin) {
-    console.log('⏭️  Admin user already exists, skipping seed.');
-    return;
-  }
-
   const hashedPassword = await bcrypt.hash('AdminPass123!', 12);
   const hashedUserPassword = await bcrypt.hash('UserPass123', 12);
+
+  if (existingAdmin) {
+    await prisma.user.update({
+      where: { email: 'admin@trustpay.com' },
+      data: {
+        phone: '+2348000000000',
+        password: hashedPassword,
+        role: UserRole.ADMIN,
+        kycStatus: KYCStatus.VERIFIED,
+      },
+    });
+
+    console.log('✅ Admin user already existed, updated seed data.');
+    return;
+  }
 
   // Create admin user
   const admin = await prisma.user.create({
@@ -96,8 +111,20 @@ async function main() {
   // Create sample rates
   await prisma.rate.createMany({
     data: [
-      { from: 'GHS', to: 'NGN', rate: '3.1746', markup: '2.5', source: 'system' },
-      { from: 'NGN', to: 'GHS', rate: '0.3150', markup: '2.5', source: 'system' },
+      {
+        from: 'GHS',
+        to: 'NGN',
+        rate: '3.1746',
+        markup: '2.5',
+        source: 'system',
+      },
+      {
+        from: 'NGN',
+        to: 'GHS',
+        rate: '0.3150',
+        markup: '2.5',
+        source: 'system',
+      },
     ],
     skipDuplicates: true,
   });
@@ -112,9 +139,24 @@ async function main() {
       { name: 'Glo', type: 'airtime', provider: 'glo', isActive: true },
       { name: 'DStv', type: 'cable', provider: 'dstv', isActive: true },
       { name: 'GOtv', type: 'cable', provider: 'gotv', isActive: true },
-      { name: 'StarTimes', type: 'cable', provider: 'startimes', isActive: true },
-      { name: 'Ikeja Electric', type: 'electricity', provider: 'ikedc', isActive: true },
-      { name: 'Eko Electric', type: 'electricity', provider: 'ekedc', isActive: true },
+      {
+        name: 'StarTimes',
+        type: 'cable',
+        provider: 'startimes',
+        isActive: true,
+      },
+      {
+        name: 'Ikeja Electric',
+        type: 'electricity',
+        provider: 'ikedc',
+        isActive: true,
+      },
+      {
+        name: 'Eko Electric',
+        type: 'electricity',
+        provider: 'ekedc',
+        isActive: true,
+      },
     ],
     skipDuplicates: true,
   });

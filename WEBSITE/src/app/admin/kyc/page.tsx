@@ -86,9 +86,9 @@ function verificationLine(doc: AdminKycDocument) {
 }
 
 export default function AdminKycPage() {
-  const { user, isLoading: authLoading } = useAuth();
+  const { user, profile, isLoading: authLoading } = useAuth();
   const router = useRouter();
-  const isAdmin = user?.role === "ADMIN";
+  const isAdmin = user?.role === "ADMIN" || profile?.role === "ADMIN";
   const [page, setPage] = useState(1);
   const [selectedDoc, setSelectedDoc] = useState<AdminKycDocument | null>(null);
   const [reviewDocumentUrl, setReviewDocumentUrl] = useState<string | null>(null);
@@ -98,10 +98,16 @@ export default function AdminKycPage() {
   const queryClient = useQueryClient();
 
   useEffect(() => {
-    if (!authLoading && !isAdmin) {
+    if (
+      !authLoading &&
+      user &&
+      profile &&
+      user.role !== "ADMIN" &&
+      profile.role !== "ADMIN"
+    ) {
       router.push("/dashboard");
     }
-  }, [authLoading, isAdmin, router]);
+  }, [authLoading, profile, user, router]);
 
   const { data: kycData, isLoading } = useQuery({
     queryKey: ["admin-kyc", page],
@@ -144,7 +150,7 @@ export default function AdminKycPage() {
     },
   });
 
-  if (authLoading || !user || isLoading) {
+  if (authLoading || !user || !profile || isLoading) {
     return <div className="p-6">Loading...</div>;
   }
 

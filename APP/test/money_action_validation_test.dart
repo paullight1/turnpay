@@ -34,7 +34,7 @@ void main() {
         bankCode: '',
       );
 
-      expect(error, 'Enter a valid bank code and account number.');
+      expect(error, 'Choose a bank and enter a valid 10-digit account number.');
     });
   });
 }

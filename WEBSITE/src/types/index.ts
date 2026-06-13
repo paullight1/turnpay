@@ -64,6 +64,25 @@ export interface Transaction {
   updatedAt: string;
 }
 
+export interface AdminAuditLog {
+  id: string;
+  adminId: string | null;
+  action: string;
+  targetType: string;
+  targetId: string;
+  reference?: string | null;
+  reason?: string | null;
+  before?: Record<string, unknown> | null;
+  after?: Record<string, unknown> | null;
+  metadata?: Record<string, unknown> | null;
+  createdAt: string;
+  admin?: {
+    id: string;
+    email: string;
+    fullName?: string | null;
+  } | null;
+}
+
 export interface ExchangeQuote {
   id: string;
   from: string;

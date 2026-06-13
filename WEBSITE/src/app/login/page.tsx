@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import { ArrowRight, Eye, EyeOff, Loader2, LockKeyhole, Mail } from "lucide-react";
 import { toast } from "sonner";
 
@@ -13,21 +13,100 @@ import { Label } from "@/components/ui/label";
 import { getErrorMessage } from "@/lib/errors";
 import { useAuth } from "@/lib/auth-provider";
 
+type AuthDebugState = {
+  stage: string;
+  error?: string;
+  email?: string;
+};
+
 export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const [debugState, setDebugState] = useState<AuthDebugState | null>(null);
+  const [authProviderDebug, setAuthProviderDebug] =
+    useState<AuthDebugState | null>(null);
   const { signIn } = useAuth();
+
+  const setLoginDebug = (stage: string, extra?: Record<string, unknown>) => {
+    const nextState = {
+      stage,
+      ...extra,
+    };
+
+    setDebugState(nextState);
+
+    if (process.env.NODE_ENV === "production") {
+      return;
+    }
+
+    (window as Window & { __TRUSTPAY_LOGIN_DEBUG__?: Record<string, unknown> }).__TRUSTPAY_LOGIN_DEBUG__ =
+      nextState;
+  };
+
+  useEffect(() => {
+    if (process.env.NODE_ENV === "production") {
+      return undefined;
+    }
+
+    const syncAuthDebug = () => {
+      const value = (window as Window & {
+        __TRUSTPAY_AUTH_DEBUG__?: AuthDebugState;
+      }).__TRUSTPAY_AUTH_DEBUG__;
+      setAuthProviderDebug(value ?? null);
+    };
+
+    syncAuthDebug();
+    const interval = window.setInterval(syncAuthDebug, 250);
+
+    const target = window as Window & {
+      __TRUSTPAY_FORCE_LOGIN__?: (
+        nextEmail: string,
+        nextPassword: string,
+      ) => Promise<void>;
+    };
+
+    target.__TRUSTPAY_FORCE_LOGIN__ = async (nextEmail, nextPassword) => {
+      setEmail(nextEmail);
+      setPassword(nextPassword);
+      setIsLoading(true);
+      setLoginDebug("global-force-login-start", { email: nextEmail });
+
+      try {
+        await signIn(nextEmail, nextPassword);
+        setLoginDebug("global-force-login-success", { email: nextEmail });
+      } catch (error: unknown) {
+        setLoginDebug("global-force-login-error", {
+          email: nextEmail,
+          error: getErrorMessage(error, "Login failed"),
+        });
+        throw error;
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    return () => {
+      window.clearInterval(interval);
+      delete target.__TRUSTPAY_FORCE_LOGIN__;
+    };
+  }, [signIn]);
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setIsLoading(true);
+    setLoginDebug("submit-start", { email });
 
     try {
       await signIn(email.trim(), password);
+      setLoginDebug("submit-success", { email });
       toast.success("Welcome back!");
     } catch (error: unknown) {
+      setLoginDebug("submit-error", {
+        email,
+        error: getErrorMessage(error, "Login failed"),
+      });
       toast.error(getErrorMessage(error, "Login failed"));
     } finally {
       setIsLoading(false);
@@ -128,6 +207,18 @@ export default function LoginPage() {
                 Create account
               </Link>
             </p>
+            {process.env.NODE_ENV !== "production" ? (
+              <div className="mt-6 space-y-2 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-left text-[11px] text-white/45">
+                Debug: {debugState?.stage ?? "idle"}
+                {debugState?.error ? ` | ${String(debugState.error)}` : ""}
+                <p>
+                  Auth: {authProviderDebug?.stage ?? "idle"}
+                  {authProviderDebug?.error
+                    ? ` | ${String(authProviderDebug.error)}`
+                    : ""}
+                </p>
+              </div>
+            ) : null}
           </CardContent>
         </Card>
       </div>

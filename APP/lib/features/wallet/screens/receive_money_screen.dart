@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
 import '../../../core/theme/app_theme.dart';
@@ -146,62 +145,65 @@ class _ReceiveMoneyScreenState extends State<ReceiveMoneyScreen> {
                               onRequest: _requestVirtualAccount,
                             ),
 
-                          SizedBox(height: AppSpacing.md),
+                          if (accounts.isEmpty) ...[
+                            SizedBox(height: AppSpacing.md),
 
-                          // Deposit instructions
-                          Container(
-                            padding: const EdgeInsets.all(AppSpacing.md),
-                            decoration: BoxDecoration(
-                              color: AppColors.surfaceVariant,
-                              borderRadius: BorderRadius.circular(AppRadius.sm),
-                              border: Border.all(
-                                color: AppColors.border,
+                            // Deposit instructions
+                            Container(
+                              padding: const EdgeInsets.all(AppSpacing.md),
+                              decoration: BoxDecoration(
+                                color: AppColors.surfaceVariant,
+                                borderRadius:
+                                    BorderRadius.circular(AppRadius.sm),
+                                border: Border.all(
+                                  color: AppColors.border,
+                                ),
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    children: [
+                                      Icon(
+                                        Icons.info_outline_rounded,
+                                        color: AppColors.primary,
+                                        size: 20,
+                                      ),
+                                      SizedBox(width: AppSpacing.sm),
+                                      Text(
+                                        'How to receive money',
+                                        style: AppTextStyles.labelM,
+                                      ),
+                                    ],
+                                  ),
+                                  SizedBox(height: AppSpacing.md),
+                                  _InstructionStep(
+                                    number: '1',
+                                    text:
+                                        'Share your virtual account number above with the sender',
+                                  ),
+                                  SizedBox(height: AppSpacing.sm),
+                                  _InstructionStep(
+                                    number: '2',
+                                    text:
+                                        'The sender transfers money to this account number from any Nigerian bank or mobile app',
+                                  ),
+                                  SizedBox(height: AppSpacing.sm),
+                                  _InstructionStep(
+                                    number: '3',
+                                    text:
+                                        'Once the transfer is confirmed, your TrustPay wallet is credited automatically',
+                                  ),
+                                  SizedBox(height: AppSpacing.sm),
+                                  _InstructionStep(
+                                    number: '4',
+                                    text:
+                                        'Bank transfers usually arrive within 5–30 minutes during business hours',
+                                  ),
+                                ],
                               ),
                             ),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Row(
-                                  children: [
-                                    Icon(
-                                      Icons.info_outline_rounded,
-                                      color: AppColors.primary,
-                                      size: 20,
-                                    ),
-                                    SizedBox(width: AppSpacing.sm),
-                                    Text(
-                                      'How to receive money',
-                                      style: AppTextStyles.labelM,
-                                    ),
-                                  ],
-                                ),
-                                SizedBox(height: AppSpacing.md),
-                                _InstructionStep(
-                                  number: '1',
-                                  text:
-                                      'Share your virtual account number above with the sender',
-                                ),
-                                SizedBox(height: AppSpacing.sm),
-                                _InstructionStep(
-                                  number: '2',
-                                  text:
-                                      'The sender transfers money to this account number from any Nigerian bank or mobile app',
-                                ),
-                                SizedBox(height: AppSpacing.sm),
-                                _InstructionStep(
-                                  number: '3',
-                                  text:
-                                      'Once the transfer is confirmed, your TrustPay wallet is credited automatically',
-                                ),
-                                SizedBox(height: AppSpacing.sm),
-                                _InstructionStep(
-                                  number: '4',
-                                  text:
-                                      'Bank transfers usually arrive within 5–30 minutes during business hours',
-                                ),
-                              ],
-                            ),
-                          ),
+                          ],
 
                           SizedBox(height: AppSpacing.xl),
 

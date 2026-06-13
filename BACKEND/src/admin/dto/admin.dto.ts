@@ -10,6 +10,8 @@ import {
   MinLength,
   Min,
   Matches,
+  IsDateString,
+  IsUUID,
 } from "class-validator";
 import { Transform } from "class-transformer";
 import { UserRole, KYCStatus } from "@prisma/client";
@@ -21,6 +23,18 @@ import {
 } from "../../common/dto/query.dto";
 
 export class AdminUsersQueryDto extends PaginationQueryDto {
+  @IsOptional()
+  @Transform(({ value }: { value: unknown }) =>
+    typeof value === "string"
+      ? value.trim().length > 0
+        ? value.trim()
+        : undefined
+      : value,
+  )
+  @IsString()
+  @MaxLength(120)
+  q?: string;
+
   @IsIn(["USER", "ADMIN"])
   @IsOptional()
   role?: UserRole;
@@ -106,6 +120,75 @@ export class AdminVtuReconciliationQueryDto extends LimitQueryDto {
   @Min(1)
   @Max(1440)
   olderThanMinutes = 10;
+}
+
+export class AdminAuditLogsQueryDto extends LimitQueryDto {
+  @IsOptional()
+  @Transform(({ value }: { value: unknown }) =>
+    typeof value === "string"
+      ? value.trim().length > 0
+        ? value.trim()
+        : undefined
+      : value,
+  )
+  @IsString()
+  @MaxLength(120)
+  q?: string;
+
+  @IsOptional()
+  @Transform(({ value }: { value: unknown }) =>
+    typeof value === "string"
+      ? value.trim().length > 0
+        ? value.trim()
+        : undefined
+      : value,
+  )
+  @IsString()
+  @MaxLength(80)
+  action?: string;
+
+  @IsOptional()
+  @Transform(({ value }: { value: unknown }) =>
+    typeof value === "string"
+      ? value.trim().length > 0
+        ? value.trim()
+        : undefined
+      : value,
+  )
+  @IsString()
+  @MaxLength(80)
+  targetType?: string;
+
+  @IsOptional()
+  @Transform(({ value }: { value: unknown }) =>
+    typeof value === "string"
+      ? value.trim().length > 0
+        ? value.trim()
+        : undefined
+      : value,
+  )
+  @IsString()
+  @MaxLength(120)
+  targetId?: string;
+
+  @IsOptional()
+  @Transform(({ value }: { value: unknown }) =>
+    typeof value === "string"
+      ? value.trim().length > 0
+        ? value.trim()
+        : undefined
+      : value,
+  )
+  @IsUUID()
+  adminId?: string;
+
+  @IsOptional()
+  @IsDateString()
+  from?: string;
+
+  @IsOptional()
+  @IsDateString()
+  to?: string;
 }
 
 const ADMIN_VTU_SERVICE_TYPES = [

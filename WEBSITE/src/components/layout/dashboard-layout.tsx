@@ -29,6 +29,7 @@ import {
   Landmark,
   LifeBuoy,
   Menu,
+  ScrollText,
   ShieldCheck,
   LogOut,
   Smartphone,
@@ -59,7 +60,8 @@ const navItems: NavItem[] = [
 ];
 
 const adminItems: NavItem[] = [
-  { label: "Admin", href: "/admin", icon: ShieldCheck },
+  { label: "Ops", href: "/admin", icon: ShieldCheck },
+  { label: "Audit Trail", href: "/admin/audit", icon: ScrollText },
   { label: "VTU Ops", href: "/admin/vtu", icon: Smartphone },
   { label: "Support Queue", href: "/admin/support", icon: LifeBuoy },
   { label: "KYC Review", href: "/admin/kyc", icon: FileCheck2 },

@@ -176,9 +176,9 @@ class _FeatureGrid extends StatelessWidget {
       itemCount: items.length,
       gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
         crossAxisCount: 3,
-        crossAxisSpacing: AppSpacing.sm,
-        mainAxisSpacing: AppSpacing.sm,
-        childAspectRatio: 0.82,
+        crossAxisSpacing: AppSpacing.xs,
+        mainAxisSpacing: AppSpacing.xs,
+        childAspectRatio: 0.94,
       ),
       itemBuilder: (context, index) {
         final item = items[index];
@@ -208,26 +208,28 @@ class _FeatureCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(AppRadius.md),
         onTap: item.route == null ? null : () => context.push(item.route!),
         child: Padding(
-          padding: const EdgeInsets.all(AppSpacing.sm),
+          padding: const EdgeInsets.all(AppSpacing.xs),
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               Container(
-                width: 46,
-                height: 46,
+                width: 40,
+                height: 40,
                 decoration: BoxDecoration(
                   color: color.withValues(alpha: 0.16),
                   borderRadius: BorderRadius.circular(AppRadius.md),
                   border: Border.all(color: color.withValues(alpha: 0.22)),
                 ),
-                child: Icon(item.icon, color: color, size: 24),
+                child: Icon(item.icon, color: color, size: 20),
               ),
-              SizedBox(height: AppSpacing.sm),
+              const SizedBox(height: 4),
               Text(
                 item.title,
                 style: AppTextStyles.labelM.copyWith(
                   color: AppColors.textPrimary,
+                  fontSize: 12,
                   fontWeight: FontWeight.w900,
+                  height: 1.0,
                 ),
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
@@ -268,7 +270,7 @@ class _ComingSoonCard extends StatelessWidget {
     final accent = _featureColor(index);
 
     return Container(
-      margin: const EdgeInsets.only(bottom: AppSpacing.sm),
+      margin: const EdgeInsets.only(bottom: AppSpacing.xs),
       decoration: BoxDecoration(
         color: AppColors.surfaceVariant,
         borderRadius: BorderRadius.circular(AppRadius.md),
@@ -310,14 +312,14 @@ class _ComingSoonCard extends StatelessWidget {
             ),
           ),
           Positioned(
-            top: AppSpacing.sm,
-            right: AppSpacing.sm,
+            top: AppSpacing.xs,
+            right: AppSpacing.xs,
             child: _LockBadge(accent: accent),
           ),
           Padding(
-            padding: const EdgeInsets.all(AppSpacing.md),
+            padding: const EdgeInsets.all(AppSpacing.sm),
             child: SizedBox(
-              height: 118,
+              height: 96,
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisAlignment: MainAxisAlignment.end,
@@ -325,17 +327,20 @@ class _ComingSoonCard extends StatelessWidget {
                   Text(
                     item.title,
                     style: AppTextStyles.labelL.copyWith(
-                      fontSize: 18,
+                      fontSize: 15.5,
                       fontWeight: FontWeight.w800,
+                      height: 1.02,
                     ),
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                   ),
-                  const SizedBox(height: 6),
+                  const SizedBox(height: 4),
                   Text(
                     item.subtitle,
                     style: AppTextStyles.bodyM.copyWith(
                       color: AppColors.textSecondary,
+                      fontSize: 12.5,
+                      height: 1.15,
                     ),
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
@@ -377,8 +382,8 @@ class _LockBadge extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.symmetric(
-        horizontal: AppSpacing.sm,
-        vertical: AppSpacing.xs,
+        horizontal: AppSpacing.xs,
+        vertical: 4,
       ),
       decoration: BoxDecoration(
         color: AppColors.surface.withValues(alpha: 0.78),
@@ -387,7 +392,7 @@ class _LockBadge extends StatelessWidget {
       ),
       child: Icon(
         Icons.lock_rounded,
-        size: 16,
+        size: 14,
         color: accent,
       ),
     );

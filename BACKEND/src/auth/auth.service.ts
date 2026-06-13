@@ -1,13 +1,16 @@
 import {
   Injectable,
   UnauthorizedException,
+  ForbiddenException,
   ConflictException,
   BadRequestException,
   HttpException,
   HttpStatus,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import * as bcrypt from 'bcrypt';
 import { createHash, randomUUID } from 'crypto';
+import * as jwt from 'jsonwebtoken';
 import { SupabaseService } from '../supabase/supabase.service';
 import { UsersService } from '../users/users.service';
 import { WalletsService } from '../wallets/wallets.service';
@@ -38,6 +41,10 @@ const REGISTRATION_RATE_LIMIT_MESSAGE =
 const MAX_FAILED_LOGIN_ATTEMPTS = 5;
 const LOCKOUT_MS = 15 * 60 * 1000;
 const REFRESH_TOKEN_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const LOCAL_AUTH_ACCESS_TOKEN_TTL_SECONDS = 15 * 60;
+const LOCAL_REFRESH_TOKEN_PREFIX = 'local_';
+
+type AuthMode = 'supabase' | 'local';
 
 @Injectable()
 export class AuthService {
@@ -118,6 +125,43 @@ export class AuthService {
       registerDto.referralCode,
     );
     await this.transactionPin.setPin(user.id, registerDto.transactionPin);
+
+    if (!data.session && this.isLocalAuthFallbackEnabled()) {
+      const hashedPassword = await bcrypt.hash(registerDto.password, 12);
+      await this.prisma.user.update({
+        where: { id: user.id },
+        data: { password: hashedPassword },
+      });
+
+      const localSession = this.createLocalSession(user);
+      await this.trackRefreshToken(user.id, localSession.refreshToken, {
+        ...context,
+        deviceName: registerDto.deviceName,
+      });
+
+      await this.prisma.user.update({
+        where: { id: user.id },
+        data: { failedAttempts: 0, lockedUntil: null },
+      });
+
+      await this.otpService.sendOtp(phone);
+
+      this.logger.info(
+        {
+          userId: user.id,
+          event: 'user_registered_local_auth',
+          transactionPinSet: true,
+        },
+        'User registered via local auth fallback',
+      );
+
+      return {
+        user,
+        session: localSession.session,
+        authMode: 'local' as AuthMode,
+      };
+    }
+
     await this.trackRefreshToken(user.id, data.session?.refresh_token, {
       ...context,
       deviceName: registerDto.deviceName,
@@ -133,6 +177,7 @@ export class AuthService {
     return {
       user,
       session: data.session,
+      authMode: 'supabase' as AuthMode,
     };
   }
 
@@ -153,6 +198,35 @@ export class AuthService {
       throw new UnauthorizedException(LOGIN_FAILURE_MESSAGE);
     }
 
+    if (
+      this.isLocalAuthFallbackEnabled() &&
+      localUser &&
+      localUser.password &&
+      (await bcrypt.compare(loginDto.password, localUser.password))
+    ) {
+      if (localUser.isSuspended) {
+        throw new UnauthorizedException(LOGIN_FAILURE_MESSAGE);
+      }
+
+      const localSession = this.createLocalSession(localUser);
+      await this.resetFailedLoginState(localUser.id);
+      await this.trackRefreshToken(localUser.id, localSession.refreshToken, {
+        ...context,
+        deviceName: loginDto.deviceName,
+      });
+
+      this.logger.info(
+        { userId: localUser.id, event: 'user_login_local_fallback' },
+        'User logged in via local auth fallback',
+      );
+
+      return {
+        user: await this.usersService.findOne(localUser.id),
+        session: localSession.session,
+        authMode: 'local' as AuthMode,
+      };
+    }
+
     const { data, error } =
       await this.supabaseService.authClient.auth.signInWithPassword({
         email,
@@ -167,6 +241,35 @@ export class AuthService {
     }
 
     if (!data.user || !data.session) {
+      if (
+        this.isLocalAuthFallbackEnabled() &&
+        localUser &&
+        localUser.password &&
+        (await bcrypt.compare(loginDto.password, localUser.password))
+      ) {
+        if (localUser.isSuspended) {
+          throw new UnauthorizedException(LOGIN_FAILURE_MESSAGE);
+        }
+
+        const localSession = this.createLocalSession(localUser);
+        await this.resetFailedLoginState(localUser.id);
+        await this.trackRefreshToken(localUser.id, localSession.refreshToken, {
+          ...context,
+          deviceName: loginDto.deviceName,
+        });
+
+        this.logger.info(
+          { userId: localUser.id, event: 'user_login_local_fallback' },
+          'User logged in via local auth fallback',
+        );
+
+        return {
+          user: await this.usersService.findOne(localUser.id),
+          session: localSession.session,
+          authMode: 'local' as AuthMode,
+        };
+      }
+
       if (localUser) {
         await this.recordFailedLogin(localUser.id, currentFailedAttempts);
       }
@@ -188,6 +291,7 @@ export class AuthService {
     return {
       user: await this.usersService.findOne(syncedUser.id),
       session: data.session,
+      authMode: 'supabase' as AuthMode,
     };
   }
 
@@ -206,6 +310,13 @@ export class AuthService {
   }
 
   async refreshToken(refreshToken: string, context: SessionContext = {}) {
+    if (
+      this.isLocalRefreshToken(refreshToken) &&
+      this.isLocalAuthFallbackEnabled()
+    ) {
+      return this.refreshLocalToken(refreshToken, context);
+    }
+
     const existingToken = await this.prisma.refreshToken.findUnique({
       where: { tokenHash: this.hashToken(refreshToken) },
       include: { user: true },
@@ -536,6 +647,7 @@ export class AuthService {
     userId: string,
     refreshToken: string | undefined,
     context: SessionContext,
+    expiresAt: Date = this.refreshTokenExpiry(),
   ) {
     if (!refreshToken) {
       return;
@@ -549,7 +661,7 @@ export class AuthService {
         deviceName: this.resolveDeviceName(context),
         userAgent: context.userAgent,
         ipAddress: context.ipAddress,
-        expiresAt: this.refreshTokenExpiry(),
+        expiresAt,
       },
     });
   }
@@ -628,6 +740,125 @@ export class AuthService {
 
   private refreshTokenExpiry() {
     return new Date(Date.now() + REFRESH_TOKEN_TTL_MS);
+  }
+
+  private isLocalRefreshToken(refreshToken: string) {
+    return refreshToken.startsWith(LOCAL_REFRESH_TOKEN_PREFIX);
+  }
+
+  private isLocalAuthFallbackEnabled() {
+    return (
+      process.env.NODE_ENV !== 'production' && process.env.NODE_ENV !== 'test'
+    );
+  }
+
+  private async refreshLocalToken(
+    refreshToken: string,
+    context: SessionContext = {},
+  ) {
+    const existingToken = await this.prisma.refreshToken.findUnique({
+      where: { tokenHash: this.hashToken(refreshToken) },
+      include: { user: true },
+    });
+
+    if (
+      !existingToken ||
+      existingToken.revokedAt ||
+      existingToken.expiresAt <= new Date()
+    ) {
+      throw new UnauthorizedException(REFRESH_FAILURE_MESSAGE);
+    }
+
+    if (existingToken.user.isSuspended) {
+      throw new ForbiddenException('Account suspended');
+    }
+
+    const localSession = this.createLocalSession(existingToken.user);
+    await this.rotateRefreshToken(existingToken, localSession.refreshToken, {
+      ipAddress: context.ipAddress,
+      userAgent: context.userAgent || existingToken.userAgent || undefined,
+      deviceName: context.deviceName || existingToken.deviceName || undefined,
+    });
+
+    this.logger.info(
+      { userId: existingToken.userId, event: 'user_refresh_local_auth' },
+      'User session refreshed via local auth fallback',
+    );
+
+    return { session: localSession.session };
+  }
+
+  private createLocalSession(user: {
+    id: string;
+    email: string;
+    role: string;
+    fullName: string | null;
+    phone: string;
+    createdAt: Date;
+    updatedAt?: Date;
+  }) {
+    const expiresAt =
+      Math.floor(Date.now() / 1000) + LOCAL_AUTH_ACCESS_TOKEN_TTL_SECONDS;
+    const accessToken = jwt.sign(
+      {
+        sub: user.id,
+        role: user.role,
+      },
+      this.configService.getOrThrow<string>('JWT_SECRET'),
+      { expiresIn: LOCAL_AUTH_ACCESS_TOKEN_TTL_SECONDS },
+    );
+    const refreshToken = `${LOCAL_REFRESH_TOKEN_PREFIX}${randomUUID()}`;
+
+    return {
+      session: {
+        access_token: accessToken,
+        refresh_token: refreshToken,
+        expires_at: expiresAt,
+        expires_in: LOCAL_AUTH_ACCESS_TOKEN_TTL_SECONDS,
+        token_type: 'bearer',
+        user: this.buildLocalSessionUser(user),
+        authMode: 'local' as AuthMode,
+      },
+      refreshToken,
+    };
+  }
+
+  private buildLocalSessionUser(user: {
+    id: string;
+    email: string;
+    role: string;
+    fullName: string | null;
+    phone: string;
+    createdAt: Date;
+    updatedAt?: Date;
+  }) {
+    const now = new Date().toISOString();
+    const updatedAt = (user.updatedAt ?? user.createdAt).toISOString();
+
+    return {
+      id: user.id,
+      aud: 'authenticated',
+      role: user.role,
+      email: user.email,
+      phone: user.phone,
+      app_metadata: {
+        provider: 'email',
+        providers: ['email'],
+        role: user.role,
+      },
+      user_metadata: {
+        email: user.email,
+        phone: user.phone,
+        full_name: user.fullName ?? '',
+        name: user.fullName ?? '',
+      },
+      identities: [],
+      confirmed_at: now,
+      email_confirmed_at: now,
+      last_sign_in_at: now,
+      created_at: user.createdAt.toISOString(),
+      updated_at: updatedAt,
+    };
   }
 
   private resolveDeviceName(context: SessionContext) {

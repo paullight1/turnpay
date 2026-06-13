@@ -1,11 +1,17 @@
 import axios from "axios";
-import { createClient } from "@/lib/supabase";
+import { createClient, isSupabaseConfigured } from "@/lib/supabase";
 import type { Session } from "@supabase/supabase-js";
 import {
   createMoneyAttemptIdempotencyKey,
   withIdempotencyKey,
 } from "@/lib/idempotency";
+import {
+  clearSupabaseSession as clearPersistedAuthSession,
+  readPersistedSupabaseSession,
+  persistSupabaseSession as persistPersistedAuthSession,
+} from "@/lib/supabase-session";
 import type {
+  AdminAuditLog,
   AdminVtuProviderHealthResponse,
   AdminVtuPricingRule,
   AdminVtuPricingRulePayload,
@@ -16,6 +22,10 @@ import type {
 } from "@/types";
 
 const API_URL = resolveApiUrl();
+type AppSession = Session & {
+  authMode?: "supabase" | "local";
+};
+const AUTH_SESSION_UPDATED_EVENT = "trustpay-auth-session-updated";
 
 function resolveApiUrl() {
   const configured = process.env.NEXT_PUBLIC_API_URL;
@@ -49,6 +59,40 @@ function isLocalHttpUrl(value: string) {
     );
   } catch {
     return false;
+  }
+}
+
+function emitAuthSessionUpdated(session: AppSession | null) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  window.dispatchEvent(
+    new CustomEvent<AppSession | null>(AUTH_SESSION_UPDATED_EVENT, {
+      detail: session,
+    }),
+  );
+}
+
+async function getCurrentAuthSession() {
+  const persistedSession = readPersistedSupabaseSession();
+  if (persistedSession?.access_token) {
+    return persistedSession;
+  }
+
+  if (!isSupabaseConfigured) {
+    return null;
+  }
+
+  try {
+    const supabase = createClient();
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+
+    return (session as AppSession | null) ?? persistedSession ?? null;
+  } catch {
+    return persistedSession ?? null;
   }
 }
 
@@ -87,14 +131,14 @@ const processQueue = (error: unknown | null, token: string | null = null) => {
 };
 
 type RefreshSessionResponse = {
-  session: Session;
+  session: AppSession;
 };
 
 const refreshSessionWithBackend = async (
   refreshToken: string,
   deviceName?: string,
 ) => {
-  const supabase = createClient();
+  const supabase = isSupabaseConfigured ? createClient() : null;
   const { data } = await axios.post<RefreshSessionResponse>(
     `${API_URL || ""}/api/auth/refresh`,
     { refreshToken, deviceName },
@@ -111,16 +155,24 @@ const refreshSessionWithBackend = async (
     throw new Error("Invalid refresh response");
   }
 
+  const returnedSession = data.session as AppSession;
+
+  if (returnedSession.authMode === "local" || !supabase) {
+    await persistPersistedAuthSession(returnedSession);
+    emitAuthSessionUpdated(returnedSession);
+    return returnedSession;
+  }
+
   const { data: sessionData, error } = await supabase.auth.setSession({
-    access_token: data.session.access_token,
-    refresh_token: data.session.refresh_token,
+    access_token: returnedSession.access_token,
+    refresh_token: returnedSession.refresh_token,
   });
 
   if (error) {
     throw error;
   }
 
-  return sessionData.session ?? data.session;
+  return (sessionData.session ?? returnedSession) as AppSession;
 };
 
 const shouldRefreshForRequest = (url?: string) =>
@@ -135,10 +187,7 @@ export const apiClient = axios.create({
 });
 
 apiClient.interceptors.request.use(async (config) => {
-  const supabase = createClient();
-  const {
-    data: { session },
-  } = await supabase.auth.getSession();
+  const session = await getCurrentAuthSession();
 
   if (session?.access_token) {
     config.headers.Authorization = `Bearer ${session.access_token}`;
@@ -185,15 +234,14 @@ apiClient.interceptors.response.use(
       originalRequest._retry = true;
       isRefreshing = true;
 
-      const supabase = createClient();
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
+      const session = await getCurrentAuthSession();
 
       if (!session?.refresh_token) {
         const refreshError = new Error("Missing refresh token");
         isRefreshing = false;
         processQueue(refreshError, null);
+        await clearPersistedAuthSession();
+        emitAuthSessionUpdated(null);
         if (typeof window !== "undefined") {
           window.location.href = "/login";
         }
@@ -213,6 +261,8 @@ apiClient.interceptors.response.use(
         return apiClient(originalRequest);
       } catch (refreshError) {
         processQueue(refreshError, null);
+        await clearPersistedAuthSession();
+        emitAuthSessionUpdated(null);
         if (typeof window !== "undefined") {
           window.location.href = "/login";
         }
@@ -227,7 +277,18 @@ apiClient.interceptors.response.use(
 );
 
 export const authApi = {
-  bootstrap: () => apiClient.post("/api/auth/bootstrap"),
+  bootstrap: (accessToken?: string) =>
+    apiClient.post(
+      "/api/auth/bootstrap",
+      undefined,
+      accessToken
+        ? {
+            headers: {
+              Authorization: `Bearer ${accessToken}`,
+            },
+          }
+        : undefined,
+    ),
   login: (email: string, password: string, deviceName?: string) =>
     apiClient.post("/api/auth/login", { email, password, deviceName }),
   refresh: (refreshToken: string, deviceName?: string) =>
@@ -404,8 +465,7 @@ export const adminExchangePayoutApi = {
     if (status && status !== "ALL") params.set("status", status);
     return apiClient.get(`/api/admin/exchange/payouts?${params}`);
   },
-  getPayoutStats: () =>
-    apiClient.get("/api/admin/exchange/payouts/stats"),
+  getPayoutStats: () => apiClient.get("/api/admin/exchange/payouts/stats"),
   approvePayout: (
     payoutId: string,
     data: { status: "APPROVED" | "REJECTED"; reason: string },
@@ -423,6 +483,57 @@ export const adminExchangePayoutApi = {
   ) =>
     apiClient.post(
       `/api/admin/exchange/payouts/${payoutId}/mark-sent`,
+      data,
+      withIdempotencyKey(idempotencyKey),
+    ),
+};
+
+export const adminAuditApi = {
+  getLogs: (limit = 50, params?: URLSearchParams) => {
+    const query = params ?? new URLSearchParams({ limit: String(limit) });
+    if (!query.has("limit")) query.set("limit", String(limit));
+    return apiClient.get<AdminAuditLog[]>(`/api/admin/audit-logs?${query}`);
+  },
+};
+
+export const adminUserApi = {
+  updateUser: (
+    userId: string,
+    data: {
+      email?: string;
+      phone?: string;
+      role?: "USER" | "ADMIN";
+      kycStatus?: "PENDING" | "SUBMITTED" | "VERIFIED" | "REJECTED";
+      isSuspended?: boolean;
+      reason: string;
+    },
+    idempotencyKey?: string,
+  ) =>
+    apiClient.put(
+      `/api/admin/users/${encodeURIComponent(userId)}`,
+      data,
+      withIdempotencyKey(idempotencyKey),
+    ),
+  suspendUser: (userId: string, reason: string, idempotencyKey?: string) =>
+    apiClient.post(
+      `/api/admin/users/${encodeURIComponent(userId)}/suspend`,
+      { reason },
+      withIdempotencyKey(idempotencyKey),
+    ),
+  unsuspendUser: (userId: string, reason: string, idempotencyKey?: string) =>
+    apiClient.post(
+      `/api/admin/users/${encodeURIComponent(userId)}/unsuspend`,
+      { reason },
+      withIdempotencyKey(idempotencyKey),
+    ),
+  revokeSession: (
+    userId: string,
+    sessionId: string,
+    data: { reason: string },
+    idempotencyKey?: string,
+  ) =>
+    apiClient.post(
+      `/api/admin/users/${encodeURIComponent(userId)}/sessions/${encodeURIComponent(sessionId)}/revoke`,
       data,
       withIdempotencyKey(idempotencyKey),
     ),

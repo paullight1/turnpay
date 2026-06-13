@@ -75,7 +75,10 @@ class WalletService {
   /// Fetches virtual accounts for the current user.
   Future<List<VirtualAccountData>> fetchVirtualAccounts() async {
     try {
-      final response = await _apiClient.client.get('/api/banking/accounts');
+      final response = await _apiClient.client.get(
+        '/api/banking/accounts',
+        options: _freshRequestOptions(),
+      );
       final data = response.data;
 
       if (data is List) {
@@ -96,6 +99,7 @@ class WalletService {
       final response = await _apiClient.client.get(
         '/api/transactions',
         queryParameters: {'limit': limit, 'type': 'FUND'},
+        options: _freshRequestOptions(),
       );
 
       final data = _asMap(response.data);
@@ -146,6 +150,15 @@ class WalletService {
       return null;
     }
   }
+}
+
+Options _freshRequestOptions() {
+  return Options(
+    headers: const {
+      'Cache-Control': 'no-cache',
+      'Pragma': 'no-cache',
+    },
+  );
 }
 
 // ─── Data models ──────────────────────────────────────────────────────────────

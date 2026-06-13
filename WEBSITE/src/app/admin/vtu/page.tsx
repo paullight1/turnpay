@@ -293,10 +293,10 @@ function buildPricingPayload(
 }
 
 export default function AdminVtuPage() {
-  const { user, isLoading: authLoading } = useAuth();
+  const { user, profile, isLoading: authLoading } = useAuth();
   const router = useRouter();
   const queryClient = useQueryClient();
-  const isAdmin = user?.role === "ADMIN";
+  const isAdmin = user?.role === "ADMIN" || profile?.role === "ADMIN";
   const [olderThanMinutes, setOlderThanMinutes] = useState(
     DEFAULT_OLDER_THAN_MINUTES,
   );
@@ -325,10 +325,16 @@ export default function AdminVtuPage() {
   >(null);
 
   useEffect(() => {
-    if (!authLoading && !isAdmin) {
+    if (
+      !authLoading &&
+      user &&
+      profile &&
+      user.role !== "ADMIN" &&
+      profile.role !== "ADMIN"
+    ) {
       router.push("/dashboard");
     }
-  }, [authLoading, isAdmin, router]);
+  }, [authLoading, profile, user, router]);
 
   const staleOrdersQuery = useQuery({
     queryKey: ["admin-vtu-stale-orders", olderThanMinutes, DEFAULT_LIMIT],
@@ -564,7 +570,7 @@ export default function AdminVtuPage() {
     requeryMutation.mutate();
   };
 
-  if (authLoading || !user) {
+  if (authLoading || !user || !profile) {
     return (
       <DashboardLayout>
         <Skeleton className="h-72 w-full" />

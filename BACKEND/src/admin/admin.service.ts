@@ -3,9 +3,11 @@ import {
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
+import { ConfigService } from "@nestjs/config";
 import { PrismaService } from "../prisma/prisma.service";
 import {
   AdminActionReasonDto,
+  AdminAuditLogsQueryDto,
   AdminCreateVtuPricingRuleDto,
   AdminTransferVerificationDto,
   AdminUpdateVtuPricingRuleDto,
@@ -13,10 +15,13 @@ import {
 } from "./dto/admin.dto";
 import { PinoLogger } from "nestjs-pino";
 import {
+  ExchangePayoutStatus,
+  ExchangeReceiptStatus,
   Prisma,
   ProviderEventStatus,
   TransactionStatus,
   TransactionType,
+  WalletCurrency,
   VtuOrderStatus,
   VtuOrderScope,
 } from "@prisma/client";
@@ -26,12 +31,24 @@ import { PaystackProvider } from "../payments/providers/paystack.provider";
 import { FlutterwaveProvider } from "../payments/providers/flutterwave.provider";
 import { SupabaseService } from "../supabase/supabase.service";
 import { VtuService } from "../vtu/vtu.service";
+import { maskAccountNumber } from "../common/utils/masking";
 
 const STALE_VTU_STATUSES: VtuOrderStatus[] = [
   "PENDING",
   "PROCESSING",
   "UNKNOWN",
 ];
+const USER_SERVICE_ORDER: TransactionType[] = [
+  "AIRTIME",
+  "DATA",
+  "CABLE",
+  "ELECTRICITY",
+  "EXCHANGE",
+  "FUND",
+  "WITHDRAW",
+  "INTERNAL_TRANSFER",
+];
+const PLATFORM_SERVICE_TREND_DAYS = 7;
 
 @Injectable()
 export class AdminService {
@@ -41,6 +58,7 @@ export class AdminService {
     private readonly ledger: LedgerService,
     private readonly paystack: PaystackProvider,
     private readonly flutterwave: FlutterwaveProvider,
+    private readonly configService: ConfigService,
     private readonly supabaseService: SupabaseService,
     private readonly vtuService: VtuService,
   ) {}
@@ -50,12 +68,31 @@ export class AdminService {
     limit: number,
     role?: string,
     kycStatus?: string,
+    q?: string,
   ) {
     const skip = (page - 1) * limit;
-    const where: Record<string, unknown> = {};
+    const whereClauses: Prisma.UserWhereInput[] = [];
 
-    if (role) where.role = role;
-    if (kycStatus) where.kycStatus = kycStatus;
+    if (role) whereClauses.push({ role: role as Prisma.UserWhereInput["role"] });
+    if (kycStatus) {
+      whereClauses.push({
+        kycStatus: kycStatus as Prisma.UserWhereInput["kycStatus"],
+      });
+    }
+
+    if (q) {
+      whereClauses.push({
+        OR: [
+          { email: { contains: q, mode: "insensitive" } },
+          { phone: { contains: q, mode: "insensitive" } },
+          { fullName: { contains: q, mode: "insensitive" } },
+          { referralCode: { contains: q, mode: "insensitive" } },
+        ],
+      });
+    }
+
+    const where =
+      whereClauses.length > 0 ? { AND: whereClauses } : undefined;
 
     const [users, total] = await this.prisma.$transaction([
       this.prisma.user.findMany({
@@ -67,6 +104,7 @@ export class AdminService {
           id: true,
           email: true,
           phone: true,
+          fullName: true,
           role: true,
           kycStatus: true,
           kycTier: true,
@@ -93,13 +131,75 @@ export class AdminService {
         id: true,
         email: true,
         phone: true,
+        fullName: true,
         role: true,
         kycStatus: true,
         kycTier: true,
         isSuspended: true,
         createdAt: true,
         updatedAt: true,
-        wallets: true,
+        wallets: {
+          orderBy: { currency: "asc" },
+          select: {
+            id: true,
+            currency: true,
+            balance: true,
+            updatedAt: true,
+          },
+        },
+        virtualAccounts: {
+          orderBy: { createdAt: "desc" },
+          take: 5,
+          select: {
+            id: true,
+            provider: true,
+            providerAccountId: true,
+            accountNumberMasked: true,
+            accountName: true,
+            bankName: true,
+            bankCode: true,
+            currency: true,
+            status: true,
+            createdAt: true,
+            updatedAt: true,
+          },
+        },
+        bankAccounts: {
+          orderBy: { createdAt: "desc" },
+          take: 5,
+          select: {
+            id: true,
+            provider: true,
+            bankCode: true,
+            bankName: true,
+            accountName: true,
+            accountNumberMasked: true,
+            currency: true,
+            isDeleted: true,
+            createdAt: true,
+            updatedAt: true,
+          },
+        },
+        refreshTokens: {
+          where: {
+            revokedAt: null,
+            expiresAt: {
+              gt: new Date(),
+            },
+          },
+          orderBy: { lastUsedAt: "desc" },
+          take: 10,
+          select: {
+            id: true,
+            deviceId: true,
+            deviceName: true,
+            userAgent: true,
+            ipAddress: true,
+            lastUsedAt: true,
+            expiresAt: true,
+            createdAt: true,
+          },
+        },
         transactions: {
           take: 20,
           orderBy: { createdAt: "desc" },
@@ -113,6 +213,78 @@ export class AdminService {
             createdAt: true,
           },
         },
+        disputes: {
+          take: 10,
+          orderBy: { createdAt: "desc" },
+          select: {
+            id: true,
+            type: true,
+            status: true,
+            description: true,
+            resolution: true,
+            createdAt: true,
+            updatedAt: true,
+            transaction: {
+              select: {
+                id: true,
+                reference: true,
+                type: true,
+                amount: true,
+                currency: true,
+                status: true,
+                createdAt: true,
+              },
+            },
+          },
+        },
+        exchangeReceipts: {
+          take: 5,
+          orderBy: { createdAt: "desc" },
+          select: {
+            id: true,
+            bankReference: true,
+            amount: true,
+            expectedCreditAmount: true,
+            status: true,
+            createdAt: true,
+            updatedAt: true,
+            transaction: {
+              select: {
+                id: true,
+                reference: true,
+                type: true,
+                status: true,
+                createdAt: true,
+              },
+            },
+          },
+        },
+        exchangePayouts: {
+          take: 5,
+          orderBy: { createdAt: "desc" },
+          select: {
+            id: true,
+            status: true,
+            sourceAmount: true,
+            destinationAmount: true,
+            destinationBankName: true,
+            destinationAccountNumber: true,
+            destinationAccountName: true,
+            reviewedAt: true,
+            sentAt: true,
+            createdAt: true,
+            updatedAt: true,
+            transaction: {
+              select: {
+                id: true,
+                reference: true,
+                type: true,
+                status: true,
+                createdAt: true,
+              },
+            },
+          },
+        },
       },
     });
 
@@ -120,7 +292,212 @@ export class AdminService {
       throw new NotFoundException("User not found");
     }
 
-    return user;
+    const { refreshTokens, exchangePayouts, ...rest } = user;
+    const relatedAuditClauses: Prisma.AuditLogWhereInput[] = [
+      { targetType: "User", targetId: userId },
+      {
+        metadata: {
+          path: ["userId"],
+          equals: userId,
+        },
+      },
+    ];
+
+    const addTargetClause = (
+      targetType: string,
+      targetIds: string[],
+    ) => {
+      if (targetIds.length > 0) {
+        relatedAuditClauses.push({
+          targetType,
+          targetId: { in: targetIds },
+        });
+      }
+    };
+
+    addTargetClause(
+      "Transaction",
+      user.transactions.map((transaction) => transaction.id),
+    );
+    addTargetClause(
+      "UserSession",
+      refreshTokens.map((session) => session.id),
+    );
+    addTargetClause(
+      "Dispute",
+      user.disputes.map((dispute) => dispute.id),
+    );
+    addTargetClause(
+      "ExchangeReceipt",
+      user.exchangeReceipts.map((receipt) => receipt.id),
+    );
+    addTargetClause(
+      "ExchangePayout",
+      exchangePayouts.map((payout) => payout.id),
+    );
+
+    const [auditLogs, serviceRows] = await Promise.all([
+      this.prisma.auditLog.findMany({
+        where: { OR: relatedAuditClauses },
+        orderBy: { createdAt: "desc" },
+        take: 12,
+        select: {
+          id: true,
+          adminId: true,
+          admin: {
+            select: {
+              id: true,
+              email: true,
+              fullName: true,
+            },
+          },
+          action: true,
+          targetType: true,
+          targetId: true,
+          reference: true,
+          reason: true,
+          before: true,
+          after: true,
+          metadata: true,
+          createdAt: true,
+        },
+      }),
+      this.prisma.transaction.groupBy({
+        by: ["type", "currency"],
+        where: { userId },
+        _count: { _all: true },
+        _sum: {
+          amount: true,
+          fee: true,
+        },
+        _max: {
+          createdAt: true,
+        },
+      }),
+    ]);
+
+    const serviceStats = serviceRows
+      .map((entry) => ({
+        type: entry.type,
+        currency: entry.currency,
+        transactionCount: entry._count._all,
+        totalAmount: this.toDecimalOrZero(entry._sum.amount).toFixed(2),
+        totalFees: this.toDecimalOrZero(entry._sum.fee).toFixed(2),
+        lastActivityAt: entry._max.createdAt?.toISOString() ?? null,
+      }))
+      .sort((left, right) => {
+        const orderDiff =
+          USER_SERVICE_ORDER.indexOf(left.type) -
+          USER_SERVICE_ORDER.indexOf(right.type);
+
+        if (orderDiff !== 0) {
+          return orderDiff;
+        }
+
+        return new Date(right.lastActivityAt ?? 0).getTime() -
+          new Date(left.lastActivityAt ?? 0).getTime();
+      });
+
+    return {
+      ...rest,
+      sessions: refreshTokens,
+      serviceStats,
+      auditLogs: auditLogs.map((log) => ({
+        ...log,
+        before: this.sanitizeMetadata(log.before),
+        after: this.sanitizeMetadata(log.after),
+        metadata: this.sanitizeMetadata(log.metadata),
+      })),
+      exchangePayouts: exchangePayouts.map((payout) => ({
+        ...payout,
+        destinationAccountNumber: maskAccountNumber(
+          payout.destinationAccountNumber,
+        ),
+      })),
+    };
+  }
+
+  async revokeUserSession(
+    userId: string,
+    sessionId: string,
+    dto: AdminActionReasonDto,
+    adminId: string,
+  ) {
+    this.assertReason(dto.reason);
+
+    const session = await this.prisma.refreshToken.findFirst({
+      where: { id: sessionId, userId },
+      select: {
+        id: true,
+        userId: true,
+        deviceId: true,
+        deviceName: true,
+        userAgent: true,
+        ipAddress: true,
+        lastUsedAt: true,
+        expiresAt: true,
+        revokedAt: true,
+        createdAt: true,
+      },
+    });
+
+    if (!session) {
+      throw new NotFoundException("Session not found");
+    }
+
+    if (session.revokedAt) {
+      return { success: true };
+    }
+
+    const revokedAt = new Date();
+    let sessionRevoked = false;
+
+    await this.prisma.$transaction(async (tx) => {
+      const updated = await tx.refreshToken.updateMany({
+        where: {
+          id: sessionId,
+          userId,
+          revokedAt: null,
+        },
+        data: { revokedAt },
+      });
+
+      if (updated.count === 0) {
+        return;
+      }
+
+      sessionRevoked = true;
+      await tx.auditLog.create({
+        data: {
+          adminId,
+          action: "USER_SESSION_REVOKE",
+          targetType: "UserSession",
+          targetId: sessionId,
+          reference: session.deviceId,
+          reason: dto.reason,
+          before: this.toRefreshTokenAuditSnapshot(session),
+          after: this.toRefreshTokenAuditSnapshot({
+            ...session,
+            revokedAt,
+          }),
+          metadata: {
+            userId,
+            deviceName: session.deviceName,
+            userAgent: session.userAgent,
+            ipAddress: session.ipAddress,
+          },
+        },
+      });
+    });
+
+    if (sessionRevoked) {
+      this.logger.info(
+        { adminId, userId, sessionId, event: "admin_user_session_revoked" },
+        "Admin revoked user session",
+      );
+    }
+
+    return { success: true };
   }
 
   async updateUser(userId: string, dto: AdminUpdateUserDto, adminId: string) {
@@ -1358,13 +1735,93 @@ export class AdminService {
     return updated;
   }
 
-  async getAuditLogs(limit = 50) {
+  async getAuditLogs(
+    query: number | AdminAuditLogsQueryDto = 50,
+  ) {
+    const limit = typeof query === "number" ? query : query.limit ?? 50;
+    const filters =
+      typeof query === "number"
+        ? {}
+        : {
+            q: query.q?.trim(),
+            action: query.action?.trim(),
+            targetType: query.targetType?.trim(),
+            targetId: query.targetId?.trim(),
+            adminId: query.adminId?.trim(),
+            from: query.from,
+            to: query.to,
+          };
+
+    const whereClauses: Prisma.AuditLogWhereInput[] = [];
+
+    if (filters.action) {
+      whereClauses.push({ action: filters.action });
+    }
+
+    if (filters.targetType) {
+      whereClauses.push({ targetType: filters.targetType });
+    }
+
+    if (filters.targetId) {
+      whereClauses.push({ targetId: filters.targetId });
+    }
+
+    if (filters.adminId) {
+      whereClauses.push({ adminId: filters.adminId });
+    }
+
+    if (filters.from || filters.to) {
+      whereClauses.push({
+        createdAt: {
+          gte: filters.from ? new Date(filters.from) : undefined,
+          lte: filters.to ? new Date(filters.to) : undefined,
+        },
+      });
+    }
+
+    if (filters.q) {
+      whereClauses.push({
+        OR: [
+          { action: { contains: filters.q, mode: "insensitive" } },
+          { targetType: { contains: filters.q, mode: "insensitive" } },
+          { targetId: { contains: filters.q, mode: "insensitive" } },
+          { reference: { contains: filters.q, mode: "insensitive" } },
+          { reason: { contains: filters.q, mode: "insensitive" } },
+          {
+            admin: {
+              is: {
+                email: { contains: filters.q, mode: "insensitive" },
+              },
+            },
+          },
+          {
+            admin: {
+              is: {
+                fullName: { contains: filters.q, mode: "insensitive" },
+              },
+            },
+          },
+        ],
+      });
+    }
+
+    const where =
+      whereClauses.length > 0 ? { AND: whereClauses } : undefined;
+
     const logs = await this.prisma.auditLog.findMany({
+      where,
       take: limit,
       orderBy: { createdAt: "desc" },
       select: {
         id: true,
         adminId: true,
+        admin: {
+          select: {
+            id: true,
+            email: true,
+            fullName: true,
+          },
+        },
         action: true,
         targetType: true,
         targetId: true,
@@ -1383,6 +1840,388 @@ export class AdminService {
       after: this.sanitizeMetadata(log.after),
       metadata: this.sanitizeMetadata(log.metadata),
     }));
+  }
+
+  async getOpsSummary(limit = 10) {
+    if (!Number.isInteger(limit) || limit < 1 || limit > 100) {
+      throw new BadRequestException("limit must be between 1 and 100");
+    }
+
+    const receiptStatuses = {
+      submitted: "SUBMITTED",
+      underReview: "UNDER_REVIEW",
+      approved: "APPROVED",
+      credited: "CREDITED",
+      rejected: "REJECTED",
+      needsMoreInfo: "NEEDS_MORE_INFO",
+    } as const satisfies Record<string, ExchangeReceiptStatus>;
+    const payoutStatuses = {
+      pendingApproval: "PENDING_APPROVAL",
+      approved: "APPROVED",
+      processing: "PROCESSING",
+      sent: "SENT",
+      failed: "FAILED",
+      reversed: "REVERSED",
+    } as const satisfies Record<string, ExchangePayoutStatus>;
+    const vtuOrderStatuses: VtuOrderStatus[] = [
+      "PENDING",
+      "PROCESSING",
+      "SUCCESS",
+      "FAILED",
+      "REVERSED",
+      "UNKNOWN",
+    ];
+    const serviceOrder: TransactionType[] = [
+      "AIRTIME",
+      "DATA",
+      "CABLE",
+      "ELECTRICITY",
+    ];
+    const platformServiceTrendStart = new Date();
+    platformServiceTrendStart.setUTCHours(0, 0, 0, 0);
+    platformServiceTrendStart.setUTCDate(
+      platformServiceTrendStart.getUTCDate() - (PLATFORM_SERVICE_TREND_DAYS - 1),
+    );
+
+    const [
+      stats,
+      suspendedUsers,
+      verifiedUsers,
+      walletExposure,
+      receiptBuckets,
+      payoutBuckets,
+      platformServiceBuckets,
+      platformServiceTrendRows,
+      vtuBuckets,
+      openVtuOrders,
+      recentTransactions,
+      recentAuditLogs,
+    ] = await Promise.all([
+      this.getStats(),
+      this.prisma.user.count({ where: { isSuspended: true } }),
+      this.prisma.user.count({ where: { kycStatus: "VERIFIED" } }),
+      this.prisma.wallet.groupBy({
+        by: ["currency"],
+        _count: { _all: true },
+        _sum: { balance: true },
+      }),
+      this.prisma.exchangeReceipt.groupBy({
+        by: ["status"],
+        _count: { _all: true },
+        _sum: {
+          amount: true,
+          expectedCreditAmount: true,
+        },
+      }),
+      this.prisma.exchangePayout.groupBy({
+        by: ["status"],
+        _count: { _all: true },
+        _sum: {
+          sourceAmount: true,
+          destinationAmount: true,
+          fee: true,
+        },
+      }),
+      this.prisma.transaction.groupBy({
+        by: ["type", "currency"],
+        where: { status: "SUCCESS" },
+        _count: { _all: true },
+        _sum: {
+          amount: true,
+          fee: true,
+        },
+        _max: {
+          createdAt: true,
+        },
+      }),
+      this.prisma.transaction.findMany({
+        where: {
+          status: "SUCCESS",
+          type: { in: USER_SERVICE_ORDER },
+          createdAt: {
+            gte: platformServiceTrendStart,
+          },
+        },
+        orderBy: { createdAt: "asc" },
+        select: {
+          type: true,
+          currency: true,
+          amount: true,
+          fee: true,
+          createdAt: true,
+        },
+      }),
+      this.prisma.vtuOrder.groupBy({
+        by: ["serviceType"],
+        _count: { _all: true },
+        _sum: {
+          amount: true,
+          fee: true,
+          costAmount: true,
+          margin: true,
+        },
+      }),
+      this.prisma.vtuOrder.count({
+        where: {
+          status: { in: ["PENDING", "PROCESSING", "UNKNOWN"] },
+        },
+      }),
+      this.prisma.transaction.findMany({
+        take: limit,
+        orderBy: { createdAt: "desc" },
+        select: {
+          id: true,
+          reference: true,
+          type: true,
+          amount: true,
+          currency: true,
+          status: true,
+          fee: true,
+          createdAt: true,
+          user: {
+            select: {
+              id: true,
+              email: true,
+              phone: true,
+            },
+          },
+        },
+      }),
+      this.prisma.auditLog.findMany({
+        take: limit,
+        orderBy: { createdAt: "desc" },
+        select: {
+          id: true,
+          action: true,
+          targetType: true,
+          targetId: true,
+          reference: true,
+          reason: true,
+          createdAt: true,
+          admin: {
+            select: {
+              id: true,
+              email: true,
+              fullName: true,
+            },
+          },
+        },
+      }),
+    ]);
+
+    const walletExposureByCurrency = walletExposure
+      .map((entry) => ({
+        currency: entry.currency,
+        walletCount: entry._count._all,
+        balance: this.toDecimalOrZero(entry._sum.balance).toFixed(2),
+      }))
+      .sort((left, right) => {
+        const order: Record<string, number> = { NGN: 0, GHS: 1 };
+        return (
+          (order[left.currency] ?? 99) - (order[right.currency] ?? 99)
+        );
+      });
+
+    const totalWalletExposure = walletExposureByCurrency
+      .reduce((total, entry) => total.plus(new Decimal(entry.balance)), new Decimal(0))
+      .toFixed(2);
+
+    const receiptStatusCounts = this.groupStatusCounts(
+      receiptStatuses,
+      receiptBuckets,
+    );
+    const payoutStatusCounts = this.groupStatusCounts(
+      payoutStatuses,
+      payoutBuckets,
+    );
+
+    const receiptTotals = receiptBuckets.reduce(
+      (totals, entry) => ({
+        sourceAmount: totals.sourceAmount.plus(
+          this.toDecimalOrZero(entry._sum.amount),
+        ),
+        expectedCreditAmount: totals.expectedCreditAmount.plus(
+          this.toDecimalOrZero(entry._sum.expectedCreditAmount),
+        ),
+      }),
+      {
+        sourceAmount: new Decimal(0),
+        expectedCreditAmount: new Decimal(0),
+      },
+    );
+
+    const payoutTotals = payoutBuckets.reduce(
+      (totals, entry) => ({
+        sourceAmount: totals.sourceAmount.plus(
+          this.toDecimalOrZero(entry._sum.sourceAmount),
+        ),
+        destinationAmount: totals.destinationAmount.plus(
+          this.toDecimalOrZero(entry._sum.destinationAmount),
+        ),
+        fee: totals.fee.plus(this.toDecimalOrZero(entry._sum.fee)),
+      }),
+      {
+        sourceAmount: new Decimal(0),
+        destinationAmount: new Decimal(0),
+        fee: new Decimal(0),
+      },
+    );
+
+    const platformServiceBreakdown = platformServiceBuckets
+      .map((entry) => ({
+        serviceType: entry.type,
+        currency: entry.currency,
+        transactionCount: entry._count._all,
+        amount: this.toDecimalOrZero(entry._sum.amount).toFixed(2),
+        fee: this.toDecimalOrZero(entry._sum.fee).toFixed(2),
+        lastActivityAt: entry._max.createdAt?.toISOString() ?? null,
+      }))
+      .sort((left, right) => {
+        const typeDiff =
+          USER_SERVICE_ORDER.indexOf(left.serviceType as TransactionType) -
+          USER_SERVICE_ORDER.indexOf(right.serviceType as TransactionType);
+        if (typeDiff !== 0) {
+          return typeDiff;
+        }
+
+        const currencyOrder: Record<string, number> = { NGN: 0, GHS: 1 };
+        return (
+          (currencyOrder[left.currency] ?? 99) -
+          (currencyOrder[right.currency] ?? 99)
+        );
+      });
+
+    const totalPlatformServiceAmount = platformServiceBuckets
+      .reduce(
+        (total, entry) => total.plus(this.toDecimalOrZero(entry._sum.amount)),
+        new Decimal(0),
+      )
+      .toFixed(2);
+    const totalPlatformServiceFees = platformServiceBuckets
+      .reduce(
+        (total, entry) => total.plus(this.toDecimalOrZero(entry._sum.fee)),
+        new Decimal(0),
+      )
+      .toFixed(2);
+    const totalPlatformServiceTransactions = platformServiceBuckets.reduce(
+      (total, entry) => total + entry._count._all,
+      0,
+    );
+    const platformServiceTrend = this.buildPlatformServiceTrend(
+      platformServiceTrendRows,
+      platformServiceTrendStart,
+    );
+
+    const vtuServiceBreakdown = vtuBuckets
+      .map((entry) => ({
+        serviceType: entry.serviceType,
+        orderCount: entry._count._all,
+        amount: this.toDecimalOrZero(entry._sum.amount).toFixed(2),
+        fee: this.toDecimalOrZero(entry._sum.fee).toFixed(2),
+        costAmount: this.toDecimalOrZero(entry._sum.costAmount).toFixed(2),
+        margin: this.toDecimalOrZero(entry._sum.margin).toFixed(2),
+      }))
+      .sort(
+        (left, right) =>
+          serviceOrder.indexOf(left.serviceType as TransactionType) -
+          serviceOrder.indexOf(right.serviceType as TransactionType),
+      );
+
+    const totalVtuAmount = vtuBuckets
+      .reduce(
+        (total, entry) => total.plus(this.toDecimalOrZero(entry._sum.amount)),
+        new Decimal(0),
+      )
+      .toFixed(2);
+    const totalVtuFees = vtuBuckets
+      .reduce(
+        (total, entry) => total.plus(this.toDecimalOrZero(entry._sum.fee)),
+        new Decimal(0),
+      )
+      .toFixed(2);
+    const totalVtuCostAmount = vtuBuckets
+      .reduce(
+        (total, entry) => total.plus(this.toDecimalOrZero(entry._sum.costAmount)),
+        new Decimal(0),
+      )
+      .toFixed(2);
+    const totalVtuMargin = vtuBuckets
+      .reduce(
+        (total, entry) => total.plus(this.toDecimalOrZero(entry._sum.margin)),
+        new Decimal(0),
+      )
+      .toFixed(2);
+
+    const settlementAccountNumber =
+      this.configService.get<string>(
+        "MONNIFY_EXCHANGE_COLLECTION_ACCOUNT_NUMBER",
+        "",
+      )?.trim() || "";
+
+    return {
+      generatedAt: new Date(),
+      stats: {
+        ...stats,
+        suspendedUsers,
+        verifiedUsers,
+      },
+      treasury: {
+        settlementAccount: {
+          provider: "MONNIFY",
+          configured: settlementAccountNumber.length > 0,
+          accountNumberMasked: settlementAccountNumber
+            ? maskAccountNumber(settlementAccountNumber)
+            : null,
+          note: settlementAccountNumber
+            ? "Exchange deposits settle to the configured Monnify collection account."
+            : "Configure MONNIFY_EXCHANGE_COLLECTION_ACCOUNT_NUMBER to lock exchange deposits to one settlement account.",
+        },
+        walletExposure: walletExposureByCurrency,
+        totalWalletExposure,
+      },
+      exchange: {
+        receipts: {
+          ...receiptStatusCounts,
+          totalSourceAmount: receiptTotals.sourceAmount.toFixed(2),
+          totalExpectedCreditAmount: receiptTotals.expectedCreditAmount.toFixed(
+            2,
+          ),
+        },
+        payouts: {
+          ...payoutStatusCounts,
+          totalSourceAmount: payoutTotals.sourceAmount.toFixed(2),
+          totalDestinationAmount: payoutTotals.destinationAmount.toFixed(2),
+          totalFees: payoutTotals.fee.toFixed(2),
+        },
+      },
+      platformServices: {
+        totalTransactions: totalPlatformServiceTransactions,
+        totalAmount: totalPlatformServiceAmount,
+        totalFees: totalPlatformServiceFees,
+        breakdown: platformServiceBreakdown,
+        trend: platformServiceTrend,
+      },
+      vtu: {
+        totalOrders: vtuBuckets.reduce(
+          (total, entry) => total + entry._count._all,
+          0,
+        ),
+        openOrders: openVtuOrders,
+        totalAmount: totalVtuAmount,
+        totalFees: totalVtuFees,
+        totalCostAmount: totalVtuCostAmount,
+        totalMargin: totalVtuMargin,
+        serviceBreakdown: vtuServiceBreakdown,
+      },
+      activity: {
+        recentTransactions: recentTransactions.map((transaction) => ({
+          ...transaction,
+          amount: new Decimal(transaction.amount).toFixed(2),
+          fee: new Decimal(transaction.fee).toFixed(2),
+        })),
+        recentAuditLogs,
+      },
+    };
   }
 
   private async verifyProviderTransfer(latestAttempt: {
@@ -1455,6 +2294,47 @@ export class AdminService {
         "A reason of at least 10 characters is required",
       );
     }
+  }
+
+  private toRefreshTokenAuditSnapshot(session: {
+    id: string;
+    userId: string;
+    deviceId: string;
+    deviceName: string | null;
+    userAgent: string | null;
+    ipAddress: string | null;
+    lastUsedAt: Date;
+    expiresAt: Date;
+    revokedAt: Date | null;
+    createdAt: Date;
+  }): Prisma.InputJsonValue {
+    return {
+      id: session.id,
+      userId: session.userId,
+      deviceId: session.deviceId,
+      deviceName: session.deviceName,
+      userAgent: session.userAgent,
+      ipAddress: session.ipAddress,
+      lastUsedAt: session.lastUsedAt.toISOString(),
+      expiresAt: session.expiresAt.toISOString(),
+      revokedAt: session.revokedAt?.toISOString() ?? null,
+      createdAt: session.createdAt.toISOString(),
+    };
+  }
+
+  private groupStatusCounts<
+    TStatusMap extends Record<string, string>,
+  >(
+    statuses: TStatusMap,
+    rows: Array<{ status: string; _count: { _all: number } }>,
+  ) {
+    const counts: Record<string, number> = {};
+
+    for (const [key, status] of Object.entries(statuses)) {
+      counts[key] = rows.find((row) => row.status === status)?._count._all ?? 0;
+    }
+
+    return counts as Record<keyof TStatusMap, number>;
   }
 
   private assertVtuPricingRuleAmounts(input: {
@@ -1531,6 +2411,114 @@ export class AdminService {
     return value === null || value === undefined
       ? new Decimal(0)
       : new Decimal(value);
+  }
+
+  private buildPlatformServiceTrend(
+    rows: Array<{
+      type: TransactionType;
+      currency: WalletCurrency;
+      amount: Decimal;
+      fee: Decimal;
+      createdAt: Date;
+    }>,
+    windowStart: Date,
+  ) {
+    const currencyOrder: Record<WalletCurrency, number> = {
+      NGN: 0,
+      GHS: 1,
+    };
+
+    const trendBuckets = Array.from(
+      { length: PLATFORM_SERVICE_TREND_DAYS },
+      (_, offset) => {
+        const date = new Date(windowStart);
+        date.setUTCDate(date.getUTCDate() + offset);
+
+        return {
+          date,
+          transactionCount: 0,
+          serviceCounts: new Map<TransactionType, number>(),
+          currencyBreakdown: new Map<
+            WalletCurrency,
+            {
+              transactionCount: number;
+              amount: Decimal;
+              fee: Decimal;
+            }
+          >(),
+        };
+      },
+    );
+
+    const trendBucketByDate = new Map(
+      trendBuckets.map((bucket) => [
+        bucket.date.toISOString().slice(0, 10),
+        bucket,
+      ]),
+    );
+
+    for (const row of rows) {
+      const bucket = trendBucketByDate.get(
+        row.createdAt.toISOString().slice(0, 10),
+      );
+
+      if (!bucket) {
+        continue;
+      }
+
+      bucket.transactionCount += 1;
+      bucket.serviceCounts.set(
+        row.type,
+        (bucket.serviceCounts.get(row.type) ?? 0) + 1,
+      );
+
+      const currencyBucket = bucket.currencyBreakdown.get(row.currency) ?? {
+        transactionCount: 0,
+        amount: new Decimal(0),
+        fee: new Decimal(0),
+      };
+
+      currencyBucket.transactionCount += 1;
+      currencyBucket.amount = currencyBucket.amount.plus(
+        this.toDecimalOrZero(row.amount),
+      );
+      currencyBucket.fee = currencyBucket.fee.plus(this.toDecimalOrZero(row.fee));
+      bucket.currencyBreakdown.set(row.currency, currencyBucket);
+    }
+
+    return trendBuckets.map((bucket) => {
+      const topServiceEntry = Array.from(bucket.serviceCounts.entries()).sort(
+        (left, right) => {
+          const countDiff = right[1] - left[1];
+          if (countDiff !== 0) {
+            return countDiff;
+          }
+
+          return (
+            USER_SERVICE_ORDER.indexOf(left[0]) -
+            USER_SERVICE_ORDER.indexOf(right[0])
+          );
+        },
+      )[0];
+
+      return {
+        date: bucket.date.toISOString(),
+        transactionCount: bucket.transactionCount,
+        topServiceType: topServiceEntry?.[0] ?? null,
+        topServiceCount: topServiceEntry?.[1] ?? 0,
+        currencyBreakdown: Array.from(bucket.currencyBreakdown.entries())
+          .sort(
+            (left, right) =>
+              (currencyOrder[left[0]] ?? 99) - (currencyOrder[right[0]] ?? 99),
+          )
+          .map(([currency, values]) => ({
+            currency,
+            transactionCount: values.transactionCount,
+            amount: values.amount.toFixed(2),
+            fee: values.fee.toFixed(2),
+          })),
+      };
+    });
   }
 
   private addVtuBreakdown(

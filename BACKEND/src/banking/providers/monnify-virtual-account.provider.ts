@@ -109,6 +109,7 @@ interface MonnifyOtpResponse {
     status?: string;
     transactionStatus?: string;
     message?: string;
+    emailRecipients?: string[];
   };
 }
 
@@ -258,20 +259,7 @@ export class MonnifyVirtualAccountProvider {
   async listBanks(): Promise<
     Array<{ name: string; code: string; slug: string }>
   > {
-    const token = await this.getAccessToken();
-    const response = await this.fetchMonnify<MonnifyBanksResponse>(
-      firstValueFrom(
-        this.httpService.get<MonnifyBanksResponse>(
-          `${this.baseUrl}/api/v1/banks`,
-          {
-            headers: {
-              Authorization: `Bearer ${token}`,
-            },
-          },
-        ),
-      ),
-      "Could not load Monnify banks",
-    );
+    const response = await this.fetchMonnifyBanksWithRetry();
 
     if (!response.data.requestSuccessful) {
       throw new BadRequestException(
@@ -292,24 +280,8 @@ export class MonnifyVirtualAccountProvider {
     accountNumber: string,
     bankCode: string,
   ): Promise<{ accountName: string; bankName?: string; bankCode?: string }> {
-    const token = await this.getAccessToken();
-    const response = await this.fetchMonnify<MonnifyAccountValidationResponse>(
-      firstValueFrom(
-        this.httpService.get<MonnifyAccountValidationResponse>(
-          `${this.baseUrl}/api/v1/disbursements/account/validate`,
-          {
-            headers: {
-              Authorization: `Bearer ${token}`,
-            },
-            params: {
-              accountNumber,
-              bankCode,
-            },
-          },
-        ),
-      ),
-      "Could not validate bank account",
-    );
+    const response =
+      await this.fetchMonnifyAccountValidationWithRetry(accountNumber, bankCode);
 
     const body = response.data.responseBody;
     if (!response.data.requestSuccessful || !body?.accountName) {
@@ -439,6 +411,7 @@ export class MonnifyVirtualAccountProvider {
   async resendTransferOtp(reference: string): Promise<{
     reference: string;
     responseMessage?: string;
+    emailRecipients?: string[];
     raw: Record<string, unknown>;
   }> {
     const token = await this.getAccessToken();
@@ -468,6 +441,7 @@ export class MonnifyVirtualAccountProvider {
       reference:
         response.data.responseBody?.transactionReference || reference,
       responseMessage: response.data.responseMessage,
+      emailRecipients: response.data.responseBody?.emailRecipients,
       raw: response.data as unknown as Record<string, unknown>,
     };
   }
@@ -624,6 +598,73 @@ export class MonnifyVirtualAccountProvider {
     }
   }
 
+  private async fetchMonnifyBanksWithRetry() {
+    return this.fetchMonnifyWithTokenRetry(
+      async (token) =>
+        this.fetchMonnify<MonnifyBanksResponse>(
+          firstValueFrom(
+            this.httpService.get<MonnifyBanksResponse>(
+              `${this.baseUrl}/api/v1/banks`,
+              {
+                headers: {
+                  Authorization: `Bearer ${token}`,
+                },
+              },
+            ),
+          ),
+          "Could not load Monnify banks",
+        ),
+      "Could not load Monnify banks",
+    );
+  }
+
+  private async fetchMonnifyAccountValidationWithRetry(
+    accountNumber: string,
+    bankCode: string,
+  ) {
+    return this.fetchMonnifyWithTokenRetry(
+      async (token) =>
+        this.fetchMonnify<MonnifyAccountValidationResponse>(
+          firstValueFrom(
+            this.httpService.get<MonnifyAccountValidationResponse>(
+              `${this.baseUrl}/api/v1/disbursements/account/validate`,
+              {
+                headers: {
+                  Authorization: `Bearer ${token}`,
+                },
+                params: {
+                  accountNumber,
+                  bankCode,
+                },
+              },
+            ),
+          ),
+          "Could not validate bank account",
+        ),
+      "Could not validate bank account",
+    );
+  }
+
+  private async fetchMonnifyWithTokenRetry<T>(
+    requestFactory: (token: string) => Promise<AxiosResponse<T>>,
+    fallbackMessage: string,
+  ): Promise<AxiosResponse<T>> {
+    const token = await this.getAccessToken();
+
+    try {
+      return await requestFactory(token);
+    } catch (error) {
+      if (!this.isInvalidMonnifyTokenError(error)) {
+        throw error;
+      }
+
+      this.invalidateAccessToken();
+      const refreshedToken = await this.getAccessToken();
+
+      return requestFactory(refreshedToken);
+    }
+  }
+
   private describeMonnifyError(error: unknown, fallbackMessage: string) {
     if (isAxiosError(error)) {
       const responseData = error.response?.data as
@@ -654,6 +695,24 @@ export class MonnifyVirtualAccountProvider {
     }
 
     return fallbackMessage;
+  }
+
+  private isInvalidMonnifyTokenError(error: unknown) {
+    if (isAxiosError(error) && error.response?.status === 401) {
+      return true;
+    }
+
+    const message = this.describeMonnifyError(error, "").toLowerCase();
+    return (
+      message.includes("invalid_token") ||
+      message.includes("invalid token") ||
+      message.includes("token expired")
+    );
+  }
+
+  private invalidateAccessToken() {
+    this.accessToken = undefined;
+    this.tokenExpiresAt = 0;
   }
 
   private isDuplicateReservedAccountError(error: unknown) {

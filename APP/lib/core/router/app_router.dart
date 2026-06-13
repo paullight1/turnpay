@@ -15,6 +15,8 @@ import '../../features/home/screens/home_task_screen.dart';
 import '../../features/home/screens/send_money_entry_screen.dart';
 import '../../features/home/screens/kyc_verification_screen.dart';
 import '../../features/home/screens/money_action_screen.dart';
+import '../../features/home/screens/withdrawal_authorization_screen.dart';
+import '../../features/home/screens/withdrawal_receipt_screen.dart';
 import '../../features/security/screens/transaction_security_screen.dart';
 import '../../features/wallet/screens/wallet_detail_screen.dart';
 import '../../features/wallet/screens/receive_money_screen.dart';
@@ -36,6 +38,9 @@ class AppRoutes {
   static const sendTrustpay = '/send/trustpay';
   static const sendBank = '/send/bank';
   static const withdraw = '/withdraw';
+  static const withdrawAuthorize = '/withdraw/authorize/:reference';
+  static const withdrawSuccess = '/withdraw/success';
+  static const withdrawReceipt = '/withdraw/receipt/:reference';
   static const exchange = '/exchange';
   static const exchangeSettlement = '/exchange/settlement';
   static const airtime = '/airtime';
@@ -66,6 +71,14 @@ class AppRoutes {
 
   static String transactionDetailFor(String reference) {
     return '/transaction/${Uri.encodeComponent(reference)}';
+  }
+
+  static String withdrawAuthorizeFor(String reference) {
+    return '/withdraw/authorize/${Uri.encodeComponent(reference)}';
+  }
+
+  static String withdrawReceiptFor(String reference) {
+    return '/withdraw/receipt/${Uri.encodeComponent(reference)}';
   }
 }
 
@@ -168,6 +181,41 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         pageBuilder: (context, state) => _slideTransition(
           state,
           const MoneyActionScreen(kind: MoneyActionKind.withdraw),
+        ),
+      ),
+      GoRoute(
+        path: AppRoutes.withdrawAuthorize,
+        pageBuilder: (context, state) => _slideTransition(
+          state,
+          WithdrawalAuthorizationScreen(
+            key: state.pageKey,
+            reference: Uri.decodeComponent(
+              state.pathParameters['reference'] ?? '',
+            ),
+          ),
+        ),
+      ),
+      GoRoute(
+        path: AppRoutes.withdrawSuccess,
+        pageBuilder: (context, state) => _slideTransition(
+          state,
+          WithdrawalCompletionScreen(
+            key: state.pageKey,
+            details: _withdrawalCompletionDetailsFromExtra(state.extra),
+          ),
+        ),
+      ),
+      GoRoute(
+        path: AppRoutes.withdrawReceipt,
+        pageBuilder: (context, state) => _slideTransition(
+          state,
+          WithdrawalReceiptScreen(
+            key: state.pageKey,
+            reference: Uri.decodeComponent(
+              state.pathParameters['reference'] ?? '',
+            ),
+            details: _withdrawalCompletionDetailsFromExtra(state.extra),
+          ),
         ),
       ),
       GoRoute(
@@ -334,6 +382,87 @@ CustomTransitionPage<void> _fadeTransition(
     },
     transitionDuration: const Duration(milliseconds: 400),
   );
+}
+
+WithdrawalCompletionDetails? _withdrawalCompletionDetailsFromExtra(
+  Object? extra,
+) {
+  if (extra is WithdrawalCompletionDetails) {
+    return extra;
+  }
+
+  if (extra is! Map) {
+    return null;
+  }
+
+  final data = Map<String, dynamic>.from(extra);
+  final metadata = _asMap(data['metadata']);
+  final attempts = _asList(data['transferAttempts']);
+  final latestAttempt = attempts.isNotEmpty ? _asMap(attempts.first) : {};
+  final attemptMetadata = _asMap(latestAttempt['metadata']);
+  final status = _asString(data['status'], fallback: 'PENDING');
+
+  return WithdrawalCompletionDetails(
+    reference: _asString(data['reference']),
+    status: status,
+    message: _asString(data['message']),
+    amount: _asString(data['amount'], fallback: '0.00'),
+    currency: _asString(data['currency'], fallback: 'NGN'),
+    bankName: _asString(
+      attemptMetadata['bankName'],
+      fallback: _asString(metadata['bankName'], fallback: 'Bank'),
+    ),
+    accountName: _asString(
+      attemptMetadata['accountName'],
+      fallback: _asString(metadata['accountName'], fallback: 'Account'),
+    ),
+    accountNumberMasked: _asString(
+      attemptMetadata['accountNumberMasked'],
+      fallback: _asString(
+        metadata['accountNumberMasked'],
+        fallback: '******',
+      ),
+    ),
+    providerStatus: _asString(
+      latestAttempt['providerStatus'],
+      fallback: status,
+    ),
+    providerReference: _asString(
+      latestAttempt['providerReference'],
+      fallback: _asString(
+        metadata['providerTransactionReference'],
+        fallback: _asString(data['reference']),
+      ),
+    ),
+    createdAt: _asDateTime(data['createdAt']),
+    updatedAt: _asDateTime(data['updatedAt']),
+    providerCreatedAt: _asDateTime(latestAttempt['createdAt']),
+  );
+}
+
+Map<String, dynamic> _asMap(dynamic value) {
+  if (value is Map<String, dynamic>) return value;
+  if (value is Map) return Map<String, dynamic>.from(value);
+  return const {};
+}
+
+List<dynamic> _asList(dynamic value) {
+  if (value is List) return value;
+  return const [];
+}
+
+String _asString(dynamic value, {String fallback = ''}) {
+  if (value == null) return fallback;
+  final text = value.toString().trim();
+  return text.isEmpty ? fallback : text;
+}
+
+DateTime? _asDateTime(dynamic value) {
+  if (value is DateTime) return value;
+  if (value is String && value.trim().isNotEmpty) {
+    return DateTime.tryParse(value);
+  }
+  return null;
 }
 
 CustomTransitionPage<void> _slideTransition(

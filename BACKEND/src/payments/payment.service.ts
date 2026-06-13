@@ -863,10 +863,15 @@ export class PaymentService {
       throw new NotFoundException("Withdrawal not found");
     }
 
+    const refreshed = await this.reconcileWithdrawalTransferStatus(
+      userId,
+      transaction,
+    );
+
     return {
-      ...transaction,
-      metadata: this.sanitizeWithdrawalMetadata(transaction.metadata),
-      transferAttempts: transaction.transferAttempts.map((attempt) => ({
+      ...refreshed,
+      metadata: this.sanitizeWithdrawalMetadata(refreshed.metadata),
+      transferAttempts: refreshed.transferAttempts.map((attempt) => ({
         ...attempt,
         metadata: this.sanitizeWithdrawalMetadata(attempt.metadata),
       })),
@@ -884,13 +889,26 @@ export class PaymentService {
       throw new NotFoundException("Withdrawal not found");
     }
 
-    const latestAttempt = withdrawal.transferAttempts[0];
+    const reconciled = await this.reconcileWithdrawalTransferStatus(
+      userId,
+      withdrawal,
+    );
+
+    const latestAttempt = reconciled.transferAttempts[0];
     if (!latestAttempt) {
       throw new BadRequestException("Withdrawal has not been submitted");
     }
 
+    if (
+      (latestAttempt.providerStatus || "")
+        .toString()
+        .toUpperCase() !== "PENDING_AUTHORIZATION"
+    ) {
+      throw new BadRequestException("Transaction not awaiting authorization");
+    }
+
     const providerReference = this.getWithdrawalProviderReference(
-      withdrawal.reference,
+      reconciled.reference,
       latestAttempt.metadata,
     );
 
@@ -903,7 +921,7 @@ export class PaymentService {
     const updatedTransaction = await this.prisma.$transaction(async (tx) => {
       const transition = await tx.transaction.updateMany({
         where: {
-          id: withdrawal.id,
+          id: reconciled.id,
           status: "PENDING",
         },
         data: { status: finalStatus },
@@ -933,10 +951,10 @@ export class PaymentService {
 
     if (updatedTransaction && ["FAILED", "REVERSED"].includes(finalStatus)) {
       const withdrawalMetadata =
-        withdrawal.metadata &&
-        typeof withdrawal.metadata === "object" &&
-        !Array.isArray(withdrawal.metadata)
-          ? (withdrawal.metadata as Record<string, unknown>)
+        reconciled.metadata &&
+        typeof reconciled.metadata === "object" &&
+        !Array.isArray(reconciled.metadata)
+          ? (reconciled.metadata as Record<string, unknown>)
           : {};
       const attemptMetadata =
         latestAttempt.metadata &&
@@ -947,11 +965,11 @@ export class PaymentService {
 
       await this.reverseWithdrawal(
         userId,
-        withdrawal.currency as WithdrawDto["currency"],
-        new Decimal(withdrawal.amount),
+        reconciled.currency as WithdrawDto["currency"],
+        new Decimal(reconciled.amount),
         {
-          id: withdrawal.id,
-          reference: withdrawal.reference,
+          id: reconciled.id,
+          reference: reconciled.reference,
         },
         {
           beneficiaryId:
@@ -966,7 +984,7 @@ export class PaymentService {
     }
 
     return {
-      reference: withdrawal.reference,
+      reference: reconciled.reference,
       status: finalStatus,
       message:
         finalStatus === "SUCCESS"
@@ -982,13 +1000,26 @@ export class PaymentService {
       throw new NotFoundException("Withdrawal not found");
     }
 
-    const latestAttempt = withdrawal.transferAttempts[0];
+    const reconciled = await this.reconcileWithdrawalTransferStatus(
+      userId,
+      withdrawal,
+    );
+
+    const latestAttempt = reconciled.transferAttempts[0];
     if (!latestAttempt) {
       throw new BadRequestException("Withdrawal has not been submitted");
     }
 
+    if (
+      (latestAttempt.providerStatus || "")
+        .toString()
+        .toUpperCase() !== "PENDING_AUTHORIZATION"
+    ) {
+      throw new BadRequestException("Transaction not awaiting authorization");
+    }
+
     const providerReference = this.getWithdrawalProviderReference(
-      withdrawal.reference,
+      reconciled.reference,
       latestAttempt.metadata,
     );
 
@@ -1009,9 +1040,10 @@ export class PaymentService {
     });
 
     return {
-      reference: response.reference || withdrawal.reference,
+      reference: response.reference || reconciled.reference,
       message:
         response.responseMessage || "Withdrawal OTP resent successfully",
+      emailRecipients: response.emailRecipients || [],
     };
   }
 
@@ -1290,6 +1322,142 @@ export class PaymentService {
     }
   }
 
+  private async reconcileWithdrawalTransferStatus(
+    userId: string,
+    withdrawal: WithdrawalRecord,
+  ): Promise<WithdrawalRecord> {
+    const latestAttempt = withdrawal.transferAttempts[0];
+    if (!latestAttempt) {
+      return withdrawal;
+    }
+
+    const providerStatus = (
+      latestAttempt.providerStatus || withdrawal.status || ""
+    )
+      .toString()
+      .toUpperCase();
+
+    if (["SUCCESS", "FAILED", "REVERSED"].includes(providerStatus)) {
+      return withdrawal;
+    }
+
+    const providerReference = this.getWithdrawalProviderReference(
+      withdrawal.reference,
+      latestAttempt.metadata,
+    );
+    const refreshed = await this.refreshWithdrawalTransferStatus(
+      providerReference,
+    );
+
+    if (!refreshed) {
+      return withdrawal;
+    }
+
+    const reconciledStatus = this.mapTransferStatus(refreshed.status);
+    const refreshedAt = new Date();
+
+    if (reconciledStatus === "PENDING") {
+      return {
+        ...withdrawal,
+        transferAttempts: withdrawal.transferAttempts.map((attempt, index) =>
+          index === 0
+            ? {
+                ...attempt,
+                providerStatus: refreshed.status,
+                lastCheckedAt: refreshedAt,
+                metadata: this.mergeJsonMetadata(attempt.metadata, {
+                  providerTransactionReference:
+                    refreshed.reference || providerReference,
+                }) as Prisma.InputJsonValue,
+              }
+            : attempt,
+        ),
+      };
+    }
+
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const transition = await tx.transaction.updateMany({
+        where: {
+          id: withdrawal.id,
+          status: "PENDING",
+        },
+        data: { status: reconciledStatus },
+      });
+
+      await tx.transferAttempt.update({
+        where: { id: latestAttempt.id },
+        data: {
+          providerStatus: refreshed.status,
+          status: reconciledStatus,
+          lastCheckedAt: refreshedAt,
+          metadata: this.mergeJsonMetadata(latestAttempt.metadata, {
+            providerTransactionReference:
+              refreshed.reference || providerReference,
+            providerRefreshStatus:
+              refreshed.responseMessage || refreshed.status,
+          }) as Prisma.InputJsonValue,
+        },
+      });
+
+      return transition.count === 1;
+    });
+
+    if (updated && ["FAILED", "REVERSED"].includes(reconciledStatus)) {
+      const withdrawalMetadata =
+        withdrawal.metadata &&
+        typeof withdrawal.metadata === "object" &&
+        !Array.isArray(withdrawal.metadata)
+          ? (withdrawal.metadata as Record<string, unknown>)
+          : {};
+      const attemptMetadata =
+        latestAttempt.metadata &&
+        typeof latestAttempt.metadata === "object" &&
+        !Array.isArray(latestAttempt.metadata)
+          ? (latestAttempt.metadata as Record<string, unknown>)
+          : {};
+
+      await this.reverseWithdrawal(
+        userId,
+        withdrawal.currency as WithdrawDto["currency"],
+        new Decimal(withdrawal.amount),
+        {
+          id: withdrawal.id,
+          reference: withdrawal.reference,
+        },
+        {
+          beneficiaryId:
+            (attemptMetadata.beneficiaryId as string | undefined) ||
+            (withdrawalMetadata.beneficiaryId as string | undefined),
+          accountNumberMasked:
+            (attemptMetadata.accountNumberMasked as string | undefined) ||
+            (withdrawalMetadata.accountNumberMasked as string | undefined) ||
+            maskAccountNumber("0000000000"),
+        },
+      );
+    }
+
+    return {
+      ...withdrawal,
+      status: reconciledStatus,
+      transferAttempts: withdrawal.transferAttempts.map((attempt, index) =>
+        index === 0
+          ? {
+              ...attempt,
+              providerStatus: refreshed.status,
+              status: reconciledStatus,
+              lastCheckedAt: refreshedAt,
+              metadata: this.mergeJsonMetadata(attempt.metadata, {
+                providerTransactionReference:
+                  refreshed.reference || providerReference,
+                providerRefreshStatus:
+                  refreshed.responseMessage || refreshed.status,
+              }) as Prisma.InputJsonValue,
+            }
+          : attempt,
+      ),
+    };
+  }
+
   private async loadWithdrawal(userId: string, reference: string) {
     return this.prisma.transaction.findFirst({
       where: {
@@ -1309,6 +1477,7 @@ export class PaymentService {
         transferAttempts: {
           orderBy: { createdAt: "desc" },
           select: {
+            id: true,
             provider: true,
             providerReference: true,
             providerStatus: true,

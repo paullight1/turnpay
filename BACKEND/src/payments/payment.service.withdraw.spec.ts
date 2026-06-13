@@ -654,6 +654,71 @@ describe("PaymentService withdrawals", () => {
     );
   });
 
+  it("reconciles an expired pending withdrawal from Monnify and reverses it once", async () => {
+    prisma.transaction.findFirst.mockResolvedValue({
+      id: "tx-1",
+      reference: "WD-1",
+      amount: new Decimal(1000),
+      currency: "NGN",
+      status: "PENDING",
+      metadata: { accountNumberMasked: "******6789" },
+      transferAttempts: [
+        {
+          id: "attempt-1",
+          providerReference: "WD-1",
+          providerStatus: "PENDING_AUTHORIZATION",
+          status: "PENDING",
+          attemptNo: 1,
+          lastCheckedAt: null,
+          metadata: {
+            beneficiaryId: "beneficiary-1",
+            accountNumberMasked: "******6789",
+            providerTransactionReference: "MNF-1",
+          },
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+      ],
+    });
+    prisma.transaction.updateMany.mockResolvedValue({ count: 1 });
+    prisma.transferAttempt.update.mockResolvedValue({
+      id: "attempt-1",
+    });
+    prisma.ledgerEntry.findFirst.mockResolvedValue(null);
+    monnifyBanks.getTransferStatus.mockResolvedValue({
+      reference: "MNF-1",
+      status: "EXPIRED",
+      responseMessage: "Transaction has expired",
+      raw: {},
+    });
+
+    const result = await service.getWithdrawal("user-1", "WD-1");
+
+    expect(monnifyBanks.getTransferStatus).toHaveBeenCalledWith("MNF-1");
+    expect(prisma.transaction.updateMany).toHaveBeenCalledWith({
+      where: { id: "tx-1", status: "PENDING" },
+      data: { status: "FAILED" },
+    });
+    expect(prisma.transferAttempt.update).toHaveBeenCalledWith({
+      where: { id: "attempt-1" },
+      data: expect.objectContaining({
+        providerStatus: "EXPIRED",
+        status: "FAILED",
+      }),
+    });
+    expect(ledger.creditWallet).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: "user-1",
+        transactionId: "tx-1",
+        reference: "WD-1-REVERSAL",
+        source: "WITHDRAWAL_REVERSAL",
+      }),
+      prisma,
+    );
+    expect(result.status).toBe("FAILED");
+    expect(result.transferAttempts[0].providerStatus).toBe("EXPIRED");
+  });
+
   it("authorizes a pending withdrawal using the Monnify OTP flow", async () => {
     const transferAttemptMetadata = {
       beneficiaryId: "beneficiary-1",
@@ -685,6 +750,11 @@ describe("PaymentService withdrawals", () => {
     prisma.transaction.updateMany.mockResolvedValue({ count: 1 });
     prisma.transferAttempt.update.mockResolvedValue({
       id: "attempt-1",
+    });
+    monnifyBanks.getTransferStatus.mockResolvedValue({
+      reference: "MNF-1",
+      status: "PENDING_AUTHORIZATION",
+      raw: {},
     });
     monnifyBanks.authorizeTransfer.mockResolvedValue({
       reference: "MNF-1",
@@ -752,9 +822,15 @@ describe("PaymentService withdrawals", () => {
     prisma.transferAttempt.update.mockResolvedValue({
       id: "attempt-1",
     });
+    monnifyBanks.getTransferStatus.mockResolvedValue({
+      reference: "MNF-1",
+      status: "PENDING_AUTHORIZATION",
+      raw: {},
+    });
     monnifyBanks.resendTransferOtp.mockResolvedValue({
       reference: "MNF-1",
       responseMessage: "OTP resent",
+      emailRecipients: ["trustpaylink@gmail.com"],
       raw: {},
     });
 
@@ -773,6 +849,7 @@ describe("PaymentService withdrawals", () => {
     expect(result).toEqual({
       reference: "MNF-1",
       message: "OTP resent",
+      emailRecipients: ["trustpaylink@gmail.com"],
     });
   });
 });

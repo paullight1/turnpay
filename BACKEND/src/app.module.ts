@@ -38,6 +38,8 @@ const defaultNodeEnv =
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
+      // Load the real local env first so it wins over placeholder values in
+      // the example template during development.
       envFilePath: [".env", ".env.example"],
       validationSchema: Joi.object({
         NODE_ENV: Joi.string()

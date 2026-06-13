@@ -1430,62 +1430,98 @@ export class ExchangeService {
       ? { status: status as ExchangePayoutStatus }
       : undefined;
 
-    const payouts = await this.prisma.exchangePayout.findMany({
-      where,
-      take: limit,
-      orderBy: { createdAt: "asc" },
-      include: {
-        user: {
-          select: {
-            id: true,
-            email: true,
-            phone: true,
-            kycStatus: true,
-            kycTier: true,
-            isSuspended: true,
+    try {
+      const payouts = await this.prisma.exchangePayout.findMany({
+        where,
+        take: limit,
+        orderBy: { createdAt: "asc" },
+        include: {
+          user: {
+            select: {
+              id: true,
+              email: true,
+              phone: true,
+              kycStatus: true,
+              kycTier: true,
+              isSuspended: true,
+            },
+          },
+          transaction: {
+            select: {
+              id: true,
+              reference: true,
+              status: true,
+              createdAt: true,
+              updatedAt: true,
+            },
           },
         },
-        transaction: {
-          select: {
-            id: true,
-            reference: true,
-            status: true,
-            createdAt: true,
-            updatedAt: true,
-          },
-        },
-      },
-    });
+      });
 
-    return payouts.map((payout) => this.mapExchangePayout(payout));
+      return payouts.map((payout) => this.mapExchangePayout(payout));
+    } catch (error) {
+      this.logger.error(
+        {
+          limit,
+          status: status ?? null,
+          error:
+            error instanceof Error
+              ? {
+                  name: error.name,
+                  message: error.message,
+                  stack: error.stack,
+                }
+              : error,
+        },
+        "Failed to load admin exchange payouts",
+      );
+      throw error;
+    }
   }
 
   async getAdminPayoutStats() {
-    const counts = await Promise.all([
-      this.prisma.exchangePayout.count({
-        where: { status: "PENDING_APPROVAL" },
-      }),
-      this.prisma.exchangePayout.count({
-        where: { status: "APPROVED" },
-      }),
-      this.prisma.exchangePayout.count({
-        where: { status: "PROCESSING" },
-      }),
-      this.prisma.exchangePayout.count({
-        where: { status: "SENT" },
-      }),
-      this.prisma.exchangePayout.count({
-        where: { status: "FAILED" },
-      }),
-    ]);
+    try {
+      const counts = await Promise.all([
+        this.prisma.exchangePayout.count({
+          where: { status: "PENDING_APPROVAL" },
+        }),
+        this.prisma.exchangePayout.count({
+          where: { status: "APPROVED" },
+        }),
+        this.prisma.exchangePayout.count({
+          where: { status: "PROCESSING" },
+        }),
+        this.prisma.exchangePayout.count({
+          where: { status: "SENT" },
+        }),
+        this.prisma.exchangePayout.count({
+          where: { status: "FAILED" },
+        }),
+      ]);
 
-    return {
-      pendingApproval: counts[0],
-      approved: counts[1],
-      processing: counts[2],
-      sent: counts[3],
-      failed: counts[4],
-    };
+      return {
+        pendingApproval: counts[0],
+        approved: counts[1],
+        processing: counts[2],
+        sent: counts[3],
+        failed: counts[4],
+      };
+    } catch (error) {
+      this.logger.error(
+        {
+          error:
+            error instanceof Error
+              ? {
+                  name: error.name,
+                  message: error.message,
+                  stack: error.stack,
+                }
+              : error,
+        },
+        "Failed to load admin payout stats",
+      );
+      throw error;
+    }
   }
 
   async approvePayout(

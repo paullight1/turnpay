@@ -1200,11 +1200,38 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
         _attemptFingerprint(amount),
       );
       final response = await _request(amount, idempotencyKey, transactionPin);
+      final responseData = _asResponseMap(response.data);
       _attemptIdempotency.markFinalOutcome();
+
+      if (!mounted) return;
+
+      if (widget.kind == MoneyActionKind.withdraw) {
+        final withdrawalStatus = _responseString(
+          responseData['status'],
+          fallback: 'PENDING',
+        ).toUpperCase();
+        final reference = _responseString(responseData['reference']);
+
+        if (withdrawalStatus == 'PENDING' && reference.isNotEmpty) {
+          context.pushReplacement(
+            AppRoutes.withdrawAuthorizeFor(reference),
+          );
+          return;
+        }
+
+        if (withdrawalStatus == 'SUCCESS') {
+          context.pushReplacement(
+            AppRoutes.withdrawSuccess,
+            extra: responseData,
+          );
+          return;
+        }
+      }
+
       setState(() {
-        _captureVtuOrder(response.data);
+        _captureVtuOrder(responseData);
         _setMessageState(
-          _successMessage(response.data),
+          _successMessage(responseData),
           type: MoneyActionFeedbackType.success,
         );
       });
@@ -1258,6 +1285,18 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
       _pendingOrderReference = reference;
       _trackedOrder = null;
     }
+  }
+
+  Map<String, dynamic> _asResponseMap(dynamic data) {
+    if (data is Map<String, dynamic>) return data;
+    if (data is Map) return Map<String, dynamic>.from(data);
+    return const {};
+  }
+
+  String _responseString(dynamic value, {String fallback = ''}) {
+    if (value == null) return fallback;
+    final text = value.toString().trim();
+    return text.isEmpty ? fallback : text;
   }
 
   Future<void> _checkVtuOrderStatus() async {

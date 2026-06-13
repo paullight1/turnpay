@@ -49,10 +49,10 @@ function maskTail(value?: string, visible = 4) {
 }
 
 export default function AdminSupportPage() {
-  const { user, isLoading: authLoading } = useAuth();
+  const { user, profile, isLoading: authLoading } = useAuth();
   const router = useRouter();
   const queryClient = useQueryClient();
-  const isAdmin = user?.role === "ADMIN";
+  const isAdmin = user?.role === "ADMIN" || profile?.role === "ADMIN";
   const [status, setStatus] = useState("OPEN");
   const [selectedTicket, setSelectedTicket] = useState<SupportTicket | null>(null);
   const [actionStatus, setActionStatus] = useState<(typeof actionStatuses)[number]>("RESOLVED");
@@ -60,10 +60,16 @@ export default function AdminSupportPage() {
   const [resolution, setResolution] = useState("");
 
   useEffect(() => {
-    if (!authLoading && !isAdmin) {
+    if (
+      !authLoading &&
+      user &&
+      profile &&
+      user.role !== "ADMIN" &&
+      profile.role !== "ADMIN"
+    ) {
       router.push("/dashboard");
     }
-  }, [authLoading, isAdmin, router]);
+  }, [authLoading, profile, user, router]);
 
   const { data, isLoading } = useQuery({
     queryKey: ["admin-support-tickets", status],
@@ -101,7 +107,7 @@ export default function AdminSupportPage() {
     },
   });
 
-  if (authLoading || !user || isLoading) {
+  if (authLoading || !user || !profile || isLoading) {
     return (
       <DashboardLayout>
         <Skeleton className="h-72 w-full" />
