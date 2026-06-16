@@ -1,6 +1,6 @@
 "use client";
 
-import { useDeferredValue, useEffect, useMemo, useState } from "react";
+import { Suspense, useDeferredValue, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -197,7 +197,7 @@ function AuditStatCard({
   );
 }
 
-export default function AdminAuditPage() {
+function AdminAuditContent() {
   const { user, profile, isLoading: authLoading } = useAuth();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -756,5 +756,19 @@ export default function AdminAuditPage() {
         </div>
       </div>
     </DashboardLayout>
+  );
+}
+
+export default function AdminAuditPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex min-h-[50vh] items-center justify-center p-6">
+          <Skeleton className="h-72 w-full max-w-6xl" />
+        </div>
+      }
+    >
+      <AdminAuditContent />
+    </Suspense>
   );
 }
