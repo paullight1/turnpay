@@ -24,6 +24,7 @@ import {
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import DashboardLayout from "@/components/layout/dashboard-layout";
+import { RateControlCard } from "@/components/admin/rate-control";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -3251,6 +3252,19 @@ export default function AdminPage() {
                         <Skeleton key={item} className="h-10 w-full" />
                       ))}
                     </div>
+                  ) : transactionsQuery.isError ? (
+                    <div className="flex flex-col items-center gap-3 py-10 text-center">
+                      <p className="text-sm text-muted-foreground">
+                        Could not load transactions.
+                      </p>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => void transactionsQuery.refetch()}
+                      >
+                        Retry
+                      </Button>
+                    </div>
                   ) : filteredTransactions.length === 0 ? (
                     <div className="py-10 text-center text-muted-foreground">
                       No transactions for this filter
@@ -3367,7 +3381,22 @@ export default function AdminPage() {
                 <CardTitle>Failed provider events</CardTitle>
               </CardHeader>
               <CardContent>
-                {(providerEventsQuery.data ?? []).length === 0 ? (
+                {providerEventsQuery.isLoading ? (
+                  <Skeleton className="h-40 w-full" />
+                ) : providerEventsQuery.isError ? (
+                  <div className="flex flex-col items-center gap-3 py-8 text-center">
+                    <p className="text-sm text-muted-foreground">
+                      Could not load provider events.
+                    </p>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => void providerEventsQuery.refetch()}
+                    >
+                      Retry
+                    </Button>
+                  </div>
+                ) : (providerEventsQuery.data ?? []).length === 0 ? (
                   <div className="py-8 text-center text-muted-foreground">
                     No failed provider events
                   </div>
@@ -3427,6 +3456,19 @@ export default function AdminPage() {
                 <CardContent>
                   {pendingWithdrawalsQuery.isLoading ? (
                     <Skeleton className="h-40 w-full" />
+                  ) : pendingWithdrawalsQuery.isError ? (
+                    <div className="flex flex-col items-center gap-3 py-8 text-center">
+                      <p className="text-sm text-muted-foreground">
+                        Could not load pending withdrawals.
+                      </p>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => void pendingWithdrawalsQuery.refetch()}
+                      >
+                        Retry
+                      </Button>
+                    </div>
                   ) : (pendingWithdrawalsQuery.data ?? []).length === 0 ? (
                     <div className="py-8 text-center text-muted-foreground">
                       No pending withdrawals
@@ -3913,6 +3955,8 @@ export default function AdminPage() {
             value="exchange"
             className="grid gap-4 xl:grid-cols-[1fr_1.2fr]"
           >
+            <RateControlCard />
+
             <Card>
               <CardHeader>
                 <CardTitle>NGN to GHS exchange lane</CardTitle>

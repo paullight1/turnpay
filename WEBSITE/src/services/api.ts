@@ -459,6 +459,40 @@ export const adminExchangeApi = {
     apiClient.post(`/api/admin/exchange/receipts/${receiptId}/proof-url`, {}),
 };
 
+export const adminExchangeRateApi = {
+  getRate: (from: string, to: string) =>
+    apiClient.get(
+      `/api/exchange/rate?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`,
+    ),
+  updateRate: (
+    data: {
+      from: string;
+      to: string;
+      rate: number;
+      markup: number;
+      reason: string;
+    },
+    idempotencyKey?: string,
+  ) =>
+    apiClient.post(
+      "/api/exchange/rates",
+      data,
+      withIdempotencyKey(idempotencyKey),
+    ),
+  getPendingOverrides: () =>
+    apiClient.get("/api/admin/exchange/rates/pending-overrides"),
+  reviewOverride: (
+    overrideId: string,
+    data: { status: "APPROVED" | "REJECTED"; reason: string },
+    idempotencyKey?: string,
+  ) =>
+    apiClient.post(
+      `/api/admin/exchange/rates/pending-overrides/${overrideId}/review`,
+      data,
+      withIdempotencyKey(idempotencyKey),
+    ),
+};
+
 export const adminExchangePayoutApi = {
   getPayouts: (status?: string, limit = 50) => {
     const params = new URLSearchParams({ limit: String(limit) });
