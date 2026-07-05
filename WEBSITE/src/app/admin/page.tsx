@@ -3348,6 +3348,16 @@ function AdminPageContent() {
                       </TableBody>
                     </Table>
                   )}
+                  {!transactionsQuery.isLoading &&
+                    !transactionsQuery.isError &&
+                    filteredTransactions.length > 0 && (
+                      <p className="mt-3 text-xs text-muted-foreground">
+                        Showing {Math.min(12, filteredTransactions.length)} of{" "}
+                        {filteredTransactions.length} in the latest 50 fetched.
+                        Narrow with the filter or open the audit trail for the
+                        full history.
+                      </p>
+                    )}
                 </CardContent>
               </Card>
 
