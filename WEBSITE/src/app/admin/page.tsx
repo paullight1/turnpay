@@ -2583,14 +2583,16 @@ export default function AdminPage() {
                   <Button
                     variant="outline"
                     className="h-auto items-start justify-between gap-3 px-4 py-3 text-left"
-                    onClick={() => setAdminTab("vtu")}
+                    asChild
                   >
-                    <span>
-                      <span className="block text-sm font-medium">VTU Ops</span>
-                      <span className="block text-xs font-normal text-muted-foreground">
-                        Check provider health and service volume.
+                    <Link href="/admin/vtu">
+                      <span>
+                        <span className="block text-sm font-medium">VTU Ops</span>
+                        <span className="block text-xs font-normal text-muted-foreground">
+                          Check provider health and service volume.
+                        </span>
                       </span>
-                    </span>
+                    </Link>
                   </Button>
                   <Button
                     variant="outline"

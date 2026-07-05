@@ -71,7 +71,7 @@ export default function AdminSupportPage() {
     }
   }, [authLoading, profile, user, router]);
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isFetching } = useQuery({
     queryKey: ["admin-support-tickets", status],
     queryFn: async () => {
       const res = await supportApi.getAdminTickets(
@@ -107,7 +107,7 @@ export default function AdminSupportPage() {
     },
   });
 
-  if (authLoading || !user || !profile || isLoading) {
+  if (authLoading || !user || !profile) {
     return (
       <DashboardLayout>
         <Skeleton className="h-72 w-full" />
@@ -146,13 +146,26 @@ export default function AdminSupportPage() {
 
         <Card>
           <CardHeader>
-            <CardTitle>Cases ({data?.total ?? 0})</CardTitle>
+            <CardTitle className="flex items-center gap-2">
+              Cases ({data?.total ?? 0})
+              {isFetching && !isLoading && (
+                <span className="text-xs font-normal text-muted-foreground">
+                  Refreshing…
+                </span>
+              )}
+            </CardTitle>
             <CardDescription>
               Admin decisions require a reason and are written to the audit log.
             </CardDescription>
           </CardHeader>
           <CardContent>
-            {data?.tickets.length === 0 ? (
+            {isLoading ? (
+              <div className="space-y-3">
+                {[1, 2, 3, 4].map((item) => (
+                  <Skeleton key={item} className="h-12 w-full" />
+                ))}
+              </div>
+            ) : data?.tickets.length === 0 ? (
               <div className="py-10 text-center text-muted-foreground">
                 No support cases for this filter
               </div>
@@ -274,8 +287,15 @@ export default function AdminSupportPage() {
                   <Input
                     value={reason}
                     onChange={(event) => setReason(event.target.value)}
+                    maxLength={500}
                     placeholder="Required for audit log"
                   />
+                  <p className="text-xs text-muted-foreground">
+                    Required for the audit log. Minimum 10 characters
+                    {reason.trim().length > 0 && reason.trim().length < 10
+                      ? ` (${10 - reason.trim().length} more needed).`
+                      : "."}
+                  </p>
                 </div>
               </div>
 
