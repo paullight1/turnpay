@@ -269,6 +269,7 @@ function AdminAuditContent() {
     },
     enabled: isAdmin,
     staleTime: 30000,
+    refetchInterval: 30000,
   });
 
   const logs = useMemo(() => logsQuery.data ?? [], [logsQuery.data]);
@@ -562,7 +563,11 @@ function AdminAuditContent() {
                   </CardDescription>
                 </div>
                 <Badge variant="outline" className="gap-1">
-                  <ScrollText className="size-3.5" />
+                  {logsQuery.isFetching ? (
+                    <RefreshCw className="size-3.5 animate-spin" />
+                  ) : (
+                    <ScrollText className="size-3.5" />
+                  )}
                   Live
                 </Badge>
               </div>
@@ -603,11 +608,20 @@ function AdminAuditContent() {
                     {logs.map((log) => (
                       <TableRow
                         key={log.id}
+                        role="button"
+                        tabIndex={0}
+                        aria-label={`Inspect ${humanizeLabel(log.action)} on ${humanizeLabel(log.targetType)}`}
                         className={cn(
-                          "cursor-pointer",
+                          "cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                           selectedLog?.id === log.id && "bg-muted/50",
                         )}
                         onClick={() => setSelectedLogId(log.id)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter" || event.key === " ") {
+                            event.preventDefault();
+                            setSelectedLogId(log.id);
+                          }
+                        }}
                       >
                         <TableCell className="whitespace-nowrap text-sm text-muted-foreground">
                           {formatDateTime(log.createdAt)}
