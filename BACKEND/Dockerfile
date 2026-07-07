@@ -25,4 +25,5 @@ RUN npx prisma generate
 
 EXPOSE 3000
 
-CMD ["dumb-init", "--", "sh", "-c", "npx prisma migrate resolve --rolled-back 013_auth_session_hardening --schema prisma/schema.prisma || true; npx prisma migrate deploy && node dist/src/main.js"]
+# Migrations run via the platform preDeployCommand (see render.yaml), not on every container boot.
+CMD ["dumb-init", "--", "node", "dist/src/main.js"]

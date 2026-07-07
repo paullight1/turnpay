@@ -86,10 +86,23 @@ class AppColors {
     overlayLight: Color(0x19000000),
   );
 
-  static _AppPalette _active = _dark;
+  static _AppPalette _active = _light;
 
+  /// Whether the currently active palette is the dark one.
+  static bool isDark = false;
+
+  /// Apply a resolved [Brightness]. This is the source of truth used by every
+  /// static color getter below, so it must be called with the *effective*
+  /// brightness (system mode already resolved) before the subtree builds.
+  static void applyBrightness(Brightness brightness) {
+    isDark = brightness == Brightness.dark;
+    _active = isDark ? _dark : _light;
+  }
+
+  /// Backwards-compatible helper. Prefer [applyBrightness] with a resolved
+  /// brightness so that [ThemeMode.system] follows the device correctly.
   static void applyThemeMode(ThemeMode mode) {
-    _active = mode == ThemeMode.light ? _light : _dark;
+    applyBrightness(mode == ThemeMode.dark ? Brightness.dark : Brightness.light);
   }
 
   static Color get background => _active.background;

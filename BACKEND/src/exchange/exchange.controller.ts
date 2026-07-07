@@ -159,6 +159,7 @@ export class ExchangeController {
       dto.from,
       dto.to,
       dto.rate,
+      dto.markup,
     );
 
     if (deviation.requiresDualApproval) {

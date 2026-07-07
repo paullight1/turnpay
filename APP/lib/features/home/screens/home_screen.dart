@@ -7,27 +7,33 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/router/app_router.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../core/utils/haptics.dart';
 import '../../../core/widgets/micro_interactions.dart';
+import '../../../core/widgets/tp_illustration.dart';
 import '../../../core/widgets/tp_snackbar.dart';
 import '../../../services/auth_service.dart';
 import '../../../services/home_data_service.dart';
 
 class HomeScreen extends StatefulWidget {
-  const HomeScreen({super.key});
+  final HomeDataService homeDataService;
+
+  HomeScreen({
+    super.key,
+    HomeDataService? homeDataService,
+  }) : homeDataService = homeDataService ?? HomeDataService();
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  final _homeDataService = HomeDataService();
   late Future<HomeDashboardData> _dashboardFuture;
   bool _showBalances = true;
 
   @override
   void initState() {
     super.initState();
-    _dashboardFuture = _homeDataService.fetchDashboard();
+    _dashboardFuture = widget.homeDataService.fetchDashboard();
   }
 
   void _toggleBalances() {
@@ -37,7 +43,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   void _refreshDashboard() {
     setState(() {
-      _dashboardFuture = _homeDataService.fetchDashboard();
+      _dashboardFuture = widget.homeDataService.fetchDashboard();
     });
   }
 
@@ -164,7 +170,7 @@ class _HomeTopBar extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('Welcome back', style: AppTextStyles.bodyM),
+              Text(_greeting(), style: AppTextStyles.bodyM),
               Text(
                 _compactName(user.displayName),
                 style: AppTextStyles.headingM.copyWith(
@@ -184,6 +190,13 @@ class _HomeTopBar extends StatelessWidget {
         ),
       ],
     );
+  }
+
+  String _greeting() {
+    final hour = DateTime.now().hour;
+    if (hour < 12) return 'Good morning';
+    if (hour < 17) return 'Good afternoon';
+    return 'Good evening';
   }
 }
 
@@ -1648,13 +1661,37 @@ class _RecentTransactionsSection extends StatelessWidget {
         ),
         SizedBox(height: AppSpacing.sm),
         if (items.isEmpty)
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
-            child: Text(
-              'No transactions yet.',
-              style: AppTextStyles.bodyM.copyWith(
-                color: AppColors.textSecondary,
-              ),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(
+              vertical: AppSpacing.md,
+              horizontal: AppSpacing.md,
+            ),
+            decoration: BoxDecoration(
+              color: AppColors.surfaceVariant,
+              borderRadius: BorderRadius.circular(AppRadius.lg),
+              border: Border.all(color: AppColors.border),
+            ),
+            child: Column(
+              children: [
+                TpIllustration(
+                  variant: TpIllustrationVariant.emptyTransactions,
+                  size: 116,
+                  semanticLabel: 'No transactions yet',
+                ),
+                const SizedBox(height: AppSpacing.xs),
+                Text(
+                  'No transactions yet',
+                  style: AppTextStyles.labelM,
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  'Your recent activity will show up here.',
+                  style: AppTextStyles.bodyS,
+                  textAlign: TextAlign.center,
+                ),
+              ],
             ),
           )
         else
@@ -1870,10 +1907,23 @@ class _HomeLoadingState extends StatelessWidget {
   Widget build(BuildContext context) {
     return SizedBox.expand(
       child: Center(
-        child: Icon(
-          Icons.sync_rounded,
-          color: AppColors.primary,
-          size: 72,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            SizedBox(
+              width: 44,
+              height: 44,
+              child: CircularProgressIndicator(
+                strokeWidth: 3,
+                color: AppColors.primary,
+              ),
+            ),
+            const SizedBox(height: AppSpacing.md),
+            Text(
+              'Loading your dashboard…',
+              style: AppTextStyles.bodyS,
+            ),
+          ],
         ),
       ),
     );
@@ -1904,10 +1954,10 @@ class _HomeErrorState extends StatelessWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(
-                Icons.cloud_off_rounded,
-                color: AppColors.primary,
-                size: 36,
+              TpIllustration(
+                variant: TpIllustrationVariant.connectionLost,
+                size: 148,
+                semanticLabel: 'Dashboard could not load',
               ),
               const SizedBox(height: AppSpacing.md),
               Text(
@@ -1919,7 +1969,10 @@ class _HomeErrorState extends StatelessWidget {
               ),
               const SizedBox(height: AppSpacing.lg),
               FilledButton(
-                onPressed: onRetry,
+                onPressed: () {
+                  Haptics.selection();
+                  onRetry();
+                },
                 style: FilledButton.styleFrom(
                   backgroundColor: AppColors.primary,
                   foregroundColor: Colors.white,
@@ -1927,7 +1980,10 @@ class _HomeErrorState extends StatelessWidget {
                 child: const Text('Retry'),
               ),
               TextButton(
-                onPressed: () => context.go(AppRoutes.login),
+                onPressed: () {
+                  Haptics.selection();
+                  context.go(AppRoutes.login);
+                },
                 child: const Text('Log in'),
               ),
             ],

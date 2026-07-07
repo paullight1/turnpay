@@ -17,6 +17,12 @@ const PIN_ITERATIONS = 210_000;
 const PIN_TTL_SECONDS = 60 * 60 * 24 * 365;
 const LOCK_SECONDS = 15 * 60;
 const MAX_FAILED_ATTEMPTS = 5;
+// Absolute ceiling on failed attempts within a rolling 24h window. Without this
+// the 5-per-15-min window still permits ~480 guesses/day, which slowly brute
+// forces a 4-digit PIN. After this many failures the PIN is locked for the rest
+// of the day and only a successful verify (or PIN reset) clears it.
+const MAX_DAILY_FAILED_ATTEMPTS = 15;
+const DAILY_WINDOW_SECONDS = 60 * 60 * 24;
 
 @Injectable()
 export class TransactionPinService {
@@ -114,6 +120,23 @@ export class TransactionPinService {
   }
 
   private async recordFailure(userId: string) {
+    // Daily hard cap — survives the short rolling window so an attacker cannot
+    // reset the counter simply by pausing 15 minutes between bursts.
+    const dailyKey = this.dailyFailuresKey(userId);
+    const dailyCount =
+      Number((await this.redis.get(dailyKey)) || "0") + 1;
+    await this.redis.set(
+      dailyKey,
+      String(dailyCount),
+      DAILY_WINDOW_SECONDS,
+    );
+
+    if (dailyCount >= MAX_DAILY_FAILED_ATTEMPTS) {
+      await this.redis.set(this.lockKey(userId), "1", DAILY_WINDOW_SECONDS);
+      await this.redis.del(this.failuresKey(userId));
+      return;
+    }
+
     const failuresKey = this.failuresKey(userId);
     const current = Number((await this.redis.get(failuresKey)) || "0");
     const next = current + 1;
@@ -129,6 +152,7 @@ export class TransactionPinService {
 
   private async clearFailures(userId: string) {
     await this.redis.del(this.failuresKey(userId));
+    await this.redis.del(this.dailyFailuresKey(userId));
     await this.redis.del(this.lockKey(userId));
   }
 
@@ -162,6 +186,10 @@ export class TransactionPinService {
 
   private failuresKey(userId: string) {
     return `transaction-pin-failures:${userId}`;
+  }
+
+  private dailyFailuresKey(userId: string) {
+    return `transaction-pin-daily-failures:${userId}`;
   }
 
   private lockKey(userId: string) {

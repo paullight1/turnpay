@@ -60,6 +60,7 @@ export class AuthController {
   }
 
   @Post("refresh")
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
   @HttpCode(HttpStatus.OK)
   async refreshTokens(@Body() dto: RefreshTokenDto, @Req() request: Request) {
     return this.authService.refreshToken(dto.refreshToken, {
@@ -122,6 +123,7 @@ export class AuthController {
   }
 
   @Post("otp/verify")
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
   @HttpCode(HttpStatus.OK)
   async verifyOtp(@Body() verifyOtpDto: VerifyOtpDto) {
     return this.authService.verifyOtp(verifyOtpDto.phone, verifyOtpDto.otp);

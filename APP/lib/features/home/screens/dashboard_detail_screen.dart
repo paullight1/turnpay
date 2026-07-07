@@ -8,6 +8,7 @@ import 'package:dio/dio.dart';
 import '../../../core/router/app_router.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/theme/theme_controller.dart';
+import '../../../core/utils/haptics.dart';
 import '../../../core/widgets/tp_page_header.dart';
 import '../../../core/widgets/trustpay_lottie.dart';
 import '../../../services/auth_service.dart';
@@ -33,11 +34,13 @@ enum ProfileActionKind {
 
 class DashboardDetailScreen extends StatefulWidget {
   final DashboardDetailKind kind;
+  final HomeDataService homeDataService;
 
-  const DashboardDetailScreen({
+  DashboardDetailScreen({
     super.key,
     required this.kind,
-  });
+    HomeDataService? homeDataService,
+  }) : homeDataService = homeDataService ?? HomeDataService();
 
   @override
   State<DashboardDetailScreen> createState() => _DashboardDetailScreenState();
@@ -183,18 +186,17 @@ class _VtuOrderDetailScreenState extends State<VtuOrderDetailScreen> {
 }
 
 class _DashboardDetailScreenState extends State<DashboardDetailScreen> {
-  final _homeDataService = HomeDataService();
   late Future<HomeDashboardData> _future;
 
   @override
   void initState() {
     super.initState();
-    _future = _homeDataService.fetchDashboard();
+    _future = widget.homeDataService.fetchDashboard();
   }
 
   void _reload() {
     setState(() {
-      _future = _homeDataService.fetchDashboard();
+      _future = widget.homeDataService.fetchDashboard();
     });
   }
 
@@ -269,21 +271,25 @@ class _DashboardDetailScreenState extends State<DashboardDetailScreen> {
 }
 
 class DashboardProfileScreen extends StatefulWidget {
-  const DashboardProfileScreen({super.key});
+  final HomeDataService homeDataService;
+
+  DashboardProfileScreen({
+    super.key,
+    HomeDataService? homeDataService,
+  }) : homeDataService = homeDataService ?? HomeDataService();
 
   @override
   State<DashboardProfileScreen> createState() => _DashboardProfileScreenState();
 }
 
 class _DashboardProfileScreenState extends State<DashboardProfileScreen> {
-  final _homeDataService = HomeDataService();
   final _authService = AuthService();
   late Future<HomeDashboardData> _future;
 
   @override
   void initState() {
     super.initState();
-    _future = _homeDataService.fetchDashboard();
+    _future = widget.homeDataService.fetchDashboard();
   }
 
   @override
@@ -306,7 +312,7 @@ class _DashboardProfileScreenState extends State<DashboardProfileScreen> {
                     'Could not load profile',
                   ),
                   onRetry: () => setState(() {
-                    _future = _homeDataService.fetchDashboard();
+                    _future = widget.homeDataService.fetchDashboard();
                   }),
                 );
               }
@@ -407,7 +413,12 @@ class _DashboardProfileScreenState extends State<DashboardProfileScreen> {
 }
 
 class DashboardTransactionsScreen extends StatefulWidget {
-  const DashboardTransactionsScreen({super.key});
+  final HomeDataService homeDataService;
+
+  DashboardTransactionsScreen({
+    super.key,
+    HomeDataService? homeDataService,
+  }) : homeDataService = homeDataService ?? HomeDataService();
 
   @override
   State<DashboardTransactionsScreen> createState() =>
@@ -416,24 +427,25 @@ class DashboardTransactionsScreen extends StatefulWidget {
 
 class ProfileActionScreen extends StatefulWidget {
   final ProfileActionKind kind;
+  final HomeDataService homeDataService;
 
-  const ProfileActionScreen({
+  ProfileActionScreen({
     super.key,
     required this.kind,
-  });
+    HomeDataService? homeDataService,
+  }) : homeDataService = homeDataService ?? HomeDataService();
 
   @override
   State<ProfileActionScreen> createState() => _ProfileActionScreenState();
 }
 
 class _ProfileActionScreenState extends State<ProfileActionScreen> {
-  final _homeDataService = HomeDataService();
   late Future<HomeDashboardData> _future;
 
   @override
   void initState() {
     super.initState();
-    _future = _homeDataService.fetchDashboard();
+    _future = widget.homeDataService.fetchDashboard();
   }
 
   @override
@@ -476,12 +488,16 @@ class _ProfileActionScreenState extends State<ProfileActionScreen> {
                             'Could not load this page',
                           ),
                           onRetry: () => setState(() {
-                            _future = _homeDataService.fetchDashboard();
+                            _future = widget.homeDataService.fetchDashboard();
                           }),
                         );
                       }
                       return _profileBodyFor(
-                          context, widget.kind, snapshot.data!);
+                        context,
+                        widget.kind,
+                        snapshot.data!,
+                        widget.homeDataService,
+                      );
                     },
                   ),
                 ],
@@ -496,7 +512,6 @@ class _ProfileActionScreenState extends State<ProfileActionScreen> {
 
 class _DashboardTransactionsScreenState
     extends State<DashboardTransactionsScreen> {
-  final _homeDataService = HomeDataService();
   final _authService = AuthService();
   late Future<List<HomeTransaction>> _future;
   bool _sessionExpired = false;
@@ -504,7 +519,7 @@ class _DashboardTransactionsScreenState
   @override
   void initState() {
     super.initState();
-    _future = _homeDataService.fetchTransactions();
+    _future = widget.homeDataService.fetchTransactions();
   }
 
   @override
@@ -519,7 +534,7 @@ class _DashboardTransactionsScreenState
       future: _future,
       onRetry: () {
         setState(() {
-          _future = _homeDataService.fetchTransactions();
+          _future = widget.homeDataService.fetchTransactions();
         });
       },
       onUnauthorized: () async {
@@ -527,7 +542,7 @@ class _DashboardTransactionsScreenState
         if (!mounted) return;
         if (refreshed) {
           setState(() {
-            _future = _homeDataService.fetchTransactions();
+            _future = widget.homeDataService.fetchTransactions();
           });
         } else {
           setState(() => _sessionExpired = true);
@@ -702,12 +717,16 @@ Widget _profileBodyFor(
   BuildContext context,
   ProfileActionKind kind,
   HomeDashboardData data,
+  HomeDataService homeDataService,
 ) {
   final user = data.user;
 
   switch (kind) {
     case ProfileActionKind.account:
-      return _AccountDetailsBody(data: data);
+      return _AccountDetailsBody(
+        data: data,
+        homeDataService: homeDataService,
+      );
     case ProfileActionKind.appearance:
       return const _AppearanceSettingsPanel();
     case ProfileActionKind.security:
@@ -718,7 +737,9 @@ Widget _profileBodyFor(
             context.push(AppRoutes.transactionSecurity),
       );
     case ProfileActionKind.support:
-      return const _SupportTicketPanel();
+      return _SupportTicketPanel(
+        homeDataService: homeDataService,
+      );
   }
 }
 
@@ -911,15 +932,18 @@ class _TierStatusCard extends StatelessWidget {
 
 class _AccountDetailsBody extends StatefulWidget {
   final HomeDashboardData data;
+  final HomeDataService homeDataService;
 
-  const _AccountDetailsBody({required this.data});
+  const _AccountDetailsBody({
+    required this.data,
+    required this.homeDataService,
+  });
 
   @override
   State<_AccountDetailsBody> createState() => _AccountDetailsBodyState();
 }
 
 class _AccountDetailsBodyState extends State<_AccountDetailsBody> {
-  final _homeDataService = HomeDataService();
   final _provisionAttempt = MoneyAttemptIdempotency();
   final _fullNameController = TextEditingController();
   final _yearOfBirthController = TextEditingController();
@@ -987,7 +1011,7 @@ class _AccountDetailsBodyState extends State<_AccountDetailsBody> {
     });
 
     try {
-      final updated = await _homeDataService.updateProfile(
+      final updated = await widget.homeDataService.updateProfile(
         fullName: _fullNameController.text,
         phone: phone,
         yearOfBirth: year,
@@ -1052,7 +1076,7 @@ class _AccountDetailsBodyState extends State<_AccountDetailsBody> {
     });
 
     try {
-      await _homeDataService.createSupportTicket(
+      await widget.homeDataService.createSupportTicket(
         category: 'ACCOUNT',
         description:
             'Account deletion requested from mobile profile. Please review wallet, KYC, transaction retention, and closure requirements.',
@@ -1090,7 +1114,9 @@ class _AccountDetailsBodyState extends State<_AccountDetailsBody> {
   Future<void> _loadTransactionVolume() async {
     setState(() => _isLoadingTransactions = true);
     try {
-      final transactions = await _homeDataService.fetchTransactions(limit: 100);
+      final transactions = await widget.homeDataService.fetchTransactions(
+        limit: 100,
+      );
       if (!mounted) return;
       setState(() => _transactions = transactions);
     } on DioException {
@@ -1119,7 +1145,7 @@ class _AccountDetailsBodyState extends State<_AccountDetailsBody> {
     });
 
     try {
-      final account = await _homeDataService.provisionVirtualAccount(
+      final account = await widget.homeDataService.provisionVirtualAccount(
         firstName: nameParts.first,
         lastName: nameParts.last,
         idempotencyKey: _provisionAttempt.keyFor(
@@ -1675,7 +1701,12 @@ class _AppearanceSettingsPanel extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final themeMode = ref.watch(themeModeProvider);
     final controller = ref.read(themeModeProvider.notifier);
-    final isLight = themeMode == ThemeMode.light;
+
+    void select(ThemeMode mode) {
+      if (mode == themeMode) return;
+      Haptics.selection();
+      controller.setMode(mode);
+    }
 
     return Column(
       children: [
@@ -1683,10 +1714,11 @@ class _AppearanceSettingsPanel extends ConsumerWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('Theme mode', style: AppTextStyles.headingM),
+              Text('Appearance', style: AppTextStyles.headingM),
               SizedBox(height: AppSpacing.xs),
               Text(
-                'Switch between the default dark interface and a lighter daytime mode.',
+                'Match your device automatically, or lock TrustPay to a light '
+                'or dark look.',
                 style: AppTextStyles.bodyM,
               ),
               SizedBox(height: AppSpacing.md),
@@ -1701,10 +1733,10 @@ class _AppearanceSettingsPanel extends ConsumerWidget {
                   children: [
                     Expanded(
                       child: _ThemeModeChip(
-                        label: 'Dark',
-                        icon: Icons.dark_mode_rounded,
-                        active: !isLight,
-                        onTap: () => controller.setMode(ThemeMode.dark),
+                        label: 'System',
+                        icon: Icons.brightness_auto_rounded,
+                        active: themeMode == ThemeMode.system,
+                        onTap: () => select(ThemeMode.system),
                       ),
                     ),
                     SizedBox(width: AppSpacing.xs),
@@ -1712,8 +1744,17 @@ class _AppearanceSettingsPanel extends ConsumerWidget {
                       child: _ThemeModeChip(
                         label: 'Light',
                         icon: Icons.light_mode_rounded,
-                        active: isLight,
-                        onTap: () => controller.setMode(ThemeMode.light),
+                        active: themeMode == ThemeMode.light,
+                        onTap: () => select(ThemeMode.light),
+                      ),
+                    ),
+                    SizedBox(width: AppSpacing.xs),
+                    Expanded(
+                      child: _ThemeModeChip(
+                        label: 'Dark',
+                        icon: Icons.dark_mode_rounded,
+                        active: themeMode == ThemeMode.dark,
+                        onTap: () => select(ThemeMode.dark),
                       ),
                     ),
                   ],
@@ -1732,21 +1773,23 @@ class _ProfileThemeQuickToggle extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final themeMode = ref.watch(themeModeProvider);
+    ref.watch(themeModeProvider);
     final controller = ref.read(themeModeProvider.notifier);
-    final isLight = themeMode == ThemeMode.light;
+    // Reflect what the user is actually looking at (handles system mode too).
+    final isDark = AppColors.isDark;
 
     return Semantics(
       button: true,
-      label: isLight ? 'Switch to dark mode' : 'Switch to light mode',
+      label: isDark ? 'Switch to light mode' : 'Switch to dark mode',
       child: Material(
         color: AppColors.surfaceVariant,
         borderRadius: BorderRadius.circular(AppRadius.full),
         child: InkWell(
           borderRadius: BorderRadius.circular(AppRadius.full),
-          onTap: () => controller.setMode(
-            isLight ? ThemeMode.dark : ThemeMode.light,
-          ),
+          onTap: () {
+            Haptics.selection();
+            controller.setMode(isDark ? ThemeMode.light : ThemeMode.dark);
+          },
           child: Container(
             width: 46,
             height: 46,
@@ -1754,9 +1797,17 @@ class _ProfileThemeQuickToggle extends ConsumerWidget {
               borderRadius: BorderRadius.circular(AppRadius.full),
               border: Border.all(color: AppColors.border),
             ),
-            child: Icon(
-              isLight ? Icons.dark_mode_rounded : Icons.light_mode_rounded,
-              color: AppColors.primary,
+            child: AnimatedSwitcher(
+              duration: const Duration(milliseconds: 260),
+              transitionBuilder: (child, anim) => RotationTransition(
+                turns: Tween<double>(begin: 0.6, end: 1).animate(anim),
+                child: FadeTransition(opacity: anim, child: child),
+              ),
+              child: Icon(
+                isDark ? Icons.light_mode_rounded : Icons.dark_mode_rounded,
+                key: ValueKey(isDark),
+                color: AppColors.primary,
+              ),
             ),
           ),
         ),
@@ -1766,14 +1817,17 @@ class _ProfileThemeQuickToggle extends ConsumerWidget {
 }
 
 class _SupportTicketPanel extends StatefulWidget {
-  const _SupportTicketPanel();
+  final HomeDataService homeDataService;
+
+  const _SupportTicketPanel({
+    required this.homeDataService,
+  });
 
   @override
   State<_SupportTicketPanel> createState() => _SupportTicketPanelState();
 }
 
 class _SupportTicketPanelState extends State<_SupportTicketPanel> {
-  final _service = HomeDataService();
   final _referenceController = TextEditingController();
   final _descriptionController = TextEditingController();
   late Future<List<SupportTicket>> _ticketsFuture;
@@ -1795,7 +1849,7 @@ class _SupportTicketPanelState extends State<_SupportTicketPanel> {
   @override
   void initState() {
     super.initState();
-    _ticketsFuture = _service.fetchSupportTickets();
+    _ticketsFuture = widget.homeDataService.fetchSupportTickets();
   }
 
   @override
@@ -1807,7 +1861,7 @@ class _SupportTicketPanelState extends State<_SupportTicketPanel> {
 
   void _reloadTickets() {
     setState(() {
-      _ticketsFuture = _service.fetchSupportTickets();
+      _ticketsFuture = widget.homeDataService.fetchSupportTickets();
     });
   }
 
@@ -1826,7 +1880,7 @@ class _SupportTicketPanelState extends State<_SupportTicketPanel> {
     });
 
     try {
-      await _service.createSupportTicket(
+      await widget.homeDataService.createSupportTicket(
         category: _category,
         description: description,
         transactionReference: _referenceController.text.trim(),
@@ -1836,7 +1890,7 @@ class _SupportTicketPanelState extends State<_SupportTicketPanel> {
       if (!mounted) return;
       setState(() {
         _message = 'Support case sent to customer care.';
-        _ticketsFuture = _service.fetchSupportTickets();
+        _ticketsFuture = widget.homeDataService.fetchSupportTickets();
       });
     } on DioException catch (error) {
       if (!mounted) return;
@@ -2048,24 +2102,27 @@ class _SupportTicketPanelState extends State<_SupportTicketPanel> {
 }
 
 class _InviteFriendPanel extends StatefulWidget {
-  const _InviteFriendPanel();
+  final HomeDataService homeDataService;
+
+  const _InviteFriendPanel({
+    required this.homeDataService,
+  });
 
   @override
   State<_InviteFriendPanel> createState() => _InviteFriendPanelState();
 }
 
 class _InviteFriendPanelState extends State<_InviteFriendPanel> {
-  final _service = HomeDataService();
   late Future<ReferralDashboard> _future;
 
   @override
   void initState() {
     super.initState();
-    _future = _service.fetchReferralDashboard();
+    _future = widget.homeDataService.fetchReferralDashboard();
   }
 
   void _reload() {
-    setState(() => _future = _service.fetchReferralDashboard());
+    setState(() => _future = widget.homeDataService.fetchReferralDashboard());
   }
 
   Future<void> _copyInvite(ReferralDashboard data) async {
@@ -2473,32 +2530,44 @@ class _ThemeModeChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final foreground = active ? Colors.white : AppColors.textSecondary;
     return GestureDetector(
+      behavior: HitTestBehavior.opaque,
       onTap: onTap,
       child: AnimatedContainer(
-        duration: const Duration(milliseconds: 180),
-        curve: Curves.easeOut,
+        duration: const Duration(milliseconds: 200),
+        curve: Curves.easeOutCubic,
         padding: const EdgeInsets.symmetric(
-          horizontal: AppSpacing.md,
+          horizontal: AppSpacing.sm,
           vertical: AppSpacing.sm,
         ),
         decoration: BoxDecoration(
           color: active ? AppColors.primary : Colors.transparent,
           borderRadius: BorderRadius.circular(AppRadius.full),
+          boxShadow: active
+              ? [
+                  BoxShadow(
+                    color: AppColors.primary.withValues(alpha: 0.3),
+                    blurRadius: 12,
+                    offset: const Offset(0, 4),
+                  ),
+                ]
+              : null,
         ),
         child: Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(
-              icon,
-              size: 18,
-              color: active ? Colors.white : AppColors.textSecondary,
-            ),
-            SizedBox(width: AppSpacing.xs),
-            Text(
-              label,
-              style: AppTextStyles.labelM.copyWith(
-                color: active ? Colors.white : AppColors.textSecondary,
+            Icon(icon, size: 17, color: foreground),
+            const SizedBox(width: 5),
+            Flexible(
+              child: Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: AppTextStyles.labelS.copyWith(
+                  color: foreground,
+                  fontWeight: FontWeight.w700,
+                ),
               ),
             ),
           ],

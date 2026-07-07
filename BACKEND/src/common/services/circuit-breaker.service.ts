@@ -31,6 +31,10 @@ export class CircuitBreakerService {
     return `circuit:${service}:failures`;
   }
 
+  private getLastFailureKey(service: string): string {
+    return `circuit:${service}:lastFailureAt`;
+  }
+
   private getRequestsKey(service: string): string {
     return `circuit:${service}:halfOpenRequests`;
   }
@@ -48,13 +52,15 @@ export class CircuitBreakerService {
     }
 
     if (state === "OPEN") {
-      const failures = await this.redis.get(this.getFailuresKey(service));
-      if (!failures) {
+      const lastFailureAt = await this.redis.get(
+        this.getLastFailureKey(service),
+      );
+      if (!lastFailureAt) {
         await this.transitionTo(service, "HALF_OPEN");
         return true;
       }
 
-      const lastFailure = parseInt(failures, 10);
+      const lastFailure = parseInt(lastFailureAt, 10);
       if (Date.now() - lastFailure > this.options.recoveryTimeout) {
         await this.transitionTo(service, "HALF_OPEN");
         return true;
@@ -89,7 +95,16 @@ export class CircuitBreakerService {
     const failures = await this.redis.get(failuresKey);
     const count = failures ? parseInt(failures, 10) + 1 : 1;
 
-    await this.redis.set(failuresKey, String(Date.now()), 300);
+    // Track the running failure count and the last-failure timestamp in
+    // separate keys — conflating them (storing Date.now() in the count key)
+    // makes the next read parse a ~1.7e12 timestamp as the count and trips the
+    // breaker after a single subsequent failure regardless of the threshold.
+    await this.redis.set(failuresKey, String(count), 300);
+    await this.redis.set(
+      this.getLastFailureKey(service),
+      String(Date.now()),
+      300,
+    );
 
     if (count >= this.options.failureThreshold) {
       await this.transitionTo(service, "OPEN");
@@ -117,6 +132,7 @@ export class CircuitBreakerService {
 
     if (state === "CLOSED") {
       await this.redis.del(this.getFailuresKey(service));
+      await this.redis.del(this.getLastFailureKey(service));
       await this.redis.del(this.getRequestsKey(service));
     }
 

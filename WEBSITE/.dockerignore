@@ -1,0 +1,35 @@
+# Prevent secrets and build/test junk from being baked into image layers.
+# Dockerfile uses `COPY . .`, so anything not ignored here ends up in the image.
+
+# Environment files with provider secrets (Monnify/VTPass/etc.) — NEVER ship.
+# .env.example is allowed so builds that read it still work.
+.env
+.env.*
+!.env.example
+
+# Dependencies & build output (rebuilt inside the image)
+node_modules
+.next
+out
+
+# Test artifacts / tooling
+playwright-report
+test-results
+.playwright-cli
+
+# Stray/nested junk directories that must never be copied into the image
+1/
+WEBSITE/
+
+# VCS / editor / OS noise
+.git
+.gitignore
+.DS_Store
+*.log
+Dockerfile
+.dockerignore
+
+# TODO(launch): ROTATE the Monnify & VTPass keys — they were committed to
+# WEBSITE/.env and must be considered compromised. Also MOVE all provider
+# secrets out of the WEBSITE project entirely (the frontend consumes only
+# NEXT_PUBLIC_* values; provider secret keys belong only in the backend).

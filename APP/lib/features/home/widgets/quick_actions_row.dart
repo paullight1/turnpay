@@ -1,31 +1,35 @@
-﻿import 'package:flutter/material.dart';
-import '../../../core/theme/app_theme.dart';
+import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 
-/// Two large pill buttons: Send Money | Exchange
-/// Matches reference design: full-width coral pill buttons with icons.
+import '../../../core/router/app_router.dart';
+import '../../../core/theme/app_theme.dart';
+import '../../../core/widgets/micro_interactions.dart';
+
+/// Two large pill buttons: Send Money | Exchange.
+/// Full-width coral pill buttons with icons and press/haptic feedback.
 class QuickActionsRow extends StatelessWidget {
-  const QuickActionsRow({super.key});
+  final VoidCallback? onSend;
+  final VoidCallback? onExchange;
+
+  const QuickActionsRow({super.key, this.onSend, this.onExchange});
 
   @override
   Widget build(BuildContext context) {
     return Row(
       children: [
-        // â”€â”€ Send Money â”€â”€
         Expanded(
           child: _QuickActionPill(
             label: 'Send',
             icon: Icons.send_rounded,
-            onTap: () {},
+            onTap: onSend ?? () => context.push(AppRoutes.send),
           ),
         ),
-        SizedBox(width: AppSpacing.md),
-
-        // â”€â”€ Exchange â”€â”€
+        const SizedBox(width: AppSpacing.md),
         Expanded(
           child: _QuickActionPill(
             label: 'Exchange',
             icon: Icons.currency_exchange_rounded,
-            onTap: () {},
+            onTap: onExchange ?? () => context.push(AppRoutes.exchange),
           ),
         ),
       ],
@@ -33,7 +37,6 @@ class QuickActionsRow extends StatelessWidget {
   }
 }
 
-// â”€â”€â”€ INDIVIDUAL PILL BUTTON â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 class _QuickActionPill extends StatelessWidget {
   final String label;
   final IconData icon;
@@ -47,8 +50,10 @@ class _QuickActionPill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
+    return TapScale(
       onTap: onTap,
+      borderRadius: BorderRadius.circular(AppRadius.full),
+      semanticLabel: label,
       child: Container(
         height: 56,
         decoration: BoxDecoration(
@@ -56,7 +61,7 @@ class _QuickActionPill extends StatelessWidget {
           borderRadius: BorderRadius.circular(AppRadius.full),
           boxShadow: [
             BoxShadow(
-              color: AppColors.primary.withOpacity(0.35),
+              color: AppColors.primary.withValues(alpha: 0.35),
               blurRadius: 18,
               offset: const Offset(0, 6),
             ),
@@ -69,12 +74,12 @@ class _QuickActionPill extends StatelessWidget {
               width: 28,
               height: 28,
               decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.2),
+                color: Colors.white.withValues(alpha: 0.2),
                 shape: BoxShape.circle,
               ),
               child: Icon(icon, color: Colors.white, size: 15),
             ),
-            SizedBox(width: AppSpacing.sm),
+            const SizedBox(width: AppSpacing.sm),
             Text(
               label,
               style: AppTextStyles.labelL.copyWith(
@@ -88,4 +93,3 @@ class _QuickActionPill extends StatelessWidget {
     );
   }
 }
-

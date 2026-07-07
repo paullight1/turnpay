@@ -2,7 +2,7 @@ services:
   - type: web
     name: trustpay-backend
     runtime: docker
-    plan: free
+    plan: free # TODO(launch): move to paid plan with backups
     region: oregon
     branch: main
     autoDeploy: true
@@ -12,7 +12,13 @@ services:
     healthCheckPath: /api/health
     envVars:
       - key: NODE_ENV
-        value: "staging"
+        value: "production"
+      - key: WEB_URL
+        value: "https://trustpay.xyz" # TODO(launch): set real origin
+      - key: ADMIN_URL
+        value: "https://admin.trustpay.xyz" # TODO(launch): set real origin
+      - key: SENTRY_DSN
+        sync: false # TODO(launch): set Sentry DSN for error monitoring
       - key: PORT
         value: "3000"
       - key: LOG_LEVEL
@@ -45,7 +51,7 @@ services:
       - key: WITHDRAWALS_ENABLED
         value: "true"
       - key: BANKING_SANDBOX_MODE
-        value: "true"
+        value: "false"
       - key: KYC_PROVIDER
         value: "manual"
       - key: KYC_DOCUMENT_BUCKET
@@ -55,7 +61,7 @@ services:
       - key: VTU_PROVIDER
         value: "vtpass"
       - key: VTPASS_BASE_URL
-        value: "https://sandbox.vtpass.com/api"
+        value: "https://sandbox.vtpass.com/api" # TODO(launch): switch to live provider URL
       - key: VTPASS_LOW_BALANCE_THRESHOLD
         value: "5000"
       - key: VTPASS_API_KEY
@@ -79,7 +85,7 @@ services:
       - key: MONNIFY_CONTRACT_CODE
         sync: false
       - key: MONNIFY_BASE_URL
-        value: "https://sandbox.monnify.com"
+        value: "https://sandbox.monnify.com" # TODO(launch): switch to live provider URL
       - key: MONNIFY_WEBHOOK_SECRET
         sync: false
       - key: MONNIFY_WEBHOOK_URL
@@ -88,8 +94,6 @@ services:
         value: "true"
       - key: MONNIFY_RESTRICT_PAYMENT_SOURCE
         value: "false"
-      - key: MONNIFY_SANDBOX_TEST_KYC_BYPASS
-        value: "true"
       - key: MONNIFY_TEST_BVN
         sync: false
       - key: MONNIFY_TEST_NIN
@@ -101,7 +105,7 @@ services:
 
   - type: keyvalue
     name: trustpay-redis
-    plan: free
+    plan: free # TODO(launch): move to paid plan with backups
     region: oregon
     maxmemoryPolicy: allkeys-lru
     ipAllowList: []
@@ -110,6 +114,6 @@ databases:
   - name: trustpay-postgres
     databaseName: trustpay
     user: trustpay
-    plan: free
+    plan: free # TODO(launch): move to paid plan with backups
     postgresMajorVersion: "15"
     ipAllowList: []

@@ -188,6 +188,7 @@ model User {
   monthlyWithdrawLimit    Decimal   @default(5000000) @db.Decimal(15, 2)
   dailyWithdrawn          Decimal   @default(0) @db.Decimal(15, 2)
   monthlyWithdrawn        Decimal   @default(0) @db.Decimal(15, 2)
+  dailyLimitResetDate     DateTime?
   limitResetDate          DateTime?
   isSuspended             Boolean   @default(false)
   failedAttempts          Int       @default(0)
@@ -217,6 +218,7 @@ model User {
   referralReward             ReferralReward?              @relation("ReferralReferred")
 
   @@index([referredById])
+  @@index([createdAt(sort: Desc)])
   @@map("users")
 }
 
@@ -306,6 +308,7 @@ model Transaction {
   @@index([userId, status])
   @@index([userId, createdAt(sort: Desc)])
   @@index([type, status])
+  @@index([status, createdAt])
   @@map("transactions")
 }
 
@@ -484,6 +487,7 @@ model VirtualAccount {
   @@unique([provider, accountNumber])
   @@index([userId, status])
   @@index([provider, status])
+  @@index([createdAt(sort: Desc)])
   @@map("virtual_accounts")
 }
 
@@ -584,6 +588,7 @@ model VtuOrder {
   @@index([provider, status])
   @@index([status, nextRequeryAt])
   @@index([countryCode, serviceType])
+  @@index([status, createdAt])
   @@map("vtu_orders")
 }
 
@@ -627,6 +632,7 @@ model AuditLog {
   @@index([adminId])
   @@index([targetType, targetId])
   @@index([reference])
+  @@index([createdAt(sort: Desc)])
   @@map("audit_logs")
 }
 

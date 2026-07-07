@@ -1,4 +1,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Required so release builds can reach the TrustPay API. The debug
+         manifest also declares this, but release/profile need it here. -->
+    <uses-permission android:name="android.permission.INTERNET"/>
     <application
         android:label="TrustPay"
         android:name="${applicationName}"

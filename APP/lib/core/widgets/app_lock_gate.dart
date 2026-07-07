@@ -10,8 +10,13 @@ import '../theme/app_theme.dart';
 
 class AppLockGate extends ConsumerStatefulWidget {
   final Widget child;
+  final TransactionSecurityService securityService;
 
-  const AppLockGate({super.key, required this.child});
+  AppLockGate({
+    super.key,
+    required this.child,
+    TransactionSecurityService? securityService,
+  }) : securityService = securityService ?? TransactionSecurityService();
 
   @override
   ConsumerState<AppLockGate> createState() => _AppLockGateState();
@@ -21,7 +26,6 @@ class _AppLockGateState extends ConsumerState<AppLockGate>
     with WidgetsBindingObserver {
   final _apiClient = ApiClient();
   final _authService = AuthService();
-  final _securityService = TransactionSecurityService();
   bool _locked = false;
   bool _checkingLock = false;
   bool _verifying = false;
@@ -54,26 +58,44 @@ class _AppLockGateState extends ConsumerState<AppLockGate>
 
     if (state == AppLifecycleState.resumed && _lockOnResume) {
       _lockOnResume = false;
+      // Lock synchronously before awaiting any storage/biometric checks so the
+      // protected content never flashes unlocked on resume. If it turns out no
+      // PIN is configured (or there is no session), _maybeLock releases it.
+      if (mounted && !_locked) {
+        setState(() {
+          _locked = true;
+          _pin = '';
+          _error = null;
+        });
+      }
       _maybeLock();
     }
   }
 
   Future<void> _maybeLock() async {
-    if (!mounted || _locked || _checkingLock) return;
+    if (!mounted || _checkingLock) return;
     setState(() => _checkingLock = true);
 
     try {
       final refreshToken = await _apiClient.readRefreshToken();
-      if (refreshToken == null || refreshToken.isEmpty) return;
+      final config = (refreshToken == null || refreshToken.isEmpty)
+          ? null
+          : await widget.securityService.getConfig();
+      if (!mounted) return;
 
-      final config = await _securityService.getConfig();
-      if (!config.hasPin || !mounted) return;
-
+      final shouldLock = config != null && config.hasPin;
       setState(() {
         _config = config;
-        _locked = true;
-        _pin = '';
-        _error = null;
+        // Release the pre-emptive lock if this session has no PIN to enter.
+        if (shouldLock) {
+          _locked = true;
+        } else {
+          _locked = false;
+        }
+        if (!_locked) {
+          _pin = '';
+          _error = null;
+        }
       });
     } finally {
       if (mounted) {
@@ -115,7 +137,7 @@ class _AppLockGateState extends ConsumerState<AppLockGate>
     }
 
     setState(() => _verifying = true);
-    final result = await _securityService.verifyPinWithLockout(_pin);
+    final result = await widget.securityService.verifyPinWithLockout(_pin);
     if (!mounted) return;
 
     if (result.approved) {
@@ -145,16 +167,18 @@ class _AppLockGateState extends ConsumerState<AppLockGate>
     }
 
     setState(() => _verifying = true);
-    final pin = await _securityService.unlockPinWithBiometric(
+    // App-unlock only needs proof of presence — it never needs the plaintext
+    // PIN, so use a pass/fail biometric prompt rather than revealing the PIN.
+    final approved = await widget.securityService.authenticateBiometric(
       reason: 'Unlock TRUSTPAY with ${config.biometricLabel}',
     );
     if (!mounted) return;
 
     setState(() {
-      _locked = pin == null;
+      _locked = !approved;
       _verifying = false;
       _pin = '';
-      _error = pin == null ? 'Biometric check was not completed.' : null;
+      _error = approved ? null : 'Biometric check was not completed.';
     });
   }
 

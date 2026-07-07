@@ -1,5 +1,6 @@
 import { Test, TestingModule } from "@nestjs/testing";
 import { ConfigModule } from "@nestjs/config";
+import { ConflictException } from "@nestjs/common";
 import { ExchangeService } from "./exchange.service";
 import { PrismaService } from "../prisma/prisma.service";
 import { RateService } from "./providers/rate.service";
@@ -19,6 +20,7 @@ describe("ExchangeService", () => {
     set: jest.fn(),
     del: jest.fn(),
     exists: jest.fn(),
+    setIfNotExists: jest.fn().mockResolvedValue(true),
   };
 
   const mockPrisma = {
@@ -228,6 +230,41 @@ describe("ExchangeService", () => {
       );
     });
 
+    it("rejects a concurrent execution of the same quote without moving money", async () => {
+      mockRedis.get.mockResolvedValue(
+        JSON.stringify({
+          id: "quote-1",
+          userId: "user-1",
+          from: "NGN",
+          to: "GHS",
+          amount: "100.00",
+          rate: 0.1,
+          markupPercent: 2.5,
+          fee: "2.00",
+          sendAmount: "102.00",
+          receiveAmount: "10.00",
+          expiresAt: new Date(Date.now() + 60_000),
+          createdAt: new Date(),
+        }),
+      );
+      mockPrisma.user.findUnique.mockResolvedValue({
+        kycStatus: "VERIFIED",
+        kycTier: "TIER_2",
+        isSuspended: false,
+      });
+      // Another in-flight execution already holds the claim.
+      mockRedis.setIfNotExists.mockResolvedValueOnce(false);
+
+      await expect(
+        service.executeQuote("user-1", { quoteId: "quote-1" }),
+      ).rejects.toThrow(ConflictException);
+
+      expect(mockLedger.debitWallet).not.toHaveBeenCalled();
+      expect(mockLedger.creditWallet).not.toHaveBeenCalled();
+      // The live quote must not be consumed when the claim is lost.
+      expect(mockRedis.del).not.toHaveBeenCalledWith("quote:quote-1");
+    });
+
     it("requires tier 2 KYC before executing an exchange", async () => {
       mockRedis.get.mockResolvedValue(
         JSON.stringify({
@@ -267,8 +304,8 @@ describe("ExchangeService", () => {
       sourceCurrency: "NGN",
       targetCurrency: "GHS",
       amount: new Decimal(1000),
-      expectedCreditAmount: new Decimal("3255.46"),
-      rate: new Decimal("3.255465"),
+      expectedCreditAmount: new Decimal("3095.23"),
+      rate: new Decimal("3.095235"),
       markupPercent: new Decimal("2.50"),
       bankReference: "BANKREF123",
       senderName: "Ada Lovelace",
@@ -318,8 +355,8 @@ describe("ExchangeService", () => {
         sourceCurrency: "NGN",
         targetCurrency: "GHS",
         amount: new Decimal(1000),
-        expectedCreditAmount: new Decimal("3255.46"),
-        rate: new Decimal("3.255465"),
+        expectedCreditAmount: new Decimal("3095.23"),
+        rate: new Decimal("3.095235"),
         markupPercent: new Decimal("2.50"),
         bankReference: "BANKREF123",
         senderName: "Ada Lovelace",
@@ -565,8 +602,8 @@ describe("ExchangeService", () => {
         sourceCurrency: "NGN",
         targetCurrency: "GHS",
         amount: new Decimal(1000),
-        expectedCreditAmount: new Decimal("3255.46"),
-        rate: new Decimal("3.255465"),
+        expectedCreditAmount: new Decimal("3095.23"),
+        rate: new Decimal("3.095235"),
         markupPercent: new Decimal("2.50"),
         bankReference: "BANKREF123",
         senderName: "Ada Lovelace",
@@ -614,7 +651,7 @@ describe("ExchangeService", () => {
       });
       mockLedger.creditWallet.mockResolvedValue({
         walletId: "wallet-ghs",
-        balanceAfter: new Decimal("3255.46"),
+        balanceAfter: new Decimal("3095.23"),
       });
       mockPrisma.auditLog.create.mockResolvedValue({});
 
@@ -627,7 +664,7 @@ describe("ExchangeService", () => {
         expect.objectContaining({
           userId: "user-1",
           currency: "GHS",
-          amount: new Decimal("3255.46"),
+          amount: new Decimal("3095.23"),
           transactionId: "tx-1",
           source: "MANUAL_EXCHANGE_RECEIPT_CREDIT",
         }),
@@ -673,8 +710,8 @@ describe("ExchangeService", () => {
         sourceCurrency: "NGN",
         targetCurrency: "GHS",
         amount: new Decimal(1000),
-        expectedCreditAmount: new Decimal("3255.46"),
-        rate: new Decimal("3.255465"),
+        expectedCreditAmount: new Decimal("3095.23"),
+        rate: new Decimal("3.095235"),
         markupPercent: new Decimal("2.50"),
         bankReference: "BANKREF123",
         senderName: "Ada Lovelace",

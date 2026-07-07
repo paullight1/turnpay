@@ -5,6 +5,7 @@ import { SwaggerModule, DocumentBuilder } from "@nestjs/swagger";
 import * as Sentry from "@sentry/nestjs";
 import { nodeProfilingIntegration } from "@sentry/profiling-node";
 import helmet from "helmet";
+import type { Application } from "express";
 import type { Server } from "http";
 import { NativeLogger } from "nestjs-pino";
 import { AppModule } from "./app.module";
@@ -29,6 +30,12 @@ async function bootstrap() {
   });
   const logger = app.get(NativeLogger);
   app.useLogger(logger);
+
+  // Trust the single reverse-proxy hop (Render/most PaaS) so req.ip reflects
+  // the real client via X-Forwarded-For. Required for per-IP rate limiting to
+  // target individual clients instead of the shared proxy address.
+  const expressApp = app.getHttpAdapter().getInstance() as Application;
+  expressApp.set("trust proxy", 1);
 
   app.use(
     helmet({

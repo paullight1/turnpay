@@ -18,6 +18,10 @@ import { AuthenticatedRequest } from "../types/request-context";
 
 const IDEMPOTENCY_TTL = 86400; // 24 hours
 const IDEMPOTENCY_LOCK_TTL = 30;
+// A crash between claiming the IN_PROGRESS record and completing the handler
+// would otherwise strand the key as IN_PROGRESS until expiresAt (24h). After
+// this lease elapses a retry may atomically take over the stale record.
+const IDEMPOTENCY_IN_PROGRESS_LEASE = 120; // 2 minutes
 
 @Injectable()
 export class IdempotencyInterceptor implements NestInterceptor {
@@ -100,56 +104,104 @@ export class IdempotencyInterceptor implements NestInterceptor {
       },
     });
 
+    let recordId: string;
+    let useRedisLock = false;
+
     if (existingRecord) {
-      return this.resolveExistingRecord(existingRecord, requestHash);
+      const resolved = this.resolveExistingRecord(existingRecord, requestHash);
+      if (resolved) {
+        return resolved;
+      }
+
+      // Lease expired on a stranded IN_PROGRESS record (handler crashed
+      // before completing). Atomically claim it so this retry can proceed;
+      // the updatedAt guard ensures only one concurrent retry wins.
+      const takenOver = await this.prisma.idempotencyRecord.updateMany({
+        where: {
+          id: existingRecord.id,
+          status: "IN_PROGRESS",
+          updatedAt: existingRecord.updatedAt,
+        },
+        data: { requestHash, expiresAt },
+      });
+
+      if (takenOver.count !== 1) {
+        throw new ConflictException(
+          "Request with this idempotency key is already in progress",
+        );
+      }
+
+      recordId = existingRecord.id;
+    } else {
+      useRedisLock = this.redis.isAvailable();
+      const lock = useRedisLock
+        ? await this.redis.setIfNotExists(lockKey, "1", IDEMPOTENCY_LOCK_TTL)
+        : true;
+
+      if (!lock) {
+        throw new ConflictException(
+          "Request with this idempotency key is already in progress",
+        );
+      }
+
+      const record = await this.createInProgressRecord({
+        scope,
+        key: idempotencyKey,
+        method,
+        path: normalizedPath,
+        requestHash,
+        expiresAt,
+      });
+      recordId = record.id;
     }
-
-    const useRedisLock = this.redis.isAvailable();
-    const lock = useRedisLock
-      ? await this.redis.setIfNotExists(lockKey, "1", IDEMPOTENCY_LOCK_TTL)
-      : true;
-
-    if (!lock) {
-      throw new ConflictException(
-        "Request with this idempotency key is already in progress",
-      );
-    }
-
-    const record = await this.createInProgressRecord({
-      scope,
-      key: idempotencyKey,
-      method,
-      path: normalizedPath,
-      requestHash,
-      expiresAt,
-    });
 
     try {
       const response: unknown = await lastValueFrom(
         next.handle() as Observable<unknown>,
       );
 
-      if (response !== undefined) {
-        const responseJson = this.toJsonValue(response);
-        await this.prisma.idempotencyRecord.update({
-          where: { id: record.id },
-          data: {
-            status: "COMPLETED",
-            response: responseJson,
-            expiresAt,
-          },
-        });
-        if (this.redis.isAvailable()) {
-          await this.redis.set(
-            cacheKey,
-            JSON.stringify({ requestHash, response: responseJson }),
-            IDEMPOTENCY_TTL,
-          );
-        }
+      // Always transition out of IN_PROGRESS on success — including when the
+      // handler returns undefined. Otherwise the record is stranded until
+      // expiresAt (24h) and every retry with the same key gets a spurious
+      // "already in progress" ConflictException.
+      const responseJson =
+        response === undefined ? Prisma.JsonNull : this.toJsonValue(response);
+      await this.prisma.idempotencyRecord.update({
+        where: { id: recordId },
+        data: {
+          status: "COMPLETED",
+          response: responseJson,
+          expiresAt,
+        },
+      });
+      if (this.redis.isAvailable()) {
+        await this.redis.set(
+          cacheKey,
+          JSON.stringify({
+            requestHash,
+            response: response === undefined ? null : responseJson,
+          }),
+          IDEMPOTENCY_TTL,
+        );
       }
 
       return of(response);
     } catch (error) {
+      // Only deterministic client errors (4xx HttpExceptions) are safe to
+      // persist as a replayable final failure. Transient faults — non-HTTP
+      // errors (DB blip, timeout) and 5xx — must NOT be memoized: delete the
+      // in-progress record and skip the failure cache so the client can retry
+      // and succeed instead of being served a stale error for 24h.
+      const isTransient =
+        !(error instanceof HttpException) || error.getStatus() >= 500;
+
+      if (isTransient) {
+        await this.prisma.idempotencyRecord
+          .delete({ where: { id: recordId } })
+          .catch(() => undefined);
+        throw error;
+      }
+
       const httpStatus =
         error instanceof HttpException ? error.getStatus() : 500;
       const errorResponse = this.toJsonValue(
@@ -158,7 +210,7 @@ export class IdempotencyInterceptor implements NestInterceptor {
           : { statusCode: 500, message: "Internal server error" },
       );
       await this.prisma.idempotencyRecord.update({
-        where: { id: record.id },
+        where: { id: recordId },
         data: {
           status: "FAILED_FINAL",
           httpStatus,
@@ -225,6 +277,9 @@ export class IdempotencyInterceptor implements NestInterceptor {
     );
   }
 
+  // Returns a replayable Observable when the prior request reached a terminal
+  // state, or null when the record is a stale IN_PROGRESS lease the caller may
+  // take over. Throws for an active in-flight request or a body mismatch.
   private resolveExistingRecord(
     record: {
       requestHash: string;
@@ -232,9 +287,10 @@ export class IdempotencyInterceptor implements NestInterceptor {
       response: unknown;
       httpStatus?: number | null;
       errorResponse?: unknown;
+      updatedAt?: Date | null;
     },
     requestHash: string,
-  ) {
+  ): Observable<unknown> | null {
     if (record.requestHash !== requestHash) {
       throw new ConflictException(
         "Idempotency-Key was already used with a different request body",
@@ -252,9 +308,16 @@ export class IdempotencyInterceptor implements NestInterceptor {
       );
     }
 
-    throw new ConflictException(
-      "Request with this idempotency key is already in progress",
-    );
+    // IN_PROGRESS: block only while the lease is still fresh. Once it lapses
+    // the record is assumed stranded and the caller may reclaim it.
+    const leaseCutoff = Date.now() - IDEMPOTENCY_IN_PROGRESS_LEASE * 1000;
+    if (record.updatedAt && record.updatedAt.getTime() > leaseCutoff) {
+      throw new ConflictException(
+        "Request with this idempotency key is already in progress",
+      );
+    }
+
+    return null;
   }
 
   private async createInProgressRecord(data: {

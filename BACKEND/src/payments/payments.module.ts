@@ -1,6 +1,7 @@
 import { Module } from "@nestjs/common";
 import { HttpModule } from "@nestjs/axios";
 import { PaymentService } from "./payment.service";
+import { WithdrawalReconcileService } from "./withdrawal-reconcile.service";
 import { PaymentController } from "./payment.controller";
 import { WebhookController } from "./webhooks/payment-webhook.controller";
 import { PaystackProvider } from "./providers/paystack.provider";
@@ -22,7 +23,12 @@ import { ExchangeModule } from "../exchange/exchange.module";
     ExchangeModule,
   ],
   controllers: [PaymentController, WebhookController],
-  providers: [PaymentService, PaystackProvider, FlutterwaveProvider],
+  providers: [
+    PaymentService,
+    WithdrawalReconcileService,
+    PaystackProvider,
+    FlutterwaveProvider,
+  ],
   exports: [PaymentService, PaystackProvider, FlutterwaveProvider],
 })
 export class PaymentsModule {}

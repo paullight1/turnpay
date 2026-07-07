@@ -130,7 +130,7 @@ class _WalletCard extends StatelessWidget {
         ),
         boxShadow: [
           BoxShadow(
-            color: gradientColors.last.withOpacity(0.35),
+            color: gradientColors.last.withValues(alpha: 0.35),
             blurRadius: 20,
             offset: const Offset(0, 8),
           ),
@@ -151,7 +151,7 @@ class _WalletCard extends StatelessWidget {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                 decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.15),
+                  color: Colors.white.withValues(alpha: 0.15),
                   borderRadius: BorderRadius.circular(AppRadius.full),
                 ),
                 child: Row(

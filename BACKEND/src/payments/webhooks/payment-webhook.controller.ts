@@ -133,7 +133,9 @@ export class WebhookController {
         eventType: body.event,
         reference: body.data.reference,
         status: body.data.status,
-        amount: body.data.amount / 100,
+        // Paystack sends the amount in integer minor units (kobo). Keep it in
+        // Decimal end-to-end rather than float division to avoid rounding drift.
+        amount: new Decimal(body.data.amount).div(100),
         currency: body.data.currency || "NGN",
         rawPayload: body as unknown as Record<string, unknown>,
       });

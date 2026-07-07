@@ -7,9 +7,11 @@ class AuthHelpButton extends StatelessWidget {
   const AuthHelpButton({
     super.key,
     this.onDark = false,
+    this.onTap,
   });
 
   final bool onDark;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
@@ -24,7 +26,7 @@ class AuthHelpButton extends StatelessWidget {
       button: true,
       label: 'Get help',
       child: GestureDetector(
-        onTap: openTawkChat,
+        onTap: onTap ?? openTawkChat,
         child: Container(
           height: 38,
           padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm),

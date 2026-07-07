@@ -4,7 +4,11 @@ import 'package:intl/intl.dart';
 
 import '../../../core/router/app_router.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../core/utils/haptics.dart';
+import '../../../core/widgets/tp_empty_state.dart';
+import '../../../core/widgets/tp_illustration.dart';
 import '../../../core/widgets/tp_page_header.dart';
+import '../../../core/widgets/tp_receipt.dart';
 import '../../../core/widgets/tp_snackbar.dart';
 import '../../../services/api_client.dart';
 import '../../../services/auth_service.dart';
@@ -197,6 +201,7 @@ class _WithdrawalReceiptScreenState extends State<WithdrawalReceiptScreen> {
   }
 
   Future<void> _showSaveSheet(WithdrawalCompletionDetails details) {
+    Haptics.light();
     return showModalBottomSheet<void>(
       context: context,
       backgroundColor: AppColors.surface,
@@ -217,6 +222,15 @@ class _WithdrawalReceiptScreenState extends State<WithdrawalReceiptScreen> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
+                Container(
+                  width: 44,
+                  height: 4,
+                  margin: const EdgeInsets.only(bottom: AppSpacing.md),
+                  decoration: BoxDecoration(
+                    color: AppColors.border,
+                    borderRadius: BorderRadius.circular(AppRadius.full),
+                  ),
+                ),
                 Text(
                   'Save receipt as',
                   style: AppTextStyles.labelL.copyWith(
@@ -279,8 +293,13 @@ class _WithdrawalReceiptScreenState extends State<WithdrawalReceiptScreen> {
           }
 
           if (snapshot.hasError || !snapshot.hasData) {
-            return _ReceiptErrorState(
-              onRetry: () => setState(() {
+            return TpEmptyState(
+              variant: TpIllustrationVariant.error,
+              title: 'Could not load this receipt',
+              message:
+                  'Something interrupted the request. Refresh and try again.',
+              primaryActionLabel: 'Retry',
+              onPrimaryAction: () => setState(() {
                 _receiptFuture = _loadReceipt();
               }),
             );
@@ -310,21 +329,37 @@ class _WithdrawalReceiptScreenState extends State<WithdrawalReceiptScreen> {
                   ),
                   sliver: SliverList.list(
                     children: [
-                      _ReceiptHero(details: details),
+                      TpReceiptHero(
+                        tone: _tone(details),
+                        title: 'Withdrawal receipt',
+                        message: _heroMessage(details),
+                        statusLabel: details.status,
+                        amountLabel: _amountLabel(details),
+                        reference: details.reference,
+                      ),
                       const SizedBox(height: AppSpacing.lg),
                       RepaintBoundary(
                         key: _receiptKey,
-                        child: _WithdrawalReceiptCard(details: details),
+                        child: TpReceiptCard(
+                          tone: _tone(details),
+                          headerTitle: 'Withdrawal details',
+                          headerSubtitle:
+                              'Keep this record for your bank transfer history.',
+                          statusLabel: details.status,
+                          entries: _entries(details),
+                          footerNote:
+                              'Only share this receipt with people who need to verify the transfer.',
+                        ),
                       ),
                       const SizedBox(height: AppSpacing.lg),
-                      _ReceiptActions(
+                      TpReceiptActions(
                         isSaving: _isSaving,
                         isSharing: _isSharing,
                         onSave: () => _showSaveSheet(details),
                         onShare: () => _shareReceipt(details),
                       ),
                       const SizedBox(height: AppSpacing.lg),
-                      const _ReceiptInfoPanel(
+                      const TpReceiptInfoPanel(
                         text:
                             'Save the receipt as PDF for records or JPG for quick sharing. The same receipt image is used for both export actions.',
                       ),
@@ -339,518 +374,54 @@ class _WithdrawalReceiptScreenState extends State<WithdrawalReceiptScreen> {
     );
   }
 
+  TpReceiptTone _tone(WithdrawalCompletionDetails details) =>
+      TpReceiptToneX.fromStatus(details.status);
+
+  String _amountLabel(WithdrawalCompletionDetails details) {
+    final amount = NumberFormat('#,##0.00').format(
+      double.tryParse(details.amount) ?? 0,
+    );
+    return '${details.currency} $amount';
+  }
+
+  String _heroMessage(WithdrawalCompletionDetails details) {
+    switch (_tone(details)) {
+      case TpReceiptTone.success:
+        return 'Your payout cleared successfully.';
+      case TpReceiptTone.failed:
+        return 'This payout expired before approval was completed.';
+      case TpReceiptTone.pending:
+        return 'This receipt is ready while Monnify finishes confirmation.';
+    }
+  }
+
+  List<TpReceiptEntry> _entries(WithdrawalCompletionDetails details) {
+    final happenedAt =
+        details.updatedAt ?? details.createdAt ?? details.providerCreatedAt;
+    final timeValue = happenedAt == null
+        ? '—'
+        : DateFormat('dd MMM yyyy • HH:mm').format(happenedAt.toLocal());
+
+    return [
+      TpReceiptEntry('Reference', details.reference),
+      TpReceiptEntry('Amount', _amountLabel(details), emphasize: true),
+      TpReceiptEntry('Bank', details.bankName),
+      TpReceiptEntry('Account name', details.accountName),
+      TpReceiptEntry('Masked account', details.accountNumberMasked),
+      if (details.providerReference.isNotEmpty)
+        TpReceiptEntry('Provider ref', details.providerReference),
+      TpReceiptEntry('Time', timeValue),
+    ];
+  }
+
   String _receiptFileName(WithdrawalCompletionDetails details, String ext) {
-    final safeReference = details.reference.replaceAll(RegExp(r'[^A-Za-z0-9_-]'), '_');
+    final safeReference =
+        details.reference.replaceAll(RegExp(r'[^A-Za-z0-9_-]'), '_');
     return 'trustpay-withdrawal-$safeReference.$ext';
   }
 
   String _shareText(WithdrawalCompletionDetails details) {
     return 'TRUSTPAY withdrawal receipt - ${details.reference}';
-  }
-}
-
-class _ReceiptHero extends StatelessWidget {
-  final WithdrawalCompletionDetails details;
-
-  const _ReceiptHero({required this.details});
-
-  @override
-  Widget build(BuildContext context) {
-    final status = details.status.toUpperCase();
-    final statusColor = _statusColor(status);
-    final amount = NumberFormat('#,##0.00').format(
-      double.tryParse(details.amount) ?? 0,
-    );
-
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(AppSpacing.lg),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(AppRadius.xl),
-        border: Border.all(color: AppColors.border),
-        boxShadow: [
-          BoxShadow(
-            color: AppColors.overlayLight,
-            blurRadius: 24,
-            offset: const Offset(0, 14),
-          ),
-        ],
-      ),
-      child: Column(
-        children: [
-          Container(
-            width: 72,
-            height: 72,
-            decoration: BoxDecoration(
-              color: statusColor.withValues(alpha: 0.12),
-              shape: BoxShape.circle,
-            ),
-            child: Icon(
-              status == 'SUCCESS'
-                  ? Icons.verified_rounded
-                  : status == 'FAILED' || status == 'REVERSED'
-                      ? Icons.error_outline_rounded
-                      : Icons.hourglass_top_rounded,
-              color: statusColor,
-              size: 38,
-            ),
-          ),
-          const SizedBox(height: AppSpacing.md),
-          Text(
-            'Withdrawal receipt',
-            style: AppTextStyles.headingL.copyWith(fontWeight: FontWeight.w900),
-            textAlign: TextAlign.center,
-          ),
-          const SizedBox(height: AppSpacing.xs),
-          Text(
-            status == 'SUCCESS'
-                ? 'Your payout cleared successfully.'
-                : status == 'FAILED' || status == 'REVERSED'
-                    ? 'This payout expired before approval was completed.'
-                    : 'This receipt is ready while Monnify finishes confirmation.',
-            style: AppTextStyles.bodyM.copyWith(
-              color: AppColors.textSecondary,
-            ),
-            textAlign: TextAlign.center,
-          ),
-          const SizedBox(height: AppSpacing.md),
-          Container(
-            padding: const EdgeInsets.symmetric(
-              horizontal: 14,
-              vertical: 6,
-            ),
-            decoration: BoxDecoration(
-              color: statusColor.withValues(alpha: 0.12),
-              borderRadius: BorderRadius.circular(AppRadius.full),
-            ),
-            child: Text(
-              status.replaceAll('_', ' '),
-              style: AppTextStyles.labelS.copyWith(
-                color: statusColor,
-                fontWeight: FontWeight.w800,
-              ),
-            ),
-          ),
-          const SizedBox(height: AppSpacing.md),
-          Text(
-            '${details.currency} $amount',
-            style: AppTextStyles.displayMedium.copyWith(
-              fontSize: 34,
-              fontWeight: FontWeight.w900,
-            ),
-          ),
-          const SizedBox(height: AppSpacing.xs),
-          Text(
-            'Reference ${details.reference}',
-            style: AppTextStyles.bodyS.copyWith(
-              color: AppColors.textSecondary,
-            ),
-            textAlign: TextAlign.center,
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _WithdrawalReceiptCard extends StatelessWidget {
-  final WithdrawalCompletionDetails details;
-
-  const _WithdrawalReceiptCard({required this.details});
-
-  @override
-  Widget build(BuildContext context) {
-    final statusColor = _statusColor(details.status.toUpperCase());
-    final amount = NumberFormat('#,##0.00').format(
-      double.tryParse(details.amount) ?? 0,
-    );
-    final happenedAt = details.updatedAt ?? details.createdAt ?? details.providerCreatedAt;
-    final timeValue = happenedAt == null
-        ? '—'
-        : DateFormat('dd MMM yyyy • HH:mm').format(happenedAt.toLocal());
-
-    return Container(
-      width: double.infinity,
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(AppRadius.xl),
-        border: Border.all(color: AppColors.border),
-        boxShadow: [
-          BoxShadow(
-            color: AppColors.overlayLight,
-            blurRadius: 22,
-            offset: const Offset(0, 12),
-          ),
-        ],
-      ),
-      child: Column(
-        children: [
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(AppSpacing.lg),
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [
-                  AppColors.primary.withValues(alpha: 0.08),
-                  AppColors.primary.withValues(alpha: 0.03),
-                ],
-              ),
-              borderRadius: const BorderRadius.vertical(
-                top: Radius.circular(AppRadius.xl),
-              ),
-            ),
-            child: Row(
-              children: [
-                Container(
-                  width: 48,
-                  height: 48,
-                  decoration: BoxDecoration(
-                    color: AppColors.primary.withValues(alpha: 0.12),
-                    shape: BoxShape.circle,
-                  ),
-                  child: Icon(
-                    Icons.receipt_long_rounded,
-                    color: AppColors.primary,
-                    size: 24,
-                  ),
-                ),
-                const SizedBox(width: AppSpacing.md),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Withdrawal details',
-                        style: AppTextStyles.labelL.copyWith(
-                          fontWeight: FontWeight.w900,
-                        ),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        'Keep this record for your bank transfer history.',
-                        style: AppTextStyles.bodyS.copyWith(
-                          color: AppColors.textSecondary,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(width: AppSpacing.sm),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 4,
-                  ),
-                  decoration: BoxDecoration(
-                    color: statusColor.withValues(alpha: 0.12),
-                    borderRadius: BorderRadius.circular(AppRadius.full),
-                  ),
-                  child: Text(
-                    details.status.toUpperCase(),
-                    style: AppTextStyles.caption.copyWith(
-                      color: statusColor,
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const _ReceiptCutLine(),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(
-              AppSpacing.lg,
-              AppSpacing.lg,
-              AppSpacing.lg,
-              AppSpacing.md,
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                _ReceiptRow(label: 'Reference', value: details.reference),
-                _ReceiptRow(label: 'Amount', value: '${details.currency} $amount'),
-                _ReceiptRow(label: 'Bank', value: details.bankName),
-                _ReceiptRow(label: 'Account name', value: details.accountName),
-                _ReceiptRow(
-                  label: 'Masked account',
-                  value: details.accountNumberMasked,
-                ),
-                if (details.providerReference.isNotEmpty)
-                  _ReceiptRow(
-                    label: 'Provider ref',
-                    value: details.providerReference,
-                  ),
-                _ReceiptRow(label: 'Time', value: timeValue, showDivider: false),
-              ],
-            ),
-          ),
-          const _ReceiptCutLine(),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(
-              AppSpacing.lg,
-              AppSpacing.md,
-              AppSpacing.lg,
-              AppSpacing.lg,
-            ),
-            child: Text(
-              'Only share this receipt with people who need to verify the transfer.',
-              style: AppTextStyles.bodyS.copyWith(
-                color: AppColors.textSecondary,
-              ),
-              textAlign: TextAlign.center,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _ReceiptRow extends StatelessWidget {
-  final String label;
-  final String value;
-  final bool showDivider;
-
-  const _ReceiptRow({
-    required this.label,
-    required this.value,
-    this.showDivider = true,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      children: [
-        Padding(
-          padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              SizedBox(
-                width: 108,
-                child: Text(
-                  label,
-                  style: AppTextStyles.bodyS.copyWith(
-                    color: AppColors.textSecondary,
-                  ),
-                ),
-              ),
-              const SizedBox(width: AppSpacing.sm),
-              Expanded(
-                child: Text(
-                  value,
-                  style: AppTextStyles.labelM.copyWith(
-                    color: AppColors.textPrimary,
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-        if (showDivider)
-          Divider(
-            height: 1,
-            thickness: 1,
-            color: AppColors.border.withValues(alpha: 0.7),
-          ),
-      ],
-    );
-  }
-}
-
-class _ReceiptCutLine extends StatelessWidget {
-  const _ReceiptCutLine();
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      height: 18,
-      child: CustomPaint(
-        painter: _ReceiptCutLinePainter(),
-        child: const SizedBox.expand(),
-      ),
-    );
-  }
-}
-
-class _ReceiptCutLinePainter extends CustomPainter {
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = AppColors.border.withValues(alpha: 0.7)
-      ..strokeWidth = 1
-      ..style = PaintingStyle.stroke;
-
-    const dashWidth = 8.0;
-    const dashGap = 6.0;
-    double startX = 0;
-
-    while (startX < size.width) {
-      final endX = (startX + dashWidth).clamp(0, size.width).toDouble();
-      canvas.drawLine(
-        Offset(startX, size.height / 2),
-        Offset(endX, size.height / 2),
-        paint,
-      );
-      startX += dashWidth + dashGap;
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
-}
-
-class _ReceiptActions extends StatelessWidget {
-  final bool isSaving;
-  final bool isSharing;
-  final VoidCallback onSave;
-  final VoidCallback onShare;
-
-  const _ReceiptActions({
-    required this.isSaving,
-    required this.isSharing,
-    required this.onSave,
-    required this.onShare,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final saveButton = OutlinedButton.icon(
-      style: OutlinedButton.styleFrom(
-        minimumSize: const Size.fromHeight(54),
-        padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
-      ),
-      onPressed: isSaving ? null : onSave,
-      icon: isSaving
-          ? const SizedBox(
-              width: 18,
-              height: 18,
-              child: CircularProgressIndicator(strokeWidth: 2),
-            )
-          : const Icon(Icons.download_rounded, size: 18),
-      label: const Text(
-        'Save',
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-      ),
-    );
-
-    final shareButton = FilledButton.icon(
-      style: FilledButton.styleFrom(
-        minimumSize: const Size.fromHeight(54),
-        padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
-      ),
-      onPressed: isSharing ? null : onShare,
-      icon: isSharing
-          ? const SizedBox(
-              width: 18,
-              height: 18,
-              child: CircularProgressIndicator(strokeWidth: 2),
-            )
-          : const Icon(Icons.ios_share_rounded, size: 18),
-      label: const Text(
-        'Share',
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-      ),
-    );
-
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final stacked = constraints.maxWidth < 420;
-
-        if (stacked) {
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              saveButton,
-              const SizedBox(height: AppSpacing.sm),
-              shareButton,
-            ],
-          );
-        }
-
-        return Row(
-          children: [
-            Expanded(child: saveButton),
-            const SizedBox(width: AppSpacing.sm),
-            Expanded(child: shareButton),
-          ],
-        );
-      },
-    );
-  }
-}
-
-class _ReceiptInfoPanel extends StatelessWidget {
-  final String text;
-
-  const _ReceiptInfoPanel({required this.text});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(AppSpacing.md),
-      decoration: BoxDecoration(
-        color: AppColors.surfaceVariant,
-        borderRadius: BorderRadius.circular(AppRadius.sm),
-        border: Border.all(color: AppColors.border),
-      ),
-      child: Text(
-        text,
-        style: AppTextStyles.bodyS.copyWith(
-          color: AppColors.textSecondary,
-        ),
-      ),
-    );
-  }
-}
-
-class _ReceiptErrorState extends StatelessWidget {
-  final VoidCallback onRetry;
-
-  const _ReceiptErrorState({required this.onRetry});
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(AppSpacing.lg),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              Icons.receipt_long_outlined,
-              size: 48,
-              color: AppColors.warning,
-            ),
-            const SizedBox(height: AppSpacing.md),
-            Text(
-              'Could not load this receipt',
-              style: AppTextStyles.labelL,
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: AppSpacing.xs),
-            Text(
-              'Refresh and try again.',
-              style: AppTextStyles.bodyM.copyWith(
-                color: AppColors.textSecondary,
-              ),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: AppSpacing.lg),
-            FilledButton(
-              onPressed: onRetry,
-              child: const Text('Retry'),
-            ),
-          ],
-        ),
-      ),
-    );
   }
 }
 
@@ -879,16 +450,4 @@ DateTime? _asDateTime(dynamic value) {
     return DateTime.tryParse(value);
   }
   return null;
-}
-
-Color _statusColor(String status) {
-  switch (status.toUpperCase()) {
-    case 'SUCCESS':
-      return AppColors.success;
-    case 'FAILED':
-    case 'REVERSED':
-      return AppColors.error;
-    default:
-      return AppColors.warning;
-  }
 }

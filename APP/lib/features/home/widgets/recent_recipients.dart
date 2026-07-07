@@ -3,39 +3,49 @@ import 'package:go_router/go_router.dart';
 
 import '../../../core/router/app_router.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../core/utils/haptics.dart';
+import '../../../core/widgets/tp_illustration.dart';
 import '../../../core/widgets/trustpay_lottie.dart';
 import '../../../services/auth_service.dart';
 import '../../../services/home_data_service.dart';
 
 class RecentRecipients extends StatelessWidget {
-  const RecentRecipients({super.key});
+  final HomeDataService homeDataService;
+
+  RecentRecipients({
+    super.key,
+    HomeDataService? homeDataService,
+  }) : homeDataService = homeDataService ?? HomeDataService();
 
   @override
   Widget build(BuildContext context) {
-    return const _RecentRecipientsContent();
+    return _RecentRecipientsContent(homeDataService: homeDataService);
   }
 }
 
 class _RecentRecipientsContent extends StatefulWidget {
-  const _RecentRecipientsContent();
+  final HomeDataService homeDataService;
+
+  _RecentRecipientsContent({
+    required this.homeDataService,
+  });
 
   @override
   State<_RecentRecipientsContent> createState() => _RecentRecipientsContentState();
 }
 
 class _RecentRecipientsContentState extends State<_RecentRecipientsContent> {
-  final _service = HomeDataService();
   late Future<List<HomeBeneficiary>> _future;
 
   @override
   void initState() {
     super.initState();
-    _future = _service.fetchBeneficiaries();
+    _future = widget.homeDataService.fetchBeneficiaries();
   }
 
   void _reload() {
     setState(() {
-      _future = _service.fetchBeneficiaries();
+      _future = widget.homeDataService.fetchBeneficiaries();
     });
   }
 
@@ -70,6 +80,7 @@ class _RecentRecipientsContentState extends State<_RecentRecipientsContent> {
 
             if (snapshot.hasError) {
               return _RecipientsMessage(
+                variant: TpIllustrationVariant.connectionLost,
                 title: authErrorMessage(
                   snapshot.error ?? 'Could not load recipients',
                   'Could not load recipients',
@@ -82,6 +93,7 @@ class _RecentRecipientsContentState extends State<_RecentRecipientsContent> {
             final recipients = snapshot.data ?? const <HomeBeneficiary>[];
             if (recipients.isEmpty) {
               return _RecipientsMessage(
+                variant: TpIllustrationVariant.emptyRecipients,
                 title: 'No recent recipients yet',
                 detail: 'Save a withdrawal beneficiary to show it here.',
                 actionLabel: 'Withdraw',
@@ -114,12 +126,14 @@ class _RecipientsLoadingState extends StatelessWidget {
 }
 
 class _RecipientsMessage extends StatelessWidget {
+  final TpIllustrationVariant variant;
   final String title;
   final String? detail;
   final String actionLabel;
   final VoidCallback onAction;
 
   const _RecipientsMessage({
+    required this.variant,
     required this.title,
     this.detail,
     required this.actionLabel,
@@ -138,13 +152,7 @@ class _RecipientsMessage extends StatelessWidget {
       ),
       child: Column(
         children: [
-          TrustPayLottie(
-            variant: detail == null
-                ? TrustPayAnimationVariant.send
-                : TrustPayAnimationVariant.loading,
-            size: 60,
-            semanticsLabel: title,
-          ),
+          TpIllustration(variant: variant, size: 124, semanticLabel: title),
           const SizedBox(height: AppSpacing.sm),
           Text(title, style: AppTextStyles.labelM, textAlign: TextAlign.center),
           if (detail != null) ...[
@@ -156,7 +164,13 @@ class _RecipientsMessage extends StatelessWidget {
             ),
           ],
           const SizedBox(height: AppSpacing.md),
-          TextButton(onPressed: onAction, child: Text(actionLabel)),
+          TextButton(
+            onPressed: () {
+              Haptics.selection();
+              onAction();
+            },
+            child: Text(actionLabel),
+          ),
         ],
       ),
     );

@@ -107,7 +107,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [profile, setProfile] = useState<TrustPayUser | null>(null);
   const [session, setSession] = useState<AppSession | null>(null);
-  const [isLoading, setIsLoading] = useState(isSupabaseConfigured);
+  const [isLoading, setIsLoading] = useState(true);
   const router = useRouter();
   const supabase = useMemo(
     () => (isSupabaseConfigured ? createClient() : null),

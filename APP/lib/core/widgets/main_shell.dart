@@ -6,6 +6,7 @@ import '../../core/theme/app_theme.dart';
 import '../../features/home/screens/dashboard_detail_screen.dart';
 import '../../features/home/screens/home_screen.dart';
 import '../../features/home/screens/money_action_screen.dart';
+import '../../services/home_data_service.dart';
 import 'micro_interactions.dart';
 
 class _NavItem {
@@ -44,7 +45,12 @@ const _navItems = [
 ];
 
 class MainShell extends StatefulWidget {
-  const MainShell({super.key});
+  final HomeDataService homeDataService;
+
+  MainShell({
+    super.key,
+    HomeDataService? homeDataService,
+  }) : homeDataService = homeDataService ?? HomeDataService();
 
   @override
   State<MainShell> createState() => _MainShellState();
@@ -74,12 +80,17 @@ class _MainShellState extends State<MainShell> {
           showBackButton: false,
         );
       case 2:
-        return const DashboardDetailScreen(kind: DashboardDetailKind.activity);
+        return DashboardDetailScreen(
+          kind: DashboardDetailKind.activity,
+          homeDataService: widget.homeDataService,
+        );
       case 3:
-        return const DashboardProfileScreen();
+        return DashboardProfileScreen(
+          homeDataService: widget.homeDataService,
+        );
       case 0:
       default:
-        return const HomeScreen();
+        return HomeScreen(homeDataService: widget.homeDataService);
     }
   }
 }
@@ -145,6 +156,21 @@ class _LiquidGlassPill extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final radius = BorderRadius.circular(AppRadius.full);
+    final isDark = AppColors.isDark;
+
+    // Derive the "glass" tint from the active theme so the pill reads as frosted
+    // light glass in day mode and a softly lit surface in dark mode.
+    final Color glassHi =
+        isDark ? Colors.white.withValues(alpha: 0.16) : Colors.white.withValues(alpha: 0.92);
+    final Color glassMid =
+        isDark ? Colors.white.withValues(alpha: 0.05) : Colors.white.withValues(alpha: 0.26);
+    final Color glassLo =
+        isDark ? AppColors.primary.withValues(alpha: 0.22) : Colors.white.withValues(alpha: 0.56);
+    final Color rim = isDark
+        ? Colors.white.withValues(alpha: 0.22)
+        : Colors.white.withValues(alpha: 0.86);
+    final Color topSheen =
+        isDark ? Colors.white.withValues(alpha: 0.5) : Colors.white.withValues(alpha: 0.96);
 
     return ClipRRect(
       borderRadius: radius,
@@ -153,19 +179,18 @@ class _LiquidGlassPill extends StatelessWidget {
         child: DecoratedBox(
           decoration: BoxDecoration(
             borderRadius: radius,
-            color: Colors.white.withValues(alpha: 0.34),
-            border: Border.all(
-              color: Colors.white.withValues(alpha: 0.86),
-              width: 1.2,
-            ),
+            color: isDark
+                ? AppColors.surfaceVariant.withValues(alpha: 0.55)
+                : Colors.white.withValues(alpha: 0.34),
+            border: Border.all(color: rim, width: 1.2),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withValues(alpha: 0.16),
+                color: Colors.black.withValues(alpha: isDark ? 0.34 : 0.16),
                 blurRadius: 22,
                 offset: const Offset(0, 10),
               ),
               BoxShadow(
-                color: Colors.white.withValues(alpha: 0.82),
+                color: topSheen.withValues(alpha: isDark ? 0.2 : 0.82),
                 blurRadius: 2,
                 offset: const Offset(0, -1),
               ),
@@ -173,11 +198,7 @@ class _LiquidGlassPill extends StatelessWidget {
             gradient: LinearGradient(
               begin: const Alignment(-0.82, -1),
               end: const Alignment(0.88, 1),
-              colors: [
-                Colors.white.withValues(alpha: 0.92),
-                Colors.white.withValues(alpha: 0.26),
-                Colors.white.withValues(alpha: 0.56),
-              ],
+              colors: [glassHi, glassMid, glassLo],
               stops: const [0, 0.52, 1],
             ),
           ),
@@ -193,9 +214,9 @@ class _LiquidGlassPill extends StatelessWidget {
                     borderRadius: BorderRadius.circular(AppRadius.full),
                     gradient: LinearGradient(
                       colors: [
-                        Colors.white.withValues(alpha: 0),
-                        Colors.white.withValues(alpha: 0.96),
-                        Colors.white.withValues(alpha: 0),
+                        topSheen.withValues(alpha: 0),
+                        topSheen,
+                        topSheen.withValues(alpha: 0),
                       ],
                     ),
                   ),
@@ -209,7 +230,7 @@ class _LiquidGlassPill extends StatelessWidget {
                   height: 28,
                   decoration: BoxDecoration(
                     borderRadius: BorderRadius.circular(AppRadius.full),
-                    color: Colors.white.withValues(alpha: 0.22),
+                    color: Colors.white.withValues(alpha: isDark ? 0.10 : 0.22),
                   ),
                 ),
               ),

@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'package:go_router/go_router.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../auth/auth_state.dart';
 import '../widgets/main_shell.dart';
 import '../../features/auth/screens/splash_screen.dart';
 import '../../features/auth/screens/onboarding_screen.dart';
@@ -80,6 +81,16 @@ class AppRoutes {
   static String withdrawReceiptFor(String reference) {
     return '/withdraw/receipt/${Uri.encodeComponent(reference)}';
   }
+
+  /// Routes that an unauthenticated / expired session is allowed to sit on.
+  static const unauthenticated = <String>{
+    splash,
+    onboarding,
+    login,
+    register,
+    otp,
+    forgotPassword,
+  };
 }
 
 // ─── ROUTER ───────────────────────────────────────────────────────────────────
@@ -87,47 +98,66 @@ final appRouterProvider = Provider<GoRouter>((ref) {
   return GoRouter(
     initialLocation: AppRoutes.splash,
     debugLogDiagnostics: kDebugMode,
+    // Re-run [redirect] whenever the auth signal changes so a server-rejected
+    // session is pushed to the login screen even from a deep-linked route.
+    refreshListenable: authStateNotifier,
+    redirect: (context, state) {
+      if (!authStateNotifier.sessionExpired) return null;
+
+      // Already on a screen the user can reach while signed out — stay put.
+      if (AppRoutes.unauthenticated.contains(state.matchedLocation)) {
+        return null;
+      }
+
+      // Session was truly expired (server-rejected refresh) or a logged-out
+      // deep link hit an authenticated route: send them to login with a flag
+      // so the login screen can surface a "session expired" message.
+      return Uri(
+        path: AppRoutes.login,
+        queryParameters: const {'expired': '1'},
+      ).toString();
+    },
     routes: [
       GoRoute(
         path: AppRoutes.splash,
         pageBuilder: (context, state) => _fadeTransition(
           state,
-          const SplashScreen(),
+          SplashScreen(),
         ),
       ),
       GoRoute(
         path: AppRoutes.home,
         pageBuilder: (context, state) => _fadeTransition(
           state,
-          const MainShell(),
+          MainShell(),
         ),
       ),
       GoRoute(
         path: AppRoutes.notifications,
         pageBuilder: (context, state) => _slideTransition(
           state,
-          const DashboardDetailScreen(kind: DashboardDetailKind.notifications),
+          DashboardDetailScreen(kind: DashboardDetailKind.notifications),
         ),
       ),
       GoRoute(
         path: AppRoutes.profileAccount,
         pageBuilder: (context, state) => _slideTransition(
           state,
-          const ProfileActionScreen(kind: ProfileActionKind.account),
+          ProfileActionScreen(kind: ProfileActionKind.account),
         ),
       ),
       GoRoute(
         path: AppRoutes.profileAppearance,
         pageBuilder: (context, state) => _slideTransition(
           state,
-          const ProfileActionScreen(kind: ProfileActionKind.appearance),
+          ProfileActionScreen(kind: ProfileActionKind.appearance),
         ),
       ),
       GoRoute(
         path: AppRoutes.profileSecurity,
         pageBuilder: (context, state) => _slideTransition(
           state,
-          const ProfileActionScreen(kind: ProfileActionKind.security),
+          ProfileActionScreen(kind: ProfileActionKind.security),
         ),
       ),
       GoRoute(
@@ -141,7 +171,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         path: AppRoutes.profileSupport,
         pageBuilder: (context, state) => _slideTransition(
           state,
-          const ProfileActionScreen(kind: ProfileActionKind.support),
+          ProfileActionScreen(kind: ProfileActionKind.support),
         ),
       ),
       GoRoute(
@@ -260,21 +290,21 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         path: AppRoutes.wallets,
         pageBuilder: (context, state) => _slideTransition(
           state,
-          const DashboardDetailScreen(kind: DashboardDetailKind.wallets),
+          DashboardDetailScreen(kind: DashboardDetailKind.wallets),
         ),
       ),
       GoRoute(
         path: AppRoutes.virtualAccount,
         pageBuilder: (context, state) => _slideTransition(
           state,
-          const DashboardDetailScreen(kind: DashboardDetailKind.virtualAccount),
+          DashboardDetailScreen(kind: DashboardDetailKind.virtualAccount),
         ),
       ),
       GoRoute(
         path: AppRoutes.activity,
         pageBuilder: (context, state) => _slideTransition(
           state,
-          const DashboardDetailScreen(kind: DashboardDetailKind.activity),
+          DashboardDetailScreen(kind: DashboardDetailKind.activity),
         ),
       ),
       GoRoute(
@@ -351,7 +381,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         path: AppRoutes.receiveMoney,
         pageBuilder: (context, state) => _slideTransition(
           state,
-          const ReceiveMoneyScreen(),
+          ReceiveMoneyScreen(),
         ),
       ),
       GoRoute(

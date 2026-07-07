@@ -1,4 +1,5 @@
 import { BadRequestException, ConflictException } from "@nestjs/common";
+import { Prisma } from "@prisma/client";
 import { createHash } from "crypto";
 import { lastValueFrom, of, throwError } from "rxjs";
 import { IdempotencyInterceptor } from "./idempotency.interceptor";
@@ -16,6 +17,8 @@ describe("IdempotencyInterceptor", () => {
       findUnique: jest.fn(),
       create: jest.fn(),
       update: jest.fn(),
+      updateMany: jest.fn(),
+      delete: jest.fn(),
     },
   };
   const logger = {
@@ -44,6 +47,8 @@ describe("IdempotencyInterceptor", () => {
     prisma.idempotencyRecord.findUnique.mockResolvedValue(null);
     prisma.idempotencyRecord.create.mockResolvedValue({ id: "idem-record-1" });
     prisma.idempotencyRecord.update.mockResolvedValue({});
+    prisma.idempotencyRecord.updateMany.mockResolvedValue({ count: 1 });
+    prisma.idempotencyRecord.delete.mockResolvedValue({});
   });
 
   const hashBody = (body: unknown) =>
@@ -176,6 +181,28 @@ describe("IdempotencyInterceptor", () => {
     expect(prisma.idempotencyRecord.create).not.toHaveBeenCalled();
   });
 
+  it("completes the record even when the handler returns undefined", async () => {
+    const interceptor = new IdempotencyInterceptor(
+      redis as any,
+      prisma as any,
+      logger as any,
+    );
+
+    const response = await interceptor.intercept(makeContext({ amount: 200 }), {
+      handle: () => of(undefined),
+    });
+
+    await expect(lastValueFrom(response)).resolves.toBeUndefined();
+    // Must move out of IN_PROGRESS so retries don't get a spurious conflict.
+    expect(prisma.idempotencyRecord.update).toHaveBeenCalledWith({
+      where: { id: "idem-record-1" },
+      data: expect.objectContaining({
+        status: "COMPLETED",
+        response: Prisma.JsonNull,
+      }),
+    });
+  });
+
   it("persists structured failed responses for handler errors", async () => {
     const interceptor = new IdempotencyInterceptor(
       redis as any,
@@ -198,6 +225,86 @@ describe("IdempotencyInterceptor", () => {
           message: "Bad amount",
         }),
       }),
+    });
+  });
+
+  it("does not memoize transient (non-HTTP) handler errors so retries can succeed", async () => {
+    const interceptor = new IdempotencyInterceptor(
+      redis as any,
+      prisma as any,
+      logger as any,
+    );
+
+    await expect(
+      interceptor.intercept(makeContext({ amount: 200 }), {
+        handle: () => throwError(() => new Error("connection reset")),
+      }),
+    ).rejects.toThrow("connection reset");
+
+    // The in-progress record is removed, not persisted as a replayable failure.
+    expect(prisma.idempotencyRecord.delete).toHaveBeenCalledWith({
+      where: { id: "idem-record-1" },
+    });
+    expect(prisma.idempotencyRecord.update).not.toHaveBeenCalled();
+  });
+
+  it("still blocks a retry while an in-progress lease is fresh", async () => {
+    const interceptor = new IdempotencyInterceptor(
+      redis as any,
+      prisma as any,
+      logger as any,
+    );
+    prisma.idempotencyRecord.findUnique.mockResolvedValue({
+      id: "idem-record-1",
+      requestHash: hashBody({ amount: 200 }),
+      status: "IN_PROGRESS",
+      response: null,
+      updatedAt: new Date(),
+    });
+
+    await expect(
+      interceptor.intercept(makeContext({ amount: 200 }), {
+        handle: () => of({ reference: "FUND-1" }),
+      }),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(prisma.idempotencyRecord.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("lets a retry take over a stranded in-progress record once the lease lapses", async () => {
+    const interceptor = new IdempotencyInterceptor(
+      redis as any,
+      prisma as any,
+      logger as any,
+    );
+    const staleUpdatedAt = new Date(Date.now() - 10 * 60 * 1000);
+    prisma.idempotencyRecord.findUnique.mockResolvedValue({
+      id: "idem-record-1",
+      requestHash: hashBody({ amount: 200 }),
+      status: "IN_PROGRESS",
+      response: null,
+      updatedAt: staleUpdatedAt,
+    });
+
+    const response = await interceptor.intercept(makeContext({ amount: 200 }), {
+      handle: () => of({ reference: "FUND-1" }),
+    });
+
+    await expect(lastValueFrom(response)).resolves.toEqual({
+      reference: "FUND-1",
+    });
+    expect(prisma.idempotencyRecord.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: "idem-record-1",
+        status: "IN_PROGRESS",
+        updatedAt: staleUpdatedAt,
+      },
+      data: expect.objectContaining({ requestHash: hashBody({ amount: 200 }) }),
+    });
+    // Reuses the reclaimed record rather than creating a new one.
+    expect(prisma.idempotencyRecord.create).not.toHaveBeenCalled();
+    expect(prisma.idempotencyRecord.update).toHaveBeenCalledWith({
+      where: { id: "idem-record-1" },
+      data: expect.objectContaining({ status: "COMPLETED" }),
     });
   });
 });

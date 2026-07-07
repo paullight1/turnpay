@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../core/auth/auth_state.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/router/app_router.dart';
 import '../../../services/auth_service.dart';
@@ -8,7 +9,14 @@ import '../../../services/auth_service.dart';
 /// Animated splash screen that transitions to onboarding or home.
 /// Features the TrustPay brand mark before the app name.
 class SplashScreen extends StatefulWidget {
-  const SplashScreen({super.key});
+  final AuthService authService;
+  final Duration minimumDelay;
+
+  SplashScreen({
+    super.key,
+    AuthService? authService,
+    this.minimumDelay = const Duration(milliseconds: 2800),
+  }) : authService = authService ?? AuthService();
 
   @override
   State<SplashScreen> createState() => _SplashScreenState();
@@ -20,7 +28,6 @@ class _SplashScreenState extends State<SplashScreen>
   late Animation<double> _logoScale;
   late Animation<double> _logoOpacity;
   late Animation<double> _taglineOpacity;
-  final _authService = AuthService();
 
   @override
   void initState() {
@@ -60,25 +67,31 @@ class _SplashScreenState extends State<SplashScreen>
   Future<void> _resolveInitialRoute() async {
     // Wait for splash animation to play (min 2.8s) while checking session
     final results = await Future.wait([
-      Future.delayed(const Duration(milliseconds: 2800)),
+      Future.delayed(widget.minimumDelay),
       _tryRestoreSession(),
     ]);
 
     if (!mounted) return;
 
-    final hasSession = results[1] as bool;
-    if (hasSession) {
-      context.go(AppRoutes.home);
-    } else {
-      context.go(AppRoutes.onboarding);
+    final state = results[1] as SessionRestoreState;
+    switch (state) {
+      // Active session, or an offline launch where we still hold valid tokens:
+      // let the user in and retry the refresh on the next authenticated call
+      // instead of logging them out because the network is down.
+      case SessionRestoreState.active:
+      case SessionRestoreState.offline:
+        context.go(AppRoutes.home);
+      case SessionRestoreState.expired:
+        context.go(AppRoutes.onboarding);
     }
   }
 
-  Future<bool> _tryRestoreSession() async {
+  Future<SessionRestoreState> _tryRestoreSession() async {
     try {
-      return await _authService.refreshSession();
+      return await widget.authService.restoreSession();
     } catch (_) {
-      return false;
+      // An unexpected error should not blow away a stored session; retry later.
+      return SessionRestoreState.offline;
     }
   }
 

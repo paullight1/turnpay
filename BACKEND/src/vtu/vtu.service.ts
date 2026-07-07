@@ -722,7 +722,9 @@ export class VtuService {
       },
       orderBy: [{ nextRequeryAt: "asc" }, { createdAt: "asc" }],
       take: limit,
-      include: { transaction: true },
+      // Only ids are used below; requeryOrder() re-fetches each order with the
+      // transaction relation, so joining it here is wasted work per cron cycle.
+      select: { id: true },
     });
 
     const results: Array<{ orderId: string; processed: boolean }> = [];
@@ -1202,7 +1204,25 @@ export class VtuService {
     metadata: Record<string, unknown>,
     finalStatus: Extract<TransactionStatus, "FAILED" | "REVERSED"> = "FAILED",
   ) {
-    await this.prisma.$transaction(async (tx) => {
+    const reversed = await this.prisma.$transaction(async (tx) => {
+      // Guarded transition: only a still-PENDING purchase may be reversed.
+      // A late FAILED/REVERSED provider event after the order was already
+      // delivered (SUCCESS) or refunded (REVERSED) must not double-refund.
+      const transitioned = await tx.transaction.updateMany({
+        where: { reference: transaction.reference, status: "PENDING" },
+        data: {
+          status: finalStatus,
+          metadata: {
+            ...metadata,
+            reversalReason: reason,
+          },
+        },
+      });
+
+      if (transitioned.count !== 1) {
+        return false;
+      }
+
       const existingReversal = await tx.ledgerEntry.findFirst({
         where: {
           transactionId: transaction.id,
@@ -1228,17 +1248,6 @@ export class VtuService {
         );
       }
 
-      await tx.transaction.update({
-        where: { reference: transaction.reference },
-        data: {
-          status: finalStatus,
-          metadata: {
-            ...metadata,
-            reversalReason: reason,
-          },
-        },
-      });
-
       if (transaction.orderId) {
         await tx.vtuOrder.update({
           where: { id: transaction.orderId },
@@ -1257,7 +1266,17 @@ export class VtuService {
           },
         });
       }
+
+      return true;
     });
+
+    if (!reversed) {
+      this.logger.info(
+        { userId, reference: transaction.reference },
+        "VTU reversal skipped; transaction already terminal",
+      );
+      return;
+    }
 
     this.logger.info(
       { userId, reference: transaction.reference, amount: amount.toString() },

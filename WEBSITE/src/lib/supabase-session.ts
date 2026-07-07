@@ -4,43 +4,44 @@ import type { Session } from "@supabase/supabase-js";
 
 const SESSION_COOKIE_NAME = "supabase.auth.token";
 const SESSION_STORAGE_KEY = "trustpay.auth.session";
-const SESSION_COOKIE_MAX_AGE_SECONDS = 30 * 24 * 60 * 60;
 const CHUNK_COUNT = 8;
 
 type PersistedSession = Session & {
   authMode?: "supabase" | "local";
 };
 
+// Kept only within the running JS context (not persisted). Holds the full
+// session, including the refresh token, so in-tab refresh works. It is cleared
+// on reload/navigation, which is acceptable — persistent copies are the XSS
+// risk, and those are minimized below.
 let inMemorySession: PersistedSession | null = null;
-
-function base64UrlEncode(value: string) {
-  const bytes = new TextEncoder().encode(value);
-  let binary = "";
-
-  bytes.forEach((byte) => {
-    binary += String.fromCharCode(byte);
-  });
-
-  return btoa(binary)
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=+$/g, "");
-}
-
-function setCookie(name: string, value: string, maxAgeSeconds: number) {
-  document.cookie = `${name}=${value}; path=/; max-age=${maxAgeSeconds}; samesite=lax`;
-}
 
 function clearCookie(name: string) {
   document.cookie = `${name}=; path=/; max-age=0; samesite=lax`;
 }
 
-function clearSessionChunks() {
+// Purge any legacy JS-readable session cookies. We no longer WRITE these: the
+// authoritative server-side copy is an HttpOnly, Secure cookie set by
+// /api/auth/session, which JavaScript cannot read (mitigating token theft via
+// XSS).
+function clearLegacySessionChunks() {
   clearCookie(SESSION_COOKIE_NAME);
 
   for (let index = 0; index < CHUNK_COUNT; index += 1) {
     clearCookie(`${SESSION_COOKIE_NAME}.${index}`);
   }
+}
+
+// The refresh token is the long-lived, high-value secret; it is never mirrored
+// into JS-readable storage. Only a short-lived access-token copy is retained in
+// localStorage so authenticated API calls survive a reload in backend "local"
+// auth mode (Supabase mode recovers from Supabase's own client storage).
+//
+// TODO(launch): even the access token in localStorage is XSS-exposed. Move
+// backend "local" auth-mode session persistence and refresh fully server-side
+// (HttpOnly cookie + a server refresh endpoint) so no token is JS-readable.
+function toMinimizedSession(session: PersistedSession): PersistedSession {
+  return { ...session, refresh_token: "" };
 }
 
 function writeSessionStorage(session: PersistedSession) {
@@ -49,9 +50,12 @@ function writeSessionStorage(session: PersistedSession) {
   }
 
   try {
-    window.localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(session));
+    window.localStorage.setItem(
+      SESSION_STORAGE_KEY,
+      JSON.stringify(toMinimizedSession(session)),
+    );
   } catch {
-    // Ignore storage failures and fall back to cookies + memory.
+    // Ignore storage failures and fall back to the in-memory session.
   }
 }
 
@@ -67,122 +71,13 @@ function clearSessionStorage() {
   }
 }
 
-async function syncSessionCookieViaForm(session: PersistedSession) {
-  if (typeof document === "undefined") {
-    return;
-  }
-
-  const host = document.body || document.documentElement;
-  if (!host) {
-    return;
-  }
-
-  await new Promise<void>((resolve) => {
-    const iframeName = `trustpay-auth-session-${Date.now()}-${Math.random()
-      .toString(36)
-      .slice(2)}`;
-    const iframe = document.createElement("iframe");
-    const form = document.createElement("form");
-    const input = document.createElement("input");
-
-    let timeoutId = 0;
-    const cleanup = () => {
-      window.clearTimeout(timeoutId);
-      form.remove();
-      iframe.remove();
-      resolve();
-    };
-
-    iframe.name = iframeName;
-    iframe.style.display = "none";
-    iframe.addEventListener("load", cleanup, { once: true });
-
-    form.method = "POST";
-    form.action = "/api/auth/session";
-    form.target = iframeName;
-    form.style.display = "none";
-
-    input.type = "hidden";
-    input.name = "session";
-    input.value = JSON.stringify({ session });
-    form.appendChild(input);
-
-    host.appendChild(iframe);
-    host.appendChild(form);
-
-    timeoutId = window.setTimeout(cleanup, 1500);
-
-    try {
-      form.submit();
-    } catch {
-      cleanup();
-    }
-  });
-}
-
-function encodeSession(session: PersistedSession) {
-  return `base64-${base64UrlEncode(JSON.stringify(session))}`;
-}
-
 function isPersistedSession(candidate: unknown): candidate is PersistedSession {
   return (
     typeof candidate === "object" &&
     candidate !== null &&
     "access_token" in candidate &&
-    "refresh_token" in candidate &&
     "user" in candidate
   );
-}
-
-function decodeSession(value: string | null): PersistedSession | null {
-  if (!value) {
-    return null;
-  }
-
-  try {
-    const parsed = value.startsWith("base64-")
-      ? JSON.parse(
-          new TextDecoder().decode(
-            Uint8Array.from(atob(value.slice("base64-".length)), (char) =>
-              char.charCodeAt(0),
-            ),
-          ),
-        )
-      : JSON.parse(value);
-
-    return isPersistedSession(parsed) ? parsed : null;
-  } catch {
-    return null;
-  }
-}
-
-function readCookieValue(name: string) {
-  if (typeof document === "undefined") {
-    return null;
-  }
-
-  const prefix = `${name}=`;
-  const cookies = document.cookie.split("; ");
-  const match = cookies.find((entry) => entry.startsWith(prefix));
-  return match ? match.slice(prefix.length) : null;
-}
-
-function readSessionFromCookies(): PersistedSession | null {
-  const directCookie = decodeSession(readCookieValue(SESSION_COOKIE_NAME));
-  if (directCookie) {
-    return directCookie;
-  }
-
-  for (let index = 0; index < CHUNK_COUNT; index += 1) {
-    const chunkCookie = decodeSession(
-      readCookieValue(`${SESSION_COOKIE_NAME}.${index}`),
-    );
-    if (chunkCookie) {
-      return chunkCookie;
-    }
-  }
-
-  return null;
 }
 
 function readSessionFromStorage(): PersistedSession | null {
@@ -207,14 +102,16 @@ export async function persistSupabaseSession(session: Session) {
   const persistedSession = session as PersistedSession;
 
   inMemorySession = persistedSession;
-  if (typeof document === "undefined") {
+  if (typeof window === "undefined") {
     return;
   }
 
-  clearSessionChunks();
-  setCookie(SESSION_COOKIE_NAME, encodeSession(persistedSession), SESSION_COOKIE_MAX_AGE_SECONDS);
+  // Clean up any legacy JS-readable full-session cookies from older builds.
+  clearLegacySessionChunks();
   writeSessionStorage(persistedSession);
 
+  // Set the authoritative HttpOnly session cookie via a same-origin JSON POST.
+  // The server validates the access token before minting the cookie.
   if (typeof fetch === "function") {
     try {
       await fetch("/api/auth/session", {
@@ -225,20 +122,18 @@ export async function persistSupabaseSession(session: Session) {
         body: JSON.stringify({ session: persistedSession }),
       });
     } catch {
-      // Ignore route failures and keep the client-side fallback in place.
+      // Ignore route failures and keep the in-memory session in place.
     }
   }
-
-  await syncSessionCookieViaForm(persistedSession);
 }
 
 export async function clearSupabaseSession() {
   inMemorySession = null;
-  if (typeof document === "undefined") {
+  if (typeof window === "undefined") {
     return;
   }
 
-  clearSessionChunks();
+  clearLegacySessionChunks();
   clearSessionStorage();
 
   if (typeof fetch === "function") {
@@ -261,12 +156,6 @@ export function readPersistedSupabaseSession() {
   if (storedSession) {
     inMemorySession = storedSession;
     return storedSession;
-  }
-
-  const cookieSession = readSessionFromCookies();
-  if (cookieSession) {
-    inMemorySession = cookieSession;
-    return cookieSession;
   }
 
   return null;

@@ -1,4 +1,8 @@
-import { BadRequestException, Injectable } from "@nestjs/common";
+import {
+  BadRequestException,
+  Injectable,
+  ServiceUnavailableException,
+} from "@nestjs/common";
 import { HttpService } from "@nestjs/axios";
 import { ConfigService } from "@nestjs/config";
 import { PinoLogger } from "nestjs-pino";
@@ -62,6 +66,21 @@ interface VtpassBalanceResponse {
   code?: number | string;
   contents?: {
     balance?: number | string;
+  };
+}
+
+interface VtpassMerchantVerifyResponse {
+  code?: number | string;
+  response_description?: string;
+  content?: {
+    error?: string;
+    Customer_Name?: string;
+    Address?: string;
+    Status?: string;
+    Customer_Number?: string;
+    Meter_Number?: string;
+    Customer_Type?: string;
+    Can_Vend?: string;
   };
 }
 
@@ -495,14 +514,28 @@ export class VtuApiProvider {
       return { name: "Test User", status: "active" };
     }
 
+    if (this.providerMode === "vtpass") {
+      const service = this.findVtpassService(provider, ["cable"]);
+      if (!service) {
+        throw new BadRequestException("Unsupported VTpass cable service");
+      }
+
+      const content = await this.vtpassMerchantVerify({
+        serviceID: service.serviceID,
+        billersCode: smartCardNumber,
+      });
+
+      return {
+        name: content.Customer_Name || "Unknown customer",
+        status: (content.Status || "active").toLowerCase(),
+      };
+    }
+
     const response = await firstValueFrom(
       this.httpService.get<{ name: string; status: string }>(
         `${this.baseUrl}/validate`,
         {
-          headers:
-            this.providerMode === "vtpass"
-              ? this.vtpassPostHeaders
-              : this.genericHeaders,
+          headers: this.genericHeaders,
           params: { provider, number: smartCardNumber },
         },
       ),
@@ -519,20 +552,73 @@ export class VtuApiProvider {
       return { name: "Test Customer", address: "Test Address" };
     }
 
+    if (this.providerMode === "vtpass") {
+      const service = this.findVtpassService(provider, ["electricity"]);
+      if (!service) {
+        throw new BadRequestException(
+          "Unsupported VTpass electricity service",
+        );
+      }
+
+      const content = await this.vtpassMerchantVerify({
+        serviceID: service.serviceID,
+        billersCode: meterNumber,
+        // Purchase payloads are prepaid-only today; keep verification aligned.
+        type: "prepaid",
+      });
+
+      return {
+        name: content.Customer_Name || "Unknown customer",
+        address: content.Address || "",
+      };
+    }
+
     const response = await firstValueFrom(
       this.httpService.get<{ name: string; address: string }>(
         `${this.baseUrl}/validate-meter`,
         {
-          headers:
-            this.providerMode === "vtpass"
-              ? this.vtpassPostHeaders
-              : this.genericHeaders,
+          headers: this.genericHeaders,
           params: { provider, number: meterNumber },
         },
       ),
     );
 
     return response.data;
+  }
+
+  private async vtpassMerchantVerify(payload: {
+    serviceID: string;
+    billersCode: string;
+    type?: string;
+  }) {
+    let response: VtpassMerchantVerifyResponse;
+    try {
+      const httpResponse = await firstValueFrom(
+        this.httpService.post<VtpassMerchantVerifyResponse>(
+          `${this.baseUrl}/merchant-verify`,
+          payload,
+          { headers: this.vtpassPostHeaders },
+        ),
+      );
+      response = httpResponse.data;
+    } catch (error) {
+      this.logger.warn(
+        this.safeProviderError(error),
+        "VTpass merchant verification request failed",
+      );
+      throw new ServiceUnavailableException(
+        "Customer verification is temporarily unavailable. Try again shortly.",
+      );
+    }
+
+    const content = response.content;
+    if (!content || content.error || `${response.code}` !== "000") {
+      throw new BadRequestException(
+        "We could not verify this customer number. Check it and try again.",
+      );
+    }
+
+    return content;
   }
 
   private getFallbackProviders(type?: string): VtuProvider[] {

@@ -5,12 +5,13 @@ import {
   ExecutionContext,
   CanActivate,
 } from "@nestjs/common";
-import * as request from "supertest";
+import request from "supertest";
 import { createHash } from "crypto";
 
 import { ExchangeController, AdminExchangeController } from "../src/exchange/exchange.controller";
 import { ExchangeService } from "../src/exchange/exchange.service";
 import { RateService } from "../src/exchange/providers/rate.service";
+import { RateAlertService } from "../src/exchange/providers/rate-alert.service";
 import { PrismaService } from "../src/prisma/prisma.service";
 import { RedisService } from "../src/redis/redis.service";
 import { SupabaseService } from "../src/supabase/supabase.service";
@@ -92,6 +93,13 @@ const mockBankingService = {
 
 const mockRateService = {
   getRate: jest.fn(),
+};
+
+const mockRateAlertService = {
+  createAlert: jest.fn(),
+  getUserAlerts: jest.fn(),
+  deleteAlert: jest.fn(),
+  checkRateAlerts: jest.fn(),
 };
 
 const mockPinoLogger = {
@@ -180,6 +188,7 @@ function buildPrismaReceipt(overrides: Record<string, any> = {}) {
 
 describe("Exchange Receipts E2E", () => {
   let app: INestApplication;
+  const api = () => request(app.getHttpAdapter().getInstance());
 
   beforeAll(async () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({
@@ -200,6 +209,7 @@ describe("Exchange Receipts E2E", () => {
         ExchangeService,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: RateService, useValue: mockRateService },
+        { provide: RateAlertService, useValue: mockRateAlertService },
         { provide: RedisService, useValue: mockRedis },
         { provide: PinoLogger, useValue: mockPinoLogger },
         { provide: LedgerService, useValue: mockLedger },
@@ -285,7 +295,7 @@ describe("Exchange Receipts E2E", () => {
       );
 
       // --- Act: submit receipt ---
-      const submitRes = await request(app.getHttpServer())
+      const submitRes = await api()
         .post("/api/exchange/receipts")
         .set("Idempotency-Key", "scenario-a-submit")
         .set("X-Test-User-Id", "user-1")
@@ -324,7 +334,7 @@ describe("Exchange Receipts E2E", () => {
       );
 
       // --- Act: proof URL ---
-      const proofRes = await request(app.getHttpServer())
+      const proofRes = await api()
         .get(`/api/exchange/receipts/${receiptId}/proof-url`)
         .set("X-Test-User-Id", "user-1")
         .set("X-Test-User-Role", "USER");
@@ -378,7 +388,7 @@ describe("Exchange Receipts E2E", () => {
       mockPrisma.exchangeReceipt.create.mockResolvedValue(createdReceipt);
 
       // --- First request ---
-      const firstRes = await request(app.getHttpServer())
+      const firstRes = await api()
         .post("/api/exchange/receipts")
         .set("Idempotency-Key", "idem-key-b")
         .set("X-Test-User-Id", "user-1")
@@ -397,7 +407,7 @@ describe("Exchange Receipts E2E", () => {
         response: firstRes.body,
       });
 
-      const secondRes = await request(app.getHttpServer())
+      const secondRes = await api()
         .post("/api/exchange/receipts")
         .set("Idempotency-Key", "idem-key-b")
         .set("X-Test-User-Id", "user-1")
@@ -457,7 +467,7 @@ describe("Exchange Receipts E2E", () => {
       });
       mockPrisma.auditLog.create.mockResolvedValue({});
 
-      const res = await request(app.getHttpServer())
+      const res = await api()
         .post(`/api/admin/exchange/receipts/${receiptId}/review`)
         .set("Idempotency-Key", "scenario-c-approve")
         .set("X-Test-User-Id", "admin-1")
@@ -534,7 +544,7 @@ describe("Exchange Receipts E2E", () => {
       });
       mockPrisma.auditLog.create.mockResolvedValue({});
 
-      const res = await request(app.getHttpServer())
+      const res = await api()
         .post(`/api/admin/exchange/receipts/${receiptId}/review`)
         .set("Idempotency-Key", "scenario-d-reject")
         .set("X-Test-User-Id", "admin-1")
@@ -604,7 +614,7 @@ describe("Exchange Receipts E2E", () => {
       });
       mockPrisma.auditLog.create.mockResolvedValue({});
 
-      const res = await request(app.getHttpServer())
+      const res = await api()
         .post(`/api/admin/exchange/receipts/${receiptId}/review`)
         .set("Idempotency-Key", "scenario-e-needs-info")
         .set("X-Test-User-Id", "admin-1")
@@ -642,7 +652,7 @@ describe("Exchange Receipts E2E", () => {
   // ================================================================
   describe("f) Non-admin rejection attempt returns 403", () => {
     it("blocks a non-admin user from reviewing a receipt", async () => {
-      const res = await request(app.getHttpServer())
+      const res = await api()
         .post("/api/admin/exchange/receipts/99999999-9999-4999-8999-999999999999/review")
         .set("Idempotency-Key", "scenario-f-non-admin")
         .set("X-Test-User-Id", "regular-user")
@@ -674,7 +684,7 @@ describe("Exchange Receipts E2E", () => {
 
       mockPrisma.exchangeReceipt.findUnique.mockResolvedValue(terminalReceipt);
 
-      const res = await request(app.getHttpServer())
+      const res = await api()
         .post(`/api/admin/exchange/receipts/${receiptId}/review`)
         .set("Idempotency-Key", "scenario-g-re-review")
         .set("X-Test-User-Id", "admin-1")
@@ -702,7 +712,7 @@ describe("Exchange Receipts E2E", () => {
 
       mockPrisma.exchangeReceipt.findUnique.mockResolvedValue(terminalReceipt);
 
-      const res = await request(app.getHttpServer())
+      const res = await api()
         .post(`/api/admin/exchange/receipts/${receiptId}/review`)
         .set("Idempotency-Key", "scenario-g-re-review-rejected")
         .set("X-Test-User-Id", "admin-1")
@@ -734,7 +744,7 @@ describe("Exchange Receipts E2E", () => {
         "https://supabase.co/storage/v1/object/signed/exchange-receipts/user-1/owner-proof.pdf?token=owner-token",
       );
 
-      const res = await request(app.getHttpServer())
+      const res = await api()
         .get(`/api/exchange/receipts/${receiptId}/proof-url`)
         .set("X-Test-User-Id", "user-1")
         .set("X-Test-User-Role", "USER");
@@ -751,7 +761,7 @@ describe("Exchange Receipts E2E", () => {
       // nothing
       mockPrisma.exchangeReceipt.findFirst.mockResolvedValue(null);
 
-      const res = await request(app.getHttpServer())
+      const res = await api()
         .get(`/api/exchange/receipts/${receiptId}/proof-url`)
         .set("X-Test-User-Id", "user-2")
         .set("X-Test-User-Role", "USER");
@@ -773,7 +783,7 @@ describe("Exchange Receipts E2E", () => {
       );
       mockPrisma.auditLog.create.mockResolvedValue({});
 
-      const res = await request(app.getHttpServer())
+      const res = await api()
         .post(`/api/admin/exchange/receipts/${receiptId}/proof-url`)
         .set("Idempotency-Key", "admin-proof-boundary")
         .set("X-Test-User-Id", "admin-1")

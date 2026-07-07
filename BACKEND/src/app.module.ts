@@ -2,6 +2,8 @@ import { Module } from "@nestjs/common";
 import { ConfigModule } from "@nestjs/config";
 import { LoggerModule } from "nestjs-pino";
 import { ThrottlerModule } from "@nestjs/throttler";
+import { APP_GUARD } from "@nestjs/core";
+import { UserThrottlerGuard } from "./common/guards/user-throttler.guard";
 import { ScheduleModule } from "@nestjs/schedule";
 import * as Joi from "joi";
 import { PrismaModule } from "./prisma/prisma.module";
@@ -75,6 +77,16 @@ const defaultNodeEnv =
             .uri({ scheme: ["https"] })
             .required(),
           otherwise: Joi.string().uri().default("http://localhost:3002"),
+        }),
+        JWT_SECRET: Joi.when("NODE_ENV", {
+          is: deployedEnvironment,
+          then: Joi.string().min(32).required(),
+          otherwise: Joi.string().default("dev_jwt_secret_do_not_use"),
+        }),
+        JWT_REFRESH_SECRET: Joi.when("NODE_ENV", {
+          is: deployedEnvironment,
+          then: Joi.string().min(32).required(),
+          otherwise: Joi.string().default("dev_refresh_secret_do_not_use"),
         }),
         SUPABASE_URL: Joi.string().uri().required(),
         SUPABASE_PUBLISHABLE_KEY: Joi.string().allow("").optional(),
@@ -252,12 +264,22 @@ const defaultNodeEnv =
           (process.env.NODE_ENV === "production" ? "info" : "debug"),
       },
     }),
-    ThrottlerModule.forRoot([
-      {
-        ttl: 60000,
-        limit: 10,
-      },
-    ]),
+    // TODO(launch): back throttler with Redis storage (npm i nestjs-throttler-storage-redis) — currently in-memory, resets on cold start
+    ThrottlerModule.forRoot({
+      throttlers: [
+        {
+          // Generous global ceiling so ordinary authenticated browsing is
+          // never throttled; tight abuse limits are applied per-endpoint via
+          // @Throttle (e.g. withdraw 5/min, provision 3/min). Keyed per user
+          // by UserThrottlerGuard, not per shared proxy IP.
+          ttl: 60000,
+          limit: 120,
+        },
+      ],
+      // Rate limiting would make request-count assertions in the e2e suite
+      // flaky; it is only meaningful in real deployments.
+      skipIf: () => process.env.NODE_ENV === "test",
+    }),
     ScheduleModule.forRoot(),
     RedisModule,
     CircuitBreakerModule,
@@ -281,6 +303,10 @@ const defaultNodeEnv =
     HealthModule,
   ],
   controllers: [AppController],
-  providers: [AppService, IdempotencyInterceptor],
+  providers: [
+    AppService,
+    IdempotencyInterceptor,
+    { provide: APP_GUARD, useClass: UserThrottlerGuard },
+  ],
 })
 export class AppModule {}

@@ -7,6 +7,7 @@ import {
   Matches,
   IsOptional,
   IsUrl,
+  Max,
   MaxLength,
   MinLength,
   ValidateIf,
@@ -88,14 +89,22 @@ export class AdminUpdateRateDto {
   @IsIn(SUPPORTED_CURRENCIES)
   to: (typeof SUPPORTED_CURRENCIES)[number];
 
+  // Absolute sanity ceiling. NGN/GHS pairs sit near 0.3–3.2; a value beyond
+  // this can only be a fat-finger or abuse. The effective-rate deviation guard
+  // in the controller still routes anything >5% off market to dual approval.
   @IsNumber()
   @Type(() => Number)
   @IsPositive()
+  @Max(100_000)
   rate: number;
 
+  // Markup is a spread percentage (default 2.5). It is intentionally bounded:
+  // it feeds the effective rate (rate * (1 - markup/100)) and therefore every
+  // exchange credit, so an unbounded value is a direct money-loss lever.
   @IsNumber()
   @Type(() => Number)
   @IsPositive()
+  @Max(50)
   markup: number;
 
   @IsString()

@@ -224,11 +224,30 @@ export class RateService implements OnModuleInit {
     from: string,
     to: string,
     proposedRate: number,
+    proposedMarkup?: number,
   ): Promise<{ deviationPercent: number; requiresDualApproval: boolean }> {
     try {
       const current = await this.getRate(from, to);
+      // Compare the *effective* rate (rate * (1 - markup/100)) — the number
+      // that actually drives every exchange credit — not just the base rate.
+      // Otherwise an admin could hold `rate` at market (0% deviation, no second
+      // approver) while inflating `markup` to move the real economics far off
+      // market. When no markup is supplied, fall back to base-rate comparison.
+      const currentEffective =
+        current.rate * (1 - (current.markup ?? 0) / 100);
+      const proposedEffective =
+        proposedMarkup === undefined
+          ? proposedRate
+          : proposedRate * (1 - proposedMarkup / 100);
+      const baseline =
+        proposedMarkup === undefined ? current.rate : currentEffective;
+
+      if (!baseline || !Number.isFinite(baseline)) {
+        return { deviationPercent: 100, requiresDualApproval: true };
+      }
+
       const deviation =
-        Math.abs(proposedRate - current.rate) / current.rate * 100;
+        (Math.abs(proposedEffective - baseline) / baseline) * 100;
       return {
         deviationPercent: Math.round(deviation * 100) / 100,
         requiresDualApproval: deviation > 5,

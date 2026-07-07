@@ -542,6 +542,7 @@ describe("PaymentService withdrawals", () => {
       monthlyWithdrawLimit: new Decimal(5000000),
       dailyWithdrawn: new Decimal(0),
       monthlyWithdrawn: new Decimal(0),
+      dailyLimitResetDate: new Date(2020, 0, 1),
       limitResetDate: new Date(2020, 0, 1),
     });
     prisma.bankAccount.findFirst.mockResolvedValue({
@@ -561,9 +562,7 @@ describe("PaymentService withdrawals", () => {
       id: "tx-1",
       reference: "WD-1",
     });
-    prisma.user.updateMany
-      .mockResolvedValueOnce({ count: 1 })
-      .mockResolvedValueOnce({ count: 1 });
+    prisma.user.updateMany.mockResolvedValue({ count: 1 });
     ledger.debitWallet.mockResolvedValue({
       balanceAfter: new Decimal(4000),
     });
@@ -587,15 +586,31 @@ describe("PaymentService withdrawals", () => {
       provider: "monnify",
     } as any);
 
+    // First reset call clears the stale daily counter for a new UTC day.
     expect(prisma.user.updateMany).toHaveBeenNthCalledWith(
       1,
+      expect.objectContaining({
+        where: {
+          id: "user-1",
+          OR: [
+            { dailyLimitResetDate: null },
+            { dailyLimitResetDate: { lt: expect.any(Date) } },
+          ],
+        },
+        data: expect.objectContaining({
+          dailyWithdrawn: new Decimal(0),
+        }),
+      }),
+    );
+    // Second reset call clears the stale monthly counter for a new UTC month.
+    expect(prisma.user.updateMany).toHaveBeenNthCalledWith(
+      2,
       expect.objectContaining({
         where: {
           id: "user-1",
           OR: [{ limitResetDate: null }, { limitResetDate: { lt: expect.any(Date) } }],
         },
         data: expect.objectContaining({
-          dailyWithdrawn: new Decimal(0),
           monthlyWithdrawn: new Decimal(0),
         }),
       }),

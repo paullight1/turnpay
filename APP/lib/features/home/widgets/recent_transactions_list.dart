@@ -4,30 +4,36 @@ import 'package:intl/intl.dart';
 
 import '../../../core/router/app_router.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../core/utils/haptics.dart';
+import '../../../core/widgets/tp_illustration.dart';
 import '../../../core/widgets/trustpay_lottie.dart';
 import '../../../services/auth_service.dart';
 import '../../../services/home_data_service.dart';
 
 class RecentTransactionsList extends StatefulWidget {
-  const RecentTransactionsList({super.key});
+  final HomeDataService homeDataService;
+
+  RecentTransactionsList({
+    super.key,
+    HomeDataService? homeDataService,
+  }) : homeDataService = homeDataService ?? HomeDataService();
 
   @override
   State<RecentTransactionsList> createState() => _RecentTransactionsListState();
 }
 
 class _RecentTransactionsListState extends State<RecentTransactionsList> {
-  final _service = HomeDataService();
   late Future<List<HomeTransaction>> _future;
 
   @override
   void initState() {
     super.initState();
-    _future = _service.fetchTransactions(limit: 5);
+    _future = widget.homeDataService.fetchTransactions(limit: 5);
   }
 
   void _reload() {
     setState(() {
-      _future = _service.fetchTransactions(limit: 5);
+      _future = widget.homeDataService.fetchTransactions(limit: 5);
     });
   }
 
@@ -61,6 +67,7 @@ class _RecentTransactionsListState extends State<RecentTransactionsList> {
 
             if (snapshot.hasError) {
               return _TransactionsMessage(
+                variant: TpIllustrationVariant.connectionLost,
                 title: authErrorMessage(
                   snapshot.error ?? 'Could not load transactions',
                   'Could not load transactions',
@@ -73,6 +80,7 @@ class _RecentTransactionsListState extends State<RecentTransactionsList> {
             final transactions = snapshot.data ?? const <HomeTransaction>[];
             if (transactions.isEmpty) {
               return _TransactionsMessage(
+                variant: TpIllustrationVariant.emptyTransactions,
                 title: 'No transactions yet',
                 detail: 'Fund your wallet to start moving money.',
                 actionLabel: 'Fund wallet',
@@ -107,12 +115,14 @@ class _TransactionsLoadingState extends StatelessWidget {
 }
 
 class _TransactionsMessage extends StatelessWidget {
+  final TpIllustrationVariant variant;
   final String title;
   final String? detail;
   final String actionLabel;
   final VoidCallback onAction;
 
   const _TransactionsMessage({
+    required this.variant,
     required this.title,
     this.detail,
     required this.actionLabel,
@@ -131,13 +141,7 @@ class _TransactionsMessage extends StatelessWidget {
       ),
       child: Column(
         children: [
-          TrustPayLottie(
-            variant: detail == null
-                ? TrustPayAnimationVariant.send
-                : TrustPayAnimationVariant.loading,
-            size: 68,
-            semanticsLabel: title,
-          ),
+          TpIllustration(variant: variant, size: 132, semanticLabel: title),
           const SizedBox(height: AppSpacing.sm),
           Text(title, style: AppTextStyles.labelM, textAlign: TextAlign.center),
           if (detail != null) ...[
@@ -149,7 +153,13 @@ class _TransactionsMessage extends StatelessWidget {
             ),
           ],
           const SizedBox(height: AppSpacing.md),
-          TextButton(onPressed: onAction, child: Text(actionLabel)),
+          TextButton(
+            onPressed: () {
+              Haptics.selection();
+              onAction();
+            },
+            child: Text(actionLabel),
+          ),
         ],
       ),
     );

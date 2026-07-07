@@ -258,7 +258,7 @@ export class PaymentService {
     eventType?: string;
     reference: string;
     status: string;
-    amount: number;
+    amount: Decimal | number;
     currency: string;
     rawPayload?: Record<string, unknown>;
   }) {
@@ -490,17 +490,37 @@ export class PaymentService {
 
     withdrawalRecord = await this.prisma.$transaction(async (tx) => {
       const now = new Date();
-      const nextResetDate = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+      const startOfUtcDay = new Date(
+        Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
+      );
+      const startOfNextUtcMonth = new Date(
+        Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1),
+      );
 
+      // Daily reset: dailyWithdrawn resets at the start of each UTC day.
+      await tx.user.updateMany({
+        where: {
+          id: userId,
+          OR: [
+            { dailyLimitResetDate: null },
+            { dailyLimitResetDate: { lt: startOfUtcDay } },
+          ],
+        },
+        data: {
+          dailyWithdrawn: new Decimal(0),
+          dailyLimitResetDate: startOfUtcDay,
+        },
+      });
+
+      // Monthly reset: monthlyWithdrawn resets at the start of each UTC month.
       await tx.user.updateMany({
         where: {
           id: userId,
           OR: [{ limitResetDate: null }, { limitResetDate: { lt: now } }],
         },
         data: {
-          dailyWithdrawn: new Decimal(0),
           monthlyWithdrawn: new Decimal(0),
-          limitResetDate: nextResetDate,
+          limitResetDate: startOfNextUtcMonth,
         },
       });
 
@@ -511,6 +531,7 @@ export class PaymentService {
           monthlyWithdrawLimit: true,
           dailyWithdrawn: true,
           monthlyWithdrawn: true,
+          dailyLimitResetDate: true,
           limitResetDate: true,
         },
       });
@@ -543,6 +564,7 @@ export class PaymentService {
       const limitsUpdated = await tx.user.updateMany({
         where: {
           id: userId,
+          dailyLimitResetDate: limitUser.dailyLimitResetDate,
           limitResetDate: limitUser.limitResetDate,
           dailyWithdrawn: { lte: dailyWithdrawLimit.minus(amount) },
           monthlyWithdrawn: { lte: monthlyWithdrawLimit.minus(amount) },
@@ -634,8 +656,11 @@ export class PaymentService {
       transferStatus = transfer.status;
       finalStatus = this.mapTransferStatus(transferStatus);
 
-      await this.prisma.transaction.update({
-        where: { reference: withdrawalRecord.reference },
+      // Guarded: only transition a still-PENDING withdrawal. A disbursement
+      // webhook may have already marked it terminal (e.g. REVERSED + refund);
+      // this sync path must not overwrite that.
+      await this.prisma.transaction.updateMany({
+        where: { reference: withdrawalRecord.reference, status: "PENDING" },
         data: { status: finalStatus },
       });
 
@@ -693,8 +718,8 @@ export class PaymentService {
             reconciledTransfer.status,
           );
 
-          await this.prisma.transaction.update({
-            where: { reference: withdrawalRecord.reference },
+          await this.prisma.transaction.updateMany({
+            where: { reference: withdrawalRecord.reference, status: "PENDING" },
             data: { status: reconciledStatus },
           });
 
@@ -796,8 +821,10 @@ export class PaymentService {
         };
       }
 
-      await this.prisma.transaction.update({
-        where: { reference: withdrawalRecord.reference },
+      // Guarded: never force a withdrawal back to PENDING once a webhook has
+      // moved it to a terminal state (SUCCESS/REVERSED with refund).
+      await this.prisma.transaction.updateMany({
+        where: { reference: withdrawalRecord.reference, status: "PENDING" },
         data: { status: "PENDING" },
       });
 
@@ -1320,6 +1347,81 @@ export class PaymentService {
       );
       return null;
     }
+  }
+
+  /**
+   * Sweeps withdrawals that are still PENDING past a grace window and drives
+   * them to a terminal state by re-querying the provider. This is the backstop
+   * for the case where the disbursement webhook is never delivered and the user
+   * never reads the withdrawal — otherwise the debited funds stay reserved
+   * indefinitely. Reconciliation is idempotent (guarded transitions + existing
+   * reversal check), so re-processing an already-resolved withdrawal is safe.
+   */
+  async reconcilePendingWithdrawals(limit = 25) {
+    const graceMinutes = this.configService.get<number>(
+      "WITHDRAWAL_RECONCILE_GRACE_MINUTES",
+      10,
+    );
+    const cutoff = new Date(Date.now() - graceMinutes * 60_000);
+
+    const pending = (await this.prisma.transaction.findMany({
+      where: {
+        type: "WITHDRAW",
+        status: "PENDING",
+        updatedAt: { lt: cutoff },
+      },
+      orderBy: { createdAt: "asc" },
+      take: limit,
+      select: {
+        id: true,
+        userId: true,
+        reference: true,
+        amount: true,
+        currency: true,
+        status: true,
+        metadata: true,
+        transferAttempts: {
+          orderBy: { createdAt: "desc" },
+          select: {
+            id: true,
+            provider: true,
+            providerReference: true,
+            providerStatus: true,
+            status: true,
+            attemptNo: true,
+            lastCheckedAt: true,
+            metadata: true,
+            createdAt: true,
+            updatedAt: true,
+          },
+        },
+      },
+    })) as Array<WithdrawalRecord & { userId: string }>;
+
+    let resolved = 0;
+
+    for (const withdrawal of pending) {
+      try {
+        const result = await this.reconcileWithdrawalTransferStatus(
+          withdrawal.userId,
+          withdrawal,
+        );
+
+        if (result.status !== "PENDING") {
+          resolved += 1;
+        }
+      } catch (error) {
+        this.logger.warn(
+          {
+            reference: withdrawal.reference,
+            error: error instanceof Error ? error.message : "Unknown error",
+          },
+          "Failed to reconcile pending withdrawal",
+        );
+      }
+    }
+
+    return { checked: pending.length, resolved };
   }
 
   private async reconcileWithdrawalTransferStatus(

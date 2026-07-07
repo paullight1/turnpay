@@ -24,7 +24,7 @@
     "db:deploy": "npx prisma migrate deploy",
     "db:generate": "npx prisma generate",
     "db:studio": "npx prisma studio",
-    "db:reset": "npx prisma migrate reset --force"
+    "db:reset": "bash scripts/safe-db-reset.sh"
   },
   "dependencies": {
     "@nestjs/axios": "^4.0.1",

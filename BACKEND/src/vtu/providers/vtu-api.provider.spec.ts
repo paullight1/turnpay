@@ -275,6 +275,92 @@ describe("VtuApiProvider VTpass adapter", () => {
     );
   });
 
+  it("verifies meters through VTpass merchant-verify with secret-key auth", async () => {
+    httpService.post.mockReturnValue(
+      of({
+        data: {
+          code: "000",
+          content: {
+            Customer_Name: "TESTMETER1",
+            Address: "ABULE EGBA BU ABULE",
+          },
+        },
+      }),
+    );
+
+    const result = await provider.validateMeter("ikedc", "1111111111111");
+
+    expect(httpService.post).toHaveBeenCalledWith(
+      "https://sandbox.vtpass.com/api/merchant-verify",
+      {
+        serviceID: "ikeja-electric",
+        billersCode: "1111111111111",
+        type: "prepaid",
+      },
+      {
+        headers: {
+          "Content-Type": "application/json",
+          "api-key": "api-key",
+          "secret-key": "secret-key",
+        },
+      },
+    );
+    expect(result).toEqual({
+      name: "TESTMETER1",
+      address: "ABULE EGBA BU ABULE",
+    });
+  });
+
+  it("verifies smart cards through VTpass merchant-verify", async () => {
+    httpService.post.mockReturnValue(
+      of({
+        data: {
+          code: "000",
+          content: {
+            Customer_Name: "TEST METER",
+            Status: "ACTIVE",
+          },
+        },
+      }),
+    );
+
+    const result = await provider.validateSmartCard("dstv", "1212121212");
+
+    expect(httpService.post).toHaveBeenCalledWith(
+      "https://sandbox.vtpass.com/api/merchant-verify",
+      { serviceID: "dstv", billersCode: "1212121212" },
+      expect.anything(),
+    );
+    expect(result).toEqual({ name: "TEST METER", status: "active" });
+  });
+
+  it("rejects merchant verification when VTpass reports an error", async () => {
+    httpService.post.mockReturnValue(
+      of({
+        data: {
+          code: "000",
+          content: { error: "INVALID METER NUMBER" },
+        },
+      }),
+    );
+
+    await expect(
+      provider.validateMeter("ikedc", "0000000000000"),
+    ).rejects.toThrow(
+      "We could not verify this customer number. Check it and try again.",
+    );
+  });
+
+  it("surfaces merchant verification transport failures as unavailable", async () => {
+    httpService.post.mockReturnValue(throwError(() => new Error("timeout")));
+
+    await expect(
+      provider.validateMeter("ikedc", "1111111111111"),
+    ).rejects.toThrow(
+      "Customer verification is temporarily unavailable. Try again shortly.",
+    );
+  });
+
   it("treats transport errors as unknown provider results", async () => {
     httpService.post.mockReturnValue(throwError(() => new Error("timeout")));
 

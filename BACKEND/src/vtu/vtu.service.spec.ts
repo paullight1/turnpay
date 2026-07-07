@@ -814,8 +814,8 @@ describe("VtuService purchase ledger handling", () => {
       }),
       prisma,
     );
-    expect(prisma.transaction.update).toHaveBeenCalledWith({
-      where: { reference: "VTU-1" },
+    expect(prisma.transaction.updateMany).toHaveBeenCalledWith({
+      where: { reference: "VTU-1", status: "PENDING" },
       data: {
         status: "FAILED",
         metadata: expect.objectContaining({
@@ -1015,7 +1015,7 @@ describe("VtuService purchase ledger handling", () => {
     });
   });
 
-  it("refunds a Reloadly refunded webhook exactly once through VTU reversal logic", async () => {
+  it("ignores a Reloadly refund webhook once the purchase is already terminal", async () => {
     prisma.vtuOrder.findFirst.mockResolvedValue({
       id: "order-1",
       transactionId: "tx-1",
@@ -1033,9 +1033,12 @@ describe("VtuService purchase ledger handling", () => {
         status: "SUCCESS",
       },
     });
-    prisma.ledgerEntry.findFirst.mockResolvedValue({
-      id: "reversal-ledger-1",
-    });
+    // The purchase already delivered (SUCCESS), so the guarded transition
+    // matches no PENDING row. A late refund event must not credit the wallet
+    // or flip an already-terminal order — otherwise the user keeps both the
+    // airtime and the refund.
+    prisma.transaction.updateMany.mockResolvedValue({ count: 0 });
+    prisma.ledgerEntry.findFirst.mockResolvedValue(null);
 
     await service.processReloadlyWebhookEvent({
       eventId: "event-1",
@@ -1047,26 +1050,11 @@ describe("VtuService purchase ledger handling", () => {
       rawPayload: { id: "event-1", status: "REFUNDED" },
     });
 
+    expect(prisma.transaction.updateMany).toHaveBeenCalledWith({
+      where: { reference: "VTU-1", status: "PENDING" },
+      data: expect.objectContaining({ status: "REVERSED" }),
+    });
     expect(ledger.creditWallet).not.toHaveBeenCalled();
-    expect(prisma.transaction.update).toHaveBeenCalledWith({
-      where: { reference: "VTU-1" },
-      data: {
-        status: "REVERSED",
-        metadata: expect.objectContaining({
-          providerReference: "reloadly-tx-1",
-          providerStatus: "refunded",
-          reversalReason: "Provider refunded top-up",
-        }),
-      },
-    });
-    expect(prisma.vtuOrder.update).toHaveBeenCalledWith({
-      where: { id: "order-1" },
-      data: expect.objectContaining({
-        status: "REVERSED",
-        providerTransactionId: "reloadly-tx-1",
-        providerStatus: "refunded",
-        nextRequeryAt: null,
-      }),
-    });
+    expect(prisma.vtuOrder.update).not.toHaveBeenCalled();
   });
 });

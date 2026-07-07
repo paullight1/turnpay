@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   NotFoundException,
   Optional,
@@ -49,6 +50,12 @@ export interface QuoteData {
 const MANUAL_RECEIPT_CREDIT_SOURCE = "MANUAL_EXCHANGE_RECEIPT_CREDIT";
 const MONNIFY_EXCHANGE_PROVIDER = "MONNIFY";
 const MONNIFY_EXCHANGE_FLOW = "MONNIFY_VERIFIED_EXCHANGE_DEPOSIT";
+// A bank reference must be at least this long before we accept a fuzzy
+// substring match against the raw webhook payload. Short references (e.g. a
+// 3-4 char narration) can collide incidentally with another same-amount
+// intent's payload and mis-attribute a verified deposit; exact matches on the
+// provider/payment reference are always allowed regardless of length.
+const MIN_FUZZY_REFERENCE_MATCH_LENGTH = 6;
 const MANUAL_RECEIPT_TERMINAL_STATUSES: ExchangeReceiptStatus[] = [
   "CREDITED",
   "REJECTED",
@@ -91,7 +98,7 @@ export class ExchangeService {
       to,
       baseRate: rate,
       markupPercent: markup,
-      effectiveRate: rate * (1 + markup / 100),
+      effectiveRate: rate * (1 - markup / 100),
       isStale,
     };
   }
@@ -105,7 +112,7 @@ export class ExchangeService {
 
     const { rate, markup } = await this.rateService.getRate(dto.from, dto.to);
     const effectiveRate = new Decimal(rate).mul(
-      new Decimal(1).plus(new Decimal(markup).div(100)),
+      new Decimal(1).minus(new Decimal(markup).div(100)),
     );
 
     const amount = new Decimal(dto.amount);
@@ -202,8 +209,24 @@ export class ExchangeService {
     const sendAmount = new Decimal(quote.sendAmount);
     const receiveAmount = new Decimal(quote.receiveAmount);
 
-    const result = await this.prisma.$transaction(
-      async (tx) => {
+    // Atomically claim the quote before any money movement. Without this,
+    // two concurrent executeQuote calls carrying different Idempotency-Key
+    // headers both read the still-present quote and each open its own DB
+    // transaction with a distinct transaction id — so the
+    // LedgerEntry @@unique([transactionId, source]) guard never collides and
+    // the wallet is debited (and the target credited) twice at the locked
+    // rate. SET NX ensures only one caller wins the claim.
+    const execLockKey = `quote:${quote.id}:exec`;
+    const claimed = await this.redis.setIfNotExists(execLockKey, "1", 60);
+    if (!claimed) {
+      throw new ConflictException(
+        "This quote is already being processed. Please wait a moment and try again.",
+      );
+    }
+
+    const result = await this.prisma
+      .$transaction(
+        async (tx) => {
         const sourceWallet = await tx.wallet.findUnique({
           where: {
             userId_currency: {
@@ -302,11 +325,17 @@ export class ExchangeService {
           },
         };
       },
-      {
-        timeout: this.transactionTimeout,
-        maxWait: 3000,
-      },
-    );
+        {
+          timeout: this.transactionTimeout,
+          maxWait: 3000,
+        },
+      )
+      .catch(async (error) => {
+        // Release the claim so a transient failure (e.g. DB timeout) does not
+        // block the user from legitimately retrying the same quote.
+        await this.redis.del(execLockKey);
+        throw error;
+      });
 
     await this.redis.del(`quote:${quote.id}`);
 
@@ -385,7 +414,7 @@ export class ExchangeService {
 
     const { rate, markup } = await this.rateService.getRate("NGN", "GHS");
     const effectiveRate = new Decimal(rate).mul(
-      new Decimal(1).plus(new Decimal(markup).div(100)),
+      new Decimal(1).minus(new Decimal(markup).div(100)),
     );
     const expectedCreditAmount = amount
       .mul(effectiveRate)
@@ -534,7 +563,7 @@ export class ExchangeService {
 
     const { rate, markup } = await this.rateService.getRate("NGN", "GHS");
     const effectiveRate = new Decimal(rate).mul(
-      new Decimal(1).plus(new Decimal(markup).div(100)),
+      new Decimal(1).minus(new Decimal(markup).div(100)),
     );
     const expectedCreditAmount = amount
       .mul(effectiveRate)
@@ -698,7 +727,8 @@ export class ExchangeService {
             return (
               candidateReference === providerReferenceNormalized ||
               candidateReference === paymentReferenceNormalized ||
-              searchablePayload.includes(candidateReference)
+              (candidateReference.length >= MIN_FUZZY_REFERENCE_MATCH_LENGTH &&
+                searchablePayload.includes(candidateReference))
             );
           });
 
@@ -1297,7 +1327,7 @@ export class ExchangeService {
 
     const { rate, markup } = await this.rateService.getRate("NGN", "GHS");
     const effectiveRate = new Decimal(rate).mul(
-      new Decimal(1).plus(new Decimal(markup).div(100)),
+      new Decimal(1).minus(new Decimal(markup).div(100)),
     );
 
     const sourceAmount = new Decimal(dto.sourceAmount);
@@ -1481,30 +1511,24 @@ export class ExchangeService {
 
   async getAdminPayoutStats() {
     try {
-      const counts = await Promise.all([
-        this.prisma.exchangePayout.count({
-          where: { status: "PENDING_APPROVAL" },
-        }),
-        this.prisma.exchangePayout.count({
-          where: { status: "APPROVED" },
-        }),
-        this.prisma.exchangePayout.count({
-          where: { status: "PROCESSING" },
-        }),
-        this.prisma.exchangePayout.count({
-          where: { status: "SENT" },
-        }),
-        this.prisma.exchangePayout.count({
-          where: { status: "FAILED" },
-        }),
-      ]);
+      // One grouped aggregate instead of five separate COUNT round-trips.
+      const grouped = await this.prisma.exchangePayout.groupBy({
+        by: ["status"],
+        _count: { _all: true },
+      });
+
+      const countByStatus = new Map(
+        grouped.map((row) => [row.status, row._count._all]),
+      );
+      const countFor = (status: ExchangePayoutStatus) =>
+        countByStatus.get(status) ?? 0;
 
       return {
-        pendingApproval: counts[0],
-        approved: counts[1],
-        processing: counts[2],
-        sent: counts[3],
-        failed: counts[4],
+        pendingApproval: countFor("PENDING_APPROVAL"),
+        approved: countFor("APPROVED"),
+        processing: countFor("PROCESSING"),
+        sent: countFor("SENT"),
+        failed: countFor("FAILED"),
       };
     } catch (error) {
       this.logger.error(
@@ -1743,8 +1767,8 @@ export class ExchangeService {
           transactionStatus: payout.transaction.status,
         };
 
-        await tx.exchangePayout.update({
-          where: { id: payout.id },
+        const approvedPayout = await tx.exchangePayout.updateMany({
+          where: { id: payout.id, status: "PENDING_APPROVAL" },
           data: {
             status: "APPROVED",
             adminId,
@@ -1753,6 +1777,12 @@ export class ExchangeService {
             reviewedAt,
           },
         });
+
+        if (approvedPayout.count !== 1) {
+          throw new BadRequestException(
+            "Only pending payouts can be approved",
+          );
+        }
 
         await tx.transaction.update({
           where: { id: payout.transactionId },
@@ -1858,8 +1888,8 @@ export class ExchangeService {
           transactionStatus: payout.transaction.status,
         };
 
-        await tx.exchangePayout.update({
-          where: { id: payout.id },
+        const rejectedPayout = await tx.exchangePayout.updateMany({
+          where: { id: payout.id, status: "PENDING_APPROVAL" },
           data: {
             status: "FAILED",
             adminId,
@@ -1867,6 +1897,12 @@ export class ExchangeService {
             reviewedAt,
           },
         });
+
+        if (rejectedPayout.count !== 1) {
+          throw new BadRequestException(
+            "Only pending payouts can be rejected",
+          );
+        }
 
         await tx.transaction.update({
           where: { id: payout.transactionId },

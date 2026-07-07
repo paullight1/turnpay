@@ -42,19 +42,36 @@ export class ReconciliationService {
   }
 
   async reconcileWallets() {
+    // Aggregate ledger movements in the database (one row per
+    // wallet/direction/currency) instead of streaming every ledger entry into
+    // memory — the entry table grows unbounded and would otherwise OOM the
+    // daily cron as volume increases.
+    const ledgerSums = await this.prisma.ledgerEntry.groupBy({
+      by: ["walletId", "direction", "currency"],
+      _sum: { amount: true },
+    });
+
+    // walletId -> (currency -> signed expected balance)
+    const expectedByWallet = new Map<string, Map<string, Decimal>>();
+    for (const row of ledgerSums) {
+      const amount = new Decimal(row._sum.amount ?? 0);
+      const signed = row.direction === "CREDIT" ? amount : amount.negated();
+
+      let byCurrency = expectedByWallet.get(row.walletId);
+      if (!byCurrency) {
+        byCurrency = new Map<string, Decimal>();
+        expectedByWallet.set(row.walletId, byCurrency);
+      }
+      const current = byCurrency.get(row.currency) ?? new Decimal(0);
+      byCurrency.set(row.currency, current.plus(signed));
+    }
+
     const wallets = await this.prisma.wallet.findMany({
       select: {
         id: true,
         userId: true,
         currency: true,
         balance: true,
-        ledgerEntries: {
-          select: {
-            direction: true,
-            amount: true,
-            currency: true,
-          },
-        },
       },
     });
 
@@ -68,20 +85,10 @@ export class ReconciliationService {
     }> = [];
 
     for (const wallet of wallets) {
-      let expectedBalance = new Decimal(0);
-
-      for (const entry of wallet.ledgerEntries) {
-        if (entry.currency !== wallet.currency) continue;
-
-        const entryAmount = new Decimal(entry.amount);
-
-        if (entry.direction === "CREDIT") {
-          expectedBalance = expectedBalance.plus(entryAmount);
-        } else {
-          expectedBalance = expectedBalance.minus(entryAmount);
-        }
-      }
-
+      // Only entries recorded in the wallet's own currency count toward its
+      // expected balance (matches the previous per-entry currency filter).
+      const expectedBalance =
+        expectedByWallet.get(wallet.id)?.get(wallet.currency) ?? new Decimal(0);
       const actualBalance = new Decimal(wallet.balance);
       const difference = expectedBalance.minus(actualBalance).abs();
 

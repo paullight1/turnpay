@@ -24,6 +24,26 @@ class _LoginScreenState extends State<LoginScreen> {
   final _authService = AuthService();
   bool _obscurePassword = true;
   bool _isLoading = false;
+  bool _expiredNoticeShown = false;
+
+  @override
+  void initState() {
+    super.initState();
+    // If we landed here because the session expired, surface a message once.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _expiredNoticeShown) return;
+      final expired =
+          GoRouterState.of(context).uri.queryParameters['expired'] == '1';
+      if (expired) {
+        _expiredNoticeShown = true;
+        showTpSnackbar(
+          context,
+          'Your session expired. Please sign in again.',
+          type: TpSnackbarType.error,
+        );
+      }
+    });
+  }
 
   @override
   void dispose() {

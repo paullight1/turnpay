@@ -3,6 +3,8 @@ import 'package:go_router/go_router.dart';
 
 import '../../../core/router/app_router.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../core/utils/haptics.dart';
+import '../../../core/widgets/tp_illustration.dart';
 import '../../../core/widgets/tp_page_header.dart';
 
 class SendMoneyEntryScreen extends StatelessWidget {
@@ -29,10 +31,18 @@ class SendMoneyEntryScreen extends StatelessWidget {
                     label: 'Send money',
                     showBackButton: true,
                   ),
-                  const SizedBox(height: AppSpacing.lg),
+                  const SizedBox(height: AppSpacing.md),
+                  Center(
+                    child: TpIllustration(
+                      variant: TpIllustrationVariant.send,
+                      size: 148,
+                    ),
+                  ),
+                  const SizedBox(height: AppSpacing.md),
                   Text(
                     'Pick a TrustPay user or send to a bank account.',
                     style: AppTextStyles.bodyL,
+                    textAlign: TextAlign.center,
                   ),
                   const SizedBox(height: AppSpacing.lg),
                   _ChoiceCard(
@@ -84,7 +94,10 @@ class _ChoiceCard extends StatelessWidget {
       borderRadius: BorderRadius.circular(AppRadius.sm),
       child: InkWell(
         borderRadius: BorderRadius.circular(AppRadius.sm),
-        onTap: onTap,
+        onTap: () {
+          Haptics.selection();
+          onTap();
+        },
         child: Container(
           padding: const EdgeInsets.all(AppSpacing.md),
           decoration: BoxDecoration(

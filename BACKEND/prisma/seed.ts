@@ -5,18 +5,45 @@ import {
   WalletCurrency,
 } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
+import { randomBytes } from 'crypto';
 
 const prisma = new PrismaClient();
 
 async function main() {
+  // Guard: never run destructive/seed tooling against production data unless
+  // explicitly overridden.
+  if (
+    process.env.NODE_ENV === 'production' &&
+    process.env.SEED_ALLOW !== 'true'
+  ) {
+    console.error(
+      '⛔ Refusing to seed in production. Set SEED_ALLOW=true to override.',
+    );
+    process.exit(1);
+  }
+
   console.log('🌱 Seeding database...');
+
+  // Admin password comes from the environment; if unset we generate a strong
+  // random one and print it once instead of shipping a hardcoded credential.
+  const adminPasswordGenerated = !process.env.SEED_ADMIN_PASSWORD;
+  const adminPassword =
+    process.env.SEED_ADMIN_PASSWORD || randomBytes(18).toString('base64url');
+  if (adminPasswordGenerated) {
+    console.log(
+      '⚠️  SEED_ADMIN_PASSWORD not set — generated a random admin password for this run.',
+    );
+    console.log(
+      `   One-time admin password (save it now, set SEED_ADMIN_PASSWORD to control it): ${adminPassword}`,
+    );
+  }
 
   // Check if admin already exists
   const existingAdmin = await prisma.user.findUnique({
     where: { email: 'admin@trustpay.com' },
   });
 
-  const hashedPassword = await bcrypt.hash('AdminPass123!', 12);
+  const hashedPassword = await bcrypt.hash(adminPassword, 12);
   const hashedUserPassword = await bcrypt.hash('UserPass123', 12);
 
   if (existingAdmin) {
@@ -165,7 +192,11 @@ async function main() {
 
   console.log('\n🎉 Seed completed!');
   console.log('\n📋 Test Accounts:');
-  console.log('   Admin: admin@trustpay.com / AdminPass123!');
+  console.log(
+    adminPasswordGenerated
+      ? `   Admin: admin@trustpay.com / ${adminPassword} (generated — save it now)`
+      : '   Admin: admin@trustpay.com / (value of SEED_ADMIN_PASSWORD)',
+  );
   console.log('   User:  user@trustpay.com / UserPass123');
   console.log('   User:  verified@trustpay.com / UserPass123');
 }
