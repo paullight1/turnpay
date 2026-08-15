@@ -8,6 +8,12 @@
 
 **Tech Stack:** NestJS, Prisma, PostgreSQL, Redis, Pino, class-validator, Next.js 16, Supabase, Flutter, Riverpod, Dio, Docker, GitHub Actions.
 
+## Current checkpoint — 2026-08-15
+
+Implemented in the current branch: retry-safe webhook inbox and async processing, strict webhook/auth DTOs, atomic OTP/PIN throttling, HttpOnly web sessions with CSRF coverage, mobile cleartext and release-signing gates, hardened containers/deployment manifests, CI safety checks, and fail-closed production database credentials.
+
+Still launch-blocking: dependency vulnerabilities, full backend lint backlog, provider credential/KYB/webhook certification, production migration/backups/restore evidence, mobile Flutter verification plus certificate pinning/device-integrity adapters, and durable reconciliation/admin dual-control work. These remain explicitly tracked below; no live provider or production infrastructure action was performed.
+
 ## Global Constraints
 
 - Every mutation endpoint accepts an `Idempotency-Key`; financial and webhook retries return the original result.
