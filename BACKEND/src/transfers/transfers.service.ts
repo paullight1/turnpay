@@ -3,20 +3,28 @@ import {
   ForbiddenException,
   Injectable,
   NotFoundException,
-} from "@nestjs/common";
-import { Decimal } from "@prisma/client/runtime/library";
-import { KYCTier, Prisma } from "@prisma/client";
-import { v4 as uuidv4 } from "uuid";
-import { PinoLogger } from "nestjs-pino";
-import { PrismaService } from "../prisma/prisma.service";
-import { LedgerService } from "../wallets/ledger.service";
-import { InternalTransferDto } from "./dto/internal-transfer.dto";
-import { maskEmail, maskPhone } from "../common/utils/masking";
-import { TransactionPinService } from "../common/services/transaction-pin.service";
-import { formatKycTier, isKycTierAtLeast } from "../common/utils/kyc-tier";
+} from '@nestjs/common';
+import { Decimal } from '@prisma/client/runtime/library';
+import { KYCTier, Prisma } from '@prisma/client';
+import { v4 as uuidv4 } from 'uuid';
+import { PinoLogger } from 'nestjs-pino';
+import { PrismaService } from '../prisma/prisma.service';
+import { LedgerService } from '../wallets/ledger.service';
+import {
+  InternalTransferDto,
+  RecipientPreviewDto,
+} from './dto/internal-transfer.dto';
+
+type RecipientIdentifiers = Pick<
+  InternalTransferDto,
+  'recipientId' | 'recipientEmail' | 'recipientPhone'
+>;
+import { maskEmail, maskPhone } from '../common/utils/masking';
+import { TransactionPinService } from '../common/services/transaction-pin.service';
+import { formatKycTier, isKycTierAtLeast } from '../common/utils/kyc-tier';
 
 const INTERNAL_TRANSFER_LIMITS: Record<
-  "TIER_2" | "TIER_3",
+  'TIER_2' | 'TIER_3',
   { perTransaction: Decimal; daily: Decimal; monthly: Decimal }
 > = {
   TIER_2: {
@@ -57,7 +65,7 @@ export class TransfersService {
 
       amount = new Decimal(dto.amount);
       if (!amount.isFinite() || amount.lessThanOrEqualTo(0)) {
-        throw new BadRequestException("Amount must be positive");
+        throw new BadRequestException('Amount must be positive');
       }
 
       const sender = await this.prisma.user.findUnique({
@@ -73,19 +81,19 @@ export class TransfersService {
       });
 
       if (!sender) {
-        throw new NotFoundException("User not found");
+        throw new NotFoundException('User not found');
       }
 
-      this.assertUserCanTransfer(sender, "sender");
+      this.assertUserCanTransfer(sender, 'sender');
       this.assertTransferAmountWithinLimit(amount, sender.kycTier);
 
       recipient = await this.findRecipient(dto);
       if (!recipient) {
-        throw new NotFoundException("Recipient not found");
+        throw new NotFoundException('Recipient not found');
       }
 
       if (recipient.id === sender.id) {
-        throw new BadRequestException("Cannot transfer to yourself");
+        throw new BadRequestException('Cannot transfer to yourself');
       }
 
       this.assertRecipientCanReceive(recipient);
@@ -108,13 +116,13 @@ export class TransfersService {
         const senderTx = await tx.transaction.create({
           data: {
             userId: sender.id,
-            type: "INTERNAL_TRANSFER",
+            type: 'INTERNAL_TRANSFER',
             amount: transferAmount,
             currency: dto.currency,
-            status: "SUCCESS",
+            status: 'SUCCESS',
             reference: senderReference,
             metadata: {
-              direction: "OUT",
+              direction: 'OUT',
               transferReference,
               counterpartyUserId: transferRecipient.id,
               counterpartyMaskedIdentifier:
@@ -127,13 +135,13 @@ export class TransfersService {
         const recipientTx = await tx.transaction.create({
           data: {
             userId: transferRecipient.id,
-            type: "INTERNAL_TRANSFER",
+            type: 'INTERNAL_TRANSFER',
             amount: transferAmount,
             currency: dto.currency,
-            status: "SUCCESS",
+            status: 'SUCCESS',
             reference: recipientReference,
             metadata: {
-              direction: "IN",
+              direction: 'IN',
               transferReference,
               counterpartyUserId: sender.id,
               counterpartyMaskedIdentifier: this.maskRecipient(sender),
@@ -149,7 +157,7 @@ export class TransfersService {
             amount: transferAmount,
             transactionId: senderTx.id,
             reference: transferReference,
-            source: "INTERNAL_TRANSFER_OUT",
+            source: 'INTERNAL_TRANSFER_OUT',
             metadata: {
               recipientUserId: transferRecipient.id,
             },
@@ -164,7 +172,7 @@ export class TransfersService {
             amount: transferAmount,
             transactionId: recipientTx.id,
             reference: transferReference,
-            source: "INTERNAL_TRANSFER_IN",
+            source: 'INTERNAL_TRANSFER_IN',
             metadata: {
               senderUserId: sender.id,
             },
@@ -188,7 +196,7 @@ export class TransfersService {
             transferReference,
             senderTransactionId: senderTx.id,
             recipientTransactionId: recipientTx.id,
-            status: "SUCCESS",
+            status: 'SUCCESS',
             amount: transferAmount,
             currency: dto.currency,
             recipientIdentifierType: this.getRecipientIdentifierType(dto),
@@ -213,12 +221,12 @@ export class TransfersService {
           amount: transferAmount.toString(),
           currency: dto.currency,
         },
-        "Internal transfer completed",
+        'Internal transfer completed',
       );
 
       return {
         reference: result.reference,
-        status: "SUCCESS",
+        status: 'SUCCESS',
         amount: transferAmount.toString(),
         currency: dto.currency,
         senderTransactionReference: result.senderTransactionReference,
@@ -239,12 +247,12 @@ export class TransfersService {
     const transfer = await this.prisma.transaction.findFirst({
       where: {
         userId,
-        type: "INTERNAL_TRANSFER",
+        type: 'INTERNAL_TRANSFER',
         OR: [
           { reference },
           {
             metadata: {
-              path: ["transferReference"],
+              path: ['transferReference'],
               equals: reference,
             },
           },
@@ -264,7 +272,7 @@ export class TransfersService {
     });
 
     if (!transfer) {
-      throw new NotFoundException("Transfer not found");
+      throw new NotFoundException('Transfer not found');
     }
 
     const metadata = (transfer.metadata || {}) as Record<string, unknown>;
@@ -279,7 +287,7 @@ export class TransfersService {
       status: transfer.status,
       amount: transfer.amount,
       currency: transfer.currency,
-      fee: "0",
+      fee: '0',
       counterparty: {
         maskedIdentifier: metadata.counterpartyMaskedIdentifier,
       },
@@ -289,7 +297,45 @@ export class TransfersService {
     };
   }
 
-  private findRecipient(dto: InternalTransferDto) {
+  async previewRecipient(userId: string, dto: RecipientPreviewDto) {
+    this.assertSingleRecipientIdentifier(dto);
+
+    const sender = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        kycStatus: true,
+        kycTier: true,
+        isSuspended: true,
+      },
+    });
+
+    if (!sender) {
+      throw new NotFoundException('User not found');
+    }
+
+    this.assertUserCanTransfer(sender, 'sender');
+
+    const recipient = await this.findRecipient(dto);
+    if (!recipient) {
+      throw new NotFoundException('Recipient cannot be found or used');
+    }
+
+    if (recipient.id === sender.id) {
+      throw new BadRequestException('Cannot transfer to yourself');
+    }
+
+    this.assertRecipientCanReceive(recipient);
+
+    return {
+      found: true,
+      displayName: this.maskDisplayName(recipient.fullName),
+      maskedIdentifier: this.maskRecipient(recipient),
+      avatarInitials: this.getAvatarInitials(recipient),
+    };
+  }
+
+  private findRecipient(dto: RecipientIdentifiers) {
     const where = dto.recipientId
       ? { id: dto.recipientId }
       : dto.recipientEmail
@@ -302,6 +348,7 @@ export class TransfersService {
         id: true,
         email: true,
         phone: true,
+        fullName: true,
         kycStatus: true,
         kycTier: true,
         isSuspended: true,
@@ -309,7 +356,7 @@ export class TransfersService {
     });
   }
 
-  private assertSingleRecipientIdentifier(dto: InternalTransferDto) {
+  private assertSingleRecipientIdentifier(dto: RecipientIdentifiers) {
     const identifiers = [
       dto.recipientId,
       dto.recipientEmail,
@@ -317,7 +364,7 @@ export class TransfersService {
     ].filter(Boolean);
 
     if (identifiers.length !== 1) {
-      throw new BadRequestException("Provide exactly one recipient identifier");
+      throw new BadRequestException('Provide exactly one recipient identifier');
     }
   }
 
@@ -327,19 +374,19 @@ export class TransfersService {
       kycTier?: KYCTier | null;
       isSuspended: boolean;
     },
-    role: "sender" | "recipient",
+    role: 'sender' | 'recipient',
   ) {
     if (user.isSuspended) {
       throw new ForbiddenException(`${role} is not eligible for transfer`);
     }
 
-    if (user.kycStatus !== "VERIFIED") {
+    if (user.kycStatus !== 'VERIFIED') {
       throw new ForbiddenException(`${role} must have verified KYC`);
     }
 
-    if (!isKycTierAtLeast(user.kycTier, "TIER_2")) {
+    if (!isKycTierAtLeast(user.kycTier, 'TIER_2')) {
       throw new ForbiddenException(
-        `${role} must be at least ${formatKycTier("TIER_2")} for transfers`,
+        `${role} must be at least ${formatKycTier('TIER_2')} for transfers`,
       );
     }
   }
@@ -358,9 +405,9 @@ export class TransfersService {
   }
 
   private async reserveTransferLimitUsage(
-    tx: Pick<Prisma.TransactionClient, "internalTransferLimitUsage">,
+    tx: Pick<Prisma.TransactionClient, 'internalTransferLimitUsage'>,
     userId: string,
-    currency: "NGN" | "GHS",
+    currency: 'NGN' | 'GHS',
     amount: Decimal,
     tier?: KYCTier | null,
   ) {
@@ -370,7 +417,7 @@ export class TransfersService {
       userId,
       currency,
       amount,
-      period: "DAILY",
+      period: 'DAILY',
       periodStart: this.startOfUtcDay(now),
       limit: limits.daily,
     });
@@ -378,19 +425,19 @@ export class TransfersService {
       userId,
       currency,
       amount,
-      period: "MONTHLY",
+      period: 'MONTHLY',
       periodStart: this.startOfUtcMonth(now),
       limit: limits.monthly,
     });
   }
 
   private async reservePeriodLimit(
-    tx: Pick<Prisma.TransactionClient, "internalTransferLimitUsage">,
+    tx: Pick<Prisma.TransactionClient, 'internalTransferLimitUsage'>,
     input: {
       userId: string;
-      currency: "NGN" | "GHS";
+      currency: 'NGN' | 'GHS';
       amount: Decimal;
-      period: "DAILY" | "MONTHLY";
+      period: 'DAILY' | 'MONTHLY';
       periodStart: Date;
       limit: Decimal;
     },
@@ -433,7 +480,7 @@ export class TransfersService {
   }
 
   private getTransferLimits(tier?: KYCTier | null) {
-    return tier === "TIER_3"
+    return tier === 'TIER_3'
       ? INTERNAL_TRANSFER_LIMITS.TIER_3
       : INTERNAL_TRANSFER_LIMITS.TIER_2;
   }
@@ -455,10 +502,10 @@ export class TransfersService {
   }) {
     if (
       user.isSuspended ||
-      user.kycStatus !== "VERIFIED" ||
-      !isKycTierAtLeast(user.kycTier, "TIER_2")
+      user.kycStatus !== 'VERIFIED' ||
+      !isKycTierAtLeast(user.kycTier, 'TIER_2')
     ) {
-      throw new NotFoundException("Recipient cannot be found or used");
+      throw new NotFoundException('Recipient cannot be found or used');
     }
   }
 
@@ -474,28 +521,28 @@ export class TransfersService {
       return maskPhone(user.phone);
     }
 
-    return "TRUSTPAY user";
+    return 'TRUSTPAY user';
   }
 
   private getRecipientIdentifierType(dto: InternalTransferDto) {
-    if (dto.recipientId) return "USER_ID";
-    if (dto.recipientEmail) return "EMAIL";
-    if (dto.recipientPhone) return "PHONE";
+    if (dto.recipientId) return 'USER_ID';
+    if (dto.recipientEmail) return 'EMAIL';
+    if (dto.recipientPhone) return 'PHONE';
     return undefined;
   }
 
   private getProvidedRecipientMaskedIdentifier(dto: InternalTransferDto) {
     if (dto.recipientEmail) return maskEmail(dto.recipientEmail);
     if (dto.recipientPhone) return maskPhone(dto.recipientPhone);
-    if (dto.recipientId) return "TRUSTPAY user";
+    if (dto.recipientId) return 'TRUSTPAY user';
     return undefined;
   }
 
   private getFailureCode(error: unknown) {
-    if (error instanceof NotFoundException) return "NOT_FOUND";
-    if (error instanceof ForbiddenException) return "FORBIDDEN";
-    if (error instanceof BadRequestException) return "BAD_REQUEST";
-    return "UNEXPECTED_ERROR";
+    if (error instanceof NotFoundException) return 'NOT_FOUND';
+    if (error instanceof ForbiddenException) return 'FORBIDDEN';
+    if (error instanceof BadRequestException) return 'BAD_REQUEST';
+    return 'UNEXPECTED_ERROR';
   }
 
   private getSafeFailureMessage(error: unknown) {
@@ -505,16 +552,16 @@ export class TransfersService {
       error instanceof NotFoundException
     ) {
       const response = error.getResponse();
-      if (typeof response === "string") {
+      if (typeof response === 'string') {
         return response;
       }
-      if (response && typeof response === "object" && "message" in response) {
+      if (response && typeof response === 'object' && 'message' in response) {
         const message = (response as { message?: unknown }).message;
-        return Array.isArray(message) ? message.join(", ") : String(message);
+        return Array.isArray(message) ? message.join(', ') : String(message);
       }
     }
 
-    return "Internal transfer failed";
+    return 'Internal transfer failed';
   }
 
   private async recordFailedAttempt(
@@ -533,7 +580,7 @@ export class TransfersService {
         data: {
           userId,
           recipientUserId: recipient?.id,
-          status: "FAILED",
+          status: 'FAILED',
           amount,
           currency: dto.currency,
           recipientIdentifierType: this.getRecipientIdentifierType(dto),
@@ -548,9 +595,9 @@ export class TransfersService {
       this.logger.warn(
         {
           userId,
-          error: logError instanceof Error ? logError.message : "Unknown error",
+          error: logError instanceof Error ? logError.message : 'Unknown error',
         },
-        "Failed to record internal transfer attempt",
+        'Failed to record internal transfer attempt',
       );
     }
   }
@@ -558,8 +605,29 @@ export class TransfersService {
   private getAvatarInitials(user: {
     email?: string | null;
     phone?: string | null;
+    fullName?: string | null;
   }) {
-    const source = user.email || user.phone || "T";
+    const source = user.fullName?.trim() || user.email || user.phone || 'T';
     return source.slice(0, 1).toUpperCase();
+  }
+
+  private maskDisplayName(fullName?: string | null) {
+    // "Paul Nwosu Chukwu" -> "Paul N. C." — enough for the sender to confirm
+    // the recipient without exposing the full legal name pre-transfer.
+    const normalized = fullName?.replace(/\s+/g, ' ').trim();
+    if (!normalized) {
+      return null;
+    }
+
+    const [first, ...rest] = normalized.split(' ');
+    if (rest.length === 0) {
+      return first;
+    }
+
+    const initials = rest
+      .map((part) => `${part.charAt(0).toUpperCase()}.`)
+      .join(' ');
+
+    return `${first} ${initials}`;
   }
 }

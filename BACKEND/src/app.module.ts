@@ -1,40 +1,42 @@
-import { Module } from "@nestjs/common";
-import { ConfigModule } from "@nestjs/config";
-import { LoggerModule } from "nestjs-pino";
-import { ThrottlerModule } from "@nestjs/throttler";
-import { APP_GUARD } from "@nestjs/core";
-import { UserThrottlerGuard } from "./common/guards/user-throttler.guard";
-import { ScheduleModule } from "@nestjs/schedule";
-import * as Joi from "joi";
-import { PrismaModule } from "./prisma/prisma.module";
-import { AuthModule } from "./auth/auth.module";
-import { UsersModule } from "./users/users.module";
-import { WalletsModule } from "./wallets/wallets.module";
-import { OtpModule } from "./otp/otp.module";
-import { ExchangeModule } from "./exchange/exchange.module";
-import { PaymentsModule } from "./payments/payments.module";
-import { VtuModule } from "./vtu/vtu.module";
-import { TransactionsModule } from "./transactions/transactions.module";
-import { HealthModule } from "./health/health.module";
-import { RedisModule } from "./redis/redis.module";
-import { CircuitBreakerModule } from "./common/services/circuit-breaker.module";
-import { ReconciliationModule } from "./common/services/reconciliation.module";
-import { TransactionPinModule } from "./common/services/transaction-pin.module";
-import { AdminModule } from "./admin/admin.module";
-import { KycModule } from "./kyc/kyc.module";
-import { SupabaseModule } from "./supabase/supabase.module";
-import { BankingModule } from "./banking/banking.module";
-import { TransfersModule } from "./transfers/transfers.module";
-import { SupportModule } from "./support/support.module";
-import { AppController } from "./app.controller";
-import { AppService } from "./app.service";
-import { IdempotencyInterceptor } from "./common/interceptors/idempotency.interceptor";
+import { Module } from '@nestjs/common';
+import { ConfigModule } from '@nestjs/config';
+import { LoggerModule } from 'nestjs-pino';
+import { ThrottlerModule } from '@nestjs/throttler';
+import { APP_GUARD } from '@nestjs/core';
+import { UserThrottlerGuard } from './common/guards/user-throttler.guard';
+import { RedisThrottlerStorage } from './common/services/redis-throttler.storage';
+import { RedisService } from './redis/redis.service';
+import { ScheduleModule } from '@nestjs/schedule';
+import * as Joi from 'joi';
+import { PrismaModule } from './prisma/prisma.module';
+import { AuthModule } from './auth/auth.module';
+import { UsersModule } from './users/users.module';
+import { WalletsModule } from './wallets/wallets.module';
+import { OtpModule } from './otp/otp.module';
+import { ExchangeModule } from './exchange/exchange.module';
+import { PaymentsModule } from './payments/payments.module';
+import { VtuModule } from './vtu/vtu.module';
+import { TransactionsModule } from './transactions/transactions.module';
+import { HealthModule } from './health/health.module';
+import { RedisModule } from './redis/redis.module';
+import { CircuitBreakerModule } from './common/services/circuit-breaker.module';
+import { ReconciliationModule } from './common/services/reconciliation.module';
+import { TransactionPinModule } from './common/services/transaction-pin.module';
+import { AdminModule } from './admin/admin.module';
+import { KycModule } from './kyc/kyc.module';
+import { SupabaseModule } from './supabase/supabase.module';
+import { BankingModule } from './banking/banking.module';
+import { TransfersModule } from './transfers/transfers.module';
+import { SupportModule } from './support/support.module';
+import { AppController } from './app.controller';
+import { AppService } from './app.service';
+import { IdempotencyInterceptor } from './common/interceptors/idempotency.interceptor';
 
-const deployedEnvironment = Joi.valid("production", "staging");
+const deployedEnvironment = Joi.valid('production', 'staging');
 const defaultNodeEnv =
   process.env.WEB_CONCURRENCY || process.env.RENDER_WEB_CONCURRENCY
-    ? "staging"
-    : "development";
+    ? 'staging'
+    : 'development';
 
 @Module({
   imports: [
@@ -42,243 +44,252 @@ const defaultNodeEnv =
       isGlobal: true,
       // Load the real local env first so it wins over placeholder values in
       // the example template during development.
-      envFilePath: [".env", ".env.example"],
+      envFilePath: ['.env', '.env.example'],
       validationSchema: Joi.object({
         NODE_ENV: Joi.string()
           .trim()
           .lowercase()
-          .valid("development", "production", "test", "staging")
-          .empty("")
-          .empty("value")
+          .valid('development', 'production', 'test', 'staging')
+          .empty('')
+          .empty('value')
           .default(defaultNodeEnv),
-        PORT: Joi.number().empty("").empty("value").default(3000),
-        DATABASE_URL: Joi.when("NODE_ENV", {
+        PORT: Joi.number().empty('').empty('value').default(3000),
+        DATABASE_URL: Joi.when('NODE_ENV', {
           is: deployedEnvironment,
           then: Joi.string()
-            .uri({ scheme: ["postgres", "postgresql"] })
+            .uri({ scheme: ['postgres', 'postgresql'] })
             .required(),
           otherwise: Joi.string()
-            .empty("")
-            .uri({ scheme: ["postgres", "postgresql"] })
+            .empty('')
+            .uri({ scheme: ['postgres', 'postgresql'] })
             .default(
-              "postgresql://trustpay:trustpay_secret@localhost:5432/trustpay_db?schema=public",
+              'postgresql://trustpay:trustpay_secret@localhost:5432/trustpay_db?schema=public',
             ),
         }),
-        WEB_URL: Joi.when("NODE_ENV", {
-          is: "production",
+        WEB_URL: Joi.when('NODE_ENV', {
+          is: 'production',
           then: Joi.string()
-            .uri({ scheme: ["https"] })
+            .uri({ scheme: ['https'] })
             .required(),
-          otherwise: Joi.string().uri().default("http://localhost:3001"),
+          otherwise: Joi.string().uri().default('http://localhost:3001'),
         }),
-        ADMIN_URL: Joi.when("NODE_ENV", {
-          is: "production",
+        ADMIN_URL: Joi.when('NODE_ENV', {
+          is: 'production',
           then: Joi.string()
-            .uri({ scheme: ["https"] })
+            .uri({ scheme: ['https'] })
             .required(),
-          otherwise: Joi.string().uri().default("http://localhost:3002"),
+          otherwise: Joi.string().uri().default('http://localhost:3002'),
         }),
-        JWT_SECRET: Joi.when("NODE_ENV", {
+        JWT_SECRET: Joi.when('NODE_ENV', {
           is: deployedEnvironment,
           then: Joi.string().min(32).required(),
-          otherwise: Joi.string().default("dev_jwt_secret_do_not_use"),
+          otherwise: Joi.string().default('dev_jwt_secret_do_not_use'),
         }),
-        JWT_REFRESH_SECRET: Joi.when("NODE_ENV", {
+        JWT_REFRESH_SECRET: Joi.when('NODE_ENV', {
           is: deployedEnvironment,
           then: Joi.string().min(32).required(),
-          otherwise: Joi.string().default("dev_refresh_secret_do_not_use"),
+          otherwise: Joi.string().default('dev_refresh_secret_do_not_use'),
         }),
         SUPABASE_URL: Joi.string().uri().required(),
-        SUPABASE_PUBLISHABLE_KEY: Joi.string().allow("").optional(),
-        SUPABASE_ANON_KEY: Joi.string().allow("").optional(),
-        SUPABASE_SERVICE_ROLE_KEY: Joi.when("NODE_ENV", {
-          is: "production",
+        SUPABASE_PUBLISHABLE_KEY: Joi.string().allow('').optional(),
+        SUPABASE_ANON_KEY: Joi.string().allow('').optional(),
+        SUPABASE_SERVICE_ROLE_KEY: Joi.when('NODE_ENV', {
+          is: 'production',
           then: Joi.string().min(1).required(),
-          otherwise: Joi.string().allow("").optional(),
+          otherwise: Joi.string().allow('').optional(),
         }),
-        SUPABASE_JWT_SECRET: Joi.string().allow("").optional(),
-        KYC_DOCUMENT_BUCKET: Joi.string().default("kyc-documents"),
+        SUPABASE_JWT_SECRET: Joi.string().allow('').optional(),
+        KYC_DOCUMENT_BUCKET: Joi.string().default('kyc-documents'),
         KYC_ADMIN_DOCUMENT_URL_TTL_SECONDS: Joi.number()
-          .empty("")
+          .empty('')
           .min(60)
           .max(900)
           .default(300),
-        EXCHANGE_RECEIPT_BUCKET: Joi.string().default("exchange-receipts"),
+        EXCHANGE_RECEIPT_BUCKET: Joi.string().default('exchange-receipts'),
         EXCHANGE_RECEIPT_PROOF_URL_TTL_SECONDS: Joi.number()
-          .empty("")
+          .empty('')
           .min(60)
           .max(900)
           .default(300),
         MONNIFY_EXCHANGE_COLLECTION_ACCOUNT_NUMBER: Joi.when(
-          "WITHDRAWALS_ENABLED",
+          'WITHDRAWALS_ENABLED',
           {
             is: true,
             then: Joi.string().min(1).required(),
-            otherwise: Joi.string().allow("").optional(),
+            otherwise: Joi.string().allow('').optional(),
           },
         ),
-        REDIS_URL: Joi.when("NODE_ENV", {
+        REDIS_URL: Joi.when('NODE_ENV', {
           is: deployedEnvironment,
           then: Joi.string()
-            .uri({ scheme: ["redis", "rediss"] })
+            .uri({ scheme: ['redis', 'rediss'] })
             .required(),
           otherwise: Joi.string()
-            .uri({ scheme: ["redis", "rediss"] })
-            .allow("")
+            .uri({ scheme: ['redis', 'rediss'] })
+            .allow('')
             .optional(),
         }),
-        REDIS_HOST: Joi.string().empty("").default("localhost"),
-        REDIS_PORT: Joi.number().empty("").default(6379),
-        REDIS_PASSWORD: Joi.string().allow("").optional(),
-        OTP_EXPIRES_IN: Joi.string().allow("").optional(),
-        OTP_LENGTH: Joi.string().allow("").optional(),
-        OTP_DEV_CODE: Joi.string().allow("").optional(),
-        PAYSTACK_SECRET_KEY: Joi.when("NODE_ENV", {
-          is: "production",
+        REDIS_HOST: Joi.string().empty('').default('localhost'),
+        REDIS_PORT: Joi.number().empty('').default(6379),
+        REDIS_PASSWORD: Joi.string().allow('').optional(),
+        OTP_EXPIRES_IN: Joi.string().allow('').optional(),
+        OTP_LENGTH: Joi.string().allow('').optional(),
+        OTP_DEV_CODE: Joi.string().allow('').optional(),
+        PAYSTACK_SECRET_KEY: Joi.when('NODE_ENV', {
+          is: 'production',
           then: Joi.string().min(1).required(),
-          otherwise: Joi.string().allow("").optional(),
+          otherwise: Joi.string().allow('').optional(),
         }),
-        PAYSTACK_PUBLIC_KEY: Joi.string().allow("").optional(),
-        PAYSTACK_WEBHOOK_URL: Joi.string().allow("").optional(),
-        PAYSTACK_WEBHOOK_SECRET: Joi.string().allow("").optional(),
-        PAYSTACK_DVA_PREFERRED_BANK: Joi.string().default("test-bank"),
-        FLUTTERWAVE_SECRET_KEY: Joi.when("NODE_ENV", {
-          is: "production",
+        PAYSTACK_PUBLIC_KEY: Joi.string().allow('').optional(),
+        PAYSTACK_WEBHOOK_URL: Joi.string().allow('').optional(),
+        PAYSTACK_WEBHOOK_SECRET: Joi.string().allow('').optional(),
+        PAYSTACK_DVA_PREFERRED_BANK: Joi.string().default('test-bank'),
+        FLUTTERWAVE_SECRET_KEY: Joi.when('NODE_ENV', {
+          is: 'production',
           then: Joi.string().min(1).required(),
-          otherwise: Joi.string().allow("").optional(),
+          otherwise: Joi.string().allow('').optional(),
         }),
-        FLUTTERWAVE_PUBLIC_KEY: Joi.string().allow("").optional(),
-        FLUTTERWAVE_ENCRYPTION_KEY: Joi.string().allow("").optional(),
-        FLUTTERWAVE_SECRET_HASH: Joi.string().allow("").optional(),
+        FLUTTERWAVE_PUBLIC_KEY: Joi.string().allow('').optional(),
+        FLUTTERWAVE_ENCRYPTION_KEY: Joi.string().allow('').optional(),
+        FLUTTERWAVE_SECRET_HASH: Joi.string().allow('').optional(),
         BANKING_ENABLED: Joi.boolean()
-          .truthy("true")
-          .falsy("false")
+          .truthy('true')
+          .falsy('false')
           .default(false),
         VIRTUAL_ACCOUNTS_ENABLED: Joi.boolean()
-          .truthy("true")
-          .falsy("false")
+          .truthy('true')
+          .falsy('false')
           .default(false),
         WITHDRAWALS_ENABLED: Joi.boolean()
-          .truthy("true")
-          .falsy("false")
+          .truthy('true')
+          .falsy('false')
           .default(false),
-        MONNIFY_API_KEY: Joi.string().allow("").optional(),
-        MONNIFY_SECRET_KEY: Joi.string().allow("").optional(),
-        MONNIFY_CONTRACT_CODE: Joi.string().allow("").optional(),
-        MONNIFY_BASE_URL: Joi.string().uri().allow("").optional(),
-        MONNIFY_WEBHOOK_SECRET: Joi.string().allow("").optional(),
-        MONNIFY_WEBHOOK_URL: Joi.string().uri().allow("").optional(),
+        MONNIFY_API_KEY: Joi.string().allow('').optional(),
+        MONNIFY_SECRET_KEY: Joi.string().allow('').optional(),
+        MONNIFY_CONTRACT_CODE: Joi.string().allow('').optional(),
+        MONNIFY_BASE_URL: Joi.string().uri().allow('').optional(),
+        MONNIFY_WEBHOOK_SECRET: Joi.string().allow('').optional(),
+        MONNIFY_WEBHOOK_URL: Joi.string().uri().allow('').optional(),
         MONNIFY_GET_ALL_AVAILABLE_BANKS: Joi.boolean()
-          .truthy("true")
-          .falsy("false")
+          .truthy('true')
+          .falsy('false')
           .default(true),
         MONNIFY_RESTRICT_PAYMENT_SOURCE: Joi.boolean()
-          .truthy("true")
-          .falsy("false")
+          .truthy('true')
+          .falsy('false')
           .default(false),
         MONNIFY_SANDBOX_TEST_KYC_BYPASS: Joi.boolean()
-          .truthy("true")
-          .falsy("false")
+          .truthy('true')
+          .falsy('false')
           .default(false),
-        MONNIFY_TEST_BVN: Joi.string().allow("").optional(),
-        MONNIFY_TEST_NIN: Joi.string().allow("").optional(),
+        MONNIFY_TEST_BVN: Joi.string().allow('').optional(),
+        MONNIFY_TEST_NIN: Joi.string().allow('').optional(),
         BANKING_PROVIDER_PRIMARY: Joi.string()
-          .valid("monnify")
-          .default("monnify"),
-        BANKING_PROVIDER_FALLBACK: Joi.string().valid("").allow("").default(""),
-        SUPPORTED_BANKING_CURRENCIES: Joi.string().default("NGN"),
+          .valid('monnify')
+          .default('monnify'),
+        VIRTUAL_ACCOUNT_NAME_PREFIX: Joi.string()
+          .max(24)
+          .allow('')
+          .default('TrustPay'),
+        BANKING_PROVIDER_FALLBACK: Joi.string().valid('').allow('').default(''),
+        SUPPORTED_BANKING_CURRENCIES: Joi.string().default('NGN'),
         BANKING_SANDBOX_MODE: Joi.boolean()
-          .truthy("true")
-          .falsy("false")
+          .truthy('true')
+          .falsy('false')
           .default(true),
-        PII_ENCRYPTION_KEY: Joi.when("NODE_ENV", {
-          is: "production",
+        PII_ENCRYPTION_KEY: Joi.when('NODE_ENV', {
+          is: 'production',
           then: Joi.string().min(32).required(),
-          otherwise: Joi.string().allow("").optional(),
+          otherwise: Joi.string().allow('').optional(),
         }),
-        PII_KEY_VERSION: Joi.string().default("1"),
-        BANK_ACCOUNT_ENCRYPTION_KEY: Joi.when("NODE_ENV", {
-          is: "production",
+        PII_KEY_VERSION: Joi.string().default('1'),
+        BANK_ACCOUNT_ENCRYPTION_KEY: Joi.when('NODE_ENV', {
+          is: 'production',
           then: Joi.string().min(32).required(),
-          otherwise: Joi.string().allow("").optional(),
+          otherwise: Joi.string().allow('').optional(),
         }),
-        TRANSACTION_PIN_REQUIRED: Joi.when("NODE_ENV", {
-          is: "production",
-          then: Joi.boolean().truthy("true").falsy("false").default(true),
-          otherwise: Joi.boolean().truthy("true").falsy("false").default(false),
+        TRANSACTION_PIN_REQUIRED: Joi.when('NODE_ENV', {
+          is: 'production',
+          then: Joi.boolean().truthy('true').falsy('false').default(true),
+          otherwise: Joi.boolean().truthy('true').falsy('false').default(false),
         }),
         VTU_PROVIDER: Joi.string()
-          .valid("generic", "vtpass")
-          .default("generic"),
+          .valid('generic', 'vtpass')
+          .default('generic'),
         VTU_KYC_BYPASS: Joi.boolean()
-          .truthy("true")
-          .falsy("false")
+          .truthy('true')
+          .falsy('false')
           .default(false),
-        VTU_API_URL: Joi.string().uri().allow("").optional(),
-        VTU_API_KEY: Joi.string().allow("").optional(),
-        VTPASS_BASE_URL: Joi.string().uri().allow("").optional(),
-        VTPASS_API_KEY: Joi.string().allow("").optional(),
-        VTPASS_PUBLIC_KEY: Joi.string().allow("").optional(),
-        VTPASS_SECRET_KEY: Joi.string().allow("").optional(),
+        VTU_API_URL: Joi.string().uri().allow('').optional(),
+        VTU_API_KEY: Joi.string().allow('').optional(),
+        VTPASS_BASE_URL: Joi.string().uri().allow('').optional(),
+        VTPASS_API_KEY: Joi.string().allow('').optional(),
+        VTPASS_PUBLIC_KEY: Joi.string().allow('').optional(),
+        VTPASS_SECRET_KEY: Joi.string().allow('').optional(),
         RELOADLY_ENABLED: Joi.boolean()
-          .truthy("true")
-          .falsy("false")
+          .truthy('true')
+          .falsy('false')
           .default(false),
         RELOADLY_AUTH_URL: Joi.string()
           .uri()
-          .default("https://auth.reloadly.com/oauth/token"),
+          .default('https://auth.reloadly.com/oauth/token'),
         RELOADLY_TOPUPS_BASE_URL: Joi.string()
           .uri()
-          .default("https://topups-sandbox.reloadly.com"),
+          .default('https://topups-sandbox.reloadly.com'),
         RELOADLY_AUDIENCE: Joi.string()
           .uri()
-          .default("https://topups-sandbox.reloadly.com"),
+          .default('https://topups-sandbox.reloadly.com'),
         RELOADLY_UTILITIES_BASE_URL: Joi.string()
           .uri()
-          .default("https://utilities-sandbox.reloadly.com"),
+          .default('https://utilities-sandbox.reloadly.com'),
         RELOADLY_UTILITIES_AUDIENCE: Joi.string()
           .uri()
-          .default("https://utilities-sandbox.reloadly.com"),
-        RELOADLY_CLIENT_ID: Joi.string().allow("").optional(),
-        RELOADLY_CLIENT_SECRET: Joi.string().allow("").optional(),
-        RELOADLY_SENDER_COUNTRY_CODE: Joi.string().default("NG"),
-        RELOADLY_WEBHOOK_SECRET: Joi.string().allow("").optional(),
-        RELOADLY_WEBHOOK_URL: Joi.string().uri().allow("").optional(),
+          .default('https://utilities-sandbox.reloadly.com'),
+        RELOADLY_CLIENT_ID: Joi.string().allow('').optional(),
+        RELOADLY_CLIENT_SECRET: Joi.string().allow('').optional(),
+        RELOADLY_SENDER_COUNTRY_CODE: Joi.string().default('NG'),
+        RELOADLY_WEBHOOK_SECRET: Joi.string().allow('').optional(),
+        RELOADLY_WEBHOOK_URL: Joi.string().uri().allow('').optional(),
       }),
     }),
     LoggerModule.forRoot({
       pinoHttp: {
         redact: {
           paths: [
-            "req.headers.authorization",
-            "req.headers.cookie",
+            'req.headers.authorization',
+            'req.headers.cookie',
             "req.headers['set-cookie']",
             "req.headers['x-api-key']",
             "req.headers['x-auth-token']",
             "res.headers['set-cookie']",
           ],
-          censor: "[REDACTED]",
+          censor: '[REDACTED]',
         },
         level:
           process.env.LOG_LEVEL ||
-          (process.env.NODE_ENV === "production" ? "info" : "debug"),
+          (process.env.NODE_ENV === 'production' ? 'info' : 'debug'),
       },
     }),
-    // TODO(launch): back throttler with Redis storage (npm i nestjs-throttler-storage-redis) — currently in-memory, resets on cold start
-    ThrottlerModule.forRoot({
-      throttlers: [
-        {
-          // Generous global ceiling so ordinary authenticated browsing is
-          // never throttled; tight abuse limits are applied per-endpoint via
-          // @Throttle (e.g. withdraw 5/min, provision 3/min). Keyed per user
-          // by UserThrottlerGuard, not per shared proxy IP.
-          ttl: 60000,
-          limit: 120,
-        },
-      ],
-      // Rate limiting would make request-count assertions in the e2e suite
-      // flaky; it is only meaningful in real deployments.
-      skipIf: () => process.env.NODE_ENV === "test",
+    ThrottlerModule.forRootAsync({
+      inject: [RedisService],
+      useFactory: (redisService: RedisService) => ({
+        throttlers: [
+          {
+            // Generous global ceiling so ordinary authenticated browsing is
+            // never throttled; tight abuse limits are applied per-endpoint via
+            // @Throttle (e.g. withdraw 5/min, provision 3/min). Keyed per user
+            // by UserThrottlerGuard, not per shared proxy IP.
+            ttl: 60000,
+            limit: 120,
+          },
+        ],
+        // Redis-backed so limits survive restarts and are shared across
+        // instances; degrades to per-instance memory when Redis is down.
+        storage: new RedisThrottlerStorage(redisService),
+        // Rate limiting would make request-count assertions in the e2e suite
+        // flaky; it is only meaningful in real deployments.
+        skipIf: () => process.env.NODE_ENV === 'test',
+      }),
     }),
     ScheduleModule.forRoot(),
     RedisModule,

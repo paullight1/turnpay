@@ -1,18 +1,18 @@
-import { of, throwError } from "rxjs";
-import { VtuApiProvider } from "./vtu-api.provider";
+import { of, throwError } from 'rxjs';
+import { VtuApiProvider } from './vtu-api.provider';
 
-describe("VtuApiProvider VTpass adapter", () => {
+describe('VtuApiProvider VTpass adapter', () => {
   const httpService = {
     get: jest.fn(),
     post: jest.fn(),
   };
   const configValues = {
-    NODE_ENV: "test",
-    VTU_PROVIDER: "vtpass",
-    VTPASS_BASE_URL: "https://sandbox.vtpass.com/api",
-    VTPASS_API_KEY: "api-key",
-    VTPASS_PUBLIC_KEY: "public-key",
-    VTPASS_SECRET_KEY: "secret-key",
+    NODE_ENV: 'test',
+    VTU_PROVIDER: 'vtpass',
+    VTPASS_BASE_URL: 'https://sandbox.vtpass.com/api',
+    VTPASS_API_KEY: 'api-key',
+    VTPASS_PUBLIC_KEY: 'public-key',
+    VTPASS_SECRET_KEY: 'secret-key',
   };
   const configService = {
     get: jest.fn((key: keyof typeof configValues) => configValues[key]),
@@ -37,25 +37,25 @@ describe("VtuApiProvider VTpass adapter", () => {
     );
   });
 
-  it("maps TRUSTPAY providers to VTpass service providers", async () => {
-    await expect(provider.getProviders("airtime")).resolves.toEqual(
+  it('maps TRUSTPAY providers to VTpass service providers', async () => {
+    await expect(provider.getProviders('airtime')).resolves.toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ id: "mtn", type: "airtime" }),
-        expect.objectContaining({ id: "9mobile", type: "airtime" }),
+        expect.objectContaining({ id: 'mtn', type: 'airtime' }),
+        expect.objectContaining({ id: '9mobile', type: 'airtime' }),
       ]),
     );
   });
 
-  it("loads data packages through VTpass service variations with GET keys", async () => {
+  it('loads data packages through VTpass service variations with GET keys', async () => {
     httpService.get.mockReturnValue(
       of({
         data: {
           content: {
             variations: [
               {
-                variation_code: "mtn-100mb-1000",
-                name: "N1000 1.5GB - 30 days",
-                variation_amount: "1000.00",
+                variation_code: 'mtn-100mb-1000',
+                name: 'N1000 1.5GB - 30 days',
+                variation_amount: '1000.00',
               },
             ],
           },
@@ -63,40 +63,40 @@ describe("VtuApiProvider VTpass adapter", () => {
       }),
     );
 
-    const packages = await provider.getPackages("mtn");
+    const packages = await provider.getPackages('mtn');
 
     expect(httpService.get).toHaveBeenCalledWith(
-      "https://sandbox.vtpass.com/api/service-variations",
+      'https://sandbox.vtpass.com/api/service-variations',
       {
         headers: {
-          "Content-Type": "application/json",
-          "api-key": "api-key",
-          "public-key": "public-key",
+          'Content-Type': 'application/json',
+          'api-key': 'api-key',
+          'public-key': 'public-key',
         },
-        params: { serviceID: "mtn-data" },
+        params: { serviceID: 'mtn-data' },
       },
     );
     expect(packages).toEqual([
       {
-        id: "mtn-100mb-1000",
-        name: "N1000 1.5GB - 30 days",
+        id: 'mtn-100mb-1000',
+        name: 'N1000 1.5GB - 30 days',
         price: 1000,
-        validity: "30 days",
+        validity: '30 days',
       },
     ]);
   });
 
-  it("posts airtime purchases to VTpass pay endpoint with secret-key auth", async () => {
+  it('posts airtime purchases to VTpass pay endpoint with secret-key auth', async () => {
     httpService.post.mockReturnValue(
       of({
         data: {
-          code: "000",
-          response_description: "TRANSACTION SUCCESSFUL",
-          requestId: "202605211122ABC",
+          code: '000',
+          response_description: 'TRANSACTION SUCCESSFUL',
+          requestId: '202605211122ABC',
           content: {
             transactions: {
-              status: "delivered",
-              transactionId: "provider-tx-1",
+              status: 'delivered',
+              transactionId: 'provider-tx-1',
             },
           },
         },
@@ -104,25 +104,25 @@ describe("VtuApiProvider VTpass adapter", () => {
     );
 
     const result = await provider.purchase({
-      type: "airtime",
-      provider: "mtn",
-      recipientNumber: "08011111111",
+      type: 'airtime',
+      provider: 'mtn',
+      recipientNumber: '08011111111',
       amount: 100,
-      reference: "VTU-1234567890-ABCDEF",
+      reference: 'VTU-1234567890-ABCDEF',
     });
 
     expect(httpService.post).toHaveBeenCalledWith(
-      "https://sandbox.vtpass.com/api/pay",
+      'https://sandbox.vtpass.com/api/pay',
       expect.objectContaining({
-        serviceID: "mtn",
+        serviceID: 'mtn',
         amount: 100,
-        phone: "08011111111",
+        phone: '08011111111',
       }),
       {
         headers: {
-          "Content-Type": "application/json",
-          "api-key": "api-key",
-          "secret-key": "secret-key",
+          'Content-Type': 'application/json',
+          'api-key': 'api-key',
+          'secret-key': 'secret-key',
         },
       },
     );
@@ -131,60 +131,60 @@ describe("VtuApiProvider VTpass adapter", () => {
     ).toMatch(/^\d{12}[A-Za-z0-9]+$/);
     expect(result).toEqual(
       expect.objectContaining({
-        reference: "provider-tx-1",
-        status: "success",
-        message: "TRANSACTION SUCCESSFUL",
+        reference: 'provider-tx-1',
+        status: 'success',
+        message: 'TRANSACTION SUCCESSFUL',
         providerRequestId: expect.any(String),
       }),
     );
   });
 
-  it("requeries VTpass transactions by provider request id", async () => {
+  it('requeries VTpass transactions by provider request id', async () => {
     httpService.post.mockReturnValue(
       of({
         data: {
-          code: "000",
-          response_description: "TRANSACTION SUCCESSFUL",
-          requestId: "202605211122ABC",
+          code: '000',
+          response_description: 'TRANSACTION SUCCESSFUL',
+          requestId: '202605211122ABC',
           content: {
             transactions: {
-              status: "delivered",
-              transactionId: "provider-tx-1",
+              status: 'delivered',
+              transactionId: 'provider-tx-1',
             },
           },
         },
       }),
     );
 
-    const result = await provider.requery("202605211122ABC");
+    const result = await provider.requery('202605211122ABC');
 
     expect(httpService.post).toHaveBeenCalledWith(
-      "https://sandbox.vtpass.com/api/requery",
-      { request_id: "202605211122ABC" },
+      'https://sandbox.vtpass.com/api/requery',
+      { request_id: '202605211122ABC' },
       {
         headers: {
-          "Content-Type": "application/json",
-          "api-key": "api-key",
-          "secret-key": "secret-key",
+          'Content-Type': 'application/json',
+          'api-key': 'api-key',
+          'secret-key': 'secret-key',
         },
       },
     );
     expect(result).toEqual(
       expect.objectContaining({
-        reference: "provider-tx-1",
-        status: "success",
-        providerRequestId: "202605211122ABC",
+        reference: 'provider-tx-1',
+        status: 'success',
+        providerRequestId: '202605211122ABC',
       }),
     );
   });
 
-  it("reports VTpass health with balance and low-balance warning", async () => {
+  it('reports VTpass health with balance and low-balance warning', async () => {
     httpService.get.mockReturnValue(
       of({
         data: {
-          code: "000",
+          code: '000',
           contents: {
-            balance: "1200.50",
+            balance: '1200.50',
           },
         },
       }),
@@ -193,38 +193,38 @@ describe("VtuApiProvider VTpass adapter", () => {
     const result = await provider.getVtpassHealth();
 
     expect(httpService.get).toHaveBeenCalledWith(
-      "https://sandbox.vtpass.com/api/balance",
+      'https://sandbox.vtpass.com/api/balance',
       {
         headers: {
-          "Content-Type": "application/json",
-          "api-key": "api-key",
-          "public-key": "public-key",
+          'Content-Type': 'application/json',
+          'api-key': 'api-key',
+          'public-key': 'public-key',
         },
       },
     );
     expect(result).toEqual(
       expect.objectContaining({
-        id: "vtpass",
+        id: 'vtpass',
         configured: true,
         enabled: true,
         supportsBalance: true,
         balance: expect.objectContaining({
-          status: "available",
-          amount: "1200.5",
-          currency: "NGN",
+          status: 'available',
+          amount: '1200.5',
+          currency: 'NGN',
         }),
         warnings: expect.arrayContaining([
-          "VTpass balance is below configured threshold of NGN 5000.",
+          'VTpass balance is below configured threshold of NGN 5000.',
         ]),
       }),
     );
   });
 
-  it("reports VTpass balance as unknown when credentials are missing", async () => {
+  it('reports VTpass balance as unknown when credentials are missing', async () => {
     configService.get.mockImplementation((key: string) => {
-      if (key === "NODE_ENV") return "test";
-      if (key === "VTU_PROVIDER") return "vtpass";
-      return "";
+      if (key === 'NODE_ENV') return 'test';
+      if (key === 'VTU_PROVIDER') return 'vtpass';
+      return '';
     });
     provider = new VtuApiProvider(
       httpService as any,
@@ -239,139 +239,139 @@ describe("VtuApiProvider VTpass adapter", () => {
       expect.objectContaining({
         configured: false,
         enabled: true,
-        balance: { status: "unknown", currency: "NGN" },
+        balance: { status: 'unknown', currency: 'NGN' },
         warnings: expect.arrayContaining([
-          "Missing VTpass apiKey configuration.",
-          "Missing VTpass publicKey configuration.",
-          "Missing VTpass secretKey configuration.",
+          'Missing VTpass apiKey configuration.',
+          'Missing VTpass publicKey configuration.',
+          'Missing VTpass secretKey configuration.',
         ]),
       }),
     );
   });
 
-  it("normalizes VTpass processing responses as pending", async () => {
+  it('normalizes VTpass processing responses as pending', async () => {
     httpService.post.mockReturnValue(
       of({
         data: {
-          code: "099",
-          response_description: "TRANSACTION IS PROCESSING",
+          code: '099',
+          response_description: 'TRANSACTION IS PROCESSING',
         },
       }),
     );
 
     await expect(
       provider.purchase({
-        type: "airtime",
-        provider: "mtn",
-        recipientNumber: "201000000000",
+        type: 'airtime',
+        provider: 'mtn',
+        recipientNumber: '201000000000',
         amount: 100,
-        reference: "VTU-1234567890-PENDING",
+        reference: 'VTU-1234567890-PENDING',
       }),
     ).resolves.toEqual(
       expect.objectContaining({
-        status: "pending",
-        message: "TRANSACTION IS PROCESSING",
+        status: 'pending',
+        message: 'TRANSACTION IS PROCESSING',
       }),
     );
   });
 
-  it("verifies meters through VTpass merchant-verify with secret-key auth", async () => {
+  it('verifies meters through VTpass merchant-verify with secret-key auth', async () => {
     httpService.post.mockReturnValue(
       of({
         data: {
-          code: "000",
+          code: '000',
           content: {
-            Customer_Name: "TESTMETER1",
-            Address: "ABULE EGBA BU ABULE",
+            Customer_Name: 'TESTMETER1',
+            Address: 'ABULE EGBA BU ABULE',
           },
         },
       }),
     );
 
-    const result = await provider.validateMeter("ikedc", "1111111111111");
+    const result = await provider.validateMeter('ikedc', '1111111111111');
 
     expect(httpService.post).toHaveBeenCalledWith(
-      "https://sandbox.vtpass.com/api/merchant-verify",
+      'https://sandbox.vtpass.com/api/merchant-verify',
       {
-        serviceID: "ikeja-electric",
-        billersCode: "1111111111111",
-        type: "prepaid",
+        serviceID: 'ikeja-electric',
+        billersCode: '1111111111111',
+        type: 'prepaid',
       },
       {
         headers: {
-          "Content-Type": "application/json",
-          "api-key": "api-key",
-          "secret-key": "secret-key",
+          'Content-Type': 'application/json',
+          'api-key': 'api-key',
+          'secret-key': 'secret-key',
         },
       },
     );
     expect(result).toEqual({
-      name: "TESTMETER1",
-      address: "ABULE EGBA BU ABULE",
+      name: 'TESTMETER1',
+      address: 'ABULE EGBA BU ABULE',
     });
   });
 
-  it("verifies smart cards through VTpass merchant-verify", async () => {
+  it('verifies smart cards through VTpass merchant-verify', async () => {
     httpService.post.mockReturnValue(
       of({
         data: {
-          code: "000",
+          code: '000',
           content: {
-            Customer_Name: "TEST METER",
-            Status: "ACTIVE",
+            Customer_Name: 'TEST METER',
+            Status: 'ACTIVE',
           },
         },
       }),
     );
 
-    const result = await provider.validateSmartCard("dstv", "1212121212");
+    const result = await provider.validateSmartCard('dstv', '1212121212');
 
     expect(httpService.post).toHaveBeenCalledWith(
-      "https://sandbox.vtpass.com/api/merchant-verify",
-      { serviceID: "dstv", billersCode: "1212121212" },
+      'https://sandbox.vtpass.com/api/merchant-verify',
+      { serviceID: 'dstv', billersCode: '1212121212' },
       expect.anything(),
     );
-    expect(result).toEqual({ name: "TEST METER", status: "active" });
+    expect(result).toEqual({ name: 'TEST METER', status: 'active' });
   });
 
-  it("rejects merchant verification when VTpass reports an error", async () => {
+  it('rejects merchant verification when VTpass reports an error', async () => {
     httpService.post.mockReturnValue(
       of({
         data: {
-          code: "000",
-          content: { error: "INVALID METER NUMBER" },
+          code: '000',
+          content: { error: 'INVALID METER NUMBER' },
         },
       }),
     );
 
     await expect(
-      provider.validateMeter("ikedc", "0000000000000"),
+      provider.validateMeter('ikedc', '0000000000000'),
     ).rejects.toThrow(
-      "We could not verify this customer number. Check it and try again.",
+      'We could not verify this customer number. Check it and try again.',
     );
   });
 
-  it("surfaces merchant verification transport failures as unavailable", async () => {
-    httpService.post.mockReturnValue(throwError(() => new Error("timeout")));
+  it('surfaces merchant verification transport failures as unavailable', async () => {
+    httpService.post.mockReturnValue(throwError(() => new Error('timeout')));
 
     await expect(
-      provider.validateMeter("ikedc", "1111111111111"),
+      provider.validateMeter('ikedc', '1111111111111'),
     ).rejects.toThrow(
-      "Customer verification is temporarily unavailable. Try again shortly.",
+      'Customer verification is temporarily unavailable. Try again shortly.',
     );
   });
 
-  it("treats transport errors as unknown provider results", async () => {
-    httpService.post.mockReturnValue(throwError(() => new Error("timeout")));
+  it('treats transport errors as unknown provider results', async () => {
+    httpService.post.mockReturnValue(throwError(() => new Error('timeout')));
 
     await expect(
       provider.purchase({
-        type: "airtime",
-        provider: "mtn",
-        recipientNumber: "300000000000",
+        type: 'airtime',
+        provider: 'mtn',
+        recipientNumber: '300000000000',
         amount: 100,
-        reference: "VTU-1234567890-TIMEOUT",
+        reference: 'VTU-1234567890-TIMEOUT',
       }),
-    ).rejects.toThrow("VTU provider result unknown");
+    ).rejects.toThrow('VTU provider result unknown');
   });
 });

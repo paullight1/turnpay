@@ -1,5 +1,5 @@
-import { HttpException, HttpStatus } from "@nestjs/common";
-import { OtpService } from "./otp.service";
+import { HttpException, HttpStatus } from '@nestjs/common';
+import { OtpService } from './otp.service';
 
 type StoredValue = {
   value: string;
@@ -42,16 +42,18 @@ function createRedisMock() {
   };
 }
 
-describe("OtpService", () => {
+describe('OtpService', () => {
   const configValues = {
-    OTP_EXPIRES_IN: "5",
-    OTP_LENGTH: "6",
-    OTP_DEV_CODE: "654321",
-    NODE_ENV: "test",
+    OTP_EXPIRES_IN: '5',
+    OTP_LENGTH: '6',
+    OTP_DEV_CODE: '654321',
+    NODE_ENV: 'test',
   };
 
   const configService = {
-    get: jest.fn((key: string) => configValues[key as keyof typeof configValues]),
+    get: jest.fn(
+      (key: string) => configValues[key as keyof typeof configValues],
+    ),
   };
 
   const logger = {
@@ -64,57 +66,79 @@ describe("OtpService", () => {
     jest.clearAllMocks();
   });
 
-  it("rejects a fourth OTP send in the same hour for one normalized phone", async () => {
+  it('rejects a fourth OTP send in the same hour for one normalized phone', async () => {
     const { redis } = createRedisMock();
-    const service = new OtpService(redis as never, configService as never, logger as never);
+    const service = new OtpService(
+      redis as never,
+      configService as never,
+      logger as never,
+    );
 
     const attempts = await Promise.allSettled(
       Array.from({ length: 4 }, () =>
-        service.assertOtpSendAllowed(" +2348012345678 "),
+        service.assertOtpSendAllowed(' +2348012345678 '),
       ),
     );
 
-    expect(attempts.filter((attempt) => attempt.status === "fulfilled")).toHaveLength(3);
-    expect(attempts.filter((attempt) => attempt.status === "rejected")).toHaveLength(1);
-    const rejected = attempts.find((attempt) => attempt.status === "rejected");
+    expect(
+      attempts.filter((attempt) => attempt.status === 'fulfilled'),
+    ).toHaveLength(3);
+    expect(
+      attempts.filter((attempt) => attempt.status === 'rejected'),
+    ).toHaveLength(1);
+    const rejected = attempts.find((attempt) => attempt.status === 'rejected');
     expect(rejected?.reason).toBeInstanceOf(HttpException);
     expect((rejected?.reason as HttpException).getStatus()).toBe(
       HttpStatus.TOO_MANY_REQUESTS,
     );
   });
 
-  it("rejects a fourth password reset request in the same hour for one normalized email", async () => {
+  it('rejects a fourth password reset request in the same hour for one normalized email', async () => {
     const { redis } = createRedisMock();
-    const service = new OtpService(redis as never, configService as never, logger as never);
+    const service = new OtpService(
+      redis as never,
+      configService as never,
+      logger as never,
+    );
 
     const attempts = await Promise.allSettled(
       Array.from({ length: 4 }, () =>
-        service.assertPasswordResetAllowed(" Ada@Example.com "),
+        service.assertPasswordResetAllowed(' Ada@Example.com '),
       ),
     );
 
-    expect(attempts.filter((attempt) => attempt.status === "fulfilled")).toHaveLength(3);
-    expect(attempts.filter((attempt) => attempt.status === "rejected")).toHaveLength(1);
-    const rejected = attempts.find((attempt) => attempt.status === "rejected");
+    expect(
+      attempts.filter((attempt) => attempt.status === 'fulfilled'),
+    ).toHaveLength(3);
+    expect(
+      attempts.filter((attempt) => attempt.status === 'rejected'),
+    ).toHaveLength(1);
+    const rejected = attempts.find((attempt) => attempt.status === 'rejected');
     expect(rejected?.reason).toBeInstanceOf(HttpException);
     expect((rejected?.reason as HttpException).getStatus()).toBe(
       HttpStatus.TOO_MANY_REQUESTS,
     );
   });
 
-  it("does not let concurrent invalid OTP submissions preserve a usable code", async () => {
+  it('does not let concurrent invalid OTP submissions preserve a usable code', async () => {
     const { redis } = createRedisMock();
-    const service = new OtpService(redis as never, configService as never, logger as never);
+    const service = new OtpService(
+      redis as never,
+      configService as never,
+      logger as never,
+    );
 
-    await service.sendOtp("+2348012345678");
+    await service.sendOtp('+2348012345678');
 
     const invalidAttempts = await Promise.all(
       Array.from({ length: 4 }, () =>
-        service.verifyOtp("+2348012345678", "111111"),
+        service.verifyOtp('+2348012345678', '111111'),
       ),
     );
 
     expect(invalidAttempts).toEqual([false, false, false, false]);
-    await expect(service.verifyOtp("+2348012345678", "654321")).resolves.toBe(false);
+    await expect(service.verifyOtp('+2348012345678', '654321')).resolves.toBe(
+      false,
+    );
   });
 });

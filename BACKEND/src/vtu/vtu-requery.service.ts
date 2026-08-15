@@ -1,7 +1,7 @@
-import { Injectable } from "@nestjs/common";
-import { Cron, CronExpression } from "@nestjs/schedule";
-import { PinoLogger } from "nestjs-pino";
-import { VtuService } from "./vtu.service";
+import { Injectable } from '@nestjs/common';
+import { Cron, CronExpression } from '@nestjs/schedule';
+import { PinoLogger } from 'nestjs-pino';
+import { VtuService } from './vtu.service';
 
 @Injectable()
 export class VtuRequeryService {
@@ -21,16 +21,16 @@ export class VtuRequeryService {
             checked: result.checked,
             processed: result.results.filter((item) => item.processed).length,
           },
-          "VTU pending order requery completed",
+          'VTU pending order requery completed',
         );
       }
     } catch (error) {
       const errorMessage =
-        error instanceof Error ? error.message : "Unknown VTU requery error";
+        error instanceof Error ? error.message : 'Unknown VTU requery error';
 
       this.pinoLogger.error(
         { errorMessage },
-        "VTU pending order requery failed",
+        'VTU pending order requery failed',
       );
     }
   }

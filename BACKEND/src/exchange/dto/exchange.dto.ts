@@ -1,4 +1,4 @@
-import { Transform, Type } from "class-transformer";
+import { Transform, Type } from 'class-transformer';
 import {
   IsString,
   IsNumber,
@@ -11,36 +11,36 @@ import {
   MaxLength,
   MinLength,
   ValidateIf,
-} from "class-validator";
+} from 'class-validator';
 import {
   LimitQueryDto,
   MONEY_AMOUNT_PATTERN,
   normalizeDecimalInput,
-} from "../../common/dto/query.dto";
+} from '../../common/dto/query.dto';
 
 const EXCHANGE_PAYOUT_STATUSES = [
-  "PENDING_APPROVAL",
-  "APPROVED",
-  "PROCESSING",
-  "SENT",
-  "FAILED",
-  "REVERSED",
+  'PENDING_APPROVAL',
+  'APPROVED',
+  'PROCESSING',
+  'SENT',
+  'FAILED',
+  'REVERSED',
 ] as const;
 
-const SUPPORTED_CURRENCIES = ["NGN", "GHS"] as const;
+const SUPPORTED_CURRENCIES = ['NGN', 'GHS'] as const;
 const EXCHANGE_RECEIPT_STATUSES = [
-  "SUBMITTED",
-  "UNDER_REVIEW",
-  "APPROVED",
-  "CREDITED",
-  "REJECTED",
-  "NEEDS_MORE_INFO",
+  'SUBMITTED',
+  'UNDER_REVIEW',
+  'APPROVED',
+  'CREDITED',
+  'REJECTED',
+  'NEEDS_MORE_INFO',
 ] as const;
 const ALLOWED_RECEIPT_CONTENT_TYPES = [
-  "image/jpeg",
-  "image/png",
-  "image/webp",
-  "application/pdf",
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+  'application/pdf',
 ] as const;
 
 export class GetRateDto {
@@ -65,7 +65,7 @@ export class CreateQuoteDto {
   @Transform(({ value }) => normalizeDecimalInput(value))
   @IsString()
   @Matches(MONEY_AMOUNT_PATTERN, {
-    message: "amount must be a positive decimal with at most 2 decimal places",
+    message: 'amount must be a positive decimal with at most 2 decimal places',
   })
   amount: string;
 }
@@ -115,8 +115,8 @@ export class AdminUpdateRateDto {
 
 export class AdminApproveRateOverrideDto {
   @IsString()
-  @IsIn(["APPROVED", "REJECTED"])
-  status: "APPROVED" | "REJECTED";
+  @IsIn(['APPROVED', 'REJECTED'])
+  status: 'APPROVED' | 'REJECTED';
 
   @IsString()
   @MinLength(10)
@@ -128,7 +128,7 @@ export class SubmitExchangeReceiptDto {
   @Transform(({ value }: { value: unknown }) => normalizeDecimalInput(value))
   @IsString()
   @Matches(MONEY_AMOUNT_PATTERN, {
-    message: "amount must be a positive decimal with at most 2 decimal places",
+    message: 'amount must be a positive decimal with at most 2 decimal places',
   })
   amount: string;
 
@@ -149,7 +149,7 @@ export class SubmitExchangeReceiptDto {
 
   @ValidateIf((dto: SubmitExchangeReceiptDto) => !dto.receiptObjectKey)
   @IsString()
-  @IsUrl({ require_protocol: true, protocols: ["https"] })
+  @IsUrl({ require_protocol: true, protocols: ['https'] })
   @MaxLength(500)
   receiptUrl?: string;
 
@@ -157,7 +157,7 @@ export class SubmitExchangeReceiptDto {
   @IsString()
   @MaxLength(300)
   @Matches(/^exchange-receipts\/[A-Za-z0-9_-]+\/[A-Za-z0-9._-]+$/, {
-    message: "Receipt object key is invalid",
+    message: 'Receipt object key is invalid',
   })
   receiptObjectKey?: string;
 
@@ -171,7 +171,7 @@ export class CreateMonnifyExchangeDepositDto {
   @Transform(({ value }: { value: unknown }) => normalizeDecimalInput(value))
   @IsString()
   @Matches(MONEY_AMOUNT_PATTERN, {
-    message: "amount must be a positive decimal with at most 2 decimal places",
+    message: 'amount must be a positive decimal with at most 2 decimal places',
   })
   amount: string;
 }
@@ -181,7 +181,7 @@ export class CreateExchangeReceiptUploadDto {
   @MinLength(1)
   @MaxLength(180)
   @Matches(/^[A-Za-z0-9._ -]+$/, {
-    message: "File name contains unsupported characters",
+    message: 'File name contains unsupported characters',
   })
   fileName: string;
 
@@ -203,8 +203,8 @@ export class AdminExchangeReceiptsQueryDto extends LimitQueryDto {
 
 export class AdminReviewExchangeReceiptDto {
   @IsString()
-  @IsIn(["APPROVED", "REJECTED", "NEEDS_MORE_INFO"])
-  status: "APPROVED" | "REJECTED" | "NEEDS_MORE_INFO";
+  @IsIn(['APPROVED', 'REJECTED', 'NEEDS_MORE_INFO'])
+  status: 'APPROVED' | 'REJECTED' | 'NEEDS_MORE_INFO';
 
   @IsString()
   @MinLength(10)
@@ -216,7 +216,8 @@ export class CreateExchangePayoutDto {
   @Transform(({ value }) => normalizeDecimalInput(value))
   @IsString()
   @Matches(MONEY_AMOUNT_PATTERN, {
-    message: "sourceAmount must be a positive decimal with at most 2 decimal places",
+    message:
+      'sourceAmount must be a positive decimal with at most 2 decimal places',
   })
   sourceAmount: string;
 
@@ -234,7 +235,7 @@ export class CreateExchangePayoutDto {
   @MinLength(10)
   @MaxLength(20)
   @Matches(/^\d{10,20}$/, {
-    message: "destinationAccountNumber must be 10-20 digits",
+    message: 'destinationAccountNumber must be 10-20 digits',
   })
   destinationAccountNumber: string;
 
@@ -246,7 +247,7 @@ export class CreateExchangePayoutDto {
   @IsOptional()
   @IsString()
   @Matches(/^\d{4,6}$/, {
-    message: "transactionPin must be 4-6 digits",
+    message: 'transactionPin must be 4-6 digits',
   })
   transactionPin?: string;
 }
@@ -259,8 +260,8 @@ export class AdminExchangePayoutsQueryDto extends LimitQueryDto {
 
 export class AdminReviewPayoutDto {
   @IsString()
-  @IsIn(["APPROVED", "REJECTED"])
-  status: "APPROVED" | "REJECTED";
+  @IsIn(['APPROVED', 'REJECTED'])
+  status: 'APPROVED' | 'REJECTED';
 
   @IsString()
   @MinLength(10)
@@ -276,7 +277,7 @@ export class AdminMarkPayoutSentDto {
 
   @IsOptional()
   @IsString()
-  @IsUrl({ require_protocol: true, protocols: ["https"] })
+  @IsUrl({ require_protocol: true, protocols: ['https'] })
   @MaxLength(500)
   paymentReceiptUrl?: string;
 }

@@ -1,11 +1,11 @@
-import { BadRequestException, Injectable } from "@nestjs/common";
-import { HttpService } from "@nestjs/axios";
-import { ConfigService } from "@nestjs/config";
-import { PinoLogger } from "nestjs-pino";
-import { firstValueFrom } from "rxjs";
-import { RedisService } from "../../redis/redis.service";
-import { VtuProvider } from "./vtu-api.provider";
-import { VtuProviderHealth } from "./provider-health.types";
+import { BadRequestException, Injectable } from '@nestjs/common';
+import { HttpService } from '@nestjs/axios';
+import { ConfigService } from '@nestjs/config';
+import { PinoLogger } from 'nestjs-pino';
+import { firstValueFrom } from 'rxjs';
+import { RedisService } from '../../redis/redis.service';
+import { VtuProvider } from './vtu-api.provider';
+import { VtuProviderHealth } from './provider-health.types';
 
 interface ReloadlyTokenResponse {
   access_token: string;
@@ -74,6 +74,22 @@ export interface ReloadlyDetectedOperator extends VtuProvider {
   countryCode: string;
 }
 
+export interface VtuCountry {
+  code: string;
+  name: string;
+  currencyCode?: string;
+  callingCodes?: string[];
+  flagUrl?: string;
+}
+
+interface ReloadlyCountry {
+  isoName?: string;
+  name?: string;
+  currencyCode?: string;
+  callingCodes?: string[];
+  flag?: string;
+}
+
 @Injectable()
 export class ReloadlyProvider {
   private readonly authUrl: string;
@@ -93,41 +109,41 @@ export class ReloadlyProvider {
     private readonly logger: PinoLogger,
   ) {
     this.authUrl =
-      this.configService.get<string>("RELOADLY_AUTH_URL") ||
-      "https://auth.reloadly.com/oauth/token";
+      this.configService.get<string>('RELOADLY_AUTH_URL') ||
+      'https://auth.reloadly.com/oauth/token';
     this.baseUrl =
-      this.configService.get<string>("RELOADLY_TOPUPS_BASE_URL") ||
-      "https://topups-sandbox.reloadly.com";
+      this.configService.get<string>('RELOADLY_TOPUPS_BASE_URL') ||
+      'https://topups-sandbox.reloadly.com';
     this.audience =
-      this.configService.get<string>("RELOADLY_AUDIENCE") ||
-      this.baseUrl.replace(/\/$/, "");
+      this.configService.get<string>('RELOADLY_AUDIENCE') ||
+      this.baseUrl.replace(/\/$/, '');
     this.utilitiesBaseUrl =
-      this.configService.get<string>("RELOADLY_UTILITIES_BASE_URL") ||
-      "https://utilities-sandbox.reloadly.com";
+      this.configService.get<string>('RELOADLY_UTILITIES_BASE_URL') ||
+      'https://utilities-sandbox.reloadly.com';
     this.utilitiesAudience =
-      this.configService.get<string>("RELOADLY_UTILITIES_AUDIENCE") ||
-      this.utilitiesBaseUrl.replace(/\/$/, "");
-    this.clientId = this.configService.get<string>("RELOADLY_CLIENT_ID") || "";
+      this.configService.get<string>('RELOADLY_UTILITIES_AUDIENCE') ||
+      this.utilitiesBaseUrl.replace(/\/$/, '');
+    this.clientId = this.configService.get<string>('RELOADLY_CLIENT_ID') || '';
     this.clientSecret =
-      this.configService.get<string>("RELOADLY_CLIENT_SECRET") || "";
+      this.configService.get<string>('RELOADLY_CLIENT_SECRET') || '';
     this.senderCountryCode =
-      this.configService.get<string>("RELOADLY_SENDER_COUNTRY_CODE") || "NG";
+      this.configService.get<string>('RELOADLY_SENDER_COUNTRY_CODE') || 'NG';
     this.enabled =
-      this.configService.get<string>("RELOADLY_ENABLED", "false") === "true";
+      this.configService.get<string>('RELOADLY_ENABLED', 'false') === 'true';
     this.logger.setContext(ReloadlyProvider.name);
 
     if (
-      this.configService.get<string>("NODE_ENV") === "production" &&
+      this.configService.get<string>('NODE_ENV') === 'production' &&
       this.enabled &&
       (!this.clientId || !this.clientSecret)
     ) {
-      throw new Error("Reloadly credentials are not configured");
+      throw new Error('Reloadly credentials are not configured');
     }
   }
 
   async getOperators(
     countryCode?: string,
-    serviceType: "airtime" | "data" = "airtime",
+    serviceType: 'airtime' | 'data' = 'airtime',
   ): Promise<VtuProvider[]> {
     if (this.isLiveDisabled()) {
       return [];
@@ -151,7 +167,7 @@ export class ReloadlyProvider {
       );
 
       return response.data
-        .filter((operator) => serviceType !== "data" || operator.data)
+        .filter((operator) => serviceType !== 'data' || operator.data)
         .map((operator) => ({
           id: String(operator.operatorId),
           name: operator.name,
@@ -159,15 +175,105 @@ export class ReloadlyProvider {
           isActive: true,
         }));
     } catch {
-      this.logger.warn("Reloadly operators unavailable, using fallback list");
+      this.logger.warn('Reloadly operators unavailable, using fallback list');
       return this.getFallbackOperators(countryCode, serviceType);
     }
+  }
+
+  async getCountries(): Promise<VtuCountry[]> {
+    if (this.isLiveDisabled()) {
+      return [];
+    }
+
+    if (this.shouldUseSimulation()) {
+      return this.getFallbackCountries();
+    }
+
+    const cacheKey = 'vtu:reloadly:countries';
+    const cached = await this.redis.get(cacheKey);
+    if (cached) {
+      try {
+        return JSON.parse(cached) as VtuCountry[];
+      } catch {
+        // Corrupt cache entry; fall through and refetch.
+      }
+    }
+
+    try {
+      const token = await this.getTopupsAccessToken();
+      const response = await firstValueFrom(
+        this.httpService.get<ReloadlyCountry[]>(`${this.baseUrl}/countries`, {
+          headers: this.authHeaders(token),
+        }),
+      );
+
+      const countries = response.data
+        .filter((country) => country.isoName && country.name)
+        .map((country) => ({
+          code: String(country.isoName).toUpperCase(),
+          name: String(country.name),
+          currencyCode: country.currencyCode,
+          callingCodes: country.callingCodes,
+          flagUrl: country.flag,
+        }))
+        .sort((a, b) => a.name.localeCompare(b.name));
+
+      if (countries.length > 0) {
+        await this.redis.set(cacheKey, JSON.stringify(countries), 21600);
+      }
+
+      return countries;
+    } catch {
+      this.logger.warn('Reloadly countries unavailable, using fallback list');
+      return this.getFallbackCountries();
+    }
+  }
+
+  private getFallbackCountries(): VtuCountry[] {
+    return [
+      {
+        code: 'GH',
+        name: 'Ghana',
+        currencyCode: 'GHS',
+        callingCodes: ['+233'],
+      },
+      {
+        code: 'KE',
+        name: 'Kenya',
+        currencyCode: 'KES',
+        callingCodes: ['+254'],
+      },
+      {
+        code: 'NG',
+        name: 'Nigeria',
+        currencyCode: 'NGN',
+        callingCodes: ['+234'],
+      },
+      {
+        code: 'ZA',
+        name: 'South Africa',
+        currencyCode: 'ZAR',
+        callingCodes: ['+27'],
+      },
+      {
+        code: 'GB',
+        name: 'United Kingdom',
+        currencyCode: 'GBP',
+        callingCodes: ['+44'],
+      },
+      {
+        code: 'US',
+        name: 'United States',
+        currencyCode: 'USD',
+        callingCodes: ['+1'],
+      },
+    ];
   }
 
   async autoDetectOperator(params: {
     phone: string;
     countryCode: string;
-    type: "airtime" | "data";
+    type: 'airtime' | 'data';
   }): Promise<ReloadlyDetectedOperator | null> {
     if (this.isLiveDisabled()) {
       return null;
@@ -192,20 +298,20 @@ export class ReloadlyProvider {
         ),
       );
 
-      if (params.type === "data" && !response.data.data) {
+      if (params.type === 'data' && !response.data.data) {
         return null;
       }
 
       return this.toDetectedOperator(response.data, params);
     } catch {
-      this.logger.warn("Reloadly operator auto-detect unavailable");
+      this.logger.warn('Reloadly operator auto-detect unavailable');
       return null;
     }
   }
 
   async getUtilityBillers(
     countryCode?: string,
-    serviceType: "electricity" = "electricity",
+    serviceType: 'electricity' = 'electricity',
   ): Promise<VtuProvider[]> {
     if (this.isLiveDisabled()) {
       return [];
@@ -219,11 +325,11 @@ export class ReloadlyProvider {
       const token = await this.getUtilitiesAccessToken();
       const params = new URLSearchParams({
         type: this.utilityBillerType(serviceType),
-        page: "1",
-        size: "50",
+        page: '1',
+        size: '50',
       });
       if (countryCode) {
-        params.set("countryISOCode", countryCode);
+        params.set('countryISOCode', countryCode);
       }
 
       const response = await firstValueFrom(
@@ -238,14 +344,14 @@ export class ReloadlyProvider {
         .filter((provider): provider is VtuProvider => Boolean(provider));
     } catch {
       this.logger.warn(
-        "Reloadly utility billers unavailable, using fallback list",
+        'Reloadly utility billers unavailable, using fallback list',
       );
       return this.getFallbackUtilityBillers(countryCode, serviceType);
     }
   }
 
   async purchase(params: {
-    type: "airtime" | "data";
+    type: 'airtime' | 'data';
     operatorId: string;
     countryCode: string;
     recipientNumber: string;
@@ -257,7 +363,7 @@ export class ReloadlyProvider {
     if (this.shouldUseSimulation()) {
       return {
         reference: params.reference,
-        status: "success",
+        status: 'success',
         message: `International ${params.type} purchase simulated successfully`,
         providerRequestId: params.reference,
       };
@@ -275,7 +381,7 @@ export class ReloadlyProvider {
       },
       senderPhone: {
         countryCode: this.senderCountryCode,
-        number: "0000000000",
+        number: '0000000000',
       },
     };
 
@@ -297,21 +403,21 @@ export class ReloadlyProvider {
           response.data.customIdentifier ||
           params.reference,
         status: this.normalizeStatus(response.data.status),
-        message: response.data.message || "Reloadly top-up submitted",
+        message: response.data.message || 'Reloadly top-up submitted',
         providerRequestId: params.reference,
         rawResponse: response.data as unknown as Record<string, unknown>,
       };
     } catch (error) {
       this.logger.error(
         this.safeProviderError(error),
-        "Reloadly purchase request failed with unknown provider result",
+        'Reloadly purchase request failed with unknown provider result',
       );
-      throw new Error("Reloadly provider result unknown");
+      throw new Error('Reloadly provider result unknown');
     }
   }
 
   async payUtilityBill(params: {
-    type: "electricity";
+    type: 'electricity';
     billerId: string;
     countryCode: string;
     meterNumber: string;
@@ -323,8 +429,8 @@ export class ReloadlyProvider {
     if (this.shouldUseSimulation()) {
       return {
         reference: params.reference,
-        status: "success",
-        message: "International electricity payment simulated successfully",
+        status: 'success',
+        message: 'International electricity payment simulated successfully',
         providerRequestId: params.reference,
       };
     }
@@ -353,14 +459,14 @@ export class ReloadlyProvider {
       return this.toUtilityResult(
         response.data,
         params.reference,
-        "Reloadly utility payment submitted",
+        'Reloadly utility payment submitted',
       );
     } catch (error) {
       this.logger.error(
         this.safeProviderError(error),
-        "Reloadly utility payment failed with unknown provider result",
+        'Reloadly utility payment failed with unknown provider result',
       );
-      throw new Error("Reloadly utility provider result unknown");
+      throw new Error('Reloadly utility provider result unknown');
     }
   }
 
@@ -378,17 +484,17 @@ export class ReloadlyProvider {
     if (this.shouldUseSimulation()) {
       return {
         reference: transactionId,
-        status: "pending",
-        message: "Reloadly status lookup simulated",
+        status: 'pending',
+        message: 'Reloadly status lookup simulated',
       };
     }
 
     if (this.isLiveDisabled()) {
-      throw new BadRequestException("Reloadly provider is not enabled");
+      throw new BadRequestException('Reloadly provider is not enabled');
     }
 
     if (!this.hasCredentials()) {
-      throw new BadRequestException("Reloadly credentials are not configured");
+      throw new BadRequestException('Reloadly credentials are not configured');
     }
 
     const token = await this.getTopupsAccessToken();
@@ -408,16 +514,16 @@ export class ReloadlyProvider {
           response.data.customIdentifier ||
           transactionId,
         status: this.normalizeStatus(response.data.status),
-        message: response.data.message || "Reloadly top-up status checked",
+        message: response.data.message || 'Reloadly top-up status checked',
         providerRequestId: response.data.customIdentifier,
         rawResponse: response.data as unknown as Record<string, unknown>,
       };
     } catch (error) {
       this.logger.error(
         this.safeProviderError(error),
-        "Reloadly requery failed with unknown provider result",
+        'Reloadly requery failed with unknown provider result',
       );
-      throw new Error("Reloadly provider result unknown");
+      throw new Error('Reloadly provider result unknown');
     }
   }
 
@@ -427,25 +533,25 @@ export class ReloadlyProvider {
     if (this.shouldUseSimulation()) {
       return {
         reference: referenceId,
-        status: "pending",
-        message: "Reloadly utility status lookup simulated",
+        status: 'pending',
+        message: 'Reloadly utility status lookup simulated',
         providerRequestId: referenceId,
       };
     }
 
     if (this.isLiveDisabled()) {
-      throw new BadRequestException("Reloadly provider is not enabled");
+      throw new BadRequestException('Reloadly provider is not enabled');
     }
 
     if (!this.hasCredentials()) {
-      throw new BadRequestException("Reloadly credentials are not configured");
+      throw new BadRequestException('Reloadly credentials are not configured');
     }
 
     const token = await this.getUtilitiesAccessToken();
     const params = new URLSearchParams({
       referenceId,
-      page: "1",
-      size: "1",
+      page: '1',
+      size: '1',
     });
 
     try {
@@ -462,8 +568,8 @@ export class ReloadlyProvider {
       if (!transaction) {
         return {
           reference: referenceId,
-          status: "pending",
-          message: "Reloadly utility transaction is not available yet",
+          status: 'pending',
+          message: 'Reloadly utility transaction is not available yet',
           providerRequestId: referenceId,
         };
       }
@@ -471,14 +577,14 @@ export class ReloadlyProvider {
       return this.toUtilityResult(
         transaction,
         referenceId,
-        "Reloadly utility payment status checked",
+        'Reloadly utility payment status checked',
       );
     } catch (error) {
       this.logger.error(
         this.safeProviderError(error),
-        "Reloadly utility requery failed with unknown provider result",
+        'Reloadly utility requery failed with unknown provider result',
       );
-      throw new Error("Reloadly utility provider result unknown");
+      throw new Error('Reloadly utility provider result unknown');
     }
   }
 
@@ -487,21 +593,21 @@ export class ReloadlyProvider {
     const configured = this.hasCredentials();
 
     if (!this.enabled) {
-      warnings.push("Reloadly is not enabled for international VTU.");
+      warnings.push('Reloadly is not enabled for international VTU.');
     }
 
     if (!configured) {
-      warnings.push("Missing Reloadly client credentials.");
+      warnings.push('Missing Reloadly client credentials.');
     }
 
     if (!this.enabled || !configured) {
       return {
-        id: "reloadly",
-        name: "Reloadly",
+        id: 'reloadly',
+        name: 'Reloadly',
         configured,
         enabled: this.enabled,
         supportsBalance: true,
-        balance: { status: "unknown" },
+        balance: { status: 'unknown' },
         warnings,
       };
     }
@@ -518,25 +624,25 @@ export class ReloadlyProvider {
         response.data.balance ?? response.data.amount,
       );
       const currency =
-        response.data.currencyCode || response.data.currency || "USD";
+        response.data.currencyCode || response.data.currency || 'USD';
 
       if (balance === null) {
         warnings.push(
-          "Reloadly balance response did not include a valid amount.",
+          'Reloadly balance response did not include a valid amount.',
         );
         return {
-          id: "reloadly",
-          name: "Reloadly",
+          id: 'reloadly',
+          name: 'Reloadly',
           configured,
           enabled: this.enabled,
           supportsBalance: true,
-          balance: { status: "error", currency, checkedAt: new Date() },
+          balance: { status: 'error', currency, checkedAt: new Date() },
           warnings,
         };
       }
 
       const threshold = this.getConfiguredThreshold(
-        "RELOADLY_LOW_BALANCE_THRESHOLD",
+        'RELOADLY_LOW_BALANCE_THRESHOLD',
         10,
       );
       if (balance < threshold) {
@@ -546,13 +652,13 @@ export class ReloadlyProvider {
       }
 
       return {
-        id: "reloadly",
-        name: "Reloadly",
+        id: 'reloadly',
+        name: 'Reloadly',
         configured,
         enabled: this.enabled,
         supportsBalance: true,
         balance: {
-          status: "available",
+          status: 'available',
           amount: balance.toString(),
           currency,
           checkedAt: new Date(),
@@ -562,29 +668,29 @@ export class ReloadlyProvider {
     } catch (error) {
       this.logger.warn(
         this.safeProviderError(error),
-        "Unable to retrieve Reloadly wallet balance",
+        'Unable to retrieve Reloadly wallet balance',
       );
-      warnings.push("Unable to retrieve Reloadly wallet balance.");
+      warnings.push('Unable to retrieve Reloadly wallet balance.');
 
       return {
-        id: "reloadly",
-        name: "Reloadly",
+        id: 'reloadly',
+        name: 'Reloadly',
         configured,
         enabled: this.enabled,
         supportsBalance: true,
-        balance: { status: "error", checkedAt: new Date() },
+        balance: { status: 'error', checkedAt: new Date() },
         warnings,
       };
     }
   }
 
   private async getTopupsAccessToken() {
-    return this.getAccessToken("reloadly:topups:access_token", this.audience);
+    return this.getAccessToken('reloadly:topups:access_token', this.audience);
   }
 
   private async getUtilitiesAccessToken() {
     return this.getAccessToken(
-      "reloadly:utilities:access_token",
+      'reloadly:utilities:access_token',
       this.utilitiesAudience,
     );
   }
@@ -601,15 +707,15 @@ export class ReloadlyProvider {
         {
           client_id: this.clientId,
           client_secret: this.clientSecret,
-          grant_type: "client_credentials",
+          grant_type: 'client_credentials',
           audience,
         },
-        { headers: { "Content-Type": "application/json" } },
+        { headers: { 'Content-Type': 'application/json' } },
       ),
     );
 
     if (!response.data.access_token) {
-      throw new BadRequestException("Reloadly authentication failed");
+      throw new BadRequestException('Reloadly authentication failed');
     }
 
     const ttl = Math.max((response.data.expires_in || 3600) - 60, 60);
@@ -620,7 +726,7 @@ export class ReloadlyProvider {
 
   private authHeaders(token: string) {
     return {
-      "Content-Type": "application/json",
+      'Content-Type': 'application/json',
       Authorization: `Bearer ${token}`,
     };
   }
@@ -628,7 +734,7 @@ export class ReloadlyProvider {
   private utilityAuthHeaders(token: string) {
     return {
       ...this.authHeaders(token),
-      Accept: "application/com.reloadly.utilities-v1+json",
+      Accept: 'application/com.reloadly.utilities-v1+json',
     };
   }
 
@@ -642,16 +748,16 @@ export class ReloadlyProvider {
     }
 
     if (!this.enabled) {
-      throw new BadRequestException("Reloadly provider is not enabled");
+      throw new BadRequestException('Reloadly provider is not enabled');
     }
 
     if (!this.hasCredentials()) {
-      throw new BadRequestException("Reloadly credentials are not configured");
+      throw new BadRequestException('Reloadly credentials are not configured');
     }
   }
 
   private isProduction() {
-    return this.configService.get<string>("NODE_ENV") === "production";
+    return this.configService.get<string>('NODE_ENV') === 'production';
   }
 
   private canSimulate() {
@@ -671,35 +777,35 @@ export class ReloadlyProvider {
 
     if (
       normalized &&
-      ["success", "successful", "completed"].includes(normalized)
+      ['success', 'successful', 'completed'].includes(normalized)
     ) {
-      return "success";
+      return 'success';
     }
 
     if (
       normalized &&
-      ["failed", "rejected", "refunded", "reversed"].includes(normalized)
+      ['failed', 'rejected', 'refunded', 'reversed'].includes(normalized)
     ) {
-      return "failed";
+      return 'failed';
     }
 
-    return "pending";
+    return 'pending';
   }
 
   private getFallbackOperators(
     countryCode?: string,
-    serviceType: "airtime" | "data" = "airtime",
+    serviceType: 'airtime' | 'data' = 'airtime',
   ): VtuProvider[] {
-    const country = countryCode || "INT";
+    const country = countryCode || 'INT';
     return [
       {
-        id: "342",
+        id: '342',
         name:
-          country === "GH"
-            ? "Ghana Mobile Operators"
-            : country === "NG"
-              ? "Airtel Nigeria"
-              : "Reloadly Test Operator",
+          country === 'GH'
+            ? 'Ghana Mobile Operators'
+            : country === 'NG'
+              ? 'Airtel Nigeria'
+              : 'Reloadly Test Operator',
         type: serviceType,
         isActive: true,
       },
@@ -708,16 +814,16 @@ export class ReloadlyProvider {
 
   private getFallbackUtilityBillers(
     countryCode?: string,
-    serviceType: "electricity" = "electricity",
+    serviceType: 'electricity' = 'electricity',
   ): VtuProvider[] {
-    const country = countryCode || "GH";
+    const country = countryCode || 'GH';
     return [
       {
-        id: "26",
+        id: '26',
         name:
-          country === "GH"
-            ? "Ghana Electricity Test Biller"
-            : "Reloadly Utility Test Biller",
+          country === 'GH'
+            ? 'Ghana Electricity Test Biller'
+            : 'Reloadly Utility Test Biller',
         type: serviceType,
         isActive: true,
       },
@@ -726,7 +832,7 @@ export class ReloadlyProvider {
 
   private toDetectedOperator(
     operator: ReloadlyOperator,
-    params: { countryCode: string; type: "airtime" | "data" },
+    params: { countryCode: string; type: 'airtime' | 'data' },
   ): ReloadlyDetectedOperator {
     return {
       id: String(operator.operatorId),
@@ -739,9 +845,9 @@ export class ReloadlyProvider {
 
   private parseNumericAmount(value: unknown): number | null {
     const parsed =
-      typeof value === "number"
+      typeof value === 'number'
         ? value
-        : typeof value === "string"
+        : typeof value === 'string'
           ? Number(value)
           : Number.NaN;
 
@@ -754,7 +860,7 @@ export class ReloadlyProvider {
     }
 
     if (
-      typeof value === "object" &&
+      typeof value === 'object' &&
       value !== null &&
       Array.isArray((value as { content?: unknown }).content)
     ) {
@@ -766,7 +872,7 @@ export class ReloadlyProvider {
 
   private toUtilityProvider(
     biller: ReloadlyBiller,
-    serviceType: "electricity",
+    serviceType: 'electricity',
   ): VtuProvider | null {
     const id = biller.id ?? biller.billerId;
     const name = biller.name ?? biller.billerName;
@@ -802,9 +908,9 @@ export class ReloadlyProvider {
     };
   }
 
-  private utilityBillerType(serviceType: "electricity") {
+  private utilityBillerType(serviceType: 'electricity') {
     const mapping = {
-      electricity: "ELECTRICITY_BILL_PAYMENT",
+      electricity: 'ELECTRICITY_BILL_PAYMENT',
     } satisfies Record<typeof serviceType, string>;
 
     return mapping[serviceType];
@@ -825,15 +931,15 @@ export class ReloadlyProvider {
     };
 
     return {
-      code: typeof candidate?.code === "string" ? candidate.code : undefined,
+      code: typeof candidate?.code === 'string' ? candidate.code : undefined,
       status:
-        typeof candidate?.response?.status === "number"
+        typeof candidate?.response?.status === 'number'
           ? candidate.response.status
           : undefined,
       message:
-        typeof candidate?.message === "string"
+        typeof candidate?.message === 'string'
           ? candidate.message
-          : "Unknown provider error",
+          : 'Unknown provider error',
     };
   }
 }

@@ -2,12 +2,12 @@ import {
   BadRequestException,
   ForbiddenException,
   NotFoundException,
-} from "@nestjs/common";
-import { Decimal } from "@prisma/client/runtime/library";
-import { TransfersService } from "./transfers.service";
-import { LedgerService } from "../wallets/ledger.service";
+} from '@nestjs/common';
+import { Decimal } from '@prisma/client/runtime/library';
+import { TransfersService } from './transfers.service';
+import { LedgerService } from '../wallets/ledger.service';
 
-describe("TransfersService", () => {
+describe('TransfersService', () => {
   const prisma = {
     user: {
       findUnique: jest.fn(),
@@ -51,7 +51,7 @@ describe("TransfersService", () => {
       count: 1,
     });
     prisma.internalTransferAttempt.create.mockResolvedValue({
-      id: "attempt-1",
+      id: 'attempt-1',
     });
     prisma.transaction.update.mockResolvedValue({});
     service = new TransfersService(
@@ -62,29 +62,29 @@ describe("TransfersService", () => {
     );
   });
 
-  it("debits sender, credits recipient, and creates both transaction records atomically", async () => {
+  it('debits sender, credits recipient, and creates both transaction records atomically', async () => {
     prisma.user.findUnique.mockResolvedValue({
-      id: "sender-1",
-      kycStatus: "VERIFIED",
-      kycTier: "TIER_2",
+      id: 'sender-1',
+      kycStatus: 'VERIFIED',
+      kycTier: 'TIER_2',
       isSuspended: false,
     });
     prisma.user.findFirst.mockResolvedValue({
-      id: "recipient-1",
-      email: "recipient@example.com",
-      phone: "+2348012345678",
-      kycStatus: "VERIFIED",
-      kycTier: "TIER_2",
+      id: 'recipient-1',
+      email: 'recipient@example.com',
+      phone: '+2348012345678',
+      kycStatus: 'VERIFIED',
+      kycTier: 'TIER_2',
       isSuspended: false,
     });
     prisma.transaction.create
       .mockResolvedValueOnce({
-        id: "tx-out",
-        reference: "IT-20260516-abc123-OUT",
+        id: 'tx-out',
+        reference: 'IT-20260516-abc123-OUT',
       })
       .mockResolvedValueOnce({
-        id: "tx-in",
-        reference: "IT-20260516-abc123-IN",
+        id: 'tx-in',
+        reference: 'IT-20260516-abc123-IN',
       });
     ledger.debitWallet.mockResolvedValue({
       balanceAfter: new Decimal(750),
@@ -93,11 +93,11 @@ describe("TransfersService", () => {
       balanceAfter: new Decimal(250),
     });
 
-    const result = await service.sendInternalTransfer("sender-1", {
-      recipientEmail: "recipient@example.com",
-      amount: "250",
-      currency: "NGN",
-      note: "Lunch",
+    const result = await service.sendInternalTransfer('sender-1', {
+      recipientEmail: 'recipient@example.com',
+      amount: '250',
+      currency: 'NGN',
+      note: 'Lunch',
     });
 
     expect(prisma.$transaction).toHaveBeenCalledTimes(1);
@@ -107,79 +107,79 @@ describe("TransfersService", () => {
     );
     expect(ledger.debitWallet).toHaveBeenCalledWith(
       expect.objectContaining({
-        userId: "sender-1",
+        userId: 'sender-1',
         amount: new Decimal(250),
-        transactionId: "tx-out",
-        source: "INTERNAL_TRANSFER_OUT",
+        transactionId: 'tx-out',
+        source: 'INTERNAL_TRANSFER_OUT',
       }),
       prisma,
     );
     expect(ledger.creditWallet).toHaveBeenCalledWith(
       expect.objectContaining({
-        userId: "recipient-1",
+        userId: 'recipient-1',
         amount: new Decimal(250),
-        transactionId: "tx-in",
-        source: "INTERNAL_TRANSFER_IN",
+        transactionId: 'tx-in',
+        source: 'INTERNAL_TRANSFER_IN',
       }),
       prisma,
     );
-    expect(result.status).toBe("SUCCESS");
-    expect(result.recipient.maskedIdentifier).toBe("r***@example.com");
-    expect(result).not.toHaveProperty("recipientTransactionReference");
+    expect(result.status).toBe('SUCCESS');
+    expect(result.recipient.maskedIdentifier).toBe('r***@example.com');
+    expect(result).not.toHaveProperty('recipientTransactionReference');
     expect(prisma.internalTransferAttempt.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
-        userId: "sender-1",
-        recipientUserId: "recipient-1",
-        status: "SUCCESS",
+        userId: 'sender-1',
+        recipientUserId: 'recipient-1',
+        status: 'SUCCESS',
         amount: new Decimal(250),
-        currency: "NGN",
-        recipientIdentifierType: "EMAIL",
-        recipientMaskedIdentifier: "r***@example.com",
+        currency: 'NGN',
+        recipientIdentifierType: 'EMAIL',
+        recipientMaskedIdentifier: 'r***@example.com',
       }),
     });
   });
 
-  it("rejects Tier 2 internal transfers above the per-transaction limit", async () => {
+  it('rejects Tier 2 internal transfers above the per-transaction limit', async () => {
     prisma.user.findUnique.mockResolvedValue({
-      id: "sender-1",
-      kycStatus: "VERIFIED",
-      kycTier: "TIER_2",
+      id: 'sender-1',
+      kycStatus: 'VERIFIED',
+      kycTier: 'TIER_2',
       isSuspended: false,
     });
 
     await expect(
-      service.sendInternalTransfer("sender-1", {
-        recipientEmail: "recipient@example.com",
-        amount: "250000.01",
-        currency: "NGN",
+      service.sendInternalTransfer('sender-1', {
+        recipientEmail: 'recipient@example.com',
+        amount: '250000.01',
+        currency: 'NGN',
       }),
-    ).rejects.toThrow("Internal transfer limit exceeded");
+    ).rejects.toThrow('Internal transfer limit exceeded');
 
     expect(prisma.user.findFirst).not.toHaveBeenCalled();
     expect(prisma.internalTransferAttempt.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
-        userId: "sender-1",
-        status: "FAILED",
-        amount: new Decimal("250000.01"),
-        currency: "NGN",
-        failureCode: "BAD_REQUEST",
+        userId: 'sender-1',
+        status: 'FAILED',
+        amount: new Decimal('250000.01'),
+        currency: 'NGN',
+        failureCode: 'BAD_REQUEST',
       }),
     });
   });
 
-  it("rejects transfers when daily or monthly usage cannot be reserved", async () => {
+  it('rejects transfers when daily or monthly usage cannot be reserved', async () => {
     prisma.user.findUnique.mockResolvedValue({
-      id: "sender-1",
-      kycStatus: "VERIFIED",
-      kycTier: "TIER_2",
+      id: 'sender-1',
+      kycStatus: 'VERIFIED',
+      kycTier: 'TIER_2',
       isSuspended: false,
     });
     prisma.user.findFirst.mockResolvedValue({
-      id: "recipient-1",
-      email: "recipient@example.com",
-      phone: "+2348012345678",
-      kycStatus: "VERIFIED",
-      kycTier: "TIER_2",
+      id: 'recipient-1',
+      email: 'recipient@example.com',
+      phone: '+2348012345678',
+      kycStatus: 'VERIFIED',
+      kycTier: 'TIER_2',
       isSuspended: false,
     });
     prisma.internalTransferLimitUsage.updateMany.mockResolvedValueOnce({
@@ -187,173 +187,239 @@ describe("TransfersService", () => {
     });
 
     await expect(
-      service.sendInternalTransfer("sender-1", {
-        recipientEmail: "recipient@example.com",
-        amount: "250",
-        currency: "NGN",
+      service.sendInternalTransfer('sender-1', {
+        recipientEmail: 'recipient@example.com',
+        amount: '250',
+        currency: 'NGN',
       }),
-    ).rejects.toThrow("daily internal transfer limit exceeded");
+    ).rejects.toThrow('daily internal transfer limit exceeded');
 
     expect(ledger.debitWallet).not.toHaveBeenCalled();
     expect(prisma.internalTransferAttempt.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
-        userId: "sender-1",
-        recipientUserId: "recipient-1",
-        status: "FAILED",
-        failureCode: "BAD_REQUEST",
+        userId: 'sender-1',
+        recipientUserId: 'recipient-1',
+        status: 'FAILED',
+        failureCode: 'BAD_REQUEST',
       }),
     });
   });
 
-  it("requires verified sender KYC", async () => {
+  it('requires verified sender KYC', async () => {
     prisma.user.findUnique.mockResolvedValue({
-      id: "sender-1",
-      kycStatus: "PENDING",
+      id: 'sender-1',
+      kycStatus: 'PENDING',
       isSuspended: false,
     });
 
     await expect(
-      service.sendInternalTransfer("sender-1", {
-        recipientEmail: "recipient@example.com",
-        amount: "250",
-        currency: "NGN",
+      service.sendInternalTransfer('sender-1', {
+        recipientEmail: 'recipient@example.com',
+        amount: '250',
+        currency: 'NGN',
       }),
     ).rejects.toBeInstanceOf(ForbiddenException);
     expect(prisma.user.findFirst).not.toHaveBeenCalled();
   });
 
-  it("requires sender KYC tier 2 for money transfers", async () => {
+  it('requires sender KYC tier 2 for money transfers', async () => {
     prisma.user.findUnique.mockResolvedValue({
-      id: "sender-1",
-      kycStatus: "VERIFIED",
-      kycTier: "TIER_1",
+      id: 'sender-1',
+      kycStatus: 'VERIFIED',
+      kycTier: 'TIER_1',
       isSuspended: false,
     });
 
     await expect(
-      service.sendInternalTransfer("sender-1", {
-        recipientEmail: "recipient@example.com",
-        amount: "250",
-        currency: "NGN",
+      service.sendInternalTransfer('sender-1', {
+        recipientEmail: 'recipient@example.com',
+        amount: '250',
+        currency: 'NGN',
       }),
-    ).rejects.toThrow("sender must be at least Tier 2 for transfers");
+    ).rejects.toThrow('sender must be at least Tier 2 for transfers');
     expect(prisma.user.findFirst).not.toHaveBeenCalled();
   });
 
-  it("uses a privacy-safe error for blocked recipients", async () => {
+  it('uses a privacy-safe error for blocked recipients', async () => {
     prisma.user.findUnique.mockResolvedValue({
-      id: "sender-1",
-      kycStatus: "VERIFIED",
-      kycTier: "TIER_2",
+      id: 'sender-1',
+      kycStatus: 'VERIFIED',
+      kycTier: 'TIER_2',
       isSuspended: false,
     });
     prisma.user.findFirst.mockResolvedValue({
-      id: "recipient-1",
-      email: "recipient@example.com",
-      phone: "+2348012345678",
-      kycStatus: "VERIFIED",
-      kycTier: "TIER_2",
+      id: 'recipient-1',
+      email: 'recipient@example.com',
+      phone: '+2348012345678',
+      kycStatus: 'VERIFIED',
+      kycTier: 'TIER_2',
       isSuspended: true,
     });
 
     await expect(
-      service.sendInternalTransfer("sender-1", {
-        recipientEmail: "recipient@example.com",
-        amount: "250",
-        currency: "NGN",
+      service.sendInternalTransfer('sender-1', {
+        recipientEmail: 'recipient@example.com',
+        amount: '250',
+        currency: 'NGN',
       }),
-    ).rejects.toThrow("Recipient cannot be found or used");
+    ).rejects.toThrow('Recipient cannot be found or used');
   });
 
-  it("rejects transfer to self", async () => {
+  it('rejects transfer to self', async () => {
     prisma.user.findUnique.mockResolvedValue({
-      id: "sender-1",
-      kycStatus: "VERIFIED",
-      kycTier: "TIER_2",
+      id: 'sender-1',
+      kycStatus: 'VERIFIED',
+      kycTier: 'TIER_2',
       isSuspended: false,
     });
     prisma.user.findFirst.mockResolvedValue({
-      id: "sender-1",
-      email: "sender@example.com",
-      phone: "+2348012345678",
-      kycStatus: "VERIFIED",
-      kycTier: "TIER_2",
+      id: 'sender-1',
+      email: 'sender@example.com',
+      phone: '+2348012345678',
+      kycStatus: 'VERIFIED',
+      kycTier: 'TIER_2',
       isSuspended: false,
     });
 
     await expect(
-      service.sendInternalTransfer("sender-1", {
-        recipientEmail: "sender@example.com",
-        amount: "250",
-        currency: "NGN",
+      service.sendInternalTransfer('sender-1', {
+        recipientEmail: 'sender@example.com',
+        amount: '250',
+        currency: 'NGN',
       }),
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 
-  it("returns a privacy-safe error for unknown recipients", async () => {
+  it('returns a privacy-safe error for unknown recipients', async () => {
     prisma.user.findUnique.mockResolvedValue({
-      id: "sender-1",
-      kycStatus: "VERIFIED",
-      kycTier: "TIER_2",
+      id: 'sender-1',
+      kycStatus: 'VERIFIED',
+      kycTier: 'TIER_2',
       isSuspended: false,
     });
     prisma.user.findFirst.mockResolvedValue(null);
 
     await expect(
-      service.sendInternalTransfer("sender-1", {
-        recipientEmail: "missing@example.com",
-        amount: "250",
-        currency: "NGN",
+      service.sendInternalTransfer('sender-1', {
+        recipientEmail: 'missing@example.com',
+        amount: '250',
+        currency: 'NGN',
       }),
     ).rejects.toBeInstanceOf(NotFoundException);
   });
 
-  it("requires exactly one recipient identifier", async () => {
+  it('requires exactly one recipient identifier', async () => {
     await expect(
-      service.sendInternalTransfer("sender-1", {
-        recipientEmail: "recipient@example.com",
-        recipientPhone: "+2348012345678",
-        amount: "250",
-        currency: "NGN",
+      service.sendInternalTransfer('sender-1', {
+        recipientEmail: 'recipient@example.com',
+        recipientPhone: '+2348012345678',
+        amount: '250',
+        currency: 'NGN',
       }),
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 
-  it("returns sanitized transfer details for the owner reference", async () => {
+  it('previews an eligible recipient with a masked display name only', async () => {
+    prisma.user.findUnique.mockResolvedValue({
+      id: 'sender-1',
+      kycStatus: 'VERIFIED',
+      kycTier: 'TIER_2',
+      isSuspended: false,
+    });
+    prisma.user.findFirst.mockResolvedValue({
+      id: 'recipient-1',
+      email: 'recipient@example.com',
+      phone: '+2348012345678',
+      fullName: 'Ada Grace Lovelace',
+      kycStatus: 'VERIFIED',
+      kycTier: 'TIER_2',
+      isSuspended: false,
+    });
+
+    const preview = await service.previewRecipient('sender-1', {
+      recipientEmail: 'recipient@example.com',
+    });
+
+    expect(preview.found).toBe(true);
+    expect(preview.displayName).toBe('Ada G. L.');
+    expect(preview.displayName).not.toContain('Lovelace');
+    expect(preview.maskedIdentifier).not.toBe('recipient@example.com');
+    expect(preview.avatarInitials).toBe('A');
+  });
+
+  it('preview rejects self-transfers and hides ineligible recipients', async () => {
+    prisma.user.findUnique.mockResolvedValue({
+      id: 'sender-1',
+      kycStatus: 'VERIFIED',
+      kycTier: 'TIER_2',
+      isSuspended: false,
+    });
+    prisma.user.findFirst.mockResolvedValue({
+      id: 'sender-1',
+      email: 'self@example.com',
+      fullName: 'Self User',
+      kycStatus: 'VERIFIED',
+      kycTier: 'TIER_2',
+      isSuspended: false,
+    });
+
+    await expect(
+      service.previewRecipient('sender-1', {
+        recipientEmail: 'self@example.com',
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+
+    prisma.user.findFirst.mockResolvedValue({
+      id: 'recipient-1',
+      email: 'recipient@example.com',
+      fullName: 'Ada Lovelace',
+      kycStatus: 'VERIFIED',
+      kycTier: 'TIER_1',
+      isSuspended: false,
+    });
+
+    await expect(
+      service.previewRecipient('sender-1', {
+        recipientEmail: 'recipient@example.com',
+      }),
+    ).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it('returns sanitized transfer details for the owner reference', async () => {
     prisma.transaction.findFirst.mockResolvedValue({
-      id: "tx-out",
-      reference: "IT-20260516-abc123-OUT",
-      type: "INTERNAL_TRANSFER",
+      id: 'tx-out',
+      reference: 'IT-20260516-abc123-OUT',
+      type: 'INTERNAL_TRANSFER',
       amount: new Decimal(250),
-      currency: "NGN",
-      status: "SUCCESS",
+      currency: 'NGN',
+      status: 'SUCCESS',
       metadata: {
-        direction: "OUT",
-        transferReference: "IT-20260516-abc123",
-        counterpartyUserId: "recipient-1",
-        counterpartyMaskedIdentifier: "r***@example.com",
-        note: "Lunch",
+        direction: 'OUT',
+        transferReference: 'IT-20260516-abc123',
+        counterpartyUserId: 'recipient-1',
+        counterpartyMaskedIdentifier: 'r***@example.com',
+        note: 'Lunch',
       },
-      createdAt: new Date("2026-05-16T12:00:00Z"),
-      updatedAt: new Date("2026-05-16T12:00:00Z"),
+      createdAt: new Date('2026-05-16T12:00:00Z'),
+      updatedAt: new Date('2026-05-16T12:00:00Z'),
     });
 
     const result = await service.getInternalTransferByReference(
-      "sender-1",
-      "IT-20260516-abc123",
+      'sender-1',
+      'IT-20260516-abc123',
     );
 
     expect(result).toEqual(
       expect.objectContaining({
-        reference: "IT-20260516-abc123",
-        transactionReference: "IT-20260516-abc123-OUT",
-        direction: "OUT",
+        reference: 'IT-20260516-abc123',
+        transactionReference: 'IT-20260516-abc123-OUT',
+        direction: 'OUT',
         counterparty: {
-          maskedIdentifier: "r***@example.com",
+          maskedIdentifier: 'r***@example.com',
         },
-        note: "Lunch",
+        note: 'Lunch',
       }),
     );
-    expect(result).not.toHaveProperty("metadata");
+    expect(result).not.toHaveProperty('metadata');
   });
 });

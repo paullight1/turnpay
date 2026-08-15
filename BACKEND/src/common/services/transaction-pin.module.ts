@@ -1,5 +1,5 @@
-import { Global, Module } from "@nestjs/common";
-import { TransactionPinService } from "./transaction-pin.service";
+import { Global, Module } from '@nestjs/common';
+import { TransactionPinService } from './transaction-pin.service';
 
 @Global()
 @Module({

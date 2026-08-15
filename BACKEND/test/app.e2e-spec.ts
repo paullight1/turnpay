@@ -1,13 +1,13 @@
-import { Test, TestingModule } from "@nestjs/testing";
-import { INestApplication } from "@nestjs/common";
-import request from "supertest";
-import { App } from "supertest/types";
-import { AppModule } from "./../src/app.module";
-import { PrismaService } from "../src/prisma/prisma.service";
-import { RedisService } from "../src/redis/redis.service";
-import { RateService } from "../src/exchange/providers/rate.service";
+import { Test, TestingModule } from '@nestjs/testing';
+import { INestApplication } from '@nestjs/common';
+import request from 'supertest';
+import { App } from 'supertest/types';
+import { AppModule } from './../src/app.module';
+import { PrismaService } from '../src/prisma/prisma.service';
+import { RedisService } from '../src/redis/redis.service';
+import { RateService } from '../src/exchange/providers/rate.service';
 
-describe("AppController (e2e)", () => {
+describe('AppController (e2e)', () => {
   jest.setTimeout(30000);
 
   let app: INestApplication<App>;
@@ -53,11 +53,8 @@ describe("AppController (e2e)", () => {
     await app.init();
   });
 
-  it("/ (GET)", () => {
-    return api()
-      .get("/")
-      .expect(200)
-      .expect("Hello World!");
+  it('/ (GET)', () => {
+    return api().get('/').expect(200).expect('Hello World!');
   });
 
   afterAll(async () => {

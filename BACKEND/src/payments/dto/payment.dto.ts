@@ -4,23 +4,23 @@ import {
   IsOptional,
   Matches,
   MaxLength,
-} from "class-validator";
-import { Transform } from "class-transformer";
+} from 'class-validator';
+import { Transform } from 'class-transformer';
 import {
   MONEY_AMOUNT_PATTERN,
   normalizeDecimalInput,
-} from "../../common/dto/query.dto";
+} from '../../common/dto/query.dto';
 
-const SUPPORTED_CURRENCIES = ["NGN", "GHS"] as const;
-const PAYMENT_CHANNELS = ["card", "bank", "ussd", "mobile_money"] as const;
-const PAYMENT_PROVIDERS = ["paystack", "flutterwave"] as const;
-const WITHDRAWAL_PROVIDERS = ["monnify"] as const;
+const SUPPORTED_CURRENCIES = ['NGN', 'GHS'] as const;
+const PAYMENT_CHANNELS = ['card', 'bank', 'ussd', 'mobile_money'] as const;
+const PAYMENT_PROVIDERS = ['paystack', 'flutterwave'] as const;
+const WITHDRAWAL_PROVIDERS = ['monnify'] as const;
 
 export class FundWalletDto {
   @Transform(({ value }) => normalizeDecimalInput(value))
   @IsString()
   @Matches(MONEY_AMOUNT_PATTERN, {
-    message: "amount must be a positive decimal with at most 2 decimal places",
+    message: 'amount must be a positive decimal with at most 2 decimal places',
   })
   amount: string;
 
@@ -48,7 +48,7 @@ export class WithdrawDto {
   @Transform(({ value }) => normalizeDecimalInput(value))
   @IsString()
   @Matches(MONEY_AMOUNT_PATTERN, {
-    message: "amount must be a positive decimal with at most 2 decimal places",
+    message: 'amount must be a positive decimal with at most 2 decimal places',
   })
   amount: string;
 

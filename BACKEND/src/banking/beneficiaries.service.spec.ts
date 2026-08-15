@@ -1,8 +1,8 @@
-import { BadRequestException, ForbiddenException } from "@nestjs/common";
-import { ConfigService } from "@nestjs/config";
-import { BeneficiariesService } from "./beneficiaries.service";
+import { BadRequestException, ForbiddenException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { BeneficiariesService } from './beneficiaries.service';
 
-describe("BeneficiariesService", () => {
+describe('BeneficiariesService', () => {
   const prisma = {
     user: {
       findUnique: jest.fn(),
@@ -21,8 +21,8 @@ describe("BeneficiariesService", () => {
 
   const config = {
     get: jest.fn((key: string) =>
-      key === "BANK_ACCOUNT_ENCRYPTION_KEY"
-        ? "test-bank-account-encryption-key"
+      key === 'BANK_ACCOUNT_ENCRYPTION_KEY'
+        ? 'test-bank-account-encryption-key'
         : undefined,
     ),
   };
@@ -32,8 +32,8 @@ describe("BeneficiariesService", () => {
   beforeEach(() => {
     jest.clearAllMocks();
     prisma.user.findUnique.mockResolvedValue({
-      kycStatus: "VERIFIED",
-      kycTier: "TIER_2",
+      kycStatus: 'VERIFIED',
+      kycTier: 'TIER_2',
       isSuspended: false,
     });
     service = new BeneficiariesService(
@@ -43,62 +43,62 @@ describe("BeneficiariesService", () => {
     );
   });
 
-  it("resolves and saves a beneficiary with encrypted and masked account number", async () => {
+  it('resolves and saves a beneficiary with encrypted and masked account number', async () => {
     monnifyBanks.resolveBankAccount.mockResolvedValue({
-      accountName: "ADA LOVELACE",
-      bankName: "Test Bank",
+      accountName: 'ADA LOVELACE',
+      bankName: 'Test Bank',
     });
     prisma.bankAccount.create.mockResolvedValue({
-      id: "beneficiary-1",
-      bankName: "Test Bank",
-      bankCode: "044",
-      accountName: "ADA LOVELACE",
-      accountNumberMasked: "******7890",
-      currency: "NGN",
-      provider: "MONNIFY",
+      id: 'beneficiary-1',
+      bankName: 'Test Bank',
+      bankCode: '044',
+      accountName: 'ADA LOVELACE',
+      accountNumberMasked: '******7890',
+      currency: 'NGN',
+      provider: 'MONNIFY',
       isDeleted: false,
       createdAt: new Date(),
       updatedAt: new Date(),
     });
 
-    const result = await service.createBeneficiary("user-1", {
-      accountNumber: "01234567890",
-      bankCode: "044",
-      bankName: "Test Bank",
-      currency: "NGN",
-      provider: "monnify",
+    const result = await service.createBeneficiary('user-1', {
+      accountNumber: '01234567890',
+      bankCode: '044',
+      bankName: 'Test Bank',
+      currency: 'NGN',
+      provider: 'monnify',
     });
 
     expect(prisma.bankAccount.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
-        userId: "user-1",
-        provider: "MONNIFY",
-        bankName: "Test Bank",
-        accountName: "ADA LOVELACE",
-        accountNumberMasked: "*******7890",
-        accountNumberEncrypted: expect.not.stringContaining("01234567890"),
+        userId: 'user-1',
+        provider: 'MONNIFY',
+        bankName: 'Test Bank',
+        accountName: 'ADA LOVELACE',
+        accountNumberMasked: '*******7890',
+        accountNumberEncrypted: expect.not.stringContaining('01234567890'),
       }),
       select: expect.any(Object),
     });
-    expect(result.accountNumberMasked).toBe("******7890");
+    expect(result.accountNumberMasked).toBe('******7890');
   });
 
-  it("never returns encrypted account numbers when listing beneficiaries", async () => {
+  it('never returns encrypted account numbers when listing beneficiaries', async () => {
     prisma.bankAccount.findMany.mockResolvedValue([
       {
-        id: "beneficiary-1",
-        bankName: "Test Bank",
-        bankCode: "044",
-        accountName: "ADA LOVELACE",
-        accountNumberMasked: "******7890",
-        currency: "NGN",
-        provider: "MONNIFY",
+        id: 'beneficiary-1',
+        bankName: 'Test Bank',
+        bankCode: '044',
+        accountName: 'ADA LOVELACE',
+        accountNumberMasked: '******7890',
+        currency: 'NGN',
+        provider: 'MONNIFY',
         createdAt: new Date(),
         updatedAt: new Date(),
       },
     ]);
 
-    const result = await service.getBeneficiaries("user-1");
+    const result = await service.getBeneficiaries('user-1');
 
     expect(prisma.bankAccount.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -107,36 +107,36 @@ describe("BeneficiariesService", () => {
         }),
       }),
     );
-    expect(result[0]).not.toHaveProperty("accountNumberEncrypted");
+    expect(result[0]).not.toHaveProperty('accountNumberEncrypted');
   });
 
-  it("requires an encryption key before saving account numbers", async () => {
+  it('requires an encryption key before saving account numbers', async () => {
     config.get.mockReturnValueOnce(undefined);
 
     await expect(
-      service.createBeneficiary("user-1", {
-        accountNumber: "01234567890",
-        bankCode: "044",
-        bankName: "Test Bank",
-        currency: "NGN",
-        provider: "monnify",
+      service.createBeneficiary('user-1', {
+        accountNumber: '01234567890',
+        bankCode: '044',
+        bankName: 'Test Bank',
+        currency: 'NGN',
+        provider: 'monnify',
       }),
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 
-  it("requires verified KYC before saving a beneficiary", async () => {
+  it('requires verified KYC before saving a beneficiary', async () => {
     prisma.user.findUnique.mockResolvedValue({
-      kycStatus: "PENDING",
+      kycStatus: 'PENDING',
       isSuspended: false,
     });
 
     await expect(
-      service.createBeneficiary("user-1", {
-        accountNumber: "01234567890",
-        bankCode: "044",
-        bankName: "Test Bank",
-        currency: "NGN",
-        provider: "monnify",
+      service.createBeneficiary('user-1', {
+        accountNumber: '01234567890',
+        bankCode: '044',
+        bankName: 'Test Bank',
+        currency: 'NGN',
+        provider: 'monnify',
       }),
     ).rejects.toBeInstanceOf(ForbiddenException);
   });

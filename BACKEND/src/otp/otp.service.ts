@@ -1,9 +1,9 @@
-import { HttpException, HttpStatus, Injectable } from "@nestjs/common";
-import { ConfigService } from "@nestjs/config";
-import { RedisService } from "../redis/redis.service";
-import { createHash, randomInt } from "crypto";
-import { PinoLogger } from "nestjs-pino";
-import { maskPhone } from "../common/utils/masking";
+import { HttpException, HttpStatus, Injectable } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { RedisService } from '../redis/redis.service';
+import { createHash, randomInt } from 'crypto';
+import { PinoLogger } from 'nestjs-pino';
+import { maskPhone } from '../common/utils/masking';
 
 const OTP_SEND_LIMIT = 3;
 const OTP_SEND_WINDOW_SECONDS = 60 * 60;
@@ -64,13 +64,13 @@ export class OtpService {
   ) {
     this.logger.setContext(OtpService.name);
     this.expirySeconds =
-      parseInt(this.configService.get<string>("OTP_EXPIRES_IN") || "5") * 60;
+      parseInt(this.configService.get<string>('OTP_EXPIRES_IN') || '5') * 60;
     this.otpLength = parseInt(
-      this.configService.get<string>("OTP_LENGTH") || "6",
+      this.configService.get<string>('OTP_LENGTH') || '6',
     );
-    const configuredDevCode = this.configService.get<string>("OTP_DEV_CODE");
+    const configuredDevCode = this.configService.get<string>('OTP_DEV_CODE');
     this.devOtpCode =
-      this.configService.get<string>("NODE_ENV") !== "production" &&
+      this.configService.get<string>('NODE_ENV') !== 'production' &&
       configuredDevCode &&
       /^\d{6}$/.test(configuredDevCode)
         ? configuredDevCode
@@ -85,7 +85,7 @@ export class OtpService {
       `otp-send:${phoneHash}`,
       OTP_SEND_WINDOW_SECONDS,
       OTP_SEND_LIMIT,
-      "OTP requests are temporarily rate limited. Please try again later.",
+      'OTP requests are temporarily rate limited. Please try again later.',
     );
   }
 
@@ -97,7 +97,7 @@ export class OtpService {
       `password-reset:${emailHash}`,
       PASSWORD_RESET_WINDOW_SECONDS,
       PASSWORD_RESET_LIMIT,
-      "Password reset requests are temporarily rate limited. Please try again later.",
+      'Password reset requests are temporarily rate limited. Please try again later.',
     );
   }
 
@@ -117,15 +117,15 @@ export class OtpService {
         phoneMasked: maskPhone(normalizedPhone),
         expiresInSeconds: this.expirySeconds,
       },
-      "OTP generated",
+      'OTP generated',
     );
     if (this.devOtpCode) {
-      this.logger.warn("Development OTP override is enabled");
+      this.logger.warn('Development OTP override is enabled');
     }
 
     return {
       success: true,
-      message: "OTP sent successfully",
+      message: 'OTP sent successfully',
     };
   }
 
@@ -140,12 +140,12 @@ export class OtpService {
           this.verifyWithLocalState(phoneHash, normalizedOtp),
         );
 
-    if (result === "verified") {
-      this.logger.info({ phoneHash, phoneMasked }, "OTP verified successfully");
+    if (result === 'verified') {
+      this.logger.info({ phoneHash, phoneMasked }, 'OTP verified successfully');
       return true;
     }
 
-    if (result === "invalid") {
+    if (result === 'invalid') {
       const attempts = await this.readAttempts(phoneHash);
       this.logger.warn(
         {
@@ -154,20 +154,20 @@ export class OtpService {
           attempt: attempts,
           maxAttempts: this.maxAttempts,
         },
-        "Invalid OTP submitted",
+        'Invalid OTP submitted',
       );
       return false;
     }
 
-    if (result === "locked" || result === "exhausted") {
+    if (result === 'locked' || result === 'exhausted') {
       this.logger.warn(
         { phoneHash, phoneMasked },
-        "Maximum OTP verification attempts exceeded",
+        'Maximum OTP verification attempts exceeded',
       );
       return false;
     }
 
-    this.logger.warn({ phoneHash, phoneMasked }, "OTP not found");
+    this.logger.warn({ phoneHash, phoneMasked }, 'OTP not found');
     return false;
   }
 
@@ -197,18 +197,16 @@ export class OtpService {
   private async incrementWithRedis(key: string, ttlSeconds: number) {
     const result = (await this.redis
       .getClient()
-      .eval(
-        INCREMENT_WITH_TTL_SCRIPT,
-        1,
-        key,
-        String(ttlSeconds * 1000),
-      )) as [number, number];
+      .eval(INCREMENT_WITH_TTL_SCRIPT, 1, key, String(ttlSeconds * 1000))) as [
+      number,
+      number,
+    ];
 
     return Number(result[0]);
   }
 
   private async incrementWithLocalState(key: string, ttlSeconds: number) {
-    const current = Number((await this.redis.get(key)) || "0") + 1;
+    const current = Number((await this.redis.get(key)) || '0') + 1;
     await this.redis.set(key, String(current), ttlSeconds);
     return current;
   }
@@ -216,7 +214,7 @@ export class OtpService {
   private async verifyWithRedis(
     phoneHash: string,
     otp: string,
-  ): Promise<"missing" | "invalid" | "verified" | "locked" | "exhausted"> {
+  ): Promise<'missing' | 'invalid' | 'verified' | 'locked' | 'exhausted'> {
     const result = (await this.redis
       .getClient()
       .eval(
@@ -229,36 +227,36 @@ export class OtpService {
       )) as [string, number];
 
     return result[0] as
-      | "missing"
-      | "invalid"
-      | "verified"
-      | "locked"
-      | "exhausted";
+      | 'missing'
+      | 'invalid'
+      | 'verified'
+      | 'locked'
+      | 'exhausted';
   }
 
   private async verifyWithLocalState(
     phoneHash: string,
     otp: string,
-  ): Promise<"missing" | "invalid" | "verified" | "locked" | "exhausted"> {
+  ): Promise<'missing' | 'invalid' | 'verified' | 'locked' | 'exhausted'> {
     const codeKey = this.codeKey(phoneHash);
     const attemptsKey = this.attemptsKey(phoneHash);
     const code = await this.redis.get(codeKey);
 
     if (!code) {
-      return "missing";
+      return 'missing';
     }
 
-    const attempts = Number((await this.redis.get(attemptsKey)) || "0");
+    const attempts = Number((await this.redis.get(attemptsKey)) || '0');
     if (attempts >= this.maxAttempts) {
       await this.redis.del(codeKey);
       await this.redis.del(attemptsKey);
-      return "locked";
+      return 'locked';
     }
 
     if (code === otp) {
       await this.redis.del(codeKey);
       await this.redis.del(attemptsKey);
-      return "verified";
+      return 'verified';
     }
 
     const nextAttempts = attempts + 1;
@@ -266,14 +264,14 @@ export class OtpService {
     if (nextAttempts >= this.maxAttempts) {
       await this.redis.del(codeKey);
       await this.redis.del(attemptsKey);
-      return "exhausted";
+      return 'exhausted';
     }
 
-    return "invalid";
+    return 'invalid';
   }
 
   private async readAttempts(phoneHash: string) {
-    return Number((await this.redis.get(this.attemptsKey(phoneHash))) || "0");
+    return Number((await this.redis.get(this.attemptsKey(phoneHash))) || '0');
   }
 
   private codeKey(phoneHash: string) {
@@ -297,7 +295,7 @@ export class OtpService {
   }
 
   private hashIdentity(value: string) {
-    return createHash("sha256").update(value).digest("hex");
+    return createHash('sha256').update(value).digest('hex');
   }
 
   private async withLocalLock<T>(key: string, work: () => Promise<T>) {

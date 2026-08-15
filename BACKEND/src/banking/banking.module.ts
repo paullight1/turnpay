@@ -1,10 +1,10 @@
-import { Module } from "@nestjs/common";
-import { HttpModule } from "@nestjs/axios";
-import { BankingController } from "./banking.controller";
-import { BankingService } from "./banking.service";
-import { BeneficiariesService } from "./beneficiaries.service";
-import { MonnifyVirtualAccountProvider } from "./providers/monnify-virtual-account.provider";
-import { WalletsModule } from "../wallets/wallets.module";
+import { Module } from '@nestjs/common';
+import { HttpModule } from '@nestjs/axios';
+import { BankingController } from './banking.controller';
+import { BankingService } from './banking.service';
+import { BeneficiariesService } from './beneficiaries.service';
+import { MonnifyVirtualAccountProvider } from './providers/monnify-virtual-account.provider';
+import { WalletsModule } from '../wallets/wallets.module';
 
 @Module({
   imports: [
@@ -20,6 +20,10 @@ import { WalletsModule } from "../wallets/wallets.module";
     BeneficiariesService,
     MonnifyVirtualAccountProvider,
   ],
-  exports: [BankingService, BeneficiariesService, MonnifyVirtualAccountProvider],
+  exports: [
+    BankingService,
+    BeneficiariesService,
+    MonnifyVirtualAccountProvider,
+  ],
 })
 export class BankingModule {}

@@ -1,4 +1,4 @@
-import { Transform } from "class-transformer";
+import { Transform } from 'class-transformer';
 import {
   IsIn,
   IsInt,
@@ -7,37 +7,37 @@ import {
   Matches,
   Max,
   Min,
-} from "class-validator";
+} from 'class-validator';
 
-export const SUPPORTED_CURRENCIES = ["NGN", "GHS"] as const;
+export const SUPPORTED_CURRENCIES = ['NGN', 'GHS'] as const;
 export const TRANSACTION_STATUSES = [
-  "PENDING",
-  "SUCCESS",
-  "FAILED",
-  "REVERSED",
+  'PENDING',
+  'SUCCESS',
+  'FAILED',
+  'REVERSED',
 ] as const;
 export const TRANSACTION_TYPES = [
-  "EXCHANGE",
-  "FUND",
-  "WITHDRAW",
-  "INTERNAL_TRANSFER",
-  "AIRTIME",
-  "DATA",
-  "CABLE",
-  "ELECTRICITY",
+  'EXCHANGE',
+  'FUND',
+  'WITHDRAW',
+  'INTERNAL_TRANSFER',
+  'AIRTIME',
+  'DATA',
+  'CABLE',
+  'ELECTRICITY',
 ] as const;
 
 export const MONEY_AMOUNT_PATTERN =
   /^(?:0\.(?:0[1-9]|[1-9]\d)|[1-9]\d{0,9}(?:\.\d{1,2})?)$/;
 
 export function normalizeDecimalInput(value: unknown) {
-  if (typeof value === "number") {
+  if (typeof value === 'number') {
     return Number.isFinite(value)
-      ? value.toFixed(2).replace(/\.00$/, "")
+      ? value.toFixed(2).replace(/\.00$/, '')
       : value;
   }
 
-  if (typeof value === "string") {
+  if (typeof value === 'string') {
     return value.trim();
   }
 

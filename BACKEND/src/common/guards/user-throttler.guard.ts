@@ -1,5 +1,5 @@
-import { Injectable } from "@nestjs/common";
-import { ThrottlerGuard } from "@nestjs/throttler";
+import { Injectable } from '@nestjs/common';
+import { ThrottlerGuard } from '@nestjs/throttler';
 
 interface ThrottledRequest {
   user?: { userId?: unknown };
@@ -31,7 +31,7 @@ export class UserThrottlerGuard extends ThrottlerGuard {
 
     const userIdClaim = request.user?.userId;
     const userId =
-      (typeof userIdClaim === "string" && userIdClaim) ||
+      (typeof userIdClaim === 'string' && userIdClaim) ||
       this.extractUserIdFromAuthHeader(request);
 
     if (userId) {
@@ -40,14 +40,14 @@ export class UserThrottlerGuard extends ThrottlerGuard {
 
     const forwarded =
       request.ips && request.ips.length > 0 ? request.ips[0] : request.ip;
-    return Promise.resolve(`ip:${forwarded ?? "unknown"}`);
+    return Promise.resolve(`ip:${forwarded ?? 'unknown'}`);
   }
 
   private extractUserIdFromAuthHeader(
     req: ThrottledRequest,
   ): string | undefined {
     const header = req.headers?.authorization;
-    if (typeof header !== "string") {
+    if (typeof header !== 'string') {
       return undefined;
     }
 
@@ -56,16 +56,16 @@ export class UserThrottlerGuard extends ThrottlerGuard {
       return undefined;
     }
 
-    const segments = match[1].split(".");
+    const segments = match[1].split('.');
     if (segments.length < 2) {
       return undefined;
     }
 
     try {
-      const decoded = Buffer.from(segments[1], "base64url").toString("utf8");
+      const decoded = Buffer.from(segments[1], 'base64url').toString('utf8');
       const payload = JSON.parse(decoded) as { sub?: unknown };
 
-      return typeof payload.sub === "string" && payload.sub.length > 0
+      return typeof payload.sub === 'string' && payload.sub.length > 0
         ? payload.sub
         : undefined;
     } catch {

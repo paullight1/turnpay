@@ -1,12 +1,12 @@
-import { BadRequestException, Injectable } from "@nestjs/common";
-import { HttpService } from "@nestjs/axios";
-import { ConfigService } from "@nestjs/config";
-import { AxiosResponse, isAxiosError } from "axios";
-import { firstValueFrom } from "rxjs";
+import { BadRequestException, Injectable } from '@nestjs/common';
+import { HttpService } from '@nestjs/axios';
+import { ConfigService } from '@nestjs/config';
+import { AxiosResponse, isAxiosError } from 'axios';
+import { firstValueFrom } from 'rxjs';
 import {
   ProviderVirtualAccount,
   ProvisionVirtualAccountInput,
-} from "./banking-provider.types";
+} from './banking-provider.types';
 
 interface MonnifyAuthResponse {
   requestSuccessful: boolean;
@@ -126,15 +126,15 @@ export class MonnifyVirtualAccountProvider {
   async provisionVirtualAccount(
     input: ProvisionVirtualAccountInput,
   ): Promise<ProviderVirtualAccount> {
-    if (input.currency !== "NGN") {
+    if (input.currency !== 'NGN') {
       throw new BadRequestException(
-        "Monnify virtual accounts support NGN only",
+        'Monnify virtual accounts support NGN only',
       );
     }
 
     if (!input.bvn && !input.nin) {
       throw new BadRequestException(
-        "BVN or NIN is required for Monnify reserved accounts",
+        'BVN or NIN is required for Monnify reserved accounts',
       );
     }
 
@@ -142,8 +142,9 @@ export class MonnifyVirtualAccountProvider {
     const token = await this.getAccessToken();
     const accountReference = this.buildAccountReference(input);
     const accountName = this.buildAccountName(input);
+    const customerName = this.buildAccountHolderName(input);
     const restrictPaymentSource = this.configService.get<boolean>(
-      "MONNIFY_RESTRICT_PAYMENT_SOURCE",
+      'MONNIFY_RESTRICT_PAYMENT_SOURCE',
       false,
     );
 
@@ -153,9 +154,9 @@ export class MonnifyVirtualAccountProvider {
       currencyCode: input.currency,
       contractCode,
       customerEmail: input.email,
-      customerName: accountName,
+      customerName,
       getAllAvailableBanks: this.configService.get<boolean>(
-        "MONNIFY_GET_ALL_AVAILABLE_BANKS",
+        'MONNIFY_GET_ALL_AVAILABLE_BANKS',
         true,
       ),
     };
@@ -183,12 +184,12 @@ export class MonnifyVirtualAccountProvider {
             {
               headers: {
                 Authorization: `Bearer ${token}`,
-                "Content-Type": "application/json",
+                'Content-Type': 'application/json',
               },
             },
           ),
         ),
-        "Could not provision Monnify reserved account",
+        'Could not provision Monnify reserved account',
       );
     } catch (error) {
       if (this.isDuplicateReservedAccountError(error)) {
@@ -202,15 +203,15 @@ export class MonnifyVirtualAccountProvider {
     const account = body?.accounts?.[0];
 
     return {
-      provider: "monnify",
+      provider: 'monnify',
       providerAccountId: body?.reservationReference || body?.accountReference,
       providerCustomerId: body?.customerEmail,
-      accountNumber: account?.accountNumber || "",
+      accountNumber: account?.accountNumber || '',
       accountName: account?.accountName || accountName,
-      bankName: account?.bankName || "Moniepoint Microfinance Bank",
+      bankName: account?.bankName || 'Moniepoint Microfinance Bank',
       bankCode: account?.bankCode,
       currency: input.currency,
-      status: body?.status === "ACTIVE" ? "ACTIVE" : "PENDING",
+      status: body?.status === 'ACTIVE' ? 'ACTIVE' : 'PENDING',
       raw: response.data as unknown as Record<string, unknown>,
     };
   }
@@ -230,7 +231,7 @@ export class MonnifyVirtualAccountProvider {
           },
         ),
       ),
-      "Could not fetch Monnify reserved account",
+      'Could not fetch Monnify reserved account',
     );
 
     const body = response.data.responseBody;
@@ -238,20 +239,20 @@ export class MonnifyVirtualAccountProvider {
 
     if (!account?.accountNumber) {
       throw new BadRequestException(
-        "Could not fetch existing Monnify reserved account details",
+        'Could not fetch existing Monnify reserved account details',
       );
     }
 
     return {
-      provider: "monnify",
+      provider: 'monnify',
       providerAccountId: body?.reservationReference || body?.accountReference,
       providerCustomerId: body?.customerEmail,
       accountNumber: account.accountNumber,
-      accountName: account.accountName || "",
-      bankName: account.bankName || "Moniepoint Microfinance Bank",
+      accountName: account.accountName || '',
+      bankName: account.bankName || 'Moniepoint Microfinance Bank',
       bankCode: account.bankCode,
-      currency: "NGN",
-      status: body?.status === "ACTIVE" ? "ACTIVE" : "PENDING",
+      currency: 'NGN',
+      status: body?.status === 'ACTIVE' ? 'ACTIVE' : 'PENDING',
       raw: response.data as unknown as Record<string, unknown>,
     };
   }
@@ -263,7 +264,7 @@ export class MonnifyVirtualAccountProvider {
 
     if (!response.data.requestSuccessful) {
       throw new BadRequestException(
-        response.data.responseMessage || "Could not load Monnify banks",
+        response.data.responseMessage || 'Could not load Monnify banks',
       );
     }
 
@@ -280,13 +281,15 @@ export class MonnifyVirtualAccountProvider {
     accountNumber: string,
     bankCode: string,
   ): Promise<{ accountName: string; bankName?: string; bankCode?: string }> {
-    const response =
-      await this.fetchMonnifyAccountValidationWithRetry(accountNumber, bankCode);
+    const response = await this.fetchMonnifyAccountValidationWithRetry(
+      accountNumber,
+      bankCode,
+    );
 
     const body = response.data.responseBody;
     if (!response.data.requestSuccessful || !body?.accountName) {
       throw new BadRequestException(
-        response.data.responseMessage || "Could not validate bank account",
+        response.data.responseMessage || 'Could not validate bank account',
       );
     }
 
@@ -305,7 +308,7 @@ export class MonnifyVirtualAccountProvider {
     accountName: string;
     sourceAccountNumber?: string;
     narration?: string;
-    currency?: "NGN";
+    currency?: 'NGN';
     async?: boolean;
   }): Promise<{
     reference: string;
@@ -322,30 +325,30 @@ export class MonnifyVirtualAccountProvider {
           {
             amount: Number(input.amount),
             reference: input.reference,
-            narration: input.narration || "TrustPay withdrawal",
+            narration: input.narration || 'TrustPay withdrawal',
             ...(input.sourceAccountNumber
               ? { sourceAccountNumber: input.sourceAccountNumber }
               : {}),
             destinationBankCode: input.bankCode,
             destinationAccountNumber: input.accountNumber,
             destinationAccountName: input.accountName,
-            currency: input.currency || "NGN",
-            ...(typeof input.async === "boolean" ? { async: input.async } : {}),
+            currency: input.currency || 'NGN',
+            ...(typeof input.async === 'boolean' ? { async: input.async } : {}),
           },
           {
             headers: {
               Authorization: `Bearer ${token}`,
-              "Content-Type": "application/json",
+              'Content-Type': 'application/json',
             },
           },
         ),
       ),
-      "Could not initiate Monnify transfer",
+      'Could not initiate Monnify transfer',
     );
 
     if (!response.data.requestSuccessful) {
       throw new BadRequestException(
-        response.data.responseMessage || "Could not initiate Monnify transfer",
+        response.data.responseMessage || 'Could not initiate Monnify transfer',
       );
     }
 
@@ -353,7 +356,7 @@ export class MonnifyVirtualAccountProvider {
       reference:
         response.data.responseBody?.transactionReference || input.reference,
       transactionReference: response.data.responseBody?.transactionReference,
-      status: response.data.responseBody?.status || "PENDING",
+      status: response.data.responseBody?.status || 'PENDING',
       responseMessage: response.data.responseMessage,
       raw: response.data as unknown as Record<string, unknown>,
     };
@@ -381,17 +384,17 @@ export class MonnifyVirtualAccountProvider {
           {
             headers: {
               Authorization: `Bearer ${token}`,
-              "Content-Type": "application/json",
+              'Content-Type': 'application/json',
             },
           },
         ),
       ),
-      "Could not authorize Monnify transfer",
+      'Could not authorize Monnify transfer',
     );
 
     if (!response.data.requestSuccessful) {
       throw new BadRequestException(
-        response.data.responseMessage || "Could not authorize Monnify transfer",
+        response.data.responseMessage || 'Could not authorize Monnify transfer',
       );
     }
 
@@ -402,7 +405,7 @@ export class MonnifyVirtualAccountProvider {
       status:
         response.data.responseBody?.status ||
         response.data.responseBody?.transactionStatus ||
-        "PENDING",
+        'PENDING',
       responseMessage: response.data.responseMessage,
       raw: response.data as unknown as Record<string, unknown>,
     };
@@ -423,23 +426,23 @@ export class MonnifyVirtualAccountProvider {
           {
             headers: {
               Authorization: `Bearer ${token}`,
-              "Content-Type": "application/json",
+              'Content-Type': 'application/json',
             },
           },
         ),
       ),
-      "Could not resend Monnify transfer OTP",
+      'Could not resend Monnify transfer OTP',
     );
 
     if (!response.data.requestSuccessful) {
       throw new BadRequestException(
-        response.data.responseMessage || "Could not resend Monnify transfer OTP",
+        response.data.responseMessage ||
+          'Could not resend Monnify transfer OTP',
       );
     }
 
     return {
-      reference:
-        response.data.responseBody?.transactionReference || reference,
+      reference: response.data.responseBody?.transactionReference || reference,
       responseMessage: response.data.responseMessage,
       emailRecipients: response.data.responseBody?.emailRecipients,
       raw: response.data as unknown as Record<string, unknown>,
@@ -465,12 +468,13 @@ export class MonnifyVirtualAccountProvider {
           },
         ),
       ),
-      "Could not fetch Monnify transfer status",
+      'Could not fetch Monnify transfer status',
     );
 
     if (!response.data.requestSuccessful) {
       throw new BadRequestException(
-        response.data.responseMessage || "Could not fetch Monnify transfer status",
+        response.data.responseMessage ||
+          'Could not fetch Monnify transfer status',
       );
     }
 
@@ -482,7 +486,7 @@ export class MonnifyVirtualAccountProvider {
       status:
         response.data.responseBody?.status ||
         response.data.responseBody?.transactionDescription ||
-        "PENDING",
+        'PENDING',
       responseMessage: response.data.responseMessage,
       raw: response.data as unknown as Record<string, unknown>,
     };
@@ -497,7 +501,7 @@ export class MonnifyVirtualAccountProvider {
 
     const apiKey = this.requireMonnifyApiKey();
     const secretKey = this.requireMonnifySecretKey();
-    const basicToken = Buffer.from(`${apiKey}:${secretKey}`).toString("base64");
+    const basicToken = Buffer.from(`${apiKey}:${secretKey}`).toString('base64');
 
     const response = await this.fetchMonnify<MonnifyAuthResponse>(
       firstValueFrom(
@@ -507,18 +511,18 @@ export class MonnifyVirtualAccountProvider {
           {
             headers: {
               Authorization: `Basic ${basicToken}`,
-              "Content-Type": "application/json",
+              'Content-Type': 'application/json',
             },
           },
         ),
       ),
-      "Monnify authentication failed",
+      'Monnify authentication failed',
     );
 
     const accessToken = response.data.responseBody?.accessToken;
 
     if (!accessToken) {
-      throw new BadRequestException("Monnify authentication failed");
+      throw new BadRequestException('Monnify authentication failed');
     }
 
     const expiresIn = response.data.responseBody?.expiresIn || 1800;
@@ -529,11 +533,11 @@ export class MonnifyVirtualAccountProvider {
   }
 
   private requireMonnifyApiKey() {
-    const apiKey = this.configService.get<string>("MONNIFY_API_KEY")?.trim();
+    const apiKey = this.configService.get<string>('MONNIFY_API_KEY')?.trim();
 
     if (!apiKey) {
       throw new BadRequestException(
-        "Monnify API credentials are not configured for this environment",
+        'Monnify API credentials are not configured for this environment',
       );
     }
 
@@ -542,12 +546,12 @@ export class MonnifyVirtualAccountProvider {
 
   private requireMonnifySecretKey() {
     const secretKey = this.configService
-      .get<string>("MONNIFY_SECRET_KEY")
+      .get<string>('MONNIFY_SECRET_KEY')
       ?.trim();
 
     if (!secretKey) {
       throw new BadRequestException(
-        "Monnify API credentials are not configured for this environment",
+        'Monnify API credentials are not configured for this environment',
       );
     }
 
@@ -556,12 +560,12 @@ export class MonnifyVirtualAccountProvider {
 
   private requireMonnifyContractCode() {
     const contractCode = this.configService
-      .get<string>("MONNIFY_CONTRACT_CODE")
+      .get<string>('MONNIFY_CONTRACT_CODE')
       ?.trim();
 
     if (!contractCode) {
       throw new BadRequestException(
-        "Monnify contract code is not configured for this environment",
+        'Monnify contract code is not configured for this environment',
       );
     }
 
@@ -569,20 +573,20 @@ export class MonnifyVirtualAccountProvider {
   }
 
   private get baseUrl() {
-    const configured = this.configService.get<string>("MONNIFY_BASE_URL");
+    const configured = this.configService.get<string>('MONNIFY_BASE_URL');
 
     if (configured) {
-      return configured.replace(/\/$/, "");
+      return configured.replace(/\/$/, '');
     }
 
     const sandboxMode = this.configService.get<boolean>(
-      "BANKING_SANDBOX_MODE",
+      'BANKING_SANDBOX_MODE',
       true,
     );
 
     return sandboxMode
-      ? "https://sandbox.monnify.com"
-      : "https://api.monnify.com";
+      ? 'https://sandbox.monnify.com'
+      : 'https://api.monnify.com';
   }
 
   private async fetchMonnify<T>(
@@ -599,22 +603,20 @@ export class MonnifyVirtualAccountProvider {
   }
 
   private async fetchMonnifyBanksWithRetry() {
-    return this.fetchMonnifyWithTokenRetry(
-      async (token) =>
-        this.fetchMonnify<MonnifyBanksResponse>(
-          firstValueFrom(
-            this.httpService.get<MonnifyBanksResponse>(
-              `${this.baseUrl}/api/v1/banks`,
-              {
-                headers: {
-                  Authorization: `Bearer ${token}`,
-                },
+    return this.fetchMonnifyWithTokenRetry(async (token) =>
+      this.fetchMonnify<MonnifyBanksResponse>(
+        firstValueFrom(
+          this.httpService.get<MonnifyBanksResponse>(
+            `${this.baseUrl}/api/v1/banks`,
+            {
+              headers: {
+                Authorization: `Bearer ${token}`,
               },
-            ),
+            },
           ),
-          "Could not load Monnify banks",
         ),
-      "Could not load Monnify banks",
+        'Could not load Monnify banks',
+      ),
     );
   }
 
@@ -622,32 +624,29 @@ export class MonnifyVirtualAccountProvider {
     accountNumber: string,
     bankCode: string,
   ) {
-    return this.fetchMonnifyWithTokenRetry(
-      async (token) =>
-        this.fetchMonnify<MonnifyAccountValidationResponse>(
-          firstValueFrom(
-            this.httpService.get<MonnifyAccountValidationResponse>(
-              `${this.baseUrl}/api/v1/disbursements/account/validate`,
-              {
-                headers: {
-                  Authorization: `Bearer ${token}`,
-                },
-                params: {
-                  accountNumber,
-                  bankCode,
-                },
+    return this.fetchMonnifyWithTokenRetry(async (token) =>
+      this.fetchMonnify<MonnifyAccountValidationResponse>(
+        firstValueFrom(
+          this.httpService.get<MonnifyAccountValidationResponse>(
+            `${this.baseUrl}/api/v1/disbursements/account/validate`,
+            {
+              headers: {
+                Authorization: `Bearer ${token}`,
               },
-            ),
+              params: {
+                accountNumber,
+                bankCode,
+              },
+            },
           ),
-          "Could not validate bank account",
         ),
-      "Could not validate bank account",
+        'Could not validate bank account',
+      ),
     );
   }
 
   private async fetchMonnifyWithTokenRetry<T>(
     requestFactory: (token: string) => Promise<AxiosResponse<T>>,
-    fallbackMessage: string,
   ): Promise<AxiosResponse<T>> {
     const token = await this.getAccessToken();
 
@@ -679,9 +678,9 @@ export class MonnifyVirtualAccountProvider {
         responseData?.responseMessage,
         responseData?.message,
         responseData?.error,
-      ].find((value) => typeof value === "string" && value.trim().length > 0);
+      ].find((value) => typeof value === 'string' && value.trim().length > 0);
 
-      if (typeof providerMessage === "string") {
+      if (typeof providerMessage === 'string') {
         return providerMessage;
       }
 
@@ -702,11 +701,11 @@ export class MonnifyVirtualAccountProvider {
       return true;
     }
 
-    const message = this.describeMonnifyError(error, "").toLowerCase();
+    const message = this.describeMonnifyError(error, '').toLowerCase();
     return (
-      message.includes("invalid_token") ||
-      message.includes("invalid token") ||
-      message.includes("token expired")
+      message.includes('invalid_token') ||
+      message.includes('invalid token') ||
+      message.includes('token expired')
     );
   }
 
@@ -716,13 +715,13 @@ export class MonnifyVirtualAccountProvider {
   }
 
   private isDuplicateReservedAccountError(error: unknown) {
-    const message = this.describeMonnifyError(error, "");
+    const message = this.describeMonnifyError(error, '');
     const normalized = message.toLowerCase();
 
     return (
-      normalized.includes("same reference") ||
-      normalized.includes("existing active reserved account") ||
-      normalized.includes("same customeremail")
+      normalized.includes('same reference') ||
+      normalized.includes('existing active reserved account') ||
+      normalized.includes('same customeremail')
     );
   }
 
@@ -731,18 +730,33 @@ export class MonnifyVirtualAccountProvider {
   }
 
   private buildAccountName(input: ProvisionVirtualAccountInput) {
-    return [input.firstName, input.middleName, input.lastName]
-      .filter(Boolean)
-      .join(" ")
-      .replace(/\s+/g, " ")
-      .trim()
-      .slice(0, 64);
+    const holderName = this.buildAccountHolderName(input);
+    const prefix = (
+      this.configService.get<string>('VIRTUAL_ACCOUNT_NAME_PREFIX') ?? ''
+    ).trim();
+
+    if (!prefix) {
+      return holderName.slice(0, 64);
+    }
+
+    return `${prefix} - ${holderName}`.slice(0, 64);
+  }
+
+  private buildAccountHolderName(input: ProvisionVirtualAccountInput) {
+    return (
+      input.accountHolderName ||
+      [input.firstName, input.middleName, input.lastName]
+        .filter(Boolean)
+        .join(' ')
+    )
+      .replace(/\s+/g, ' ')
+      .trim();
   }
 
   private slugify(value: string) {
     return value
       .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-+|-+$/g, "");
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '');
   }
 }

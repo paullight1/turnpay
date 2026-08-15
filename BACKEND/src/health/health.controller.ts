@@ -1,9 +1,9 @@
-import { Controller, Get, ServiceUnavailableException } from "@nestjs/common";
-import { ConfigService } from "@nestjs/config";
-import { PrismaService } from "../prisma/prisma.service";
-import { RedisService } from "../redis/redis.service";
+import { Controller, Get, ServiceUnavailableException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { PrismaService } from '../prisma/prisma.service';
+import { RedisService } from '../redis/redis.service';
 
-@Controller("health")
+@Controller('health')
 export class HealthController {
   constructor(
     private readonly prisma: PrismaService,
@@ -18,30 +18,30 @@ export class HealthController {
 
     try {
       await this.prisma.$queryRaw`SELECT 1`;
-      checks.database = "connected";
+      checks.database = 'connected';
     } catch {
-      checks.database = "disconnected";
+      checks.database = 'disconnected';
       isHealthy = false;
     }
 
     const isProduction =
-      this.configService.get<string>("NODE_ENV") === "production";
+      this.configService.get<string>('NODE_ENV') === 'production';
 
     try {
       if (!this.redis.isRedisAvailable()) {
-        throw new Error("Redis is not ready");
+        throw new Error('Redis is not ready');
       }
       await this.redis.getClient().ping();
-      checks.redis = "connected";
+      checks.redis = 'connected';
     } catch {
-      checks.redis = "memory-fallback";
+      checks.redis = 'memory-fallback';
       if (isProduction) {
         isHealthy = false;
       }
     }
 
     const response = {
-      status: isHealthy ? "ok" : "degraded",
+      status: isHealthy ? 'ok' : 'degraded',
       checks,
       timestamp: new Date().toISOString(),
     };

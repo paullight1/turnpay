@@ -1,7 +1,7 @@
-import { Injectable } from "@nestjs/common";
-import { Cron, CronExpression } from "@nestjs/schedule";
-import { PinoLogger } from "nestjs-pino";
-import { PaymentService } from "./payment.service";
+import { Injectable } from '@nestjs/common';
+import { Cron, CronExpression } from '@nestjs/schedule';
+import { PinoLogger } from 'nestjs-pino';
+import { PaymentService } from './payment.service';
 
 /**
  * Periodically resolves withdrawals left PENDING after an ambiguous provider
@@ -23,18 +23,18 @@ export class WithdrawalReconcileService {
       if (result.checked > 0) {
         this.logger.info(
           { checked: result.checked, resolved: result.resolved },
-          "Pending withdrawal reconciliation completed",
+          'Pending withdrawal reconciliation completed',
         );
       }
     } catch (error) {
       const errorMessage =
         error instanceof Error
           ? error.message
-          : "Unknown withdrawal reconciliation error";
+          : 'Unknown withdrawal reconciliation error';
 
       this.logger.error(
         { errorMessage },
-        "Pending withdrawal reconciliation failed",
+        'Pending withdrawal reconciliation failed',
       );
     }
   }

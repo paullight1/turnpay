@@ -1,11 +1,11 @@
-import { Injectable } from "@nestjs/common";
-import { WalletCurrency } from "@prisma/client";
-import { PinoLogger } from "nestjs-pino";
-import { PrismaService } from "../prisma/prisma.service";
+import { Injectable } from '@nestjs/common';
+import { WalletCurrency } from '@prisma/client';
+import { PinoLogger } from 'nestjs-pino';
+import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
 export class WalletsService {
-  private readonly currencies: WalletCurrency[] = ["NGN", "GHS"];
+  private readonly currencies: WalletCurrency[] = ['NGN', 'GHS'];
 
   constructor(
     private readonly prisma: PrismaService,
@@ -36,13 +36,13 @@ export class WalletsService {
       return tx.wallet.findMany({
         where: { userId },
         select: this.walletSelect,
-        orderBy: { currency: "desc" },
+        orderBy: { currency: 'desc' },
       });
     });
 
     this.logger.info(
       { userId, walletCount: wallets.length },
-      "Ensured user wallets",
+      'Ensured user wallets',
     );
 
     return wallets;
@@ -62,7 +62,7 @@ export class WalletsService {
     return this.prisma.wallet.findMany({
       where: { userId },
       select: this.walletSelect,
-      orderBy: { currency: "desc" },
+      orderBy: { currency: 'desc' },
     });
   }
 
@@ -71,7 +71,7 @@ export class WalletsService {
       where: {
         userId_currency: {
           userId,
-          currency: currency as "NGN" | "GHS",
+          currency: currency as 'NGN' | 'GHS',
         },
       },
     });

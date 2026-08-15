@@ -1,6 +1,6 @@
-import { Injectable } from "@nestjs/common";
-import { PinoLogger } from "nestjs-pino";
-import { RedisService } from "../../redis/redis.service";
+import { Injectable } from '@nestjs/common';
+import { PinoLogger } from 'nestjs-pino';
+import { RedisService } from '../../redis/redis.service';
 
 export interface CircuitBreakerOptions {
   failureThreshold: number;
@@ -8,7 +8,7 @@ export interface CircuitBreakerOptions {
   halfOpenMaxRequests: number;
 }
 
-export type CircuitState = "CLOSED" | "OPEN" | "HALF_OPEN";
+export type CircuitState = 'CLOSED' | 'OPEN' | 'HALF_OPEN';
 
 @Injectable()
 export class CircuitBreakerService {
@@ -41,28 +41,28 @@ export class CircuitBreakerService {
 
   async getState(service: string): Promise<CircuitState> {
     const state = await this.redis.get(this.getStateKey(service));
-    return (state as CircuitState) || "CLOSED";
+    return (state as CircuitState) || 'CLOSED';
   }
 
   async canExecute(service: string): Promise<boolean> {
     const state = await this.getState(service);
 
-    if (state === "CLOSED") {
+    if (state === 'CLOSED') {
       return true;
     }
 
-    if (state === "OPEN") {
+    if (state === 'OPEN') {
       const lastFailureAt = await this.redis.get(
         this.getLastFailureKey(service),
       );
       if (!lastFailureAt) {
-        await this.transitionTo(service, "HALF_OPEN");
+        await this.transitionTo(service, 'HALF_OPEN');
         return true;
       }
 
       const lastFailure = parseInt(lastFailureAt, 10);
       if (Date.now() - lastFailure > this.options.recoveryTimeout) {
-        await this.transitionTo(service, "HALF_OPEN");
+        await this.transitionTo(service, 'HALF_OPEN');
         return true;
       }
 
@@ -86,8 +86,8 @@ export class CircuitBreakerService {
   }
 
   async recordSuccess(service: string): Promise<void> {
-    await this.transitionTo(service, "CLOSED");
-    this.logger.info({ service }, "Circuit breaker closed (success)");
+    await this.transitionTo(service, 'CLOSED');
+    this.logger.info({ service }, 'Circuit breaker closed (success)');
   }
 
   async recordFailure(service: string): Promise<void> {
@@ -107,10 +107,10 @@ export class CircuitBreakerService {
     );
 
     if (count >= this.options.failureThreshold) {
-      await this.transitionTo(service, "OPEN");
+      await this.transitionTo(service, 'OPEN');
       this.logger.warn(
         { service, failureCount: count },
-        "Circuit breaker opened after failures",
+        'Circuit breaker opened after failures',
       );
     } else {
       this.logger.warn(
@@ -119,7 +119,7 @@ export class CircuitBreakerService {
           failureCount: count,
           threshold: this.options.failureThreshold,
         },
-        "Circuit breaker failure recorded",
+        'Circuit breaker failure recorded',
       );
     }
   }
@@ -130,14 +130,14 @@ export class CircuitBreakerService {
   ): Promise<void> {
     await this.redis.set(this.getStateKey(service), state, 300);
 
-    if (state === "CLOSED") {
+    if (state === 'CLOSED') {
       await this.redis.del(this.getFailuresKey(service));
       await this.redis.del(this.getLastFailureKey(service));
       await this.redis.del(this.getRequestsKey(service));
     }
 
-    if (state === "HALF_OPEN") {
-      await this.redis.set(this.getRequestsKey(service), "0", 30);
+    if (state === 'HALF_OPEN') {
+      await this.redis.set(this.getRequestsKey(service), '0', 30);
     }
   }
 }

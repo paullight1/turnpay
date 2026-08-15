@@ -1,9 +1,9 @@
-import { Injectable } from "@nestjs/common";
-import { HttpService } from "@nestjs/axios";
-import { ConfigService } from "@nestjs/config";
-import { firstValueFrom } from "rxjs";
-import { createHmac } from "crypto";
-import { PinoLogger } from "nestjs-pino";
+import { Injectable } from '@nestjs/common';
+import { HttpService } from '@nestjs/axios';
+import { ConfigService } from '@nestjs/config';
+import { firstValueFrom } from 'rxjs';
+import { createHmac } from 'crypto';
+import { PinoLogger } from 'nestjs-pino';
 
 interface PaymentInitResponse {
   status: boolean;
@@ -42,7 +42,7 @@ interface TransferVerifyResponse {
 
 @Injectable()
 export class PaystackProvider {
-  private readonly baseUrl = "https://api.paystack.co";
+  private readonly baseUrl = 'https://api.paystack.co';
   private readonly secretKey: string;
 
   constructor(
@@ -51,14 +51,14 @@ export class PaystackProvider {
     private readonly logger: PinoLogger,
   ) {
     this.secretKey = this.configService.getOrThrow<string>(
-      "PAYSTACK_SECRET_KEY",
+      'PAYSTACK_SECRET_KEY',
     );
   }
 
   private get headers() {
     return {
       Authorization: `Bearer ${this.secretKey}`,
-      "Content-Type": "application/json",
+      'Content-Type': 'application/json',
     };
   }
 
@@ -91,7 +91,7 @@ export class PaystackProvider {
         amountMinor: params.amountMinor,
         currency: params.currency,
       },
-      "Paystack payment initialized",
+      'Paystack payment initialized',
     );
 
     return response.data;
@@ -182,7 +182,7 @@ export class PaystackProvider {
 
     this.logger.info(
       { reference: params.reference, amountMinor: params.amountMinor },
-      "Paystack transfer initiated",
+      'Paystack transfer initiated',
     );
 
     return response.data;
@@ -190,7 +190,7 @@ export class PaystackProvider {
 
   async verifyTransfer(
     reference: string,
-  ): Promise<TransferVerifyResponse["data"]> {
+  ): Promise<TransferVerifyResponse['data']> {
     const response = await firstValueFrom(
       this.httpService.get<TransferVerifyResponse>(
         `${this.baseUrl}/transfer/verify/${reference}`,
@@ -208,9 +208,9 @@ export class PaystackProvider {
     currency: string;
   }): Promise<{ recipientCode: string }> {
     const payload = {
-      type: "nuban",
+      type: 'nuban',
       name: params.name,
-      description: "TrustPay withdrawal",
+      description: 'TrustPay withdrawal',
       account_number: params.accountNumber,
       bank_code: params.bankCode,
       currency: params.currency.toLowerCase(),
@@ -229,9 +229,9 @@ export class PaystackProvider {
   }
 
   verifySignature(rawBody: string, signature: string): boolean {
-    const hash = createHmac("sha512", this.secretKey)
+    const hash = createHmac('sha512', this.secretKey)
       .update(rawBody)
-      .digest("hex");
+      .digest('hex');
     return hash === signature;
   }
 }

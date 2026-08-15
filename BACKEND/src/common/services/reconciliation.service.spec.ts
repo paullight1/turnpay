@@ -1,7 +1,7 @@
-import { Decimal } from "@prisma/client/runtime/library";
-import { ReconciliationService } from "./reconciliation.service";
+import { Decimal } from '@prisma/client/runtime/library';
+import { ReconciliationService } from './reconciliation.service';
 
-describe("ReconciliationService", () => {
+describe('ReconciliationService', () => {
   const prisma = {
     wallet: {
       findMany: jest.fn(),
@@ -22,26 +22,41 @@ describe("ReconciliationService", () => {
     service = new ReconciliationService(prisma as any, pinoLogger as any);
   });
 
-  it("derives expected wallet balances from aggregated ledger sums", async () => {
+  it('derives expected wallet balances from aggregated ledger sums', async () => {
     prisma.ledgerEntry.groupBy.mockResolvedValue([
-      { walletId: "wallet-1", direction: "CREDIT", currency: "NGN", _sum: { amount: new Decimal("1000.00") } },
-      { walletId: "wallet-1", direction: "DEBIT", currency: "NGN", _sum: { amount: new Decimal("200.00") } },
+      {
+        walletId: 'wallet-1',
+        direction: 'CREDIT',
+        currency: 'NGN',
+        _sum: { amount: new Decimal('1000.00') },
+      },
+      {
+        walletId: 'wallet-1',
+        direction: 'DEBIT',
+        currency: 'NGN',
+        _sum: { amount: new Decimal('200.00') },
+      },
       // Different-currency movement must not affect the NGN wallet balance.
-      { walletId: "wallet-1", direction: "CREDIT", currency: "GHS", _sum: { amount: new Decimal("500.00") } },
+      {
+        walletId: 'wallet-1',
+        direction: 'CREDIT',
+        currency: 'GHS',
+        _sum: { amount: new Decimal('500.00') },
+      },
     ]);
     prisma.wallet.findMany.mockResolvedValue([
       {
-        id: "wallet-1",
-        userId: "user-1",
-        currency: "NGN",
-        balance: new Decimal("800.00"),
+        id: 'wallet-1',
+        userId: 'user-1',
+        currency: 'NGN',
+        balance: new Decimal('800.00'),
       },
     ]);
 
     const result = await service.reconcileWallets();
 
     expect(prisma.ledgerEntry.groupBy).toHaveBeenCalledWith({
-      by: ["walletId", "direction", "currency"],
+      by: ['walletId', 'direction', 'currency'],
       _sum: { amount: true },
     });
     expect(prisma.wallet.findMany).toHaveBeenCalledWith({
@@ -58,17 +73,27 @@ describe("ReconciliationService", () => {
     });
   });
 
-  it("reports wallet balance drift using Decimal-formatted values", async () => {
+  it('reports wallet balance drift using Decimal-formatted values', async () => {
     prisma.ledgerEntry.groupBy.mockResolvedValue([
-      { walletId: "wallet-1", direction: "CREDIT", currency: "NGN", _sum: { amount: new Decimal("1000.00") } },
-      { walletId: "wallet-1", direction: "DEBIT", currency: "NGN", _sum: { amount: new Decimal("200.00") } },
+      {
+        walletId: 'wallet-1',
+        direction: 'CREDIT',
+        currency: 'NGN',
+        _sum: { amount: new Decimal('1000.00') },
+      },
+      {
+        walletId: 'wallet-1',
+        direction: 'DEBIT',
+        currency: 'NGN',
+        _sum: { amount: new Decimal('200.00') },
+      },
     ]);
     prisma.wallet.findMany.mockResolvedValue([
       {
-        id: "wallet-1",
-        userId: "user-1",
-        currency: "NGN",
-        balance: new Decimal("799.50"),
+        id: 'wallet-1',
+        userId: 'user-1',
+        currency: 'NGN',
+        balance: new Decimal('799.50'),
       },
     ]);
 
@@ -76,24 +101,24 @@ describe("ReconciliationService", () => {
 
     expect(result.mismatches).toEqual([
       {
-        walletId: "wallet-1",
-        userId: "user-1",
-        currency: "NGN",
-        expectedBalance: "800.00",
-        actualBalance: "799.50",
-        difference: "0.50",
+        walletId: 'wallet-1',
+        userId: 'user-1',
+        currency: 'NGN',
+        expectedBalance: '800.00',
+        actualBalance: '799.50',
+        difference: '0.50',
       },
     ]);
   });
 
-  it("treats a wallet with no ledger entries as expecting a zero balance", async () => {
+  it('treats a wallet with no ledger entries as expecting a zero balance', async () => {
     prisma.ledgerEntry.groupBy.mockResolvedValue([]);
     prisma.wallet.findMany.mockResolvedValue([
       {
-        id: "wallet-1",
-        userId: "user-1",
-        currency: "NGN",
-        balance: new Decimal("0.00"),
+        id: 'wallet-1',
+        userId: 'user-1',
+        currency: 'NGN',
+        balance: new Decimal('0.00'),
       },
     ]);
 

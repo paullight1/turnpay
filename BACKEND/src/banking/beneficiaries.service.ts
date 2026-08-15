@@ -3,14 +3,14 @@ import {
   ForbiddenException,
   Injectable,
   NotFoundException,
-} from "@nestjs/common";
-import { ConfigService } from "@nestjs/config";
-import { PrismaService } from "../prisma/prisma.service";
-import { encryptSensitiveValue } from "../common/utils/encryption";
-import { maskAccountNumber } from "../common/utils/masking";
-import { formatKycTier, isKycTierAtLeast } from "../common/utils/kyc-tier";
-import { CreateBeneficiaryDto, ResolveBankAccountDto } from "./dto/banking.dto";
-import { MonnifyVirtualAccountProvider } from "./providers/monnify-virtual-account.provider";
+} from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { PrismaService } from '../prisma/prisma.service';
+import { encryptSensitiveValue } from '../common/utils/encryption';
+import { maskAccountNumber } from '../common/utils/masking';
+import { formatKycTier, isKycTierAtLeast } from '../common/utils/kyc-tier';
+import { CreateBeneficiaryDto, ResolveBankAccountDto } from './dto/banking.dto';
+import { MonnifyVirtualAccountProvider } from './providers/monnify-virtual-account.provider';
 
 type ResolvedBankAccount = {
   accountName: string;
@@ -40,7 +40,7 @@ export class BeneficiariesService {
   async createBeneficiary(userId: string, dto: CreateBeneficiaryDto) {
     const encryptionKey = this.getEncryptionKey();
     await this.assertCanManageBeneficiary(userId);
-    const provider = dto.provider || "monnify";
+    const provider = dto.provider || 'monnify';
     const resolved = await this.resolveBankAccount(dto);
 
     return this.prisma.bankAccount.create({
@@ -68,7 +68,7 @@ export class BeneficiariesService {
         isDeleted: false,
       },
       select: this.beneficiarySelect,
-      orderBy: { createdAt: "desc" },
+      orderBy: { createdAt: 'desc' },
     });
   }
 
@@ -83,7 +83,7 @@ export class BeneficiariesService {
     });
 
     if (deleted.count !== 1) {
-      throw new NotFoundException("Beneficiary not found");
+      throw new NotFoundException('Beneficiary not found');
     }
 
     return { deleted: true };
@@ -91,12 +91,12 @@ export class BeneficiariesService {
 
   private getEncryptionKey() {
     const key =
-      this.configService.get<string>("BANK_ACCOUNT_ENCRYPTION_KEY") ||
-      this.configService.get<string>("PII_ENCRYPTION_KEY");
+      this.configService.get<string>('BANK_ACCOUNT_ENCRYPTION_KEY') ||
+      this.configService.get<string>('PII_ENCRYPTION_KEY');
 
     if (!key) {
       throw new BadRequestException(
-        "Sensitive data encryption key is not configured",
+        'Sensitive data encryption key is not configured',
       );
     }
 
@@ -114,30 +114,30 @@ export class BeneficiariesService {
     });
 
     if (!user) {
-      throw new NotFoundException("User not found");
+      throw new NotFoundException('User not found');
     }
 
     if (user.isSuspended) {
-      throw new ForbiddenException("Account is suspended");
+      throw new ForbiddenException('Account is suspended');
     }
 
-    if (user.kycStatus !== "VERIFIED") {
-      throw new ForbiddenException("KYC verification is required");
+    if (user.kycStatus !== 'VERIFIED') {
+      throw new ForbiddenException('KYC verification is required');
     }
 
-    if (!isKycTierAtLeast(user.kycTier, "TIER_2")) {
+    if (!isKycTierAtLeast(user.kycTier, 'TIER_2')) {
       throw new ForbiddenException(
-        `KYC ${formatKycTier("TIER_2")} is required to manage beneficiaries`,
+        `KYC ${formatKycTier('TIER_2')} is required to manage beneficiaries`,
       );
     }
   }
 
-  private normalizeProvider(provider: string): "MONNIFY" {
+  private normalizeProvider(provider: string): 'MONNIFY' {
     const normalized = provider.toUpperCase();
-    if (normalized !== "MONNIFY") {
-      throw new BadRequestException("Unsupported provider");
+    if (normalized !== 'MONNIFY') {
+      throw new BadRequestException('Unsupported provider');
     }
-    return "MONNIFY";
+    return 'MONNIFY';
   }
 
   private readonly beneficiarySelect = {

@@ -1,4 +1,4 @@
-export type ProviderBalanceStatus = "available" | "unknown" | "error";
+export type ProviderBalanceStatus = 'available' | 'unknown' | 'error';
 
 export interface ProviderBalanceHealth {
   status: ProviderBalanceStatus;
@@ -8,7 +8,7 @@ export interface ProviderBalanceHealth {
 }
 
 export interface VtuProviderHealth {
-  id: "vtpass" | "reloadly";
+  id: 'vtpass' | 'reloadly';
   name: string;
   configured: boolean;
   enabled: boolean;

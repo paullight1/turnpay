@@ -6,13 +6,13 @@ import {
   HttpCode,
   Post,
   Req,
-} from "@nestjs/common";
-import { ConfigService } from "@nestjs/config";
-import { Throttle } from "@nestjs/throttler";
-import { createHmac, timingSafeEqual } from "crypto";
-import { PinoLogger } from "nestjs-pino";
-import type { RawBodyRequest } from "../common/types/request-context";
-import { VtuService } from "./vtu.service";
+} from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { Throttle } from '@nestjs/throttler';
+import { createHmac, timingSafeEqual } from 'crypto';
+import { PinoLogger } from 'nestjs-pino';
+import type { RawBodyRequest } from '../common/types/request-context';
+import { VtuService } from './vtu.service';
 
 type ReloadlyWebhookPayload = Record<string, unknown>;
 
@@ -26,7 +26,7 @@ type ReloadlyWebhookEvent = {
   rawPayload: Record<string, unknown>;
 };
 
-@Controller("webhooks/vtu")
+@Controller('webhooks/vtu')
 export class ReloadlyWebhookController {
   constructor(
     private readonly vtuService: VtuService,
@@ -36,14 +36,14 @@ export class ReloadlyWebhookController {
     this.logger.setContext(ReloadlyWebhookController.name);
   }
 
-  @Post("reloadly")
+  @Post('reloadly')
   @HttpCode(200)
   @Throttle({ default: { limit: 100, ttl: 60000 } })
   async handleReloadlyWebhook(
-    @Headers("x-reloadly-signature") reloadlySignature: string | undefined,
-    @Headers("reloadly-signature") legacyReloadlySignature: string | undefined,
-    @Headers("x-webhook-signature") webhookSignature: string | undefined,
-    @Headers("x-signature") genericSignature: string | undefined,
+    @Headers('x-reloadly-signature') reloadlySignature: string | undefined,
+    @Headers('reloadly-signature') legacyReloadlySignature: string | undefined,
+    @Headers('x-webhook-signature') webhookSignature: string | undefined,
+    @Headers('x-signature') genericSignature: string | undefined,
     @Req() req: RawBodyRequest,
     @Body() body: ReloadlyWebhookPayload,
   ) {
@@ -65,9 +65,9 @@ export class ReloadlyWebhookController {
           providerReference: event.providerReference,
           eventType: event.eventType,
           errorMessage:
-            error instanceof Error ? error.message : "Unknown webhook error",
+            error instanceof Error ? error.message : 'Unknown webhook error',
         },
-        "Reloadly webhook background processing failed",
+        'Reloadly webhook background processing failed',
       );
     });
 
@@ -77,7 +77,7 @@ export class ReloadlyWebhookController {
         providerReference: event.providerReference,
         status: event.status,
       },
-      "Reloadly VTU webhook accepted",
+      'Reloadly VTU webhook accepted',
     );
 
     return { received: true };
@@ -87,37 +87,37 @@ export class ReloadlyWebhookController {
     rawBody: string | undefined,
     receivedSignature: string | undefined,
   ) {
-    const secret = this.configService.get<string>("RELOADLY_WEBHOOK_SECRET");
+    const secret = this.configService.get<string>('RELOADLY_WEBHOOK_SECRET');
     if (!secret) {
-      this.logger.warn("RELOADLY_WEBHOOK_SECRET is not configured");
+      this.logger.warn('RELOADLY_WEBHOOK_SECRET is not configured');
       throw new BadRequestException(
-        "Webhook signature secret is not configured",
+        'Webhook signature secret is not configured',
       );
     }
 
     if (!receivedSignature) {
-      this.logger.warn("Missing Reloadly webhook signature");
-      throw new BadRequestException("Missing signature header");
+      this.logger.warn('Missing Reloadly webhook signature');
+      throw new BadRequestException('Missing signature header');
     }
 
     if (!rawBody) {
-      this.logger.warn("Missing raw body for Reloadly webhook");
-      throw new BadRequestException("Missing request body");
+      this.logger.warn('Missing raw body for Reloadly webhook');
+      throw new BadRequestException('Missing request body');
     }
 
-    const expectedHex = createHmac("sha256", secret)
+    const expectedHex = createHmac('sha256', secret)
       .update(rawBody)
-      .digest("hex");
-    const expectedBase64 = createHmac("sha256", secret)
+      .digest('hex');
+    const expectedBase64 = createHmac('sha256', secret)
       .update(rawBody)
-      .digest("base64");
+      .digest('base64');
 
     if (
       !this.timingSafeCompare(expectedHex, receivedSignature) &&
       !this.timingSafeCompare(expectedBase64, receivedSignature)
     ) {
-      this.logger.warn("Invalid Reloadly webhook signature");
-      throw new BadRequestException("Invalid signature");
+      this.logger.warn('Invalid Reloadly webhook signature');
+      throw new BadRequestException('Invalid signature');
     }
   }
 
@@ -160,7 +160,7 @@ export class ReloadlyWebhookController {
       .toLowerCase();
 
     if (!eventType || !providerReference || !status) {
-      throw new BadRequestException("Invalid Reloadly webhook payload");
+      throw new BadRequestException('Invalid Reloadly webhook payload');
     }
 
     return {
@@ -180,7 +180,7 @@ export class ReloadlyWebhookController {
   }
 
   private objectValue(value: unknown): Record<string, unknown> | undefined {
-    if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+    if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
       return value as Record<string, unknown>;
     }
 
@@ -188,19 +188,19 @@ export class ReloadlyWebhookController {
   }
 
   private stringValue(value: unknown) {
-    if (typeof value === "string") {
+    if (typeof value === 'string') {
       return value;
     }
 
-    if (typeof value === "number" || typeof value === "bigint") {
+    if (typeof value === 'number' || typeof value === 'bigint') {
       return value.toString();
     }
 
-    return "";
+    return '';
   }
 
   private timingSafeCompare(expected: string, received: string) {
-    const normalizedReceived = received.replace(/^sha256=/i, "").trim();
+    const normalizedReceived = received.replace(/^sha256=/i, '').trim();
     const expectedBuffer = Buffer.from(expected);
     const receivedBuffer = Buffer.from(normalizedReceived);
 

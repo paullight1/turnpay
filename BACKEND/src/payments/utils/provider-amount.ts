@@ -1,15 +1,15 @@
-import { BadRequestException } from "@nestjs/common";
-import { Decimal } from "@prisma/client/runtime/library";
+import { BadRequestException } from '@nestjs/common';
+import { Decimal } from '@prisma/client/runtime/library';
 
 export function toMinorUnit(amount: Decimal): number {
   const minor = amount.mul(100);
 
   if (!minor.isInteger() || minor.lessThanOrEqualTo(0)) {
-    throw new BadRequestException("Invalid monetary amount");
+    throw new BadRequestException('Invalid monetary amount');
   }
 
   if (minor.greaterThan(Number.MAX_SAFE_INTEGER)) {
-    throw new BadRequestException("Amount exceeds provider-safe range");
+    throw new BadRequestException('Amount exceeds provider-safe range');
   }
 
   return minor.toNumber();
@@ -21,7 +21,7 @@ export function toProviderDecimalString(amount: Decimal): string {
     amount.decimalPlaces() > 2 ||
     amount.lessThanOrEqualTo(0)
   ) {
-    throw new BadRequestException("Invalid monetary amount");
+    throw new BadRequestException('Invalid monetary amount');
   }
 
   return amount.toFixed(2);

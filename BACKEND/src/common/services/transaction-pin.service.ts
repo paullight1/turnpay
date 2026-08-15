@@ -2,10 +2,10 @@ import {
   BadRequestException,
   ForbiddenException,
   Injectable,
-} from "@nestjs/common";
-import { ConfigService } from "@nestjs/config";
-import { pbkdf2Sync, randomBytes, timingSafeEqual } from "crypto";
-import { RedisService } from "../../redis/redis.service";
+} from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { pbkdf2Sync, randomBytes, timingSafeEqual } from 'crypto';
+import { RedisService } from '../../redis/redis.service';
 
 type StoredPin = {
   salt: string;
@@ -90,12 +90,12 @@ export class TransactionPinService {
 
     const locked = await this.redis.get(this.lockKey(userId));
     if (locked) {
-      throw new ForbiddenException("Transaction PIN is temporarily locked");
+      throw new ForbiddenException('Transaction PIN is temporarily locked');
     }
 
     const raw = await this.redis.get(this.pinKey(userId));
     if (!raw) {
-      throw new ForbiddenException("Transaction PIN setup is required");
+      throw new ForbiddenException('Transaction PIN setup is required');
     }
 
     const stored = JSON.parse(raw) as StoredPin;
@@ -104,7 +104,7 @@ export class TransactionPinService {
 
     if (!isValid) {
       await this.recordFailure(userId);
-      throw new ForbiddenException("Invalid transaction PIN");
+      throw new ForbiddenException('Invalid transaction PIN');
     }
 
     await this.clearFailures(userId);
@@ -124,12 +124,12 @@ export class TransactionPinService {
     const resetHold = await this.redis.get(this.resetHoldKey(userId));
     if (resetHold) {
       throw new ForbiddenException(
-        "Transaction PIN was recently reset; money movement is temporarily locked",
+        'Transaction PIN was recently reset; money movement is temporarily locked',
       );
     }
 
     if (!pin) {
-      throw new BadRequestException("Transaction PIN is required");
+      throw new BadRequestException('Transaction PIN is required');
     }
 
     await this.verifyPin(userId, pin);
@@ -140,14 +140,14 @@ export class TransactionPinService {
     // fallback here mirrors that so a bypassed/absent validation layer can
     // never silently disable PIN checks in prod.
     return this.configService.get<boolean>(
-      "TRANSACTION_PIN_REQUIRED",
-      this.configService.get<string>("NODE_ENV") === "production",
+      'TRANSACTION_PIN_REQUIRED',
+      this.configService.get<string>('NODE_ENV') === 'production',
     );
   }
 
   private assertValidPin(pin: string) {
     if (!/^\d{4,6}$/.test(pin)) {
-      throw new BadRequestException("Transaction PIN must be 4 to 6 digits");
+      throw new BadRequestException('Transaction PIN must be 4 to 6 digits');
     }
   }
 
@@ -163,39 +163,41 @@ export class TransactionPinService {
   }
 
   private async recordFailureWithRedis(userId: string) {
-    await this.redis.getClient().eval(
-      RECORD_PIN_FAILURE_SCRIPT,
-      3,
-      this.failuresKey(userId),
-      this.dailyFailuresKey(userId),
-      this.lockKey(userId),
-      String(MAX_FAILED_ATTEMPTS),
-      String(MAX_DAILY_FAILED_ATTEMPTS),
-      String(DAILY_WINDOW_SECONDS * 1000),
-      String(LOCK_SECONDS * 1000),
-      String(LOCK_SECONDS * 1000),
-    );
+    await this.redis
+      .getClient()
+      .eval(
+        RECORD_PIN_FAILURE_SCRIPT,
+        3,
+        this.failuresKey(userId),
+        this.dailyFailuresKey(userId),
+        this.lockKey(userId),
+        String(MAX_FAILED_ATTEMPTS),
+        String(MAX_DAILY_FAILED_ATTEMPTS),
+        String(DAILY_WINDOW_SECONDS * 1000),
+        String(LOCK_SECONDS * 1000),
+        String(LOCK_SECONDS * 1000),
+      );
   }
 
   private async recordFailureWithLocalState(userId: string) {
     // Daily hard cap — survives the short rolling window so an attacker cannot
     // reset the counter simply by pausing 15 minutes between bursts.
     const dailyKey = this.dailyFailuresKey(userId);
-    const dailyCount = Number((await this.redis.get(dailyKey)) || "0") + 1;
+    const dailyCount = Number((await this.redis.get(dailyKey)) || '0') + 1;
     await this.redis.set(dailyKey, String(dailyCount), DAILY_WINDOW_SECONDS);
 
     if (dailyCount >= MAX_DAILY_FAILED_ATTEMPTS) {
-      await this.redis.set(this.lockKey(userId), "1", DAILY_WINDOW_SECONDS);
+      await this.redis.set(this.lockKey(userId), '1', DAILY_WINDOW_SECONDS);
       await this.redis.del(this.failuresKey(userId));
       return;
     }
 
     const failuresKey = this.failuresKey(userId);
-    const current = Number((await this.redis.get(failuresKey)) || "0");
+    const current = Number((await this.redis.get(failuresKey)) || '0');
     const next = current + 1;
 
     if (next >= MAX_FAILED_ATTEMPTS) {
-      await this.redis.set(this.lockKey(userId), "1", LOCK_SECONDS);
+      await this.redis.set(this.lockKey(userId), '1', LOCK_SECONDS);
       await this.redis.del(failuresKey);
       return;
     }
@@ -210,13 +212,13 @@ export class TransactionPinService {
   }
 
   private hashPin(pin: string, salt: string, iterations: number) {
-    return pbkdf2Sync(pin, salt, iterations, 32, "sha256").toString(
-      "base64url",
+    return pbkdf2Sync(pin, salt, iterations, 32, 'sha256').toString(
+      'base64url',
     );
   }
 
   private buildStoredPin(pin: string): StoredPin {
-    const salt = randomBytes(16).toString("base64url");
+    const salt = randomBytes(16).toString('base64url');
     return {
       salt,
       iterations: PIN_ITERATIONS,

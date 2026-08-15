@@ -1,8 +1,8 @@
-import { Injectable } from "@nestjs/common";
-import { Cron, CronExpression } from "@nestjs/schedule";
-import { PrismaService } from "../../prisma/prisma.service";
-import { RateService } from "./rate.service";
-import { PinoLogger } from "nestjs-pino";
+import { Injectable } from '@nestjs/common';
+import { Cron, CronExpression } from '@nestjs/schedule';
+import { PrismaService } from '../../prisma/prisma.service';
+import { RateService } from './rate.service';
+import { PinoLogger } from 'nestjs-pino';
 
 /**
  * NotificationService — stub for future Firebase/APNs push notification integration.
@@ -16,12 +16,12 @@ export class NotificationService {
    * Send a push notification to a user.
    * STUB: Logs to Pino. Replace with Firebase Admin SDK / APNs integration.
    */
-  async sendPushNotification(
+  sendPushNotification(
     userId: string,
     title: string,
     body: string,
     data?: Record<string, unknown>,
-  ): Promise<void> {
+  ): void {
     this.logger.info(
       {
         userId,
@@ -29,7 +29,7 @@ export class NotificationService {
         body,
         data,
       },
-      "[NOTIFICATION STUB] Push notification would be sent here",
+      '[NOTIFICATION STUB] Push notification would be sent here',
     );
     // TODO: Integrate with Firebase Cloud Messaging or APNs
   }
@@ -38,12 +38,12 @@ export class NotificationService {
    * Create an in-app alert for a user.
    * STUB: Logs to Pino. Replace with in-app notification table + WebSocket push.
    */
-  async sendInAppAlert(
+  sendInAppAlert(
     userId: string,
     type: string,
     message: string,
     metadata?: Record<string, unknown>,
-  ): Promise<void> {
+  ): void {
     this.logger.info(
       {
         userId,
@@ -51,7 +51,7 @@ export class NotificationService {
         message,
         metadata,
       },
-      "[NOTIFICATION STUB] In-app alert would be created here",
+      '[NOTIFICATION STUB] In-app alert would be created here',
     );
     // TODO: Insert into an in-app notifications table and push via WebSocket
   }
@@ -96,14 +96,12 @@ export class RateAlertService {
 
         const targetRate = alert.targetRate.toNumber();
         const isTriggered =
-          alert.direction === "ABOVE"
-            ? rate >= targetRate
-            : rate <= targetRate;
+          alert.direction === 'ABOVE' ? rate >= targetRate : rate <= targetRate;
 
         if (isTriggered) {
           const fromTo = `${alert.fromCurrency}→${alert.toCurrency}`;
           const directionLabel =
-            alert.direction === "ABOVE" ? "above" : "below";
+            alert.direction === 'ABOVE' ? 'above' : 'below';
           const title = `Rate Alert: ${fromTo}`;
           const body = `The ${fromTo} rate is now ${rate.toFixed(4)}, ${directionLabel} your target of ${targetRate.toFixed(4)}`;
 
@@ -112,7 +110,7 @@ export class RateAlertService {
             data: { triggeredAt: new Date() },
           });
 
-          await this.notificationService.sendPushNotification(
+          this.notificationService.sendPushNotification(
             alert.userId,
             title,
             body,
@@ -126,9 +124,9 @@ export class RateAlertService {
             },
           );
 
-          await this.notificationService.sendInAppAlert(
+          this.notificationService.sendInAppAlert(
             alert.userId,
-            "RATE_ALERT_TRIGGERED",
+            'RATE_ALERT_TRIGGERED',
             body,
             {
               alertId: alert.id,
@@ -149,7 +147,7 @@ export class RateAlertService {
               targetRate,
               direction: alert.direction,
             },
-            "Rate alert triggered",
+            'Rate alert triggered',
           );
 
           triggered++;
@@ -158,9 +156,9 @@ export class RateAlertService {
         this.logger.error(
           {
             alertId: alert.id,
-            error: error instanceof Error ? error.message : "Unknown error",
+            error: error instanceof Error ? error.message : 'Unknown error',
           },
-          "Failed to check rate alert",
+          'Failed to check rate alert',
         );
         errors++;
       }
@@ -169,7 +167,7 @@ export class RateAlertService {
     if (triggered > 0 || errors > 0) {
       this.logger.info(
         { triggered, errors, checked: activeAlerts.length },
-        "Rate alert check completed",
+        'Rate alert check completed',
       );
     }
   }
@@ -180,11 +178,11 @@ export class RateAlertService {
       fromCurrency: string;
       toCurrency: string;
       targetRate: number;
-      direction: "ABOVE" | "BELOW";
+      direction: 'ABOVE' | 'BELOW';
     },
   ) {
     if (dto.fromCurrency === dto.toCurrency) {
-      throw new Error("Source and destination currencies must be different");
+      throw new Error('Source and destination currencies must be different');
     }
 
     const alert = await this.prisma.rateAlert.create({
@@ -206,7 +204,7 @@ export class RateAlertService {
         targetRate: dto.targetRate,
         direction: dto.direction,
       },
-      "Rate alert created",
+      'Rate alert created',
     );
 
     return alert;
@@ -215,7 +213,7 @@ export class RateAlertService {
   async getUserAlerts(userId: string) {
     return this.prisma.rateAlert.findMany({
       where: { userId },
-      orderBy: { createdAt: "desc" },
+      orderBy: { createdAt: 'desc' },
       take: 50,
     });
   }
@@ -226,17 +224,14 @@ export class RateAlertService {
     });
 
     if (!alert) {
-      throw new Error("Rate alert not found");
+      throw new Error('Rate alert not found');
     }
 
     await this.prisma.rateAlert.delete({
       where: { id: alertId },
     });
 
-    this.logger.info(
-      { alertId, userId },
-      "Rate alert deleted",
-    );
+    this.logger.info({ alertId, userId }, 'Rate alert deleted');
 
     return { success: true };
   }

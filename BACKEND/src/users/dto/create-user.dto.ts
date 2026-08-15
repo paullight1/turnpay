@@ -6,7 +6,7 @@ import {
   IsOptional,
   IsUUID,
   MaxLength,
-} from "class-validator";
+} from 'class-validator';
 
 export class CreateUserDto {
   @IsUUID()
@@ -23,7 +23,7 @@ export class CreateUserDto {
 
   @IsString()
   @Matches(/^(\+?\d{10,15})$/, {
-    message: "Phone number must be a valid format",
+    message: 'Phone number must be a valid format',
   })
   @IsOptional()
   phone?: string;
@@ -31,7 +31,7 @@ export class CreateUserDto {
   @IsString()
   @MinLength(8)
   @Matches(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/, {
-    message: "Password must contain uppercase, lowercase, and number",
+    message: 'Password must contain uppercase, lowercase, and number',
   })
   @IsOptional()
   password?: string;

@@ -1,8 +1,8 @@
-import { Injectable } from "@nestjs/common";
-import { Cron, CronExpression } from "@nestjs/schedule";
-import { Decimal } from "@prisma/client/runtime/library";
-import { PrismaService } from "../../prisma/prisma.service";
-import { PinoLogger } from "nestjs-pino";
+import { Injectable } from '@nestjs/common';
+import { Cron, CronExpression } from '@nestjs/schedule';
+import { Decimal } from '@prisma/client/runtime/library';
+import { PrismaService } from '../../prisma/prisma.service';
+import { PinoLogger } from 'nestjs-pino';
 
 @Injectable()
 export class ReconciliationService {
@@ -13,7 +13,7 @@ export class ReconciliationService {
 
   @Cron(CronExpression.EVERY_DAY_AT_MIDNIGHT)
   async runDailyReconciliation() {
-    this.pinoLogger.info({}, "Starting daily reconciliation");
+    this.pinoLogger.info({}, 'Starting daily reconciliation');
 
     try {
       const result = await this.reconcileWallets();
@@ -24,20 +24,20 @@ export class ReconciliationService {
           checkedWallets: result.totalChecked,
           timestamp: new Date().toISOString(),
         },
-        "Daily reconciliation completed",
+        'Daily reconciliation completed',
       );
 
       if (result.mismatches.length > 0) {
         this.pinoLogger.warn(
           { mismatchCount: result.mismatches.length },
-          "Found wallet mismatches",
+          'Found wallet mismatches',
         );
       }
     } catch (error) {
       const errorMessage =
-        error instanceof Error ? error.message : "Unknown reconciliation error";
+        error instanceof Error ? error.message : 'Unknown reconciliation error';
 
-      this.pinoLogger.error({ errorMessage }, "Daily reconciliation failed");
+      this.pinoLogger.error({ errorMessage }, 'Daily reconciliation failed');
     }
   }
 
@@ -47,7 +47,7 @@ export class ReconciliationService {
     // memory — the entry table grows unbounded and would otherwise OOM the
     // daily cron as volume increases.
     const ledgerSums = await this.prisma.ledgerEntry.groupBy({
-      by: ["walletId", "direction", "currency"],
+      by: ['walletId', 'direction', 'currency'],
       _sum: { amount: true },
     });
 
@@ -55,7 +55,7 @@ export class ReconciliationService {
     const expectedByWallet = new Map<string, Map<string, Decimal>>();
     for (const row of ledgerSums) {
       const amount = new Decimal(row._sum.amount ?? 0);
-      const signed = row.direction === "CREDIT" ? amount : amount.negated();
+      const signed = row.direction === 'CREDIT' ? amount : amount.negated();
 
       let byCurrency = expectedByWallet.get(row.walletId);
       if (!byCurrency) {
@@ -92,7 +92,7 @@ export class ReconciliationService {
       const actualBalance = new Decimal(wallet.balance);
       const difference = expectedBalance.minus(actualBalance).abs();
 
-      if (difference.greaterThan(new Decimal("0.01"))) {
+      if (difference.greaterThan(new Decimal('0.01'))) {
         mismatches.push({
           walletId: wallet.id,
           userId: wallet.userId,
