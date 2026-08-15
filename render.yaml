@@ -61,7 +61,7 @@ services:
       - key: VTU_PROVIDER
         value: "vtpass"
       - key: VTPASS_BASE_URL
-        value: "https://sandbox.vtpass.com/api" # TODO(launch): switch to live provider URL
+        sync: false # Operator gate: set the live VTpass base URL before enabling production traffic
       - key: VTPASS_LOW_BALANCE_THRESHOLD
         value: "5000"
       - key: VTPASS_API_KEY
@@ -85,11 +85,11 @@ services:
       - key: MONNIFY_CONTRACT_CODE
         sync: false
       - key: MONNIFY_BASE_URL
-        value: "https://sandbox.monnify.com" # TODO(launch): switch to live provider URL
+        sync: false # Operator gate: set the live Monnify base URL before enabling production traffic
       - key: MONNIFY_WEBHOOK_SECRET
         sync: false
       - key: MONNIFY_WEBHOOK_URL
-        value: "https://turnpay.onrender.com/api/webhooks/monnify"
+        sync: false # Operator gate: set the canonical HTTPS callback URL for this deployment
       - key: MONNIFY_GET_ALL_AVAILABLE_BANKS
         value: "true"
       - key: MONNIFY_RESTRICT_PAYMENT_SOURCE
