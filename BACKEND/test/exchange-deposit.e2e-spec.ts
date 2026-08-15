@@ -1,18 +1,16 @@
-import { Test, TestingModule } from "@nestjs/testing";
-import { ExecutionContext } from "@nestjs/common";
-import { createHmac, createHash } from "crypto";
-import { from, isObservable, lastValueFrom } from "rxjs";
-import { WebhookController } from "../src/payments/webhooks/payment-webhook.controller";
-import { PaymentService } from "../src/payments/payment.service";
-import { BankingService } from "../src/banking/banking.service";
-import { ExchangeService } from "../src/exchange/exchange.service";
-import { ConfigService } from "@nestjs/config";
-import { PinoLogger } from "nestjs-pino";
-import { Decimal } from "@prisma/client/runtime/library";
-import { PrismaService } from "../src/prisma/prisma.service";
-import { WebhookInboxService } from "../src/payments/webhooks/webhook-inbox.service";
+import { Test, TestingModule } from '@nestjs/testing';
+import { createHmac } from 'crypto';
+import { WebhookController } from '../src/payments/webhooks/payment-webhook.controller';
+import { PaymentService } from '../src/payments/payment.service';
+import { BankingService } from '../src/banking/banking.service';
+import { ExchangeService } from '../src/exchange/exchange.service';
+import { ConfigService } from '@nestjs/config';
+import { PinoLogger } from 'nestjs-pino';
+import { Decimal } from '@prisma/client/runtime/library';
+import { PrismaService } from '../src/prisma/prisma.service';
+import { WebhookInboxService } from '../src/payments/webhooks/webhook-inbox.service';
 
-describe("Exchange — Monnify Deposit Flow (e2e simulated)", () => {
+describe('Exchange — Monnify Deposit Flow (e2e simulated)', () => {
   const mockPaymentService = {
     verifyPaystackSignature: jest.fn(),
     verifyFlutterwaveSignature: jest.fn(),
@@ -59,34 +57,34 @@ describe("Exchange — Monnify Deposit Flow (e2e simulated)", () => {
     },
   };
 
-  const WEBHOOK_SECRET = "whsec_exchange_test";
+  const WEBHOOK_SECRET = 'whsec_exchange_test';
 
   let controller: WebhookController;
 
   const signBody = (body: string): string =>
-    createHmac("sha512", WEBHOOK_SECRET).update(body).digest("hex");
+    createHmac('sha512', WEBHOOK_SECRET).update(body).digest('hex');
 
   const makeExchangeDepositBody = (
     overrides: Record<string, unknown> = {},
   ) => ({
-    eventType: "SUCCESSFUL_TRANSACTION",
+    eventType: 'SUCCESSFUL_TRANSACTION',
     eventData: {
-      transactionReference: "MNFY-EXCH-TXN-001",
-      paymentReference: "MNFY-EXCH-PAY-001",
+      transactionReference: 'MNFY-EXCH-TXN-001',
+      paymentReference: 'MNFY-EXCH-PAY-001',
       amountPaid: 50000,
       totalPayable: 50000,
       settlementAmount: 49750,
-      currency: "NGN",
-      paymentStatus: "PAID",
+      currency: 'NGN',
+      paymentStatus: 'PAID',
       destinationAccountInformation: {
-        accountNumber: "EXCHANGE_COLLECTION_ACC",
-        accountName: "TrustPay Exchange Collection",
-        bankCode: "035",
-        bankName: "Wema Bank",
+        accountNumber: 'EXCHANGE_COLLECTION_ACC',
+        accountName: 'TrustPay Exchange Collection',
+        bankCode: '035',
+        bankName: 'Wema Bank',
       },
       product: {
-        reference: "EXCHANGE_COLLECTION_001",
-        type: "COLLECTION_ACCOUNT",
+        reference: 'EXCHANGE_COLLECTION_001',
+        type: 'COLLECTION_ACCOUNT',
       },
       ...overrides,
     },
@@ -98,7 +96,7 @@ describe("Exchange — Monnify Deposit Flow (e2e simulated)", () => {
       rawBody,
       body,
       headers: {
-        "monnify-signature": signature ?? signBody(rawBody),
+        'monnify-signature': signature ?? signBody(rawBody),
       },
     };
   };
@@ -107,10 +105,13 @@ describe("Exchange — Monnify Deposit Flow (e2e simulated)", () => {
     jest.clearAllMocks();
     mockConfigService.get.mockReturnValue(WEBHOOK_SECRET);
     mockConfigService.getOrThrow.mockReturnValue(WEBHOOK_SECRET);
-    mockPrisma.webhookLog.create.mockResolvedValue({ id: "log-1" });
-    mockPrisma.webhookLog.update.mockResolvedValue({ id: "log-1", processed: true });
+    mockPrisma.webhookLog.create.mockResolvedValue({ id: 'log-1' });
+    mockPrisma.webhookLog.update.mockResolvedValue({
+      id: 'log-1',
+      processed: true,
+    });
     mockWebhookInbox.accept.mockResolvedValue({
-      eventId: "inbox-1",
+      eventId: 'inbox-1',
       duplicate: false,
     });
 
@@ -131,17 +132,17 @@ describe("Exchange — Monnify Deposit Flow (e2e simulated)", () => {
   });
 
   // ─── Scenario 1: Exchange deposit matched — routes to exchange service ───
-  it("routes Monnify webhook to exchange service when exchange intent is matched", async () => {
+  it('routes Monnify webhook to exchange service when exchange intent is matched', async () => {
     mockExchangeService.processMonnifyExchangeDepositWebhook.mockResolvedValue({
       matched: true,
-      exchangeReceiptId: "receipt-001",
+      exchangeReceiptId: 'receipt-001',
     });
 
     const body = makeExchangeDepositBody();
     const req = makeRequest(body);
 
     const result = await controller.handleMonnifyWebhook(
-      req.headers["monnify-signature"],
+      req.headers['monnify-signature'],
       req as any,
       body,
     );
@@ -151,7 +152,7 @@ describe("Exchange — Monnify Deposit Flow (e2e simulated)", () => {
   });
 
   // ─── Scenario 2: Exchange deposit NOT matched — falls back to banking ───
-  it("falls back to banking service when no exchange intent is matched", async () => {
+  it('falls back to banking service when no exchange intent is matched', async () => {
     mockExchangeService.processMonnifyExchangeDepositWebhook.mockResolvedValue({
       matched: false,
     });
@@ -163,7 +164,7 @@ describe("Exchange — Monnify Deposit Flow (e2e simulated)", () => {
     const req = makeRequest(body);
 
     const result = await controller.handleMonnifyWebhook(
-      req.headers["monnify-signature"],
+      req.headers['monnify-signature'],
       req as any,
       body,
     );
@@ -174,7 +175,7 @@ describe("Exchange — Monnify Deposit Flow (e2e simulated)", () => {
 
   // ─── Scenario 3: Exchange deposit GHS credit is atomic —─────────────────
   //     one provider inflow never credits both NGN and GHS
-  it("ensures one provider inflow credits only GHS (not NGN) when matched to exchange", async () => {
+  it('ensures one provider inflow credits only GHS (not NGN) when matched to exchange', async () => {
     mockExchangeService.processMonnifyExchangeDepositWebhook.mockResolvedValue({
       matched: true,
     });
@@ -183,7 +184,7 @@ describe("Exchange — Monnify Deposit Flow (e2e simulated)", () => {
     const req = makeRequest(body);
 
     await controller.handleMonnifyWebhook(
-      req.headers["monnify-signature"],
+      req.headers['monnify-signature'],
       req as any,
       body,
     );
@@ -192,15 +193,15 @@ describe("Exchange — Monnify Deposit Flow (e2e simulated)", () => {
   });
 
   // ─── Scenario 4: Admin approves exchange receipt → GHS credited ─────────
-  it("reviews and approves an exchange receipt via admin endpoint", async () => {
-    const receiptId = "receipt-001";
+  it('reviews and approves an exchange receipt via admin endpoint', async () => {
+    const receiptId = 'receipt-001';
     const reviewResponse = {
       id: receiptId,
-      status: "CREDITED",
+      status: 'CREDITED',
       creditedAt: new Date().toISOString(),
       transaction: {
-        id: "tx-001",
-        status: "SUCCESS",
+        id: 'tx-001',
+        status: 'SUCCESS',
       },
     };
 
@@ -208,22 +209,22 @@ describe("Exchange — Monnify Deposit Flow (e2e simulated)", () => {
 
     const result = await mockExchangeService.reviewManualReceipt(
       receiptId,
-      "admin-001",
-      { status: "APPROVED", reason: "Verified receipt" },
+      'admin-001',
+      { status: 'APPROVED', reason: 'Verified receipt' },
     );
 
     expect(result).toEqual(reviewResponse);
-    expect(result.status).toBe("CREDITED");
+    expect(result.status).toBe('CREDITED');
   });
 
   // ─── Scenario 5: Admin rejects exchange receipt — stores reason, ─────────
   //     no credit applied
-  it("rejects an exchange receipt and stores the rejection reason without crediting", async () => {
-    const receiptId = "receipt-002";
-    const rejectReason = "Receipt image is blurry — unable to verify amount";
+  it('rejects an exchange receipt and stores the rejection reason without crediting', async () => {
+    const receiptId = 'receipt-002';
+    const rejectReason = 'Receipt image is blurry — unable to verify amount';
     const reviewResponse = {
       id: receiptId,
-      status: "REJECTED",
+      status: 'REJECTED',
       reviewReason: rejectReason,
       transaction: null,
     };
@@ -232,54 +233,54 @@ describe("Exchange — Monnify Deposit Flow (e2e simulated)", () => {
 
     const result = await mockExchangeService.reviewManualReceipt(
       receiptId,
-      "admin-001",
-      { status: "REJECTED", reason: rejectReason },
+      'admin-001',
+      { status: 'REJECTED', reason: rejectReason },
     );
 
-    expect(result.status).toBe("REJECTED");
+    expect(result.status).toBe('REJECTED');
     expect(result.reviewReason).toBe(rejectReason);
     // No transaction credited on rejection
     expect(result.transaction).toBeNull();
   });
 
   // ─── Scenario 6: Duplicate exchange receipt review is idempotent ─────────
-  it("prevents duplicate approval of the same exchange receipt", async () => {
-    const receiptId = "receipt-003";
+  it('prevents duplicate approval of the same exchange receipt', async () => {
+    const receiptId = 'receipt-003';
 
     mockExchangeService.reviewManualReceipt
       .mockResolvedValueOnce({
         id: receiptId,
-        status: "CREDITED",
-        transaction: { id: "tx-002", status: "SUCCESS" },
+        status: 'CREDITED',
+        transaction: { id: 'tx-002', status: 'SUCCESS' },
       })
       .mockRejectedValueOnce(
-        new Error("Receipt already reviewed — cannot re-review"),
+        new Error('Receipt already reviewed — cannot re-review'),
       );
 
     const first = await mockExchangeService.reviewManualReceipt(
       receiptId,
-      "admin-001",
-      { status: "APPROVED", reason: "First approval" },
+      'admin-001',
+      { status: 'APPROVED', reason: 'First approval' },
     );
 
-    expect(first.status).toBe("CREDITED");
+    expect(first.status).toBe('CREDITED');
 
     await expect(
-      mockExchangeService.reviewManualReceipt(receiptId, "admin-002", {
-        status: "APPROVED",
-        reason: "Attempted duplicate",
+      mockExchangeService.reviewManualReceipt(receiptId, 'admin-002', {
+        status: 'APPROVED',
+        reason: 'Attempted duplicate',
       }),
-    ).rejects.toThrow("Receipt already reviewed");
+    ).rejects.toThrow('Receipt already reviewed');
   });
 
   // ─── Scenario 7: Full exchange deposit e2e flow ──────────────────────────
-  it("completes the full exchange deposit lifecycle: intent → webhook → review → credit", async () => {
+  it('completes the full exchange deposit lifecycle: intent → webhook → review → credit', async () => {
     // Step 1: User creates exchange deposit intent
     const intent = {
-      id: "intent-001",
-      collectionAccountNumber: "EXCHANGE_COLLECTION_ACC",
-      collectionBankName: "Wema Bank",
-      collectionAccountName: "TrustPay Exchange Collection",
+      id: 'intent-001',
+      collectionAccountNumber: 'EXCHANGE_COLLECTION_ACC',
+      collectionBankName: 'Wema Bank',
+      collectionAccountName: 'TrustPay Exchange Collection',
       expectedAmount: new Decimal(50000),
     };
     mockExchangeService.createMonnifyExchangeDepositIntent.mockResolvedValue(
@@ -287,28 +288,29 @@ describe("Exchange — Monnify Deposit Flow (e2e simulated)", () => {
     );
 
     const createdIntent =
-      await mockExchangeService.createMonnifyExchangeDepositIntent(
-        "user-001",
-        { amount: "50000", sourceCurrency: "NGN", targetCurrency: "GHS" },
-      );
+      await mockExchangeService.createMonnifyExchangeDepositIntent('user-001', {
+        amount: '50000',
+        sourceCurrency: 'NGN',
+        targetCurrency: 'GHS',
+      });
 
     expect(createdIntent.collectionAccountNumber).toBe(
-      "EXCHANGE_COLLECTION_ACC",
+      'EXCHANGE_COLLECTION_ACC',
     );
 
     // Step 2: Monnify webhook arrives — exchange service matches it
     mockExchangeService.processMonnifyExchangeDepositWebhook.mockResolvedValue({
       matched: true,
-      exchangeReceiptId: "receipt-004",
+      exchangeReceiptId: 'receipt-004',
     });
 
     const body = makeExchangeDepositBody({
-      transactionReference: "MNFY-EXCH-FULL-001",
+      transactionReference: 'MNFY-EXCH-FULL-001',
     });
     const req = makeRequest(body);
 
     const webhookResult = await controller.handleMonnifyWebhook(
-      req.headers["monnify-signature"],
+      req.headers['monnify-signature'],
       req as any,
       body,
     );
@@ -318,44 +320,44 @@ describe("Exchange — Monnify Deposit Flow (e2e simulated)", () => {
 
     // Step 3: Admin approves receipt → GHS wallet credited
     mockExchangeService.reviewManualReceipt.mockResolvedValue({
-      id: "receipt-004",
-      status: "CREDITED",
+      id: 'receipt-004',
+      status: 'CREDITED',
       creditedAt: new Date().toISOString(),
-      transaction: { id: "tx-final", status: "SUCCESS" },
+      transaction: { id: 'tx-final', status: 'SUCCESS' },
     });
 
     const review = await mockExchangeService.reviewManualReceipt(
-      "receipt-004",
-      "admin-001",
-      { status: "APPROVED", reason: "Verified" },
+      'receipt-004',
+      'admin-001',
+      { status: 'APPROVED', reason: 'Verified' },
     );
 
-    expect(review.status).toBe("CREDITED");
+    expect(review.status).toBe('CREDITED');
     expect(review.transaction).toBeDefined();
   });
 
   // ─── Scenario 8: Audit log is written on admin action ───────────────────
-  it("writes an audit log entry when admin reviews an exchange receipt", async () => {
+  it('writes an audit log entry when admin reviews an exchange receipt', async () => {
     // Note: Audit logging is handled in ExchangeService.reviewManualReceipt.
     // This test verifies the service is called with the admin ID so it can log.
-    const receiptId = "receipt-005";
-    const adminId = "admin-001";
+    const receiptId = 'receipt-005';
+    const adminId = 'admin-001';
 
     mockExchangeService.reviewManualReceipt.mockResolvedValue({
       id: receiptId,
-      status: "APPROVED",
+      status: 'APPROVED',
     });
 
     await mockExchangeService.reviewManualReceipt(receiptId, adminId, {
-      status: "APPROVED",
-      reason: "Verified exchange deposit",
+      status: 'APPROVED',
+      reason: 'Verified exchange deposit',
     });
 
     expect(mockExchangeService.reviewManualReceipt).toHaveBeenCalledWith(
       receiptId,
       adminId,
       expect.objectContaining({
-        status: "APPROVED",
+        status: 'APPROVED',
         reason: expect.any(String),
       }),
     );
@@ -363,27 +365,27 @@ describe("Exchange — Monnify Deposit Flow (e2e simulated)", () => {
 
   // ─── Scenario 9: Non-PAID status webhook is acknowledged but not ─────────
   //     processed
-  it("acknowledges non-PAID webhook without processing deposit", async () => {
+  it('acknowledges non-PAID webhook without processing deposit', async () => {
     const body = {
-      eventType: "SUCCESSFUL_TRANSACTION",
+      eventType: 'SUCCESSFUL_TRANSACTION',
       eventData: {
-        transactionReference: "MNFY-PENDING-001",
-        paymentReference: "MNFY-PAY-PENDING",
+        transactionReference: 'MNFY-PENDING-001',
+        paymentReference: 'MNFY-PAY-PENDING',
         amountPaid: 10000,
-        currency: "NGN",
-        paymentStatus: "PENDING",
+        currency: 'NGN',
+        paymentStatus: 'PENDING',
         destinationAccountInformation: {
-          accountNumber: "9922334455",
-          accountName: "Test User",
-          bankCode: "035",
-          bankName: "Wema Bank",
+          accountNumber: '9922334455',
+          accountName: 'Test User',
+          bankCode: '035',
+          bankName: 'Wema Bank',
         },
       },
     };
     const req = makeRequest(body);
 
     const result = await controller.handleMonnifyWebhook(
-      req.headers["monnify-signature"],
+      req.headers['monnify-signature'],
       req as any,
       body,
     );
@@ -394,23 +396,23 @@ describe("Exchange — Monnify Deposit Flow (e2e simulated)", () => {
   });
 
   // ─── Scenario 10: Unrecognized event type is acknowledged safely ─────────
-  it("acknowledges unrecognized event types without error", async () => {
+  it('acknowledges unrecognized event types without error', async () => {
     const body = {
-      eventType: "UNKNOWN_EVENT_TYPE",
+      eventType: 'UNKNOWN_EVENT_TYPE',
       eventData: {
-        transactionReference: "MNFY-UNKNOWN-001",
-        paymentStatus: "PAID",
+        transactionReference: 'MNFY-UNKNOWN-001',
+        paymentStatus: 'PAID',
         amountPaid: 10000,
-        currency: "NGN",
+        currency: 'NGN',
         destinationAccountInformation: {
-          accountNumber: "9922334455",
+          accountNumber: '9922334455',
         },
       },
     };
     const req = makeRequest(body);
 
     const result = await controller.handleMonnifyWebhook(
-      req.headers["monnify-signature"],
+      req.headers['monnify-signature'],
       req as any,
       body,
     );
