@@ -3,6 +3,10 @@ import { ReconciliationService } from './reconciliation.service';
 
 describe('ReconciliationService', () => {
   const prisma = {
+    reconciliationRun: {
+      create: jest.fn(),
+      update: jest.fn(),
+    },
     wallet: {
       findMany: jest.fn(),
     },
@@ -12,6 +16,7 @@ describe('ReconciliationService', () => {
   };
   const pinoLogger = {
     info: jest.fn(),
+    warn: jest.fn(),
     error: jest.fn(),
   };
 
@@ -71,6 +76,29 @@ describe('ReconciliationService', () => {
       totalChecked: 1,
       mismatches: [],
     });
+  });
+
+  it('persists a completed reconciliation run when all wallets are in sync', async () => {
+    prisma.reconciliationRun.create.mockResolvedValue({ id: 'run-1' });
+    prisma.ledgerEntry.groupBy.mockResolvedValue([]);
+    prisma.wallet.findMany.mockResolvedValue([]);
+
+    const result = await service.runDailyReconciliation();
+
+    expect(result).toMatchObject({ totalChecked: 0, mismatches: [] });
+    expect(prisma.reconciliationRun.create).toHaveBeenCalledWith({
+      data: { scope: 'WALLET_BALANCES' },
+    });
+    expect(prisma.reconciliationRun.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'run-1' },
+        data: expect.objectContaining({
+          status: 'COMPLETED',
+          checkedCount: 0,
+          mismatchCount: 0,
+        }),
+      }),
+    );
   });
 
   it('reports wallet balance drift using Decimal-formatted values', async () => {
