@@ -46,6 +46,10 @@ describe('ExchangeService', () => {
       update: jest.fn(),
       updateMany: jest.fn(),
     },
+    exchangePayout: {
+      findUnique: jest.fn(),
+      updateMany: jest.fn(),
+    },
     providerEvent: {
       create: jest.fn(),
       findUnique: jest.fn(),
@@ -115,6 +119,39 @@ describe('ExchangeService', () => {
 
   it('should be defined', () => {
     expect(service).toBeDefined();
+  });
+
+  it('rejects a concurrent second mark-sent transition', async () => {
+    mockPrisma.exchangePayout.findUnique.mockResolvedValue({
+      id: 'payout-1',
+      status: 'APPROVED',
+      notificationSent: false,
+      transactionId: 'tx-1',
+      userId: 'user-1',
+      destinationBankName: 'Test Bank',
+      destinationAccountNumber: '****1234',
+      destinationAmount: new Decimal('100.00'),
+      transaction: {
+        reference: 'PAYOUT-1',
+        status: 'PENDING',
+      },
+      user: {
+        id: 'user-1',
+        email: 'user@example.com',
+        phone: '+2348012345678',
+        kycStatus: 'VERIFIED',
+        kycTier: 'TIER_2',
+        isSuspended: false,
+      },
+    });
+    mockPrisma.exchangePayout.updateMany.mockResolvedValue({ count: 0 });
+
+    await expect(
+      service.markPayoutSent('payout-1', 'admin-2', {
+        reason: 'Concurrent duplicate settlement attempt',
+        paymentReceiptUrl: 'https://example.com/receipt',
+      }),
+    ).rejects.toThrow('already marked as sent');
   });
 
   describe('createQuote', () => {

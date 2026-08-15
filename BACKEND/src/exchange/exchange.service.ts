@@ -1656,8 +1656,8 @@ export class ExchangeService {
           notificationSent: payout.notificationSent,
         };
 
-        await tx.exchangePayout.update({
-          where: { id: payout.id },
+        const sentPayout = await tx.exchangePayout.updateMany({
+          where: { id: payout.id, status: 'APPROVED' },
           data: {
             status: 'SENT',
             adminId,
@@ -1666,6 +1666,12 @@ export class ExchangeService {
             sentAt: now,
           },
         });
+
+        if (sentPayout.count !== 1) {
+          throw new BadRequestException(
+            'Payout was already marked as sent or is no longer approved',
+          );
+        }
 
         await tx.transaction.update({
           where: { id: payout.transactionId },
