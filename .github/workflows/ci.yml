@@ -16,6 +16,9 @@ jobs:
       - name: Check production manifests for unsafe defaults
         run: ./scripts/check-production-manifests.sh
 
+      - name: Check repository for committed secrets
+        run: ./scripts/check-secrets.sh
+
   backend-test:
     runs-on: ubuntu-latest
     defaults:
