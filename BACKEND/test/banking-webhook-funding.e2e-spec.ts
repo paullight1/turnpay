@@ -10,6 +10,7 @@ import { ConfigService } from "@nestjs/config";
 import { PinoLogger } from "nestjs-pino";
 import { Decimal } from "@prisma/client/runtime/library";
 import { PrismaService } from "../src/prisma/prisma.service";
+import { WebhookInboxService } from "../src/payments/webhooks/webhook-inbox.service";
 
 describe("Banking — Webhook Wallet Funding (e2e simulated)", () => {
   const mockPaymentService = {
@@ -28,6 +29,10 @@ describe("Banking — Webhook Wallet Funding (e2e simulated)", () => {
 
   const mockExchangeService = {
     processMonnifyExchangeDepositWebhook: jest.fn(),
+  };
+
+  const mockWebhookInbox = {
+    accept: jest.fn(),
   };
 
   const mockConfigService = {
@@ -110,11 +115,16 @@ describe("Banking — Webhook Wallet Funding (e2e simulated)", () => {
     });
     mockPrisma.webhookLog.create.mockResolvedValue({ id: "log-1" });
     mockPrisma.webhookLog.update.mockResolvedValue({ id: "log-1", processed: true });
+    mockWebhookInbox.accept.mockResolvedValue({
+      eventId: "inbox-1",
+      duplicate: false,
+    });
 
     const moduleRef: TestingModule = await Test.createTestingModule({
       controllers: [WebhookController],
       providers: [
         { provide: PaymentService, useValue: mockPaymentService },
+        { provide: WebhookInboxService, useValue: mockWebhookInbox },
         { provide: BankingService, useValue: mockBankingService },
         { provide: ExchangeService, useValue: mockExchangeService },
         { provide: ConfigService, useValue: mockConfigService },
@@ -138,20 +148,12 @@ describe("Banking — Webhook Wallet Funding (e2e simulated)", () => {
     );
 
     expect(result).toEqual({ received: true });
-    expect(
-      mockExchangeService.processMonnifyExchangeDepositWebhook,
-    ).toHaveBeenCalledTimes(1);
-    expect(
-      mockBankingService.processVirtualAccountDeposit,
-    ).toHaveBeenCalledTimes(1);
-    expect(mockBankingService.processVirtualAccountDeposit).toHaveBeenCalledWith(
+    expect(mockWebhookInbox.accept).toHaveBeenCalledTimes(1);
+    expect(mockWebhookInbox.accept).toHaveBeenCalledWith(
       expect.objectContaining({
-        provider: "monnify",
+        provider: "MONNIFY",
         eventType: "SUCCESSFUL_TRANSACTION",
         providerReference: "MNFY-TXN-001",
-        accountNumber: "9922334455",
-        amount: expect.any(Decimal),
-        currency: "NGN",
       }),
     );
   });
@@ -206,9 +208,10 @@ describe("Banking — Webhook Wallet Funding (e2e simulated)", () => {
     );
 
     // Second delivery (replay by Monnify)
-    mockBankingService.processVirtualAccountDeposit.mockRejectedValue(
-      Object.assign(new Error("Duplicate webhook event"), { code: "P2002" }),
-    );
+    mockWebhookInbox.accept.mockResolvedValueOnce({
+      eventId: "inbox-1",
+      duplicate: true,
+    });
 
     // Should not throw — idempotency handled by DB unique constraint
     const result = await controller.handleMonnifyWebhook(
@@ -220,9 +223,7 @@ describe("Banking — Webhook Wallet Funding (e2e simulated)", () => {
     // The first call credits; the second should be caught by the unique
     // constraint and NOT result in a double credit
     expect(result).toEqual({ received: true });
-    expect(
-      mockBankingService.processVirtualAccountDeposit,
-    ).toHaveBeenCalledTimes(2);
+    expect(mockWebhookInbox.accept).toHaveBeenCalledTimes(2);
   });
 
   // ─── Scenario 5: Wrong currency webhook is routed but handled ────────────
@@ -239,13 +240,7 @@ describe("Banking — Webhook Wallet Funding (e2e simulated)", () => {
     );
 
     expect(result).toEqual({ received: true });
-    expect(
-      mockBankingService.processVirtualAccountDeposit,
-    ).toHaveBeenCalledWith(
-      expect.objectContaining({
-        currency: "USD",
-      }),
-    );
+    expect(mockWebhookInbox.accept).toHaveBeenCalledTimes(1);
   });
 
   // ─── Scenario 6: Amount mismatch is forwarded to service for handling ────
@@ -263,12 +258,6 @@ describe("Banking — Webhook Wallet Funding (e2e simulated)", () => {
     );
 
     expect(result).toEqual({ received: true });
-    expect(
-      mockBankingService.processVirtualAccountDeposit,
-    ).toHaveBeenCalledWith(
-      expect.objectContaining({
-        amount: expect.any(Decimal),
-      }),
-    );
+    expect(mockWebhookInbox.accept).toHaveBeenCalledTimes(1);
   });
 });

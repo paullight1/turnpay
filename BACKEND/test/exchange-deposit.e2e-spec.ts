@@ -10,6 +10,7 @@ import { ConfigService } from "@nestjs/config";
 import { PinoLogger } from "nestjs-pino";
 import { Decimal } from "@prisma/client/runtime/library";
 import { PrismaService } from "../src/prisma/prisma.service";
+import { WebhookInboxService } from "../src/payments/webhooks/webhook-inbox.service";
 
 describe("Exchange — Monnify Deposit Flow (e2e simulated)", () => {
   const mockPaymentService = {
@@ -31,6 +32,10 @@ describe("Exchange — Monnify Deposit Flow (e2e simulated)", () => {
     submitManualReceipt: jest.fn(),
     reviewManualReceipt: jest.fn(),
     createMonnifyExchangeDepositIntent: jest.fn(),
+  };
+
+  const mockWebhookInbox = {
+    accept: jest.fn(),
   };
 
   const mockConfigService = {
@@ -104,11 +109,16 @@ describe("Exchange — Monnify Deposit Flow (e2e simulated)", () => {
     mockConfigService.getOrThrow.mockReturnValue(WEBHOOK_SECRET);
     mockPrisma.webhookLog.create.mockResolvedValue({ id: "log-1" });
     mockPrisma.webhookLog.update.mockResolvedValue({ id: "log-1", processed: true });
+    mockWebhookInbox.accept.mockResolvedValue({
+      eventId: "inbox-1",
+      duplicate: false,
+    });
 
     const moduleRef: TestingModule = await Test.createTestingModule({
       controllers: [WebhookController],
       providers: [
         { provide: PaymentService, useValue: mockPaymentService },
+        { provide: WebhookInboxService, useValue: mockWebhookInbox },
         { provide: BankingService, useValue: mockBankingService },
         { provide: ExchangeService, useValue: mockExchangeService },
         { provide: ConfigService, useValue: mockConfigService },
@@ -136,14 +146,8 @@ describe("Exchange — Monnify Deposit Flow (e2e simulated)", () => {
       body,
     );
 
-    expect(result).toEqual({ received: true, routed: "exchange" });
-    expect(
-      mockExchangeService.processMonnifyExchangeDepositWebhook,
-    ).toHaveBeenCalledTimes(1);
-    // Must NOT call standard deposit — exchange handled it
-    expect(
-      mockBankingService.processVirtualAccountDeposit,
-    ).not.toHaveBeenCalled();
+    expect(result).toEqual({ received: true });
+    expect(mockWebhookInbox.accept).toHaveBeenCalledTimes(1);
   });
 
   // ─── Scenario 2: Exchange deposit NOT matched — falls back to banking ───
@@ -165,12 +169,7 @@ describe("Exchange — Monnify Deposit Flow (e2e simulated)", () => {
     );
 
     expect(result).toEqual({ received: true });
-    expect(
-      mockExchangeService.processMonnifyExchangeDepositWebhook,
-    ).toHaveBeenCalledTimes(1);
-    expect(
-      mockBankingService.processVirtualAccountDeposit,
-    ).toHaveBeenCalledTimes(1);
+    expect(mockWebhookInbox.accept).toHaveBeenCalledTimes(1);
   });
 
   // ─── Scenario 3: Exchange deposit GHS credit is atomic —─────────────────
@@ -189,14 +188,7 @@ describe("Exchange — Monnify Deposit Flow (e2e simulated)", () => {
       body,
     );
 
-    // Matched to exchange → only exchange service processes it
-    expect(
-      mockExchangeService.processMonnifyExchangeDepositWebhook,
-    ).toHaveBeenCalledTimes(1);
-    // Banking service must NOT process — prevents double credit
-    expect(
-      mockBankingService.processVirtualAccountDeposit,
-    ).not.toHaveBeenCalled();
+    expect(mockWebhookInbox.accept).toHaveBeenCalledTimes(1);
   });
 
   // ─── Scenario 4: Admin approves exchange receipt → GHS credited ─────────
@@ -321,7 +313,8 @@ describe("Exchange — Monnify Deposit Flow (e2e simulated)", () => {
       body,
     );
 
-    expect(webhookResult).toEqual({ received: true, routed: "exchange" });
+    expect(webhookResult).toEqual({ received: true });
+    expect(mockWebhookInbox.accept).toHaveBeenCalledTimes(1);
 
     // Step 3: Admin approves receipt → GHS wallet credited
     mockExchangeService.reviewManualReceipt.mockResolvedValue({

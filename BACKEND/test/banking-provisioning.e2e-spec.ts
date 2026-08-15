@@ -11,6 +11,7 @@ import { PinoLogger } from "nestjs-pino";
 import { IdempotencyInterceptor } from "../src/common/interceptors/idempotency.interceptor";
 import { JwtAuthGuard } from "../src/auth/guards/jwt-auth.guard";
 import { SupabaseService } from "../src/supabase/supabase.service";
+import { ProvisionVirtualAccountDto } from "../src/banking/dto/banking.dto";
 
 describe("Banking — Virtual Account Provisioning (e2e simulated)", () => {
   const mockBankingService = {
@@ -89,16 +90,16 @@ describe("Banking — Virtual Account Provisioning (e2e simulated)", () => {
       }),
     }) as unknown as ExecutionContext;
 
-  const execute = async (
+  const execute = async <T>(
     context: ExecutionContext,
-    handler: () => Promise<unknown>,
-  ) => {
+    handler: () => Promise<T>,
+  ): Promise<T> => {
     const result = await interceptor.intercept(context, {
       handle: () => from(handler()),
     });
 
     if (isObservable(result)) {
-      return lastValueFrom(result);
+      return lastValueFrom(result) as Promise<T>;
     }
 
     return result;
@@ -157,7 +158,7 @@ describe("Banking — Virtual Account Provisioning (e2e simulated)", () => {
 
   // ─── Scenario 1: Successful virtual account provisioning ─────────────────
   it("provisions a Monnify virtual account for a verified Tier 2 user", async () => {
-    const requestBody = {
+    const requestBody: ProvisionVirtualAccountDto = {
       currency: "NGN",
       provider: "monnify",
       country: "NG",
@@ -188,7 +189,7 @@ describe("Banking — Virtual Account Provisioning (e2e simulated)", () => {
 
   // ─── Scenario 2: Duplicate idempotency key returns same account ──────────
   it("returns the same virtual account when the same Idempotency-Key is reused", async () => {
-    const requestBody = {
+    const requestBody: ProvisionVirtualAccountDto = {
       currency: "NGN",
       provider: "monnify",
       country: "NG",
@@ -238,7 +239,7 @@ describe("Banking — Virtual Account Provisioning (e2e simulated)", () => {
       new Error("KYC verification required to provision a virtual account"),
     );
 
-    const requestBody = {
+    const requestBody: ProvisionVirtualAccountDto = {
       currency: "NGN",
       provider: "monnify",
       country: "NG",
