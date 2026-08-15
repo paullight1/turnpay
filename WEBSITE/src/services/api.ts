@@ -8,7 +8,7 @@ import {
 import {
   clearSupabaseSession as clearPersistedAuthSession,
   readPersistedSupabaseSession,
-  persistSupabaseSession as persistPersistedAuthSession,
+  refreshPersistedSupabaseSession,
 } from "@/lib/supabase-session";
 import type {
   AdminAuditLog,
@@ -75,7 +75,7 @@ function emitAuthSessionUpdated(session: AppSession | null) {
 }
 
 async function getCurrentAuthSession() {
-  const persistedSession = readPersistedSupabaseSession();
+  const persistedSession = await readPersistedSupabaseSession();
   if (persistedSession?.access_token) {
     return persistedSession;
   }
@@ -128,51 +128,6 @@ const processQueue = (error: unknown | null, token: string | null = null) => {
     }
   });
   failedQueue = [];
-};
-
-type RefreshSessionResponse = {
-  session: AppSession;
-};
-
-const refreshSessionWithBackend = async (
-  refreshToken: string,
-  deviceName?: string,
-) => {
-  const supabase = isSupabaseConfigured ? createClient() : null;
-  const { data } = await axios.post<RefreshSessionResponse>(
-    `${API_URL || ""}/api/auth/refresh`,
-    { refreshToken, deviceName },
-    {
-      headers: {
-        "Content-Type": "application/json",
-        "Idempotency-Key": createMoneyAttemptIdempotencyKey("mutation"),
-      },
-      timeout: 30000,
-    },
-  );
-
-  if (!data.session?.access_token || !data.session.refresh_token) {
-    throw new Error("Invalid refresh response");
-  }
-
-  const returnedSession = data.session as AppSession;
-
-  if (returnedSession.authMode === "local" || !supabase) {
-    await persistPersistedAuthSession(returnedSession);
-    emitAuthSessionUpdated(returnedSession);
-    return returnedSession;
-  }
-
-  const { data: sessionData, error } = await supabase.auth.setSession({
-    access_token: returnedSession.access_token,
-    refresh_token: returnedSession.refresh_token,
-  });
-
-  if (error) {
-    throw error;
-  }
-
-  return (sessionData.session ?? returnedSession) as AppSession;
 };
 
 const shouldRefreshForRequest = (url?: string) =>
@@ -234,27 +189,17 @@ apiClient.interceptors.response.use(
       originalRequest._retry = true;
       isRefreshing = true;
 
-      const session = await getCurrentAuthSession();
-
-      if (!session?.refresh_token) {
-        const refreshError = new Error("Missing refresh token");
-        isRefreshing = false;
-        processQueue(refreshError, null);
-        await clearPersistedAuthSession();
-        emitAuthSessionUpdated(null);
-        if (typeof window !== "undefined") {
-          window.location.href = "/login";
-        }
-        return Promise.reject(refreshError);
-      }
-
       try {
-        const refreshedSession = await refreshSessionWithBackend(
-          session.refresh_token,
-          getAuthDeviceName(),
-        );
+        const refreshedSession =
+          (await refreshPersistedSupabaseSession()) as AppSession | null;
+
+        if (!refreshedSession?.access_token) {
+          throw new Error("Unable to refresh session");
+        }
+
         const accessToken = refreshedSession.access_token;
         apiClient.defaults.headers.common.Authorization = `Bearer ${accessToken}`;
+        emitAuthSessionUpdated(refreshedSession);
         processQueue(null, accessToken);
 
         originalRequest.headers.Authorization = `Bearer ${accessToken}`;

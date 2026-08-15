@@ -20,6 +20,10 @@ type TestSession = {
   authMode: "local";
 };
 
+type ClientSession = Omit<TestSession, "refresh_token"> & {
+  refresh_token: "";
+};
+
 type TestProfile = {
   id: string;
   email: string;
@@ -57,6 +61,14 @@ function buildSession(email: string): TestSession {
   };
 }
 
+function toClientSession(session: TestSession): ClientSession {
+  const { refresh_token: _refreshToken, ...clientSession } = session;
+  return {
+    ...clientSession,
+    refresh_token: "",
+  };
+}
+
 function buildProfile(email: string): TestProfile {
   return {
     id: "user-123",
@@ -88,8 +100,10 @@ function encodeSessionCookie(session: TestSession) {
 
 async function installProfileMocks(page: Page, email: string) {
   const session = buildSession(email);
+  const clientSession = toClientSession(session);
   const profile = buildProfile(email);
   const sessions = buildAuthSessions();
+  const csrfToken = "csrf-token-123";
 
   await page.route("**/api/auth/bootstrap", async (route) => {
     expect(route.request().headers().authorization).toBe(
@@ -106,9 +120,33 @@ async function installProfileMocks(page: Page, email: string) {
   });
 
   await page.route("**/api/auth/session", async (route) => {
+    if (route.request().method() === "GET") {
+      await route.fulfill({
+        status: 200,
+        json: {
+          session: clientSession,
+          csrfToken,
+        },
+      });
+      return;
+    }
+
+    if (route.request().method() === "DELETE") {
+      expect(route.request().headers()["x-csrf-token"]).toBe(csrfToken);
+      await route.fulfill({
+        status: 200,
+        json: { success: true },
+      });
+      return;
+    }
+
     await route.fulfill({
       status: 200,
-      json: { ok: true },
+      json: {
+        success: true,
+        session: clientSession,
+        csrfToken,
+      },
     });
   });
 
@@ -206,15 +244,10 @@ test.describe("TrustPay Profile", () => {
         value: cookieValue,
         domain: "127.0.0.1",
         path: "/",
+        httpOnly: true,
+        sameSite: "Lax",
       },
     ]);
-
-    await page.addInitScript((session) => {
-      window.localStorage.setItem(
-        "trustpay.auth.session",
-        JSON.stringify(session),
-      );
-    }, seededSession);
 
     await page.goto("/dashboard/profile");
     await expect(page.getByRole("heading", { name: /^Profile$/i })).toBeVisible({

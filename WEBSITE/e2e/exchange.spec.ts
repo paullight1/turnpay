@@ -20,6 +20,10 @@ type TestSession = {
   authMode: "local";
 };
 
+type ClientSession = Omit<TestSession, "refresh_token"> & {
+  refresh_token: "";
+};
+
 type TestProfile = {
   id: string;
   email: string;
@@ -107,6 +111,14 @@ function buildSession(email: string): TestSession {
   };
 }
 
+function toClientSession(session: TestSession): ClientSession {
+  const { refresh_token: _refreshToken, ...clientSession } = session;
+  return {
+    ...clientSession,
+    refresh_token: "",
+  };
+}
+
 function encodeSessionCookie(session: TestSession) {
   return `base64-${Buffer.from(JSON.stringify(session), "utf8").toString("base64url")}`;
 }
@@ -148,6 +160,7 @@ function buildSeedTransactions(now: string): TestTransaction[] {
 async function installExchangeMocks(page: Page, credentials: typeof TEST_USER) {
   const profile = buildProfile(credentials.email);
   const session = buildSession(credentials.email);
+  const clientSession = toClientSession(session);
   const now = iso();
   const wallets = buildWallets(now);
   const transactions = buildSeedTransactions(now);
@@ -158,6 +171,7 @@ async function installExchangeMocks(page: Page, credentials: typeof TEST_USER) {
   let receiptCount = 0;
   let payoutCount = 0;
   let transactionCount = transactions.length;
+  const csrfToken = "csrf-token-123";
 
   await page.route("**/api/auth/login", async (route) => {
     const body = parseJsonBody<{ email?: string; password?: string }>(route);
@@ -193,15 +207,21 @@ async function installExchangeMocks(page: Page, credentials: typeof TEST_USER) {
     if (route.request().method() === "POST") {
       await route.fulfill({
         status: 200,
-        contentType: "text/html",
-        body: "<!doctype html><html><body>session saved</body></html>",
+        json: {
+          success: true,
+          session: clientSession,
+          csrfToken,
+        },
       });
       return;
     }
 
     await route.fulfill({
       status: 200,
-      json: { ok: true },
+      json: {
+        session: clientSession,
+        csrfToken,
+      },
     });
   });
 
@@ -515,15 +535,10 @@ test.describe("TrustPay Exchange Flow", () => {
         value: cookieValue,
         domain: "127.0.0.1",
         path: "/",
+        httpOnly: true,
+        sameSite: "Lax",
       },
     ]);
-
-    await page.addInitScript((session) => {
-      window.localStorage.setItem(
-        "trustpay.auth.session",
-        JSON.stringify(session),
-      );
-    }, seededSession);
 
     await page.goto("/dashboard/exchange");
     await expect(

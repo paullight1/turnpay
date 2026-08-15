@@ -1,27 +1,23 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { createServerClient } from "@supabase/ssr";
+import {
+  decodeSessionCookie,
+  encodeSessionCookie,
+  getSessionCookieOptions,
+  refreshSessionWithBackend,
+  SESSION_COOKIE_NAME,
+} from "@/lib/server-auth-session";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseAnonKey =
   process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ||
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 const apiBaseUrl = process.env.NEXT_PUBLIC_API_URL;
-const LOCAL_SESSION_COOKIE_NAME = "supabase.auth.token";
 
 const PROTECTED_ROUTES = ["/dashboard"];
 const ADMIN_ROUTES = ["/admin"];
 const AUTH_ROUTES = ["/login", "/register"];
-
-type LocalSessionCookie = {
-  access_token: string;
-};
-
-function decodeBase64Url(value: string) {
-  const normalized = value.replace(/-/g, "+").replace(/_/g, "/");
-  const padding = "=".repeat((4 - (normalized.length % 4)) % 4);
-  return atob(normalized + padding);
-}
 
 // Reads the locally-persisted session cookie ONLY to recover a candidate
 // bearer token. The presence/contents of this cookie are NOT trusted for
@@ -29,21 +25,10 @@ function decodeBase64Url(value: string) {
 // Supabase (getUser) or the backend (/api/auth/bootstrap) before access is
 // granted. A forged cookie therefore grants nothing.
 function readLocalSessionCandidateToken(request: NextRequest) {
-  const cookieValue = request.cookies.get(LOCAL_SESSION_COOKIE_NAME)?.value;
-
-  if (!cookieValue?.startsWith("base64-")) {
-    return null;
-  }
-
-  try {
-    const parsed = JSON.parse(
-      decodeBase64Url(cookieValue.slice("base64-".length)),
-    ) as Partial<LocalSessionCookie>;
-
-    return parsed.access_token ?? null;
-  } catch {
-    return null;
-  }
+  return (
+    decodeSessionCookie(request.cookies.get(SESSION_COOKIE_NAME)?.value)
+      ?.access_token ?? null
+  );
 }
 
 // Verifies a bearer token against the backend, which validates the token
@@ -78,6 +63,32 @@ async function verifyWithBackend(
   } catch {
     return { ok: false };
   }
+}
+
+async function refreshCookieBackedSession(
+  request: NextRequest,
+  response: NextResponse,
+) {
+  const storedSession = decodeSessionCookie(
+    request.cookies.get(SESSION_COOKIE_NAME)?.value,
+  );
+
+  if (!storedSession?.refresh_token) {
+    return null;
+  }
+
+  const refreshedSession = await refreshSessionWithBackend(storedSession, request);
+  if (!refreshedSession?.access_token) {
+    response.cookies.set(SESSION_COOKIE_NAME, "", getSessionCookieOptions(0));
+    return null;
+  }
+
+  response.cookies.set(
+    SESSION_COOKIE_NAME,
+    encodeSessionCookie(refreshedSession),
+    getSessionCookieOptions(),
+  );
+  return refreshedSession.access_token;
 }
 
 export async function proxy(request: NextRequest) {
@@ -147,9 +158,18 @@ export async function proxy(request: NextRequest) {
       return redirectToLogin();
     }
 
-    const result = await verifyWithBackend(candidateToken, request);
+    let result = await verifyWithBackend(candidateToken, request);
     if (!result.ok) {
-      return redirectToLogin();
+      const refreshedToken = await refreshCookieBackedSession(request, response);
+      if (!refreshedToken) {
+        return redirectToLogin();
+      }
+
+      candidateToken = refreshedToken;
+      result = await verifyWithBackend(candidateToken, request);
+      if (!result.ok) {
+        return redirectToLogin();
+      }
     }
     if (result.role !== "ADMIN") {
       return NextResponse.redirect(new URL("/dashboard", request.url));
@@ -165,8 +185,15 @@ export async function proxy(request: NextRequest) {
 
     // Supabase could not verify a session (e.g. backend "local" auth mode).
     // Fall back to verifying the candidate token with the backend.
-    if (candidateToken && (await verifyWithBackend(candidateToken, request)).ok) {
-      return response;
+    if (candidateToken) {
+      if ((await verifyWithBackend(candidateToken, request)).ok) {
+        return response;
+      }
+
+      const refreshedToken = await refreshCookieBackedSession(request, response);
+      if (refreshedToken && (await verifyWithBackend(refreshedToken, request)).ok) {
+        return response;
+      }
     }
 
     return redirectToLogin();

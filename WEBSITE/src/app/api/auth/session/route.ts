@@ -1,16 +1,25 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { z } from "zod";
-
-const SESSION_COOKIE_NAME = "supabase.auth.token";
-const SESSION_COOKIE_MAX_AGE_SECONDS = 30 * 24 * 60 * 60;
-const CHUNK_COUNT = 8;
+import {
+  buildClientSession,
+  CSRF_COOKIE_NAME,
+  decodeSessionCookie,
+  getCsrfCookieOptions,
+  getRequestCookies,
+  getSessionCookieOptions,
+  mintCsrfToken,
+  refreshSessionWithBackend,
+  SESSION_COOKIE_NAME,
+  encodeSessionCookie,
+} from "@/lib/server-auth-session";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseAnonKey =
   process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ||
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 const apiBaseUrl = process.env.NEXT_PUBLIC_API_URL;
+const LEGACY_CHUNK_COUNT = 8;
 
 const authSessionSchema = z.object({
   session: z
@@ -26,29 +35,20 @@ const authSessionSchema = z.object({
     .passthrough(),
 });
 
-function encodeSessionCookie(session: unknown) {
-  const json = JSON.stringify(session);
-  return `base64-${Buffer.from(json, "utf8").toString("base64url")}`;
+function clearSessionCookie(response: NextResponse) {
+  response.cookies.set(SESSION_COOKIE_NAME, "", getSessionCookieOptions(0));
+
+  for (let index = 0; index < LEGACY_CHUNK_COUNT; index += 1) {
+    response.cookies.set(
+      `${SESSION_COOKIE_NAME}.${index}`,
+      "",
+      getSessionCookieOptions(0),
+    );
+  }
 }
 
-function clearSessionCookie(response: NextResponse) {
-  response.cookies.set(SESSION_COOKIE_NAME, "", {
-    path: "/",
-    maxAge: 0,
-    httpOnly: true,
-    secure: true,
-    sameSite: "lax",
-  });
-
-  for (let index = 0; index < CHUNK_COUNT; index += 1) {
-    response.cookies.set(`${SESSION_COOKIE_NAME}.${index}`, "", {
-      path: "/",
-      maxAge: 0,
-      httpOnly: true,
-      secure: true,
-      sameSite: "lax",
-    });
-  }
+function clearCsrfCookie(response: NextResponse) {
+  response.cookies.set(CSRF_COOKIE_NAME, "", getCsrfCookieOptions(0));
 }
 
 // Rejects cross-site requests to prevent CSRF session fixation. Same-origin
@@ -62,8 +62,6 @@ function isSameOrigin(request: Request) {
 
   const origin = request.headers.get("origin");
   if (!origin) {
-    // No Origin header (e.g. same-origin GET-like POST from older browsers).
-    // Sec-Fetch-Site is the primary control above; treat absence as same-origin.
     return true;
   }
 
@@ -72,6 +70,19 @@ function isSameOrigin(request: Request) {
   } catch {
     return false;
   }
+}
+
+function hasValidCsrfToken(request: Request) {
+  const cookies = getRequestCookies(request);
+  const cookieToken = cookies[CSRF_COOKIE_NAME];
+  const headerToken = request.headers.get("x-csrf-token");
+
+  return Boolean(cookieToken && headerToken && cookieToken === headerToken);
+}
+
+function readStoredSession(request: Request) {
+  const cookies = getRequestCookies(request);
+  return decodeSessionCookie(cookies[SESSION_COOKIE_NAME]);
 }
 
 // Verifies the submitted access token before we mint a long-lived cookie so we
@@ -112,8 +123,6 @@ export async function POST(request: Request) {
   }
 
   const contentType = request.headers.get("content-type") ?? "";
-  // The legacy hidden-iframe form POST path has been removed to close a CSRF
-  // session-fixation vector. Only same-origin JSON is accepted.
   if (!contentType.includes("application/json")) {
     return NextResponse.json(
       { message: "Unsupported content type" },
@@ -139,41 +148,90 @@ export async function POST(request: Request) {
     );
   }
 
-  const response = NextResponse.json({ success: true });
+  const csrfToken = getRequestCookies(request)[CSRF_COOKIE_NAME] || mintCsrfToken();
+  const response = NextResponse.json({
+    success: true,
+    session: buildClientSession(parsed.data.session),
+    csrfToken,
+  });
   response.cookies.set(
     SESSION_COOKIE_NAME,
     encodeSessionCookie(parsed.data.session),
-    {
-      path: "/",
-      maxAge: SESSION_COOKIE_MAX_AGE_SECONDS,
-      httpOnly: true,
-      secure: true,
-      sameSite: "lax",
-    },
+    getSessionCookieOptions(),
   );
-
-  for (let index = 0; index < CHUNK_COUNT; index += 1) {
-    response.cookies.set(`${SESSION_COOKIE_NAME}.${index}`, "", {
-      path: "/",
-      maxAge: 0,
-      httpOnly: true,
-      secure: true,
-      sameSite: "lax",
-    });
+  for (let index = 0; index < LEGACY_CHUNK_COUNT; index += 1) {
+    response.cookies.set(
+      `${SESSION_COOKIE_NAME}.${index}`,
+      "",
+      getSessionCookieOptions(0),
+    );
   }
-
+  response.cookies.set(CSRF_COOKIE_NAME, csrfToken, getCsrfCookieOptions());
   return response;
 }
 
-export async function DELETE() {
+export async function PUT(request: Request) {
+  if (!isSameOrigin(request) || !hasValidCsrfToken(request)) {
+    return NextResponse.json({ message: "Forbidden" }, { status: 403 });
+  }
+
+  const storedSession = readStoredSession(request);
+  if (!storedSession?.refresh_token) {
+    const response = NextResponse.json({ message: "Unauthorized" }, { status: 401 });
+    clearSessionCookie(response);
+    clearCsrfCookie(response);
+    return response;
+  }
+
+  const refreshedSession = await refreshSessionWithBackend(storedSession, request);
+  if (!refreshedSession) {
+    const response = NextResponse.json({ message: "Unauthorized" }, { status: 401 });
+    clearSessionCookie(response);
+    clearCsrfCookie(response);
+    return response;
+  }
+
+  const csrfToken = getRequestCookies(request)[CSRF_COOKIE_NAME] || mintCsrfToken();
+  const response = NextResponse.json({
+    success: true,
+    session: buildClientSession(refreshedSession),
+    csrfToken,
+  });
+  response.cookies.set(
+    SESSION_COOKIE_NAME,
+    encodeSessionCookie(refreshedSession),
+    getSessionCookieOptions(),
+  );
+  for (let index = 0; index < LEGACY_CHUNK_COUNT; index += 1) {
+    response.cookies.set(
+      `${SESSION_COOKIE_NAME}.${index}`,
+      "",
+      getSessionCookieOptions(0),
+    );
+  }
+  response.cookies.set(CSRF_COOKIE_NAME, csrfToken, getCsrfCookieOptions());
+  return response;
+}
+
+export async function DELETE(request: Request) {
+  if (!isSameOrigin(request) || !hasValidCsrfToken(request)) {
+    return NextResponse.json({ message: "Forbidden" }, { status: 403 });
+  }
+
   const response = NextResponse.json({ success: true });
   clearSessionCookie(response);
+  clearCsrfCookie(response);
   return response;
 }
 
 export async function GET(request: Request) {
-  const cookieHeader = request.headers.get("cookie") ?? "";
-  const hasSessionCookie = cookieHeader.includes(`${SESSION_COOKIE_NAME}=`);
+  const storedSession = readStoredSession(request);
+  const csrfToken = getRequestCookies(request)[CSRF_COOKIE_NAME] || mintCsrfToken();
+  const response = NextResponse.json({
+    session: storedSession ? buildClientSession(storedSession) : null,
+    csrfToken,
+  });
 
-  return NextResponse.json({ hasSessionCookie });
+  response.cookies.set(CSRF_COOKIE_NAME, csrfToken, getCsrfCookieOptions());
+  return response;
 }

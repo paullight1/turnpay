@@ -20,7 +20,7 @@ export function createClient() {
     auth: {
       autoRefreshToken: false,
       detectSessionInUrl: true,
-      persistSession: true,
+      persistSession: false,
     },
   });
 }
