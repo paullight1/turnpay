@@ -49,6 +49,7 @@ pg_restore --list "$backup_file" >/dev/null || fail 'backup archive is invalid'
 
 printf '%s\n' 'Restoring into the disposable target...'
 pg_restore \
+  --exit-on-error \
   --clean \
   --if-exists \
   --no-owner \
