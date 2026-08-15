@@ -136,6 +136,7 @@ describe('ExchangeService', () => {
     mockPrisma.exchangePayout.findUnique.mockResolvedValue({
       id: 'payout-1',
       status: 'APPROVED',
+      adminId: 'admin-1',
       notificationSent: false,
       transactionId: 'tx-1',
       userId: 'user-1',
@@ -163,6 +164,39 @@ describe('ExchangeService', () => {
         paymentReceiptUrl: 'https://example.com/receipt',
       }),
     ).rejects.toThrow('already marked as sent');
+  });
+
+  it('requires a distinct admin to settle an approved payout', async () => {
+    mockPrisma.exchangePayout.findUnique.mockResolvedValue({
+      id: 'payout-1',
+      status: 'APPROVED',
+      adminId: 'admin-1',
+      notificationSent: false,
+      transactionId: 'tx-1',
+      userId: 'user-1',
+      destinationBankName: 'Test Bank',
+      destinationAccountNumber: '****1234',
+      destinationAmount: new Decimal('100.00'),
+      transaction: {
+        reference: 'PAYOUT-1',
+        status: 'PENDING',
+      },
+      user: {
+        id: 'user-1',
+        email: 'user@example.com',
+        phone: '+2348012345678',
+        kycStatus: 'VERIFIED',
+        kycTier: 'TIER_2',
+        isSuspended: false,
+      },
+    });
+
+    await expect(
+      service.markPayoutSent('payout-1', 'admin-1', {
+        reason: 'Attempted same-admin settlement',
+        paymentReceiptUrl: 'https://example.com/receipt',
+      }),
+    ).rejects.toThrow('different admin');
   });
 
   it('rejects a concurrent second rate-override review', async () => {

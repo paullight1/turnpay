@@ -6,6 +6,7 @@
 - Integrated: retry-safe webhook inbox, asynchronous webhook processing, strict webhook DTOs, atomic OTP/PIN throttling, HttpOnly web session migration with CSRF, mobile cleartext/release-signing gates, hardened Docker/Render/CI manifests.
 - Verification: backend build/typecheck/lint pass; 33 unit suites / 262 tests and 6 e2e suites / 41 tests pass; focused reconciliation/webhook/auth/PIN/rate-approval tests pass; website lint/build and production-manifest/secret checks pass.
 - Admin controls: payout settlement transitions and rate-override approval are now conditional/transactional against concurrent duplicate requests, with focused regression coverage.
+- Admin controls: payout settlement now requires a distinct admin from the approver and retains the approving actor for auditability; same-admin settlement is covered by a regression test.
 - Current audit gate: backend and website production dependency audits both report zero vulnerabilities after lockfile/framework remediation.
 - Reconciliation: migration 025 persists scheduled/admin runs, mismatch details, statuses, and admin run history; the CI drift check now requires an explicit PostgreSQL shadow database.
 - External gates: provider credentials/KYB/webhook registration, production secrets, paid hosting, backups, and Flutter toolchain require operator/environment access.

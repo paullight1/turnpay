@@ -1651,6 +1651,18 @@ export class ExchangeService {
           );
         }
 
+        if (!payout.adminId) {
+          throw new BadRequestException(
+            'Payout approval actor is missing; resubmit the approval before settlement',
+          );
+        }
+
+        if (payout.adminId === adminId) {
+          throw new BadRequestException(
+            'Payout settlement requires a different admin from the approver',
+          );
+        }
+
         const before = {
           status: payout.status,
           notificationSent: payout.notificationSent,
@@ -1660,7 +1672,6 @@ export class ExchangeService {
           where: { id: payout.id, status: 'APPROVED' },
           data: {
             status: 'SENT',
-            adminId,
             adminPaymentReceipt: dto.paymentReceiptUrl,
             notificationSent: true,
             sentAt: now,
@@ -1694,6 +1705,7 @@ export class ExchangeService {
               sentAt: now,
             },
             metadata: {
+              approvalAdminId: payout.adminId,
               destinationBankName: payout.destinationBankName,
               destinationAccountNumber: payout.destinationAccountNumber,
               destinationAmount: new Decimal(payout.destinationAmount).toFixed(
