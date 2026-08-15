@@ -10,3 +10,4 @@
 - Current audit gate: backend and website production dependency audits both report zero vulnerabilities after lockfile/framework remediation.
 - Reconciliation: migration 025 persists scheduled/admin runs, mismatch details, statuses, and admin run history; the CI drift check now requires an explicit PostgreSQL shadow database.
 - External gates: provider credentials/KYB/webhook registration, production secrets, paid hosting, backups, and Flutter toolchain require operator/environment access.
+- Operations: CI now creates a disposable PostgreSQL restore target and runs a fail-closed backup/restore verification script; off-site encryption, retention, and a real production restore drill remain operator evidence.

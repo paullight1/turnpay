@@ -85,6 +85,15 @@ jobs:
         env:
           DATABASE_URL: postgresql://trustpay:trustpay_secret@localhost:5432/trustpay_test?schema=public
 
+      - name: Create disposable restore-drill database
+        run: PGPASSWORD=trustpay_secret psql -h localhost -U trustpay -d postgres -c "CREATE DATABASE trustpay_restore"
+
+      - name: Verify database backup restore
+        run: ./scripts/verify-backup-restore.sh
+        env:
+          DATABASE_URL: postgresql://trustpay:trustpay_secret@localhost:5432/trustpay_test?schema=public
+          RESTORE_DATABASE_URL: postgresql://trustpay:trustpay_secret@localhost:5432/trustpay_restore?schema=public
+
       - name: Validate production config guard
         run: ./scripts/validate-production-config.sh true
         env:

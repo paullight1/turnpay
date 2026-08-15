@@ -15,6 +15,7 @@ Infrastructure/DevOps lead and incident commander.
 - [ ] Configure structured logs, error tracking, metrics, traces, uptime checks, provider-health alerts, webhook-failure alerts, and reconciliation alerts.
 - [ ] Enable encrypted automated database backups and define retention, RPO, and RTO targets.
 - [ ] Perform a restore to a clean environment; verify users, wallets, ledger entries, audit logs, webhook evidence, and migrations.
+- [ ] Keep the CI restore-drill gate green; it exercises `BACKEND/scripts/verify-backup-restore.sh` against a disposable PostgreSQL database.
 - [ ] Test Redis loss, database failover, provider timeout, webhook backlog, bad deployment, and secret rotation.
 - [ ] Write incident runbooks for payment outage, suspected fraud, data leak, reconciliation mismatch, and rollback.
 - [ ] Assign on-call coverage and perform a tabletop incident exercise before launch.
