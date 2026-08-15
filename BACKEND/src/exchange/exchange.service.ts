@@ -2453,60 +2453,71 @@ export class ExchangeService {
     adminId: string,
     dto: { status: 'APPROVED' | 'REJECTED'; reason: string },
   ) {
-    const override = await this.prisma.rateOverride.findUnique({
-      where: { id: overrideId },
-    });
-
-    if (!override) {
-      throw new NotFoundException('Rate override request not found');
-    }
-
-    if (override.status !== 'PENDING_APPROVAL') {
-      throw new BadRequestException('Rate override is not pending approval');
-    }
-
-    if (override.requestedById === adminId) {
-      throw new BadRequestException(
-        'Cannot approve your own rate override request',
-      );
-    }
-
+    const approved = dto.status === 'APPROVED';
     const now = new Date();
-
-    if (dto.status === 'APPROVED') {
-      await this.rateService.setManualRate(
-        override.fromCurrency,
-        override.toCurrency,
-        override.proposedRate.toNumber(),
-        override.proposedMarkup.toNumber(),
-        override.requestedById,
-        override.reason,
-      );
-
-      await this.prisma.rateOverride.update({
+    const cacheRefresh = await this.prisma.$transaction(async (tx) => {
+      const override = await tx.rateOverride.findUnique({
         where: { id: overrideId },
+      });
+
+      if (!override) {
+        throw new NotFoundException('Rate override request not found');
+      }
+
+      if (override.status !== 'PENDING_APPROVAL') {
+        throw new BadRequestException('Rate override is not pending approval');
+      }
+
+      if (override.requestedById === adminId) {
+        throw new BadRequestException(
+          'Cannot approve your own rate override request',
+        );
+      }
+
+      if (approved) {
+        await this.rateService.setManualRate(
+          override.fromCurrency,
+          override.toCurrency,
+          override.proposedRate.toNumber(),
+          override.proposedMarkup.toNumber(),
+          undefined,
+          undefined,
+          tx,
+          { refreshCache: false },
+        );
+      }
+
+      const updated = await tx.rateOverride.updateMany({
+        where: { id: overrideId, status: 'PENDING_APPROVAL' },
         data: {
-          status: 'APPROVED',
+          status: approved ? 'APPROVED' : 'REJECTED',
           approvedById: adminId,
           reviewReason: dto.reason,
           reviewedAt: now,
         },
       });
 
-      await this.prisma.auditLog.create({
+      if (updated.count !== 1) {
+        throw new BadRequestException('Rate override was already reviewed');
+      }
+
+      await tx.auditLog.create({
         data: {
           adminId,
-          action: 'RATE_OVERRIDE_APPROVED',
+          action: approved
+            ? 'RATE_OVERRIDE_APPROVED'
+            : 'RATE_OVERRIDE_REJECTED',
           targetType: 'RateOverride',
           targetId: overrideId,
           reason: dto.reason,
           before: {
             status: 'PENDING_APPROVAL',
             proposedRate: override.proposedRate.toNumber(),
+            proposedMarkup: override.proposedMarkup.toNumber(),
             deviationPercent: override.deviationPercent.toNumber(),
           },
           after: {
-            status: 'APPROVED',
+            status: approved ? 'APPROVED' : 'REJECTED',
             approvedBy: adminId,
             reviewedAt: now,
           },
@@ -2518,50 +2529,31 @@ export class ExchangeService {
         },
       });
 
-      this.logger.info(
-        { adminId, overrideId, requestedBy: override.requestedById },
-        'Rate override approved',
-      );
-    } else {
-      await this.prisma.rateOverride.update({
-        where: { id: overrideId },
-        data: {
-          status: 'REJECTED',
-          approvedById: adminId,
-          reviewReason: dto.reason,
-          reviewedAt: now,
-        },
-      });
+      if (approved) {
+        return {
+          from: override.fromCurrency,
+          to: override.toCurrency,
+          rate: override.proposedRate.toNumber(),
+          markup: override.proposedMarkup.toNumber(),
+        };
+      }
 
-      await this.prisma.auditLog.create({
-        data: {
-          adminId,
-          action: 'RATE_OVERRIDE_REJECTED',
-          targetType: 'RateOverride',
-          targetId: overrideId,
-          reason: dto.reason,
-          before: {
-            status: 'PENDING_APPROVAL',
-            proposedRate: override.proposedRate.toNumber(),
-          },
-          after: {
-            status: 'REJECTED',
-            approvedBy: adminId,
-            reviewedAt: now,
-          },
-          metadata: {
-            requestedBy: override.requestedById,
-            from: override.fromCurrency,
-            to: override.toCurrency,
-          },
-        },
-      });
+      return null;
+    });
 
-      this.logger.info(
-        { adminId, overrideId, requestedBy: override.requestedById },
-        'Rate override rejected',
+    if (cacheRefresh) {
+      await this.rateService.refreshRateCache(
+        cacheRefresh.from,
+        cacheRefresh.to,
+        cacheRefresh.rate,
+        cacheRefresh.markup,
       );
     }
+
+    this.logger.info(
+      { adminId, overrideId, status: dto.status },
+      `Rate override ${approved ? 'approved' : 'rejected'}`,
+    );
 
     return this.prisma.rateOverride.findUnique({
       where: { id: overrideId },

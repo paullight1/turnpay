@@ -7,6 +7,7 @@ import { HttpService } from '@nestjs/axios';
 import { firstValueFrom } from 'rxjs';
 import { AxiosResponse } from 'axios';
 import { PinoLogger } from 'nestjs-pino';
+import { Prisma } from '@prisma/client';
 
 interface FxRateResponse {
   result?: string;
@@ -155,11 +156,11 @@ export class RateService implements OnModuleInit {
     markup: number,
     adminId?: string,
     reason?: string,
+    database: PrismaService | Prisma.TransactionClient = this.prisma,
+    options: { refreshCache?: boolean } = {},
   ): Promise<void> {
-    const key = `${from}_${to}`;
-
     // Get old rate for audit
-    const oldRate = await this.prisma.rate.findUnique({
+    const oldRate = await database.rate.findUnique({
       where: { from_to: { from, to } },
     });
 
@@ -171,7 +172,7 @@ export class RateService implements OnModuleInit {
         }
       : null;
 
-    await this.prisma.rate.upsert({
+    await database.rate.upsert({
       where: {
         from_to: { from, to },
       },
@@ -185,18 +186,13 @@ export class RateService implements OnModuleInit {
       },
     });
 
-    // Update caches
-    const cached: CachedRate = {
-      rate,
-      markup,
-      fetchedAt: Date.now(),
-    };
-    this.memoryCache.set(key, cached);
-    await this.saveToRedis(key, cached);
+    if (options.refreshCache !== false) {
+      await this.refreshRateCache(from, to, rate, markup);
+    }
 
     // Write audit log
     if (adminId) {
-      await this.prisma.auditLog.create({
+      await database.auditLog.create({
         data: {
           adminId,
           action: 'FX_RATE_OVERRIDE',
@@ -220,6 +216,21 @@ export class RateService implements OnModuleInit {
       { from, to, rate, markup, adminId },
       'Manual rate set by admin',
     );
+  }
+
+  async refreshRateCache(
+    from: string,
+    to: string,
+    rate: number,
+    markup: number,
+  ): Promise<void> {
+    const cached: CachedRate = {
+      rate,
+      markup,
+      fetchedAt: Date.now(),
+    };
+    this.memoryCache.set(`${from}_${to}`, cached);
+    await this.saveToRedis(`${from}_${to}`, cached);
   }
 
   /**

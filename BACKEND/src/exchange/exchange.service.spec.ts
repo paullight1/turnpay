@@ -56,6 +56,15 @@ describe('ExchangeService', () => {
       findUniqueOrThrow: jest.fn(),
       update: jest.fn(),
     },
+    rate: {
+      findUnique: jest.fn(),
+      upsert: jest.fn(),
+    },
+    rateOverride: {
+      findUnique: jest.fn(),
+      findMany: jest.fn(),
+      updateMany: jest.fn(),
+    },
     auditLog: {
       create: jest.fn(),
     },
@@ -76,6 +85,8 @@ describe('ExchangeService', () => {
 
   const mockRateService = {
     getRate: jest.fn().mockResolvedValue({ rate: 3.1746, markup: 2.5 }),
+    setManualRate: jest.fn(),
+    refreshRateCache: jest.fn(),
   };
 
   const mockPinoLogger = {
@@ -152,6 +163,28 @@ describe('ExchangeService', () => {
         paymentReceiptUrl: 'https://example.com/receipt',
       }),
     ).rejects.toThrow('already marked as sent');
+  });
+
+  it('rejects a concurrent second rate-override review', async () => {
+    mockPrisma.rateOverride.findUnique.mockResolvedValue({
+      id: 'override-1',
+      status: 'PENDING_APPROVAL',
+      requestedById: 'admin-1',
+      fromCurrency: 'NGN',
+      toCurrency: 'GHS',
+      proposedRate: new Decimal('0.03'),
+      proposedMarkup: new Decimal('2.50'),
+      deviationPercent: new Decimal('10.00'),
+      reason: 'Correct a verified market movement',
+    });
+    mockPrisma.rateOverride.updateMany.mockResolvedValue({ count: 0 });
+
+    await expect(
+      service.reviewRateOverride('override-1', 'admin-2', {
+        status: 'APPROVED',
+        reason: 'Second reviewer race test',
+      }),
+    ).rejects.toThrow('already reviewed');
   });
 
   describe('createQuote', () => {
