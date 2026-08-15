@@ -7,7 +7,7 @@ services:
       - '5432'
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-trustpay}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
       POSTGRES_DB: ${POSTGRES_DB:-trustpay_db}
     volumes:
       - postgres_data:/var/lib/postgresql/data
@@ -25,9 +25,9 @@ services:
     restart: unless-stopped
     expose:
       - '6379'
-    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD}
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
     environment:
-      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
     volumes:
       - redis_data:/data
     healthcheck:
@@ -49,10 +49,10 @@ services:
     environment:
       NODE_ENV: production
       PORT: 3000
-      DATABASE_URL: postgresql://${POSTGRES_USER:-trustpay}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-trustpay_db}?schema=public
+      DATABASE_URL: postgresql://${POSTGRES_USER:-trustpay}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:-trustpay_db}?schema=public
       REDIS_HOST: redis
       REDIS_PORT: 6379
-      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
       WEB_URL: ${WEB_URL}
       ADMIN_URL: ${ADMIN_URL}
       SUPABASE_URL: ${SUPABASE_URL}
