@@ -50,10 +50,9 @@ function buildSession(email: string): TestSession {
 }
 
 function toClientSession(session: TestSession): ClientSession {
-  const { refresh_token: _refreshToken, ...clientSession } = session;
   return {
-    ...clientSession,
-    refresh_token: "",
+    ...session,
+    refresh_token: "" as const,
   };
 }
 

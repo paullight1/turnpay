@@ -209,6 +209,9 @@ apiClient.interceptors.response.use(
         await clearPersistedAuthSession();
         emitAuthSessionUpdated(null);
         if (typeof window !== "undefined") {
+          // The interceptor runs outside React, so a hard redirect is required
+          // after the server invalidates the session.
+          // eslint-disable-next-line @next/next/no-location-assign-relative-destination
           window.location.href = "/login";
         }
         return Promise.reject(refreshError);
