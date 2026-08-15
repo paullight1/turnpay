@@ -1,4 +1,4 @@
-import { TooManyRequestsException } from "@nestjs/common";
+import { HttpException, HttpStatus } from "@nestjs/common";
 import { OtpService } from "./otp.service";
 
 type StoredValue = {
@@ -76,11 +76,11 @@ describe("OtpService", () => {
 
     expect(attempts.filter((attempt) => attempt.status === "fulfilled")).toHaveLength(3);
     expect(attempts.filter((attempt) => attempt.status === "rejected")).toHaveLength(1);
-    expect(
-      attempts.find((attempt) => attempt.status === "rejected"),
-    ).toMatchObject({
-      reason: expect.any(TooManyRequestsException),
-    });
+    const rejected = attempts.find((attempt) => attempt.status === "rejected");
+    expect(rejected?.reason).toBeInstanceOf(HttpException);
+    expect((rejected?.reason as HttpException).getStatus()).toBe(
+      HttpStatus.TOO_MANY_REQUESTS,
+    );
   });
 
   it("rejects a fourth password reset request in the same hour for one normalized email", async () => {
@@ -95,11 +95,11 @@ describe("OtpService", () => {
 
     expect(attempts.filter((attempt) => attempt.status === "fulfilled")).toHaveLength(3);
     expect(attempts.filter((attempt) => attempt.status === "rejected")).toHaveLength(1);
-    expect(
-      attempts.find((attempt) => attempt.status === "rejected"),
-    ).toMatchObject({
-      reason: expect.any(TooManyRequestsException),
-    });
+    const rejected = attempts.find((attempt) => attempt.status === "rejected");
+    expect(rejected?.reason).toBeInstanceOf(HttpException);
+    expect((rejected?.reason as HttpException).getStatus()).toBe(
+      HttpStatus.TOO_MANY_REQUESTS,
+    );
   });
 
   it("does not let concurrent invalid OTP submissions preserve a usable code", async () => {

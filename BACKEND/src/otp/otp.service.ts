@@ -1,4 +1,4 @@
-import { Injectable, TooManyRequestsException } from "@nestjs/common";
+import { HttpException, HttpStatus, Injectable } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { RedisService } from "../redis/redis.service";
 import { createHash, randomInt } from "crypto";
@@ -190,7 +190,7 @@ export class OtpService {
         );
 
     if (total > limit) {
-      throw new TooManyRequestsException(message);
+      throw new HttpException(message, HttpStatus.TOO_MANY_REQUESTS);
     }
   }
 
