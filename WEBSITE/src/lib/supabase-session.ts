@@ -43,7 +43,10 @@ function isPersistedSession(candidate: unknown): candidate is PersistedSession {
 }
 
 function isSessionExpiringSoon(session: PersistedSession) {
-  return session.expires_at <= Math.floor(Date.now() / 1000) + SESSION_REFRESH_BUFFER_SECONDS;
+  return (
+    (session.expires_at ?? 0) <=
+    Math.floor(Date.now() / 1000) + SESSION_REFRESH_BUFFER_SECONDS
+  );
 }
 
 async function parseSessionRouteResponse(response: Response) {
