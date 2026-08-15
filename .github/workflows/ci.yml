@@ -68,8 +68,14 @@ jobs:
         env:
           DATABASE_URL: postgresql://trustpay:trustpay_secret@localhost:5432/trustpay_test?schema=public
 
+      - name: Create Prisma shadow database
+        run: PGPASSWORD=trustpay_secret psql -h localhost -U trustpay -d postgres -c "CREATE DATABASE trustpay_shadow"
+
       - name: Validate Prisma schema and migration drift
         run: ./scripts/check-migration-drift.sh
+        env:
+          DATABASE_URL: postgresql://trustpay:trustpay_secret@localhost:5432/trustpay_test?schema=public
+          SHADOW_DATABASE_URL: postgresql://trustpay:trustpay_secret@localhost:5432/trustpay_shadow?schema=public
 
       - name: Deploy database migrations
         run: npm run db:deploy
