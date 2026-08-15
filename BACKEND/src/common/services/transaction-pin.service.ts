@@ -23,9 +23,35 @@ const MAX_FAILED_ATTEMPTS = 5;
 // of the day and only a successful verify (or PIN reset) clears it.
 const MAX_DAILY_FAILED_ATTEMPTS = 15;
 const DAILY_WINDOW_SECONDS = 60 * 60 * 24;
+const RECORD_PIN_FAILURE_SCRIPT = `
+local dailyCount = redis.call("INCR", KEYS[2])
+local dailyTtlMs = redis.call("PTTL", KEYS[2])
+if dailyTtlMs <= 0 then
+  redis.call("PEXPIRE", KEYS[2], tonumber(ARGV[3]))
+  dailyTtlMs = tonumber(ARGV[3])
+end
+if dailyCount >= tonumber(ARGV[2]) then
+  redis.call("SET", KEYS[3], "1", "PX", dailyTtlMs)
+  redis.call("DEL", KEYS[1])
+  return { 0, dailyCount, 1, dailyTtlMs }
+end
+local failureCount = redis.call("INCR", KEYS[1])
+local failureTtlMs = redis.call("PTTL", KEYS[1])
+if failureTtlMs <= 0 then
+  redis.call("PEXPIRE", KEYS[1], tonumber(ARGV[4]))
+  failureTtlMs = tonumber(ARGV[4])
+end
+if failureCount >= tonumber(ARGV[1]) then
+  redis.call("SET", KEYS[3], "1", "PX", tonumber(ARGV[5]))
+  redis.call("DEL", KEYS[1])
+  return { 0, dailyCount, 1, tonumber(ARGV[5]) }
+end
+return { failureCount, dailyCount, 0, failureTtlMs }
+`;
 
 @Injectable()
 export class TransactionPinService {
+  private readonly localLocks = new Map<string, Promise<void>>();
   constructor(
     private readonly redis: RedisService,
     private readonly configService: ConfigService,
@@ -110,7 +136,13 @@ export class TransactionPinService {
   }
 
   isRequired() {
-    return this.configService.get<boolean>("TRANSACTION_PIN_REQUIRED", false);
+    // The Joi schema in app.module defaults this to true in production; the
+    // fallback here mirrors that so a bypassed/absent validation layer can
+    // never silently disable PIN checks in prod.
+    return this.configService.get<boolean>(
+      "TRANSACTION_PIN_REQUIRED",
+      this.configService.get<string>("NODE_ENV") === "production",
+    );
   }
 
   private assertValidPin(pin: string) {
@@ -120,16 +152,37 @@ export class TransactionPinService {
   }
 
   private async recordFailure(userId: string) {
+    if (this.redis.isRedisAvailable()) {
+      await this.recordFailureWithRedis(userId);
+      return;
+    }
+
+    await this.withLocalLock(`transaction-pin:${userId}:failure`, async () => {
+      await this.recordFailureWithLocalState(userId);
+    });
+  }
+
+  private async recordFailureWithRedis(userId: string) {
+    await this.redis.getClient().eval(
+      RECORD_PIN_FAILURE_SCRIPT,
+      3,
+      this.failuresKey(userId),
+      this.dailyFailuresKey(userId),
+      this.lockKey(userId),
+      String(MAX_FAILED_ATTEMPTS),
+      String(MAX_DAILY_FAILED_ATTEMPTS),
+      String(DAILY_WINDOW_SECONDS * 1000),
+      String(LOCK_SECONDS * 1000),
+      String(LOCK_SECONDS * 1000),
+    );
+  }
+
+  private async recordFailureWithLocalState(userId: string) {
     // Daily hard cap — survives the short rolling window so an attacker cannot
     // reset the counter simply by pausing 15 minutes between bursts.
     const dailyKey = this.dailyFailuresKey(userId);
-    const dailyCount =
-      Number((await this.redis.get(dailyKey)) || "0") + 1;
-    await this.redis.set(
-      dailyKey,
-      String(dailyCount),
-      DAILY_WINDOW_SECONDS,
-    );
+    const dailyCount = Number((await this.redis.get(dailyKey)) || "0") + 1;
+    await this.redis.set(dailyKey, String(dailyCount), DAILY_WINDOW_SECONDS);
 
     if (dailyCount >= MAX_DAILY_FAILED_ATTEMPTS) {
       await this.redis.set(this.lockKey(userId), "1", DAILY_WINDOW_SECONDS);
@@ -198,5 +251,26 @@ export class TransactionPinService {
 
   private resetHoldKey(userId: string) {
     return `transaction-pin-reset-hold:${userId}`;
+  }
+
+  private async withLocalLock<T>(key: string, work: () => Promise<T>) {
+    const previous = this.localLocks.get(key) ?? Promise.resolve();
+    let release: (() => void) | undefined;
+    const current = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const chain = previous.then(() => current);
+    this.localLocks.set(key, chain);
+
+    await previous;
+
+    try {
+      return await work();
+    } finally {
+      release?.();
+      if (this.localLocks.get(key) === chain) {
+        this.localLocks.delete(key);
+      }
+    }
   }
 }
