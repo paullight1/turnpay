@@ -35,7 +35,7 @@ describe("AuthController", () => {
     const payload = {
       email: "test@example.com",
       password: "Passw0rd!",
-      phone: "08012345678",
+      phone: "+2348012345678",
       fullName: "Tester",
       transactionPin: "1234",
     };
@@ -148,8 +148,11 @@ describe("AuthController", () => {
       "Bearer access-token",
       { currentPassword: "old", newPassword: "new" },
     );
-    const sendOtp = await controller.sendOtp({ phone: "0801" });
-    const verifyOtp = await controller.verifyOtp({ phone: "0801", otp: "000000" });
+    const sendOtp = await controller.sendOtp({ phone: "+2348012345678" });
+    const verifyOtp = await controller.verifyOtp({
+      phone: "+2348012345678",
+      otp: "000000",
+    });
     const forgotPassword = await controller.forgotPassword({ email: "test@example.com" });
     const resendConfirmation = await controller.resendConfirmation({
       email: "test@example.com",
@@ -161,8 +164,11 @@ describe("AuthController", () => {
       "old",
       "new",
     );
-    expect(authService.sendOtp).toHaveBeenCalledWith("0801");
-    expect(authService.verifyOtp).toHaveBeenCalledWith("0801", "000000");
+    expect(authService.sendOtp).toHaveBeenCalledWith("+2348012345678");
+    expect(authService.verifyOtp).toHaveBeenCalledWith(
+      "+2348012345678",
+      "000000",
+    );
     expect(authService.sendPasswordResetEmail).toHaveBeenCalledWith(
       "test@example.com",
     );
@@ -185,18 +191,16 @@ describe("AuthController", () => {
       pin: "1234",
     });
     const reset = await controller.resetTransactionPin(user, {
-      currentPassword: "old",
-      pin: "1234",
+      currentPin: "1234",
+      newPin: "5678",
       otp: "000000",
-      phone: "0801",
     });
 
     expect(authService.setupTransactionPin).toHaveBeenCalledWith("user-1", "1234");
     expect(authService.resetTransactionPin).toHaveBeenCalledWith("user-1", {
-      currentPassword: "old",
-      pin: "1234",
+      currentPin: "1234",
+      newPin: "5678",
       otp: "000000",
-      phone: "0801",
     });
     expect(setup).toEqual({ success: true });
     expect(reset).toEqual({ success: true });
