@@ -1,107 +1,56 @@
 import {
+  BadRequestException,
   Controller,
-  Post,
   Body,
   Headers,
+  Post,
   Req,
-  BadRequestException,
-} from "@nestjs/common";
-import { createHmac, timingSafeEqual } from "crypto";
-import { PaymentService } from "../payment.service";
-import { PinoLogger } from "nestjs-pino";
-import { Throttle } from "@nestjs/throttler";
-import { Decimal } from "@prisma/client/runtime/library";
-import type { Prisma } from "@prisma/client";
-import { BankingService } from "../../banking/banking.service";
-import type { RawBodyRequest } from "../../common/types/request-context";
-import { ConfigService } from "@nestjs/config";
-import { ExchangeService } from "../../exchange/exchange.service";
-import { PrismaService } from "../../prisma/prisma.service";
+} from '@nestjs/common';
+import { plainToInstance } from 'class-transformer';
+import { validateSync, ValidationError } from 'class-validator';
+import { createHmac, timingSafeEqual } from 'crypto';
+import { PaymentService } from '../payment.service';
+import { PinoLogger } from 'nestjs-pino';
+import { Throttle } from '@nestjs/throttler';
+import type { Prisma } from '@prisma/client';
+import type { RawBodyRequest } from '../../common/types/request-context';
+import { ConfigService } from '@nestjs/config';
+import { PrismaService } from '../../prisma/prisma.service';
+import {
+  FlutterwaveWebhookDto,
+  MonnifyWebhookDto,
+  PaymentWebhookInboxDto,
+  PaystackWebhookDto,
+} from './dto/payment-webhook.dto';
+import { WebhookInboxService } from './webhook-inbox.service';
 
-interface PaystackWebhookEvent {
-  event: string;
-  data: {
-    reference: string;
-    status: string;
-    amount: number;
-    currency: string;
-    gateway_response: string;
-    id: number;
-    authorization?: {
-      receiver_bank_account_number?: string;
-    };
-  };
-}
-
-interface FlutterwaveWebhookEvent {
-  event: string;
-  data: {
-    id: number;
-    tx_ref: string;
-    reference?: string;
-    status: string;
-    amount: number;
-    currency: string;
-    account_number?: string;
-    customer?: {
-      account_number?: string;
-    };
-  };
-}
-
-interface MonnifyWebhookEvent {
-  eventType: string;
-  eventData?: {
-    transactionReference?: string;
-    paymentReference?: string;
-    status?: string;
-    transactionStatus?: string;
-    amountPaid?: number;
-    totalPayable?: number;
-    settlementAmount?: number;
-    currency?: string;
-    paymentStatus?: string;
-    destinationAccountInformation?: {
-      accountNumber?: string;
-      accountName?: string;
-      bankCode?: string;
-      bankName?: string;
-    };
-    product?: {
-      reference?: string;
-      type?: string;
-    };
-  };
-}
-
-@Controller("webhooks")
+@Controller('webhooks')
 export class WebhookController {
   constructor(
     private readonly paymentService: PaymentService,
-    private readonly bankingService: BankingService,
-    private readonly exchangeService: ExchangeService,
+    private readonly webhookInbox: WebhookInboxService,
     private readonly configService: ConfigService,
     private readonly logger: PinoLogger,
     private readonly prisma: PrismaService,
   ) {}
 
-  @Post("paystack")
+  @Post('paystack')
   @Throttle({ default: { limit: 100, ttl: 60000 } })
   async handlePaystackWebhook(
-    @Headers("x-paystack-signature") signature: string,
+    @Headers('x-paystack-signature') signature: string,
     @Req() req: RawBodyRequest,
-    @Body() body: PaystackWebhookEvent,
+    @Body() body: unknown,
   ) {
     const rawBody = req.rawBody;
 
     if (!signature) {
-      this.logger.warn("Missing Paystack webhook signature");
-      throw new BadRequestException("Missing signature header");
+      this.logger.warn('Missing Paystack webhook signature');
+      throw new BadRequestException('Missing signature header');
     }
 
     if (!rawBody) {
-      this.logger.warn("Missing raw body for Paystack webhook");
-      throw new BadRequestException("Missing request body");
+      this.logger.warn('Missing raw body for Paystack webhook');
+      throw new BadRequestException('Missing request body');
     }
 
     const isValid = this.paymentService.verifyPaystackSignature(
@@ -110,47 +59,34 @@ export class WebhookController {
     );
 
     if (!isValid) {
-      this.logger.warn("Invalid Paystack webhook signature");
-      throw new BadRequestException("Invalid signature");
+      this.logger.warn('Invalid Paystack webhook signature');
+      throw new BadRequestException('Invalid signature');
     }
+
+    const payload = this.validateBody(PaystackWebhookDto, body);
 
     this.logger.info(
-      { event: body.event, reference: body.data?.reference },
-      "Paystack webhook received",
+      { event: payload.event, reference: payload.data.reference },
+      'Paystack webhook received',
     );
 
-    if (body.event?.startsWith("transfer.") && body.data?.reference) {
-      await this.paymentService.processTransferWebhook({
-        provider: "paystack",
-        eventType: body.event,
-        providerReference: body.data.reference,
-        providerStatus: body.data.status,
-        rawPayload: body as unknown as Record<string, unknown>,
-      });
-    } else if (body.event === "charge.success" && body.data?.reference) {
-      await this.paymentService.processWebhookDeposit({
-        provider: "paystack",
-        eventType: body.event,
-        reference: body.data.reference,
-        status: body.data.status,
-        // Paystack sends the amount in integer minor units (kobo). Keep it in
-        // Decimal end-to-end rather than float division to avoid rounding drift.
-        amount: new Decimal(body.data.amount).div(100),
-        currency: body.data.currency || "NGN",
-        rawPayload: body as unknown as Record<string, unknown>,
-      });
-    }
+    await this.acceptWebhookEvent({
+      provider: 'PAYSTACK',
+      eventType: payload.event,
+      providerReference: payload.data.reference,
+      payload: body as Record<string, unknown>,
+    });
 
     return { received: true };
   }
 
-  @Post("flutterwave")
+  @Post('flutterwave')
   @Throttle({ default: { limit: 100, ttl: 60000 } })
   async handleFlutterwaveWebhook(
-    @Headers("verif-hash") verifHash: string,
-    @Headers("flw-signature") flwSignature: string,
+    @Headers('verif-hash') verifHash: string,
+    @Headers('flw-signature') flwSignature: string,
     @Req() req: RawBodyRequest,
-    @Body() body: FlutterwaveWebhookEvent,
+    @Body() body: unknown,
   ) {
     const rawBody = req.rawBody;
 
@@ -161,226 +97,149 @@ export class WebhookController {
       );
 
       if (!isValid) {
-        this.logger.warn("Invalid Flutterwave webhook signature");
-        throw new BadRequestException("Invalid signature");
+        this.logger.warn('Invalid Flutterwave webhook signature');
+        throw new BadRequestException('Invalid signature');
       }
     } else if (verifHash) {
       const isValid =
         this.paymentService.verifyFlutterwaveSecretHash(verifHash);
 
       if (!isValid) {
-        this.logger.warn("Invalid Flutterwave webhook secret hash");
-        throw new BadRequestException("Invalid signature");
+        this.logger.warn('Invalid Flutterwave webhook secret hash');
+        throw new BadRequestException('Invalid signature');
       }
     } else {
-      throw new BadRequestException("Missing webhook verification headers");
+      throw new BadRequestException('Missing webhook verification headers');
     }
+
+    const payload = this.validateBody(FlutterwaveWebhookDto, body);
 
     this.logger.info(
-      { event: body.event, tx_ref: body.data?.tx_ref },
-      "Flutterwave webhook received",
+      { event: payload.event, tx_ref: payload.data.tx_ref },
+      'Flutterwave webhook received',
     );
 
-    const transferReference = body.data?.reference || body.data?.tx_ref;
-
-    if (body.event?.startsWith("transfer") && transferReference) {
-      await this.paymentService.processTransferWebhook({
-        provider: "flutterwave",
-        eventType: body.event,
-        providerReference: transferReference,
-        providerStatus: body.data.status,
-        rawPayload: body as unknown as Record<string, unknown>,
-      });
-    } else if (body.event === "charge.completed" && body.data?.tx_ref) {
-      await this.paymentService.processWebhookDeposit({
-        provider: "flutterwave",
-        eventType: body.event,
-        reference: body.data.tx_ref,
-        status: body.data.status,
-        amount: body.data.amount,
-        currency: body.data.currency,
-        rawPayload: body as unknown as Record<string, unknown>,
-      });
-    }
+    const transferReference = payload.data.reference || payload.data.tx_ref;
+    await this.acceptWebhookEvent({
+      provider: 'FLUTTERWAVE',
+      eventType: payload.event,
+      providerReference: transferReference,
+      payload: body as Record<string, unknown>,
+    });
 
     return { received: true };
   }
 
-  @Post("monnify")
+  @Post('monnify')
   @Throttle({ default: { limit: 100, ttl: 60000 } })
   async handleMonnifyWebhook(
-    @Headers("monnify-signature") signature: string,
+    @Headers('monnify-signature') signature: string,
     @Req() req: RawBodyRequest,
-    @Body() body: MonnifyWebhookEvent,
+    @Body() body: unknown,
   ) {
     const rawBody = req.rawBody;
 
     if (!signature) {
-      this.logger.warn("Missing Monnify webhook signature");
-      throw new BadRequestException("Missing signature header");
+      this.logger.warn('Missing Monnify webhook signature');
+      throw new BadRequestException('Missing signature header');
     }
 
     if (!rawBody) {
-      this.logger.warn("Missing raw body for Monnify webhook");
-      throw new BadRequestException("Missing request body");
+      this.logger.warn('Missing raw body for Monnify webhook');
+      throw new BadRequestException('Missing request body');
     }
 
     if (
       !this.verifyHmacHex(
-        "sha512",
+        'sha512',
         rawBody,
         signature,
-        "MONNIFY_WEBHOOK_SECRET",
+        'MONNIFY_WEBHOOK_SECRET',
       )
     ) {
-      this.logger.warn("Invalid Monnify webhook signature");
-      throw new BadRequestException("Invalid signature");
+      this.logger.warn('Invalid Monnify webhook signature');
+      throw new BadRequestException('Invalid signature');
     }
 
-    const eventType = body.eventType;
-    const data = body.eventData;
+    const payload = this.validateBody(MonnifyWebhookDto, body);
+    const eventType = payload.eventType;
+    const data = payload.eventData;
     const providerReference =
       data?.transactionReference || data?.paymentReference;
-    const accountNumber = data?.destinationAccountInformation?.accountNumber;
-    const amount = data?.amountPaid ?? data?.totalPayable;
-    const currency = data?.currency || "NGN";
-    const paymentStatus = data?.paymentStatus;
 
     this.logger.info(
       { event: eventType, reference: providerReference },
-      "Monnify webhook received",
+      'Monnify webhook received',
     );
 
-    // Log every received webhook for audit trail and debugging
-    try {
-      await this.prisma.webhookLog.create({
-        data: {
-          provider: "MONNIFY",
-          eventType: eventType || "UNKNOWN",
-          reference: providerReference || `unknown-${Date.now()}`,
-          payload: body as unknown as Prisma.InputJsonValue,
-          processed: false,
-        },
-      });
-    } catch (logError) {
-      // Reference must be unique — duplicate webhook deliveries
-      // should not crash the handler
-      this.logger.warn(
-        { error: logError, reference: providerReference },
-        "Failed to create webhook log entry (likely duplicate reference)",
-      );
-    }
-
-    const upperEventType = (eventType || "").toUpperCase();
-
-    if (
-      upperEventType.includes("DISBURSEMENT") &&
-      providerReference
-    ) {
-      const providerStatus =
-        data?.status ||
-        data?.transactionStatus ||
-        (upperEventType.includes("SUCCESSFUL")
-          ? "SUCCESS"
-          : upperEventType.includes("REVERSED")
-            ? "REVERSED"
-            : upperEventType.includes("FAILED")
-              ? "FAILED"
-              : "PENDING");
-
-      await this.paymentService.processTransferWebhook({
-        provider: "monnify",
+    if (providerReference) {
+      await this.acceptWebhookEvent({
+        provider: 'MONNIFY',
         eventType,
         providerReference,
-        providerStatus,
-        rawPayload: body as unknown as Record<string, unknown>,
+        payload: body as Record<string, unknown>,
       });
-    } else if (
-      eventType === "SUCCESSFUL_TRANSACTION" &&
-      paymentStatus === "PAID" &&
-      providerReference &&
-      accountNumber &&
-      amount
-    ) {
-      try {
-        const exchangeResult =
-          await this.exchangeService.processMonnifyExchangeDepositWebhook({
-            eventType,
-            providerReference,
-            paymentReference: data?.paymentReference,
-            accountNumber,
-            amount: new Decimal(amount),
-            currency: currency as "NGN" | "GHS",
-            rawPayload: body as unknown as Record<string, unknown>,
-          });
-
-        if (exchangeResult.matched) {
-          // Mark webhook log as processed
-          await this.prisma.webhookLog
-            .update({
-              where: { reference: providerReference },
-              data: { processed: true },
-            })
-            .catch(() => {});
-
-          return { received: true, routed: "exchange" };
-        }
-
-        await this.bankingService.processVirtualAccountDeposit({
-          provider: "monnify",
-          eventType,
-          providerReference,
-          accountNumber,
-          amount: new Decimal(amount),
-          currency: currency as "NGN" | "GHS",
-          rawPayload: body as unknown as Record<string, unknown>,
-        });
-
-        // Mark webhook log as processed
-        await this.prisma.webhookLog
-          .update({
-            where: { reference: providerReference },
-            data: { processed: true },
-          })
-          .catch(() => {});
-      } catch (processingError) {
-        const errorMessage =
-          processingError instanceof Error
-            ? processingError.message
-            : "Unknown processing error";
-
-        this.logger.error(
-          { error: processingError, reference: providerReference },
-          "Failed to process Monnify webhook",
-        );
-
-        // Update webhook log with error
-        await this.prisma.webhookLog
-          .update({
-            where: { reference: providerReference },
-            data: { errorMessage },
-          })
-          .catch(() => {});
-      }
     }
 
     return { received: true };
   }
 
+  private async acceptWebhookEvent(body: {
+    provider: 'PAYSTACK' | 'FLUTTERWAVE' | 'MONNIFY';
+    eventType: string;
+    providerReference: string;
+    payload: Record<string, unknown>;
+  }) {
+    const event = this.validateBody(PaymentWebhookInboxDto, body);
+
+    try {
+      await this.prisma.webhookLog.create({
+        data: {
+          provider: event.provider,
+          eventType: event.eventType,
+          reference: event.providerReference,
+          payload: event.payload as Prisma.InputJsonValue,
+          processed: false,
+        },
+      });
+    } catch (logError) {
+      this.logger.warn(
+        {
+          error: logError instanceof Error ? logError.message : 'Unknown error',
+          reference: event.providerReference,
+        },
+        'Failed to create webhook log entry (likely duplicate reference)',
+      );
+    }
+
+    const accepted = await this.webhookInbox.accept(event);
+    if (accepted.duplicate) {
+      this.logger.info(
+        {
+          provider: event.provider,
+          eventType: event.eventType,
+          providerReference: event.providerReference,
+          eventId: accepted.eventId,
+        },
+        'Duplicate payment webhook delivery acknowledged',
+      );
+    }
+  }
+
   private verifyHmacHex(
-    algorithm: "sha512",
+    algorithm: 'sha512',
     rawBody: string,
     receivedSignature: string,
     secretEnvName: string,
   ) {
     const secret =
       this.configService.get<string>(secretEnvName) ||
-      (secretEnvName === "MONNIFY_WEBHOOK_SECRET"
-        ? this.configService.getOrThrow<string>("MONNIFY_SECRET_KEY")
+      (secretEnvName === 'MONNIFY_WEBHOOK_SECRET'
+        ? this.configService.getOrThrow<string>('MONNIFY_SECRET_KEY')
         : this.configService.getOrThrow<string>(secretEnvName));
     const expected = createHmac(algorithm, secret)
       .update(rawBody)
-      .digest("hex");
+      .digest('hex');
 
     return this.timingSafeCompare(expected, receivedSignature);
   }
@@ -394,5 +253,42 @@ export class WebhookController {
     }
 
     return timingSafeEqual(expectedBuffer, receivedBuffer);
+  }
+
+  private validateBody<T extends object>(
+    dtoClass: new () => T,
+    body: unknown,
+  ): T {
+    const instance = plainToInstance(dtoClass, body);
+    const errors = validateSync(instance, {
+      whitelist: true,
+      forbidNonWhitelisted: true,
+    });
+
+    if (errors.length > 0) {
+      throw new BadRequestException(this.extractValidationMessage(errors[0]));
+    }
+
+    return instance;
+  }
+
+  private extractValidationMessage(error: ValidationError): string {
+    if (error.constraints) {
+      const messages = Object.values(error.constraints);
+      return (
+        messages.find(
+          (message) =>
+            message.includes('must be a string') ||
+            message.includes('must be a number') ||
+            message.includes('should not be empty'),
+        ) || messages[0]
+      );
+    }
+
+    if (error.children?.length) {
+      return this.extractValidationMessage(error.children[0]);
+    }
+
+    return 'Invalid webhook payload';
   }
 }
