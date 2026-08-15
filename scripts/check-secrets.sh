@@ -16,6 +16,7 @@ if rg -n --hidden \
   --glob '!**/.next/**' \
   --glob '!DOCS/**' \
   --glob '!**/package-lock.json' \
+  -- \
   '-----BEGIN (RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----|AKIA[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9_]{20,}|sk_(live|test)_[A-Za-z0-9]{16,}' \
   . >/dev/null; then
   fail 'private key or known provider/token pattern detected'
