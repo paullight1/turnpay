@@ -222,13 +222,14 @@ export class PaymentWebhookProcessorService {
       paymentStatus === 'PAID' &&
       providerReference &&
       accountNumber &&
-      amount !== undefined
+      amount !== null
     ) {
       const exchangeResult =
         await this.exchangeService.processMonnifyExchangeDepositWebhook({
           eventType,
           providerReference,
-          paymentReference: this.getString(data, 'paymentReference'),
+          paymentReference:
+            this.getString(data, 'paymentReference') ?? undefined,
           accountNumber,
           amount: new Decimal(amount),
           currency: currency as 'NGN' | 'GHS',

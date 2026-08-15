@@ -53,6 +53,13 @@ describe("AdminService banking operations", () => {
       create: jest.fn(),
       findMany: jest.fn(),
     },
+    webhookLog: {
+      findUnique: jest.fn(),
+      update: jest.fn(),
+    },
+    providerEvent: {
+      findMany: jest.fn(),
+    },
     $transaction: jest.fn(async (arg: any) =>
       typeof arg === "function" ? arg(prisma) : Promise.all(arg),
     ),
@@ -95,6 +102,10 @@ describe("AdminService banking operations", () => {
     getProviderHealth: jest.fn(),
   };
 
+  const bankingService = {
+    processVirtualAccountDeposit: jest.fn(),
+  };
+
   let service: AdminService;
 
   beforeEach(() => {
@@ -108,6 +119,7 @@ describe("AdminService banking operations", () => {
       configService as any,
       supabase as any,
       vtuService as any,
+      bankingService as any,
     );
   });
 
@@ -1801,5 +1813,91 @@ describe("AdminService banking operations", () => {
         after: expect.objectContaining({ isActive: false }),
       }),
     });
+  });
+
+  it("replays a failed Monnify virtual-account deposit from its webhook log", async () => {
+    prisma.webhookLog.findUnique.mockResolvedValue({
+      id: "log-1",
+      provider: "MONNIFY",
+      reference: "MNF-REF-1",
+      payload: {
+        eventType: "SUCCESSFUL_TRANSACTION",
+        eventData: {
+          transactionReference: "MNF-REF-1",
+          paymentStatus: "PAID",
+          amountPaid: 2500,
+          settlementAmount: 2481.25,
+          currency: "NGN",
+          destinationAccountInformation: { accountNumber: "6254727989" },
+        },
+      },
+    });
+    bankingService.processVirtualAccountDeposit.mockResolvedValue({
+      received: true,
+      processed: true,
+    });
+    prisma.webhookLog.update.mockResolvedValue({});
+    prisma.auditLog.create.mockResolvedValue({});
+
+    const result = await service.replayVirtualAccountDeposit(
+      "MNF-REF-1",
+      { reason: "Deposit trapped after KYC lapse, user re-verified" },
+      "admin-1",
+    );
+
+    expect(result).toEqual({ received: true, processed: true });
+    expect(bankingService.processVirtualAccountDeposit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: "monnify",
+        providerReference: "MNF-REF-1",
+        accountNumber: "6254727989",
+        amount: new Decimal(2500),
+        settlementAmount: new Decimal(2481.25),
+        currency: "NGN",
+      }),
+    );
+    expect(prisma.webhookLog.update).toHaveBeenCalledWith({
+      where: { reference: "MNF-REF-1" },
+      data: { processed: true, errorMessage: null },
+    });
+    expect(prisma.auditLog.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        adminId: "admin-1",
+        action: "BANKING_DEPOSIT_REPLAY",
+        targetType: "WebhookLog",
+        targetId: "log-1",
+      }),
+    });
+  });
+
+  it("rejects replaying a webhook log that is not a paid virtual-account deposit", async () => {
+    prisma.webhookLog.findUnique.mockResolvedValue({
+      id: "log-2",
+      provider: "MONNIFY",
+      reference: "MNF-REF-2",
+      payload: {
+        eventType: "SUCCESSFUL_DISBURSEMENT",
+        eventData: { transactionReference: "MNF-REF-2" },
+      },
+    });
+
+    await expect(
+      service.replayVirtualAccountDeposit(
+        "MNF-REF-2",
+        { reason: "Attempting to replay a disbursement event" },
+        "admin-1",
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(bankingService.processVirtualAccountDeposit).not.toHaveBeenCalled();
+
+    prisma.webhookLog.findUnique.mockResolvedValue(null);
+
+    await expect(
+      service.replayVirtualAccountDeposit(
+        "MISSING-REF",
+        { reason: "No webhook log exists for this reference" },
+        "admin-1",
+      ),
+    ).rejects.toBeInstanceOf(NotFoundException);
   });
 });

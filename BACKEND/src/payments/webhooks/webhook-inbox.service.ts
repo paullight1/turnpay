@@ -37,7 +37,7 @@ export class WebhookInboxService {
           provider: input.provider,
           eventType: input.eventType,
           providerReference: input.providerReference,
-          payload: sanitizedPayload,
+          payload: sanitizedPayload as Prisma.InputJsonValue,
           payloadHash: this.hashPayload(sanitizedPayload),
           status: 'RECEIVED',
           nextAttemptAt: now,
