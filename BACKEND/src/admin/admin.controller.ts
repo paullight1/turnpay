@@ -238,6 +238,11 @@ export class AdminController {
     return this.adminService.runReconciliation(user.userId, dto);
   }
 
+  @Get('banking/reconciliation/runs')
+  async getReconciliationRuns(@Query() query: LimitQueryDto) {
+    return this.adminService.getReconciliationRuns(query.limit);
+  }
+
   @Post('banking/deposits/:reference/replay')
   @Throttle({ default: { limit: 10, ttl: 60000 } })
   async replayVirtualAccountDeposit(

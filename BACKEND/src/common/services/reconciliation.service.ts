@@ -14,9 +14,24 @@ export class ReconciliationService {
   @Cron(CronExpression.EVERY_DAY_AT_MIDNIGHT)
   async runDailyReconciliation() {
     this.pinoLogger.info({}, 'Starting daily reconciliation');
+    const run = await this.prisma.reconciliationRun.create({
+      data: { scope: 'WALLET_BALANCES' },
+    });
 
     try {
       const result = await this.reconcileWallets();
+      const status = result.mismatches.length > 0 ? 'BLOCKED' : 'COMPLETED';
+
+      await this.prisma.reconciliationRun.update({
+        where: { id: run.id },
+        data: {
+          status,
+          completedAt: new Date(),
+          checkedCount: result.totalChecked,
+          mismatchCount: result.mismatches.length,
+          mismatchDetails: result.mismatches,
+        },
+      });
 
       this.pinoLogger.info(
         {
@@ -33,9 +48,20 @@ export class ReconciliationService {
           'Found wallet mismatches',
         );
       }
+
+      return result;
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : 'Unknown reconciliation error';
+
+      await this.prisma.reconciliationRun.update({
+        where: { id: run.id },
+        data: {
+          status: 'FAILED',
+          completedAt: new Date(),
+          errorMessage,
+        },
+      });
 
       this.pinoLogger.error({ errorMessage }, 'Daily reconciliation failed');
     }

@@ -1333,21 +1333,85 @@ export class AdminService {
 
   async runReconciliation(adminId: string, dto: AdminActionReasonDto) {
     this.assertReason(dto.reason);
-    const report = await this.getReconciliationReport();
-
-    await this.prisma.auditLog.create({
+    const run = await this.prisma.reconciliationRun.create({
       data: {
-        adminId,
-        action: 'RECONCILIATION_RUN',
-        targetType: 'ReconciliationReport',
-        targetId: `report-${Date.now()}`,
-        reason: dto.reason,
-        after: report,
-        metadata: { summary: report.summary },
+        scope: 'ADMIN_BANKING',
+        initiatedById: adminId,
       },
     });
 
-    return report;
+    try {
+      const report = await this.getReconciliationReport();
+      const walletDriftCount = report.walletLedgerReconciliation.filter(
+        (entry) => !entry.inSync,
+      ).length;
+      const mismatchCount =
+        Object.values(report.summary).reduce(
+          (total, count) => total + count,
+          0,
+        ) + walletDriftCount;
+      const status = mismatchCount > 0 ? 'BLOCKED' : 'COMPLETED';
+
+      await this.prisma.reconciliationRun.update({
+        where: { id: run.id },
+        data: {
+          status,
+          completedAt: new Date(),
+          checkedCount: report.providerOnlyEvents.length,
+          mismatchCount,
+          mismatchDetails: this.sanitizeMetadata({
+            summary: report.summary,
+            walletLedgerReconciliation: report.walletLedgerReconciliation,
+            amountMismatches: report.amountMismatches,
+            stalePendingTransfers: report.stalePendingTransfers,
+            failedProviderEvents: report.failedProviderEvents,
+          }) as Prisma.InputJsonValue,
+        },
+      });
+
+      await this.prisma.auditLog.create({
+        data: {
+          adminId,
+          action: 'RECONCILIATION_RUN',
+          targetType: 'ReconciliationReport',
+          targetId: `report-${Date.now()}`,
+          reason: dto.reason,
+          after: report,
+          metadata: { summary: report.summary },
+        },
+      });
+
+      return report;
+    } catch (error) {
+      await this.prisma.reconciliationRun.update({
+        where: { id: run.id },
+        data: {
+          status: 'FAILED',
+          completedAt: new Date(),
+          errorMessage: error instanceof Error ? error.message : String(error),
+        },
+      });
+      throw error;
+    }
+  }
+
+  async getReconciliationRuns(limit = 20) {
+    return this.prisma.reconciliationRun.findMany({
+      take: Math.min(Math.max(limit, 1), 100),
+      orderBy: { createdAt: 'desc' },
+      select: {
+        id: true,
+        scope: true,
+        status: true,
+        initiatedById: true,
+        startedAt: true,
+        completedAt: true,
+        checkedCount: true,
+        mismatchCount: true,
+        errorMessage: true,
+        createdAt: true,
+      },
+    });
   }
 
   /**

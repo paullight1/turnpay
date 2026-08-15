@@ -127,6 +127,13 @@ enum ProviderEventStatus {
   IGNORED
 }
 
+enum ReconciliationRunStatus {
+  RUNNING
+  COMPLETED
+  BLOCKED
+  FAILED
+}
+
 enum LedgerDirection {
   DEBIT
   CREDIT
@@ -554,6 +561,25 @@ model PaymentWebhookInbox {
   @@index([status, nextAttemptAt])
   @@index([status, claimedAt])
   @@map("payment_webhook_inbox")
+}
+
+model ReconciliationRun {
+  id              String                @id @default(uuid())
+  scope           String
+  status          ReconciliationRunStatus @default(RUNNING)
+  initiatedById   String?
+  startedAt       DateTime              @default(now())
+  completedAt     DateTime?
+  checkedCount    Int                   @default(0)
+  mismatchCount   Int                   @default(0)
+  mismatchDetails Json?
+  errorMessage    String?
+  createdAt       DateTime              @default(now())
+  updatedAt       DateTime              @updatedAt
+
+  @@index([scope, createdAt(sort: Desc)])
+  @@index([status, createdAt(sort: Desc)])
+  @@map("reconciliation_runs")
 }
 
 model TransferAttempt {
