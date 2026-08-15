@@ -532,6 +532,30 @@ model ProviderEvent {
   @@map("provider_events")
 }
 
+model PaymentWebhookInbox {
+  id                String              @id @default(uuid())
+  provider          PaymentProvider
+  eventType         String
+  providerReference String
+  payload           Json
+  payloadHash       String
+  status            ProviderEventStatus @default(RECEIVED)
+  attemptCount      Int                 @default(0)
+  nextAttemptAt     DateTime?           @default(now())
+  lastError         String?
+  receivedAt        DateTime            @default(now())
+  claimedAt         DateTime?
+  processedAt       DateTime?
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+
+  @@unique([provider, eventType, providerReference])
+  @@index([provider, providerReference])
+  @@index([status, nextAttemptAt])
+  @@index([status, claimedAt])
+  @@map("payment_webhook_inbox")
+}
+
 model TransferAttempt {
   id                String                @id @default(uuid())
   transactionId     String
