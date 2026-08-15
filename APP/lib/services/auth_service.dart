@@ -22,7 +22,10 @@ class AuthService {
       },
     );
 
-    return _persistSession(response.data);
+    return _persistSession(
+      response.data,
+      clearTransactionApprovalCache: true,
+    );
   }
 
   Future<bool> register({
@@ -47,7 +50,10 @@ class AuthService {
       },
     );
 
-    return _persistSession(response.data);
+    return _persistSession(
+      response.data,
+      clearTransactionApprovalCache: true,
+    );
   }
 
   Future<void> forgotPassword(String email) async {
@@ -151,7 +157,10 @@ class AuthService {
     return await restoreSession() == SessionRestoreState.active;
   }
 
-  Future<bool> _persistSession(dynamic payload) async {
+  Future<bool> _persistSession(
+    dynamic payload, {
+    bool clearTransactionApprovalCache = false,
+  }) async {
     if (payload is! Map<String, dynamic>) {
       return false;
     }
@@ -164,6 +173,10 @@ class AuthService {
     final accessToken = session['access_token'];
     if (accessToken is! String || accessToken.isEmpty) {
       return false;
+    }
+
+    if (clearTransactionApprovalCache) {
+      await _apiClient.clearTransactionApproval();
     }
 
     final refreshToken = session['refresh_token'];

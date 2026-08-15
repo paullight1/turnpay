@@ -1,8 +1,17 @@
 import 'package:dio/dio.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:trustpay_app/services/api_client.dart';
+import 'package:trustpay_app/services/transaction_security_service.dart';
 
 void main() {
+  setUp(() {
+    FlutterSecureStorage.setMockInitialValues({});
+    TransactionSecurityService.debugResetEphemeralState();
+  });
+
+  tearDown(TransactionSecurityService.debugResetEphemeralState);
+
   group('ApiLogRedactor', () {
     test('redacts sensitive headers and nested body fields', () {
       final request = RequestOptions(
@@ -80,4 +89,38 @@ void main() {
       expect(changed, isNot(first));
     });
   });
+
+  group('session cleanup', () {
+    test('clears cached biometric transaction approval on session clear',
+        () async {
+      final securityService =
+          _FakeTransactionSecurityService(approveBiometric: true);
+      await securityService.savePin('2468', pinLength: 4);
+
+      final client = ApiClient();
+      await client.clearSession();
+
+      expect(
+        await securityService.unlockPinWithBiometric(
+          reason: 'Approve transaction',
+        ),
+        isNull,
+      );
+    });
+  });
+}
+
+class _FakeTransactionSecurityService extends TransactionSecurityService {
+  _FakeTransactionSecurityService({
+    required this.approveBiometric,
+  });
+
+  final bool approveBiometric;
+
+  @override
+  Future<bool> authenticateBiometric({
+    required String reason,
+  }) async {
+    return approveBiometric;
+  }
 }

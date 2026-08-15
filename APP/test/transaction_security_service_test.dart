@@ -38,6 +38,18 @@ void main() {
       );
     });
 
+    test('does not persist the raw PIN in secure storage', () async {
+      final service = TransactionSecurityService();
+      await service.savePin('2468', pinLength: 4);
+
+      const storage = FlutterSecureStorage();
+      expect(
+        await storage.read(key: 'trustpay_tx_pin_value'),
+        isNull,
+        reason: 'biometric approval must not rely on a stored reusable PIN',
+      );
+    });
+
     test('re-saving the same PIN produces a different salted hash', () async {
       final service = TransactionSecurityService();
       const storage = FlutterSecureStorage();
@@ -113,4 +125,60 @@ void main() {
       expect(state.lockedUntil, now.add(const Duration(minutes: 20)));
     });
   });
+
+  group('biometric transaction approval cache', () {
+    setUp(() {
+      FlutterSecureStorage.setMockInitialValues({});
+      TransactionSecurityService.debugResetEphemeralState();
+    });
+
+    tearDown(TransactionSecurityService.debugResetEphemeralState);
+
+    test('returns the cached PIN only after biometric approval', () async {
+      final service = _FakeTransactionSecurityService(approveBiometric: true);
+      await service.savePin('2468', pinLength: 4);
+
+      expect(
+        await service.unlockPinWithBiometric(reason: 'Approve transaction'),
+        '2468',
+      );
+    });
+
+    test('returns null when biometric approval is denied', () async {
+      final service = _FakeTransactionSecurityService(approveBiometric: false);
+      await service.savePin('2468', pinLength: 4);
+
+      expect(
+        await service.unlockPinWithBiometric(reason: 'Approve transaction'),
+        isNull,
+      );
+    });
+
+    test('clears the cached approval PIN when the session is reset', () async {
+      final service = _FakeTransactionSecurityService(approveBiometric: true);
+      await service.savePin('2468', pinLength: 4);
+
+      await service.clearEphemeralTransactionApproval();
+
+      expect(
+        await service.unlockPinWithBiometric(reason: 'Approve transaction'),
+        isNull,
+      );
+    });
+  });
+}
+
+class _FakeTransactionSecurityService extends TransactionSecurityService {
+  _FakeTransactionSecurityService({
+    required this.approveBiometric,
+  });
+
+  final bool approveBiometric;
+
+  @override
+  Future<bool> authenticateBiometric({
+    required String reason,
+  }) async {
+    return approveBiometric;
+  }
 }

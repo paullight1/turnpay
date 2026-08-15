@@ -1,5 +1,6 @@
 import java.util.Properties
 import java.io.FileInputStream
+import org.gradle.api.GradleException
 
 plugins {
     id("com.android.application")
@@ -14,8 +15,16 @@ plugins {
 val keystorePropertiesFile = rootProject.file("key.properties")
 val keystoreProperties = Properties()
 val hasReleaseSigning = keystorePropertiesFile.exists()
+val releaseTaskRequested = gradle.startParameter.taskNames.any { taskName ->
+    taskName.contains("Release", ignoreCase = true)
+}
 if (hasReleaseSigning) {
     keystoreProperties.load(FileInputStream(keystorePropertiesFile))
+} else if (releaseTaskRequested) {
+    throw GradleException(
+        "Android release signing is not configured. Copy android/key.properties.example " +
+            "to android/key.properties and provide the upload keystore before running release tasks.",
+    )
 }
 
 android {
@@ -40,8 +49,6 @@ android {
     }
 
     signingConfigs {
-        // Only materialize the release signing config when key.properties exists,
-        // so local `flutter run --release` still works without a keystore.
         if (hasReleaseSigning) {
             create("release") {
                 keyAlias = keystoreProperties["keyAlias"] as String?
@@ -53,14 +60,13 @@ android {
     }
 
     buildTypes {
+        profile {
+            signingConfig = signingConfigs.getByName("debug")
+        }
+
         release {
-            // Use the real upload key when key.properties is present; otherwise
-            // fall back to the debug keys so `flutter run --release` works locally.
-            // TODO(launch): key.properties MUST be populated for store builds.
-            signingConfig = if (hasReleaseSigning) {
-                signingConfigs.getByName("release")
-            } else {
-                signingConfigs.getByName("debug")
+            if (hasReleaseSigning) {
+                signingConfig = signingConfigs.getByName("release")
             }
 
             // Shrink and obfuscate the release build.

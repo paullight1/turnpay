@@ -5,12 +5,14 @@ import 'package:uuid/uuid.dart';
 
 import '../core/auth/auth_state.dart';
 import '../core/constants/app_constants.dart';
+import 'transaction_security_service.dart';
 
 class ApiClient {
   static const _accessTokenKey = 'trustpay_access_token';
   static const _refreshTokenKey = 'trustpay_refresh_token';
   static const _storage = FlutterSecureStorage();
   static const _uuid = Uuid();
+  static final _transactionSecurity = TransactionSecurityService();
   static Future<String?>? _refreshInFlight;
 
   late final Dio _dio;
@@ -93,6 +95,11 @@ class ApiClient {
   Future<void> clearSession() async {
     await _storage.delete(key: _accessTokenKey);
     await _storage.delete(key: _refreshTokenKey);
+    await clearTransactionApproval();
+  }
+
+  Future<void> clearTransactionApproval() {
+    return _transactionSecurity.clearEphemeralTransactionApproval();
   }
 
   bool _shouldRefresh(DioException error) {
