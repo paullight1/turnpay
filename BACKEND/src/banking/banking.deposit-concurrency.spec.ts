@@ -1,6 +1,10 @@
+import { ConfigService } from "@nestjs/config";
 import { Decimal } from "@prisma/client/runtime/library";
-import { BankingService } from "./banking.service";
+import { PinoLogger } from "nestjs-pino";
+import { PrismaService } from "../prisma/prisma.service";
 import { LedgerService } from "../wallets/ledger.service";
+import { BankingService } from "./banking.service";
+import { MonnifyVirtualAccountProvider } from "./providers/monnify-virtual-account.provider";
 
 describe("BankingService deposit concurrency", () => {
   const prisma = {
@@ -53,11 +57,11 @@ describe("BankingService deposit concurrency", () => {
   beforeEach(() => {
     jest.clearAllMocks();
     service = new BankingService(
-      prisma as any,
+      prisma as unknown as PrismaService,
       ledger as unknown as LedgerService,
-      monnifyVirtualAccounts as any,
-      configService as any,
-      logger as any,
+      monnifyVirtualAccounts as unknown as MonnifyVirtualAccountProvider,
+      configService as unknown as ConfigService,
+      logger as unknown as PinoLogger,
     );
   });
 
@@ -85,7 +89,9 @@ describe("BankingService deposit concurrency", () => {
       status: "FAILED",
     });
     prisma.providerEvent.updateMany.mockResolvedValue({ count: 1 });
-    prisma.$transaction.mockRejectedValue(new Error("simulated processing failure"));
+    prisma.$transaction.mockRejectedValue(
+      new Error("simulated processing failure"),
+    );
 
     await expect(service.processVirtualAccountDeposit(event)).rejects.toThrow(
       "simulated processing failure",
