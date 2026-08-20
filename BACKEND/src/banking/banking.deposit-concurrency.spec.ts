@@ -78,4 +78,36 @@ describe("BankingService deposit concurrency", () => {
     expect(prisma.$transaction).not.toHaveBeenCalled();
     expect(ledger.creditWallet).not.toHaveBeenCalled();
   });
+
+  it("does not let two retries claim the same failed provider event", async () => {
+    prisma.providerEvent.findUnique.mockResolvedValue({
+      id: "event-1",
+      status: "FAILED",
+    });
+    prisma.providerEvent.updateMany.mockResolvedValue({ count: 0 });
+    prisma.$transaction.mockRejectedValue(
+      new Error("a retry that lost the claim must not start a transaction"),
+    );
+
+    await expect(service.processVirtualAccountDeposit(event)).resolves.toEqual({
+      received: true,
+      processed: false,
+      duplicate: true,
+      inFlight: true,
+    });
+
+    expect(prisma.providerEvent.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: "event-1",
+        status: { in: ["RECEIVED", "FAILED"] },
+      },
+      data: {
+        status: "PROCESSING",
+        errorMessage: null,
+        processedAt: null,
+      },
+    });
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(ledger.creditWallet).not.toHaveBeenCalled();
+  });
 });
