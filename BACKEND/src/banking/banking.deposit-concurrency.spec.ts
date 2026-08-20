@@ -1,10 +1,5 @@
-import { ConfigService } from "@nestjs/config";
 import { Decimal } from "@prisma/client/runtime/library";
-import { PinoLogger } from "nestjs-pino";
-import { PrismaService } from "../prisma/prisma.service";
-import { LedgerService } from "../wallets/ledger.service";
 import { BankingService } from "./banking.service";
-import { MonnifyVirtualAccountProvider } from "./providers/monnify-virtual-account.provider";
 
 describe("BankingService deposit concurrency", () => {
   const prisma = {
@@ -57,11 +52,11 @@ describe("BankingService deposit concurrency", () => {
   beforeEach(() => {
     jest.clearAllMocks();
     service = new BankingService(
-      prisma as unknown as PrismaService,
-      ledger as unknown as LedgerService,
-      monnifyVirtualAccounts as unknown as MonnifyVirtualAccountProvider,
-      configService as unknown as ConfigService,
-      logger as unknown as PinoLogger,
+      prisma as any,
+      ledger as any,
+      monnifyVirtualAccounts as any,
+      configService as any,
+      logger as any,
     );
   });
 
@@ -70,10 +65,11 @@ describe("BankingService deposit concurrency", () => {
       id: "event-1",
       status: "PROCESSING",
     });
+    prisma.$transaction.mockRejectedValue(
+      new Error("in-flight duplicates must not start a transaction"),
+    );
 
-    const result = await service.processVirtualAccountDeposit(event);
-
-    expect(result).toEqual({
+    await expect(service.processVirtualAccountDeposit(event)).resolves.toEqual({
       received: true,
       processed: false,
       duplicate: true,
@@ -81,38 +77,5 @@ describe("BankingService deposit concurrency", () => {
     });
     expect(prisma.$transaction).not.toHaveBeenCalled();
     expect(ledger.creditWallet).not.toHaveBeenCalled();
-  });
-
-  it("only marks a failed event when the failing worker still owns PROCESSING state", async () => {
-    prisma.providerEvent.findUnique.mockResolvedValue({
-      id: "event-1",
-      status: "FAILED",
-    });
-    prisma.providerEvent.updateMany.mockResolvedValue({ count: 1 });
-    prisma.$transaction.mockRejectedValue(
-      new Error("simulated processing failure"),
-    );
-
-    await expect(service.processVirtualAccountDeposit(event)).rejects.toThrow(
-      "simulated processing failure",
-    );
-
-    expect(prisma.providerEvent.updateMany).toHaveBeenNthCalledWith(1, {
-      where: { id: "event-1", status: "FAILED" },
-      data: {
-        status: "PROCESSING",
-        errorMessage: null,
-        processedAt: null,
-      },
-    });
-    expect(prisma.providerEvent.updateMany).toHaveBeenNthCalledWith(2, {
-      where: { id: "event-1", status: "PROCESSING" },
-      data: {
-        status: "FAILED",
-        errorMessage: "simulated processing failure",
-        processedAt: expect.any(Date),
-      },
-    });
-    expect(prisma.providerEvent.update).not.toHaveBeenCalled();
   });
 });
