@@ -271,21 +271,68 @@ export class BankingService {
       return { received: true, processed: false };
     }
 
-    const providerEvent =
-      existing ||
-      (await this.createDepositProviderEvent({
+    if (existing?.status === "PROCESSING") {
+      this.logger.info(
+        {
+          provider,
+          providerReference: event.providerReference,
+          eventType: event.eventType,
+        },
+        "Provider event is already being processed",
+      );
+      return {
+        received: true,
+        processed: false,
+        duplicate: true,
+        inFlight: true,
+      };
+    }
+
+    if (existing?.status === "IGNORED") {
+      return { received: true, processed: false, duplicate: true };
+    }
+
+    let providerEvent = existing;
+
+    if (providerEvent) {
+      const claim = await this.prisma.providerEvent.updateMany({
+        where: {
+          id: providerEvent.id,
+          status: { in: ["RECEIVED", "FAILED"] },
+        },
+        data: {
+          status: "PROCESSING",
+          errorMessage: null,
+          processedAt: null,
+        },
+      });
+
+      if (claim.count !== 1) {
+        return {
+          received: true,
+          processed: false,
+          duplicate: true,
+          inFlight: true,
+        };
+      }
+
+      providerEvent = {
+        ...providerEvent,
+        status: "PROCESSING",
+        errorMessage: null,
+        processedAt: null,
+      };
+    } else {
+      providerEvent = await this.createDepositProviderEvent({
         provider,
         eventType: event.eventType,
         providerReference: event.providerReference,
         rawPayload: event.rawPayload,
-      }));
+      });
+    }
 
     if (!providerEvent) {
       return { received: true, processed: false, duplicate: true };
-    }
-
-    if (providerEvent.status === "PROCESSED") {
-      return { received: true, processed: false };
     }
 
     try {
