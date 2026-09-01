@@ -79,14 +79,18 @@ async function refreshCookieBackedSession(
 
   const refreshedSession = await refreshSessionWithBackend(storedSession, request);
   if (!refreshedSession?.access_token) {
-    response.cookies.set(SESSION_COOKIE_NAME, "", getSessionCookieOptions(0));
+    response.cookies.set(
+      SESSION_COOKIE_NAME,
+      "",
+      getSessionCookieOptions(0, request.url),
+    );
     return null;
   }
 
   response.cookies.set(
     SESSION_COOKIE_NAME,
     encodeSessionCookie(refreshedSession),
-    getSessionCookieOptions(),
+    getSessionCookieOptions(undefined, request.url),
   );
   return refreshedSession.access_token;
 }

@@ -7,6 +7,22 @@ export const SESSION_COOKIE_MAX_AGE_SECONDS = 30 * 24 * 60 * 60;
 const apiBaseUrl = process.env.NEXT_PUBLIC_API_URL;
 const isSecureCookie = process.env.NODE_ENV === "production";
 
+function isHttpLoopback(requestUrl?: string) {
+  if (!requestUrl) {
+    return false;
+  }
+
+  try {
+    const url = new URL(requestUrl);
+    return (
+      url.protocol === "http:" &&
+      ["127.0.0.1", "localhost", "::1"].includes(url.hostname)
+    );
+  } catch {
+    return false;
+  }
+}
+
 export type StoredSession = {
   access_token: string;
   refresh_token: string;
@@ -70,22 +86,30 @@ export function getRequestCookies(request: Request) {
   return parseCookieHeader(request.headers.get("cookie") ?? "");
 }
 
-export function getSessionCookieOptions(maxAge = SESSION_COOKIE_MAX_AGE_SECONDS) {
+export function getSessionCookieOptions(
+  maxAge = SESSION_COOKIE_MAX_AGE_SECONDS,
+  requestUrl?: string,
+) {
   return {
     path: "/",
     maxAge,
     httpOnly: true,
-    secure: isSecureCookie,
+    // Production cookies remain Secure everywhere except an explicitly
+    // identified loopback HTTP origin used by local production-mode tests.
+    secure: isSecureCookie && !isHttpLoopback(requestUrl),
     sameSite: "lax" as const,
   };
 }
 
-export function getCsrfCookieOptions(maxAge = SESSION_COOKIE_MAX_AGE_SECONDS) {
+export function getCsrfCookieOptions(
+  maxAge = SESSION_COOKIE_MAX_AGE_SECONDS,
+  requestUrl?: string,
+) {
   return {
     path: "/",
     maxAge,
     httpOnly: false,
-    secure: isSecureCookie,
+    secure: isSecureCookie && !isHttpLoopback(requestUrl),
     sameSite: "strict" as const,
   };
 }

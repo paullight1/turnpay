@@ -35,20 +35,28 @@ const authSessionSchema = z.object({
     .passthrough(),
 });
 
-function clearSessionCookie(response: NextResponse) {
-  response.cookies.set(SESSION_COOKIE_NAME, "", getSessionCookieOptions(0));
+function clearSessionCookie(response: NextResponse, requestUrl: string) {
+  response.cookies.set(
+    SESSION_COOKIE_NAME,
+    "",
+    getSessionCookieOptions(0, requestUrl),
+  );
 
   for (let index = 0; index < LEGACY_CHUNK_COUNT; index += 1) {
     response.cookies.set(
       `${SESSION_COOKIE_NAME}.${index}`,
       "",
-      getSessionCookieOptions(0),
+      getSessionCookieOptions(0, requestUrl),
     );
   }
 }
 
-function clearCsrfCookie(response: NextResponse) {
-  response.cookies.set(CSRF_COOKIE_NAME, "", getCsrfCookieOptions(0));
+function clearCsrfCookie(response: NextResponse, requestUrl: string) {
+  response.cookies.set(
+    CSRF_COOKIE_NAME,
+    "",
+    getCsrfCookieOptions(0, requestUrl),
+  );
 }
 
 // Rejects cross-site requests to prevent CSRF session fixation. Same-origin
@@ -157,16 +165,20 @@ export async function POST(request: Request) {
   response.cookies.set(
     SESSION_COOKIE_NAME,
     encodeSessionCookie(parsed.data.session),
-    getSessionCookieOptions(),
+    getSessionCookieOptions(undefined, request.url),
   );
   for (let index = 0; index < LEGACY_CHUNK_COUNT; index += 1) {
     response.cookies.set(
       `${SESSION_COOKIE_NAME}.${index}`,
       "",
-      getSessionCookieOptions(0),
+      getSessionCookieOptions(0, request.url),
     );
   }
-  response.cookies.set(CSRF_COOKIE_NAME, csrfToken, getCsrfCookieOptions());
+  response.cookies.set(
+    CSRF_COOKIE_NAME,
+    csrfToken,
+    getCsrfCookieOptions(undefined, request.url),
+  );
   return response;
 }
 
@@ -178,16 +190,16 @@ export async function PUT(request: Request) {
   const storedSession = readStoredSession(request);
   if (!storedSession?.refresh_token) {
     const response = NextResponse.json({ message: "Unauthorized" }, { status: 401 });
-    clearSessionCookie(response);
-    clearCsrfCookie(response);
+    clearSessionCookie(response, request.url);
+    clearCsrfCookie(response, request.url);
     return response;
   }
 
   const refreshedSession = await refreshSessionWithBackend(storedSession, request);
   if (!refreshedSession) {
     const response = NextResponse.json({ message: "Unauthorized" }, { status: 401 });
-    clearSessionCookie(response);
-    clearCsrfCookie(response);
+    clearSessionCookie(response, request.url);
+    clearCsrfCookie(response, request.url);
     return response;
   }
 
@@ -200,16 +212,20 @@ export async function PUT(request: Request) {
   response.cookies.set(
     SESSION_COOKIE_NAME,
     encodeSessionCookie(refreshedSession),
-    getSessionCookieOptions(),
+    getSessionCookieOptions(undefined, request.url),
   );
   for (let index = 0; index < LEGACY_CHUNK_COUNT; index += 1) {
     response.cookies.set(
       `${SESSION_COOKIE_NAME}.${index}`,
       "",
-      getSessionCookieOptions(0),
+      getSessionCookieOptions(0, request.url),
     );
   }
-  response.cookies.set(CSRF_COOKIE_NAME, csrfToken, getCsrfCookieOptions());
+  response.cookies.set(
+    CSRF_COOKIE_NAME,
+    csrfToken,
+    getCsrfCookieOptions(undefined, request.url),
+  );
   return response;
 }
 
@@ -219,8 +235,8 @@ export async function DELETE(request: Request) {
   }
 
   const response = NextResponse.json({ success: true });
-  clearSessionCookie(response);
-  clearCsrfCookie(response);
+  clearSessionCookie(response, request.url);
+  clearCsrfCookie(response, request.url);
   return response;
 }
 
@@ -232,6 +248,10 @@ export async function GET(request: Request) {
     csrfToken,
   });
 
-  response.cookies.set(CSRF_COOKIE_NAME, csrfToken, getCsrfCookieOptions());
+  response.cookies.set(
+    CSRF_COOKIE_NAME,
+    csrfToken,
+    getCsrfCookieOptions(undefined, request.url),
+  );
   return response;
 }
