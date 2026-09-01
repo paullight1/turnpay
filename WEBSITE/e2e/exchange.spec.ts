@@ -401,7 +401,7 @@ async function installExchangeMocks(page: Page, credentials: typeof TEST_USER) {
     const fee = isWalletExchange ? 0 : 25;
     const receiveAmount = Number((amount * rate).toFixed(2));
     const sendAmount = Number((isWalletExchange ? amount : amount + fee).toFixed(2));
-    const expiresInSeconds = amount <= 5 ? 2 : 25;
+    const expiresInSeconds = amount <= 5 ? 2 : 120;
 
     const quote: ExchangeQuote = {
       id: `quote-${++quoteCount}`,

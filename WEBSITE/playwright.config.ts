@@ -32,7 +32,9 @@ export default defineConfig({
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
   workers: process.env.CI ? 1 : undefined,
-  reporter: 'html',
+  reporter: process.env.CI
+    ? [['line'], ['html', { open: 'never' }]]
+    : 'html',
   use: {
     baseURL: externalServerUrl || 'http://127.0.0.1:3001',
     trace: 'on-first-retry',
@@ -73,11 +75,26 @@ export default defineConfig({
   ...(externalServerUrl
     ? {}
     : {
-        webServer: {
-          command: 'npm run dev -- --hostname 127.0.0.1 --port 3001',
-          url: 'http://127.0.0.1:3001',
-          reuseExistingServer: !process.env.CI,
-          timeout: 180000,
-        },
+        webServer: [
+          {
+            command: 'node e2e/mock-auth-verifier.mjs',
+            url: 'http://127.0.0.1:3100/health',
+            reuseExistingServer: !process.env.CI,
+            timeout: 30000,
+          },
+          {
+            command: 'npm run dev -- --hostname 127.0.0.1 --port 3001',
+            url: 'http://127.0.0.1:3001',
+            reuseExistingServer: !process.env.CI,
+            timeout: 180000,
+            env: {
+              ...process.env,
+              NEXT_PUBLIC_API_URL: 'http://127.0.0.1:3100',
+              NEXT_PUBLIC_SUPABASE_URL: '',
+              NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: '',
+              NEXT_PUBLIC_SUPABASE_ANON_KEY: '',
+            },
+          },
+        ],
       }),
 });

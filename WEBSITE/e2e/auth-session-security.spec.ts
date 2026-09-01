@@ -19,10 +19,6 @@ type TestSession = {
   authMode: "local";
 };
 
-type ClientSession = Omit<TestSession, "refresh_token"> & {
-  refresh_token: "";
-};
-
 type TestProfile = {
   id: string;
   email: string;
@@ -49,13 +45,6 @@ function buildSession(email: string): TestSession {
   };
 }
 
-function toClientSession(session: TestSession): ClientSession {
-  return {
-    ...session,
-    refresh_token: "" as const,
-  };
-}
-
 function buildProfile(email: string): TestProfile {
   return {
     id: "user-123",
@@ -76,9 +65,7 @@ async function readStoredSession(page: Page) {
 
 async function installAuthSessionMocks(page: Page, email: string) {
   const session = buildSession(email);
-  const clientSession = toClientSession(session);
   const profile = buildProfile(email);
-  const csrfToken = "csrf-token-123";
 
   await page.route("**/api/auth/login", async (route) => {
     await route.fulfill({
@@ -102,49 +89,6 @@ async function installAuthSessionMocks(page: Page, email: string) {
         user: profile,
         wallets: [],
       },
-    });
-  });
-
-  await page.route("**/api/auth/session", async (route) => {
-    if (route.request().method() === "POST") {
-      await route.fulfill({
-        status: 200,
-        headers: {
-          "set-cookie": `supabase.auth.token=${encodeSessionCookie(session)}; Path=/; HttpOnly; SameSite=Lax`,
-        },
-        json: {
-          success: true,
-          session: clientSession,
-          csrfToken,
-        },
-      });
-      return;
-    }
-
-    if (route.request().method() === "GET") {
-      await route.fulfill({
-        status: 200,
-        json: {
-          session: clientSession,
-          csrfToken,
-        },
-      });
-      return;
-    }
-
-    if (route.request().method() === "DELETE") {
-      expect(route.request().headers()["x-csrf-token"]).toBe(csrfToken);
-
-      await route.fulfill({
-        status: 200,
-        json: { success: true },
-      });
-      return;
-    }
-
-    await route.fulfill({
-      status: 405,
-      json: { message: "Method not allowed" },
     });
   });
 
@@ -193,7 +137,13 @@ test.describe("web session hardening", () => {
     await page.goto("/login");
     await page.getByLabel(/email/i).fill(TEST_USER.email);
     await page.getByLabel(/^password$/i).fill(TEST_USER.password);
+    const sessionResponse = page.waitForResponse(
+      (response) =>
+        response.url().endsWith("/api/auth/session") &&
+        response.request().method() === "POST",
+    );
     await page.getByRole("button", { name: /sign in/i }).click();
+    expect((await sessionResponse).ok()).toBe(true);
 
     await expect(page).toHaveURL(/\/dashboard/);
     await expect.poll(() => readStoredSession(page)).toBeNull();

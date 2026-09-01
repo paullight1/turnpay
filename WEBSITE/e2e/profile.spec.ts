@@ -257,7 +257,16 @@ test.describe("TrustPay Profile", () => {
   test("should render profile details and active sessions", async ({ page }) => {
     await expect(page.getByRole("heading", { name: /^Profile$/i })).toBeVisible();
     await expect(page.getByRole("button", { name: /Toggle color theme/i })).toBeVisible();
-    await expect(page.getByRole("navigation", { name: /Dashboard navigation/i })).toBeVisible();
+    const isMobile = (page.viewportSize()?.width ?? 1280) < 768;
+    if (isMobile) {
+      await page.getByRole("button", { name: /Open menu/i }).click();
+    }
+    await expect(
+      page.getByRole("navigation", { name: /Dashboard navigation/i }),
+    ).toBeVisible();
+    if (isMobile) {
+      await page.getByRole("button", { name: /^Close$/i }).click();
+    }
     await expect(
       page.locator('[data-slot="card-title"]').filter({ hasText: /^Account Information$/i }),
     ).toBeVisible();

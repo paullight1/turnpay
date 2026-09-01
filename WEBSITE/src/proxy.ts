@@ -111,44 +111,43 @@ export async function proxy(request: NextRequest) {
     return NextResponse.redirect(url);
   };
 
-  if (!supabaseUrl || !supabaseAnonKey) {
-    if (isProtected || isAdmin) {
-      return redirectToLogin();
-    }
-
-    return response;
-  }
-
-  // Create Supabase client for server-side session verification.
-  const supabase = createServerClient(supabaseUrl, supabaseAnonKey, {
-    cookies: {
-      getAll() {
-        return request.cookies.getAll();
-      },
-      setAll(cookiesToSet) {
-        cookiesToSet.forEach(({ name, value, options }) => {
-          response.cookies.set(name, value, options);
-        });
-      },
-    },
-  });
-
-  // getUser() validates the JWT signature against Supabase (unlike getSession(),
-  // which only decodes the cookie). A forged/base64 cookie fails here.
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  // Candidate bearer token for backend verification. Prefer the Supabase-
-  // validated session; otherwise fall back to the locally-persisted token,
-  // which is re-validated by the backend below (never trusted on its own).
+  // Candidate bearer token for backend verification. Prefer a Supabase-
+  // validated session when Supabase is configured; otherwise use the local
+  // cookie only as a candidate that must still pass backend verification.
+  // This keeps backend-issued local sessions usable without weakening the
+  // fail-closed behavior for forged or unverifiable cookies.
+  let hasVerifiedSupabaseUser = false;
   let candidateToken: string | null = null;
-  if (user) {
+
+  if (supabaseUrl && supabaseAnonKey) {
+    const supabase = createServerClient(supabaseUrl, supabaseAnonKey, {
+      cookies: {
+        getAll() {
+          return request.cookies.getAll();
+        },
+        setAll(cookiesToSet) {
+          cookiesToSet.forEach(({ name, value, options }) => {
+            response.cookies.set(name, value, options);
+          });
+        },
+      },
+    });
+
+    // getUser() validates the JWT signature against Supabase (unlike
+    // getSession(), which only decodes the cookie).
     const {
-      data: { session },
-    } = await supabase.auth.getSession();
-    candidateToken = session?.access_token ?? null;
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    hasVerifiedSupabaseUser = Boolean(user);
+    if (user) {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      candidateToken = session?.access_token ?? null;
+    }
   }
+
   if (!candidateToken) {
     candidateToken = readLocalSessionCandidateToken(request);
   }
@@ -179,7 +178,7 @@ export async function proxy(request: NextRequest) {
   }
 
   if (isProtected) {
-    if (user) {
+    if (hasVerifiedSupabaseUser) {
       return response;
     }
 
@@ -202,7 +201,7 @@ export async function proxy(request: NextRequest) {
   // Auth routes: only bounce away Supabase-verified users. We intentionally do
   // NOT redirect based on the unverified local cookie here, to avoid a redirect
   // loop if the backend is unreachable.
-  if (isAuthRoute && user) {
+  if (isAuthRoute && hasVerifiedSupabaseUser) {
     return NextResponse.redirect(new URL("/dashboard", request.url));
   }
 

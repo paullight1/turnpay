@@ -2,8 +2,28 @@ import type { NextConfig } from "next";
 
 // Single source of truth for security headers (vercel.json no longer sets a
 // competing header block). Pin allow-lists to the hosts we actually talk to.
-const API_ORIGIN = "https://api.trustpay.xyz";
-const SUPABASE_ORIGIN = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
+function resolveHttpOrigin(value: string | undefined, fallback = "") {
+  if (!value) return fallback;
+
+  try {
+    const url = new URL(value);
+    const isLoopbackHttp =
+      url.protocol === "http:" &&
+      ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
+
+    return url.protocol === "https:" || isLoopbackHttp ? url.origin : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+const API_ORIGIN = resolveHttpOrigin(
+  process.env.NEXT_PUBLIC_API_URL,
+  "https://api.trustpay.xyz",
+);
+const SUPABASE_ORIGIN = resolveHttpOrigin(
+  process.env.NEXT_PUBLIC_SUPABASE_URL,
+);
 const TAWK_HTTPS = "https://*.tawk.to https://embed.tawk.to https://va.tawk.to";
 const TAWK_WSS = "wss://*.tawk.to";
 // Dev-only origins so local API/Supabase/HMR still work outside production.

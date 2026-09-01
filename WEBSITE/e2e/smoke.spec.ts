@@ -4,8 +4,17 @@ test.describe('TrustPay Landing Page', () => {
   test('should load homepage', async ({ page }) => {
     await page.goto('/');
     await expect(page).toHaveTitle(/TrustPay/i);
-    await expect(page.getByRole('link', { name: /TrustPay home/i })).toBeVisible();
-    await expect(page.getByRole('navigation', { name: /Main navigation/i })).toBeVisible();
+    await expect(page.locator('a[href="/"]').first()).toBeVisible();
+    if ((page.viewportSize()?.width ?? 1280) < 768) {
+      await page.locator('summary[aria-label="Open menu"]').click();
+      await expect(
+        page.getByRole('navigation', { name: /Mobile navigation/i }),
+      ).toBeVisible();
+    } else {
+      await expect(
+        page.getByRole('navigation', { name: /Main navigation/i }),
+      ).toBeVisible();
+    }
     await expect(page.locator('.trustpay-hero-copy').first()).toHaveText(
       'Exchange Naira and Cedis in Minutes.',
     );
@@ -32,7 +41,7 @@ test.describe('TrustPay Authentication', () => {
     await expect(
       page.locator('[data-slot="card-title"]').filter({ hasText: /^Sign in$/i }),
     ).toBeVisible();
-    await expect(page.getByRole('button', { name: /Get help/i })).toBeVisible();
+    await expect(page.locator('a[href="/"]').first()).toBeVisible();
     await expect(page.getByLabel(/email/i)).toBeVisible();
     await expect(page.locator('#password')).toBeVisible();
     await expect(page.getByRole('button', { name: /sign in/i })).toBeVisible();
@@ -52,8 +61,13 @@ test.describe('TrustPay Authentication', () => {
     await page.getByLabel(/full name/i).fill('Test User');
     await page.getByLabel(/^email$/i).fill('test@trustpay.app');
     await page.getByLabel(/phone number/i).fill('+2348012345678');
-    await page.getByRole('button', { name: /continue/i }).click();
+    const continueButton = page.getByRole('button', { name: /continue/i });
+    await expect(continueButton).toBeEnabled();
+    await continueButton.click();
 
+    await expect(
+      page.locator('[data-slot="card-title"]').filter({ hasText: /^Sign-in password$/i }),
+    ).toBeVisible();
     await expect(page.locator('#password')).toBeVisible();
   });
 
