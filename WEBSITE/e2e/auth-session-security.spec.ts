@@ -129,14 +129,6 @@ async function installAuthSessionMocks(page: Page, email: string) {
 }
 
 test.describe("web session hardening", () => {
-  test.beforeEach(async ({ page }) => {
-    // Authentication tests must not depend on a third-party support widget.
-    // Its remote iframe can load over the form and intercept clicks in WebKit.
-    await page.route(/https:\/\/(?:[^/]+\.)?tawk\.to\//, (route) =>
-      route.abort(),
-    );
-  });
-
   test("does not persist auth tokens in localStorage after login", async ({
     page,
   }) => {
