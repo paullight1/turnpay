@@ -223,10 +223,27 @@ model User {
   referredUsers              User[]                       @relation("UserReferrals")
   referralsGiven             ReferralReward[]             @relation("ReferralReferrer")
   referralReward             ReferralReward?              @relation("ReferralReferred")
+  transactionPinCredential   TransactionPinCredential?
 
   @@index([referredById])
   @@index([createdAt(sort: Desc)])
   @@map("users")
+}
+
+model TransactionPinCredential {
+  id             String    @id @default(uuid())
+  userId         String    @unique
+  salt           String
+  hash           String
+  iterations     Int
+  resetHoldUntil DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([resetHoldUntil])
+  @@map("transaction_pin_credentials")
 }
 
 model ReferralReward {
@@ -314,6 +331,7 @@ model Transaction {
 
   @@index([userId, status])
   @@index([userId, createdAt(sort: Desc)])
+  @@index([walletId])
   @@index([type, status])
   @@index([status, createdAt])
   @@map("transactions")
@@ -444,7 +462,7 @@ model InternalTransferLimitUsage {
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  @@unique([userId, currency, period, periodStart])
+  @@unique([userId, currency, period, periodStart], map: "internal_transfer_limit_usage_userId_currency_period_periodStar")
   @@index([userId, currency, period])
   @@index([periodStart])
   @@map("internal_transfer_limit_usage")
@@ -556,26 +574,28 @@ model PaymentWebhookInbox {
   createdAt         DateTime            @default(now())
   updatedAt         DateTime            @updatedAt
 
-  @@unique([provider, eventType, providerReference])
-  @@index([provider, providerReference])
+  // Providers can legitimately send the same event type/reference again with
+  // a changed terminal status. Only an exact payload replay is a duplicate.
+  @@unique([provider, eventType, providerReference, payloadHash], map: "payment_webhook_inbox_provider_event_reference_payload_key")
+  @@index([provider, providerReference], map: "payment_webhook_inbox_provider_reference_idx")
   @@index([status, nextAttemptAt])
   @@index([status, claimedAt])
   @@map("payment_webhook_inbox")
 }
 
 model ReconciliationRun {
-  id              String                @id @default(uuid())
+  id              String                  @id @default(uuid())
   scope           String
   status          ReconciliationRunStatus @default(RUNNING)
   initiatedById   String?
-  startedAt       DateTime              @default(now())
+  startedAt       DateTime                @default(now())
   completedAt     DateTime?
-  checkedCount    Int                   @default(0)
-  mismatchCount   Int                   @default(0)
+  checkedCount    Int                     @default(0)
+  mismatchCount   Int                     @default(0)
   mismatchDetails Json?
   errorMessage    String?
-  createdAt       DateTime              @default(now())
-  updatedAt       DateTime              @updatedAt
+  createdAt       DateTime                @default(now())
+  updatedAt       DateTime                @updatedAt
 
   @@index([scope, createdAt(sort: Desc)])
   @@index([status, createdAt(sort: Desc)])

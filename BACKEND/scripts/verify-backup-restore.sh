@@ -13,6 +13,14 @@ require_command() {
   command -v "$1" >/dev/null 2>&1 || fail "$1 is required"
 }
 
+postgres_client_url() {
+  # Prisma accepts a `schema` query parameter, but libpq tools such as
+  # pg_dump, pg_restore, and psql reject it. Remove only that Prisma-specific
+  # parameter while preserving TLS and other libpq parameters.
+  printf '%s' "$1" |
+    sed -E 's/([?&])schema=[^&]*&/\1/; s/[?&]schema=[^&]*$//'
+}
+
 source_url="${DATABASE_URL:-}"
 restore_url="${RESTORE_DATABASE_URL:-}"
 
@@ -28,6 +36,9 @@ case "$restore_url" in
     ;;
 esac
 
+source_postgres_url="$(postgres_client_url "$source_url")"
+restore_postgres_url="$(postgres_client_url "$restore_url")"
+
 require_command pg_dump
 require_command pg_restore
 require_command psql
@@ -42,7 +53,7 @@ pg_dump \
   --no-owner \
   --no-acl \
   --file="$backup_file" \
-  "$source_url"
+  "$source_postgres_url"
 
 [ -s "$backup_file" ] || fail 'pg_dump produced an empty backup'
 pg_restore --list "$backup_file" >/dev/null || fail 'backup archive is invalid'
@@ -54,10 +65,10 @@ pg_restore \
   --if-exists \
   --no-owner \
   --no-acl \
-  --dbname="$restore_url" \
+  --dbname="$restore_postgres_url" \
   "$backup_file"
 
-psql "$restore_url" -Atqc 'SELECT 1' | grep -qx '1' ||
+psql "$restore_postgres_url" -Atqc 'SELECT 1' | grep -qx '1' ||
   fail 'restored database health query failed'
 
 printf '%s\n' 'backup restore verification passed'
