@@ -83,7 +83,9 @@ export default defineConfig({
             timeout: 30000,
           },
           {
-            command: 'npm run dev -- --hostname 127.0.0.1 --port 3001',
+            command: process.env.CI
+              ? 'npm run start -- --hostname 127.0.0.1 --port 3001'
+              : 'npm run dev -- --hostname 127.0.0.1 --port 3001',
             url: 'http://127.0.0.1:3001',
             reuseExistingServer: !process.env.CI,
             timeout: 180000,
