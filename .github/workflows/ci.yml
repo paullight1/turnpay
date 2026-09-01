@@ -256,7 +256,10 @@ jobs:
     needs:
       [manifest-safety, backend-test, backend-security, website-test, website-security, flutter-test]
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main'
+    # Render and Vercel deploy directly from Git. Docker Hub publishing is an
+    # optional release channel and must be explicitly enabled after its
+    # credentials are configured.
+    if: github.ref == 'refs/heads/main' && vars.DOCKER_PUBLISH_ENABLED == 'true'
 
     steps:
       - uses: actions/checkout@v4
