@@ -104,11 +104,22 @@ export async function persistSupabaseSession(session: Session) {
         body: JSON.stringify({ session: persistedSession }),
       });
 
-      if (response.ok) {
-        await parseSessionRouteResponse(response);
+      if (!response.ok) {
+        throw new Error("Unable to create a secure session");
       }
-    } catch {
-      // Ignore route failures and keep the in-memory session in place.
+
+      await parseSessionRouteResponse(response);
+
+      // WebKit can resolve the POST before its Set-Cookie update is visible to
+      // the next navigation. A same-origin read creates an ordering barrier and
+      // also fails closed if the HttpOnly session was not actually persisted.
+      const confirmedSession = await requestSession("GET");
+      if (confirmedSession?.access_token !== persistedSession.access_token) {
+        throw new Error("Unable to confirm the secure session");
+      }
+    } catch (error) {
+      inMemorySession = null;
+      throw error;
     }
   }
 
