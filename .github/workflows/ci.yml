@@ -172,6 +172,10 @@ jobs:
 
   website-test:
     runs-on: ubuntu-latest
+    env:
+      # Third-party chat is not part of application E2E coverage and can place
+      # a remote iframe over controls while WebKit tests are running.
+      NEXT_PUBLIC_TAWK_ENABLED: "false"
     defaults:
       run:
         working-directory: WEBSITE
