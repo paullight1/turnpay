@@ -25,7 +25,6 @@ enum MoneyActionKind {
   exchange,
   airtime,
   data,
-  cable,
   electricity,
 }
 
@@ -59,7 +58,6 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
   final _withdrawBankController = TextEditingController();
   final _withdrawBankFocusNode = FocusNode();
   final _noteController = TextEditingController();
-  final _cablePhoneController = TextEditingController();
   final _attemptIdempotency = MoneyAttemptIdempotency();
   late final VtuService _vtuService;
 
@@ -96,13 +94,6 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
   String? _meterCustomerName;
   String? _meterCustomerAddress;
   bool _meterVerifySkippable = false;
-  bool _isCablePaymentStep = false;
-  bool _isVerifyingCard = false;
-  String? _cableCustomerName;
-  bool _cableVerifySkippable = false;
-  String? _cablePackageId;
-  List<VtuPackageOption> _cablePackages = const [];
-  List<VtuProviderOption> _localCableProviders = const [];
   Timer? _orderPollTimer;
   int _orderPollAttempts = 0;
   String? _message;
@@ -173,7 +164,6 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
     _withdrawBankFocusNode.dispose();
     _bankCodeController.dispose();
     _noteController.dispose();
-    _cablePhoneController.dispose();
     super.dispose();
   }
 
@@ -187,20 +177,12 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
   }
 
   void _onRecipientChanged() {
-    if (!mounted) return;
-    if (widget.kind == MoneyActionKind.electricity &&
-        (_meterCustomerName != null || _meterVerifySkippable)) {
+    if (widget.kind != MoneyActionKind.electricity || !mounted) return;
+    if (_meterCustomerName != null || _meterVerifySkippable) {
       setState(() {
         _meterCustomerName = null;
         _meterCustomerAddress = null;
         _meterVerifySkippable = false;
-      });
-    }
-    if (widget.kind == MoneyActionKind.cable &&
-        (_cableCustomerName != null || _cableVerifySkippable)) {
-      setState(() {
-        _cableCustomerName = null;
-        _cableVerifySkippable = false;
       });
     }
   }
@@ -280,7 +262,11 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
   }
 
   Future<void> _loadVtuCatalogs() async {
-    if (!_isVtuAction) {
+    if (![
+      MoneyActionKind.airtime,
+      MoneyActionKind.data,
+      MoneyActionKind.electricity,
+    ].contains(widget.kind)) {
       return;
     }
 
@@ -294,7 +280,6 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
         _vtuService.getProviders('airtime'),
         _vtuService.getProviders('data'),
         _vtuService.getProviders('electricity'),
-        _vtuService.getProviders('cable'),
       ]);
 
       if (!mounted) return;
@@ -303,7 +288,6 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
         _localAirtimeProviders = results[0];
         _localDataProviders = results[1];
         _localElectricityProviders = results[2];
-        _localCableProviders = results[3];
         _vtuProvider = _firstProviderId(_providersForCurrentFlow());
       });
 
@@ -311,9 +295,6 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
           _dataCountryCode == 'NG' &&
           _vtuProvider.isNotEmpty) {
         await _loadDataPackages(_vtuProvider);
-      } else if (widget.kind == MoneyActionKind.cable &&
-          _vtuProvider.isNotEmpty) {
-        await _loadCablePackages(_vtuProvider);
       } else if (widget.kind == MoneyActionKind.data &&
           _dataCountryCode == 'GH') {
         await _loadInternationalProviders(
@@ -333,7 +314,6 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
         _localAirtimeProviders = const [];
         _localDataProviders = const [];
         _localElectricityProviders = const [];
-        _localCableProviders = const [];
         _vtuProvider = '';
         _vtuCatalogMessage = authErrorMessage(
           error,
@@ -768,55 +748,6 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
     if (selected.isEmpty) return;
     final package = selected.first;
     _dataPackageId = package.id;
-    _amountController.text = package.price.toStringAsFixed(2);
-  }
-
-  Future<void> _loadCablePackages(String provider) async {
-    if (provider.isEmpty) {
-      setState(() {
-        _cablePackageId = null;
-        _cablePackages = const [];
-        _vtuCatalogMessage = 'Select a provider to load bouquets.';
-      });
-      return;
-    }
-
-    setState(() {
-      _isLoadingVtuCatalog = true;
-      _vtuCatalogMessage = null;
-      _cablePackageId = null;
-      _cablePackages = const [];
-    });
-
-    try {
-      final packages = await _vtuService.getPackages(provider);
-      if (!mounted) return;
-      setState(() {
-        _cablePackages = packages;
-        if (packages.isNotEmpty) {
-          _selectCablePackage(packages.first.id);
-        }
-      });
-    } catch (error) {
-      if (!mounted) return;
-      setState(() {
-        _vtuCatalogMessage = authErrorMessage(
-          error,
-          'Could not load bouquets for this provider.',
-        );
-      });
-    } finally {
-      if (mounted) {
-        setState(() => _isLoadingVtuCatalog = false);
-      }
-    }
-  }
-
-  void _selectCablePackage(String packageId) {
-    final selected = _cablePackages.where((item) => item.id == packageId);
-    if (selected.isEmpty) return;
-    final package = selected.first;
-    _cablePackageId = package.id;
     _amountController.text = package.price.toStringAsFixed(2);
   }
 
@@ -1400,7 +1331,6 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
     return [
       MoneyActionKind.airtime,
       MoneyActionKind.data,
-      MoneyActionKind.cable,
       MoneyActionKind.electricity,
     ].contains(widget.kind);
   }
@@ -5690,20 +5620,6 @@ InputDecoration _inputDecoration(String label, {String? prefixText}) {
       borderSide: BorderSide(color: AppColors.primary),
     ),
   );
-}
-
-TrustPayAnimationVariant _animationFor(MoneyActionKind kind) {
-  switch (kind) {
-    case MoneyActionKind.fund:
-      return TrustPayAnimationVariant.loading;
-    case MoneyActionKind.send:
-    case MoneyActionKind.withdraw:
-    case MoneyActionKind.exchange:
-    case MoneyActionKind.airtime:
-    case MoneyActionKind.data:
-    case MoneyActionKind.electricity:
-      return TrustPayAnimationVariant.send;
-  }
 }
 
 _ActionConfig _configFor(MoneyActionKind kind) {

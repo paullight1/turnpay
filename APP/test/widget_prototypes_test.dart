@@ -112,8 +112,8 @@ void main() {
     expect(find.text('Send'), findsOneWidget);
     expect(find.text('Exchange'), findsOneWidget);
     expect(find.text('Wallets'), findsOneWidget);
-    expect(find.text('GHS'), findsWidgets);
-    expect(find.text('NGN'), findsWidgets);
+    expect(find.textContaining('GHS'), findsWidgets);
+    expect(find.textContaining('NGN'), findsWidgets);
   });
 
   testWidgets('recent recipients and transactions render live data',
@@ -142,10 +142,21 @@ void main() {
 
     await tester.pumpAndSettle();
 
+    final contentScroll = find.descendant(
+      of: find.byType(ListView).first,
+      matching: find.byType(Scrollable),
+    ).first;
     expect(find.text('Recipients'), findsOneWidget);
-    expect(find.text('First Bank'), findsOneWidget);
+    expect(find.textContaining('First Bank'), findsOneWidget);
+
+    await tester.scrollUntilVisible(
+      find.text('Recent transactions'),
+      300,
+      scrollable: contentScroll,
+    );
     expect(find.text('Recent transactions'), findsOneWidget);
-    expect(find.text('Fund success'), findsWidgets);
+
+    expect(find.text('Fund'), findsWidgets);
     expect(find.text('See all'), findsOneWidget);
   });
 }

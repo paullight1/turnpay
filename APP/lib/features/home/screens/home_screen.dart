@@ -206,6 +206,8 @@ class _BalancePanel extends StatefulWidget {
   final VoidCallback onToggleBalances;
 
   const _BalancePanel({
+    // The key remains available for stable widget identity in parent rebuilds.
+    // ignore: unused_element_parameter
     super.key,
     required this.data,
     required this.showBalances,
@@ -583,6 +585,8 @@ class _CurrencyBalanceCard extends StatelessWidget {
   }
 }
 
+// Retained for the next dashboard rollout; not mounted by the current layout.
+// ignore: unused_element
 class _VirtualAccountSection extends StatelessWidget {
   final HomeVirtualAccount? account;
   final bool showBalances;

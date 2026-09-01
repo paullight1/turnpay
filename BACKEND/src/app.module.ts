@@ -132,6 +132,15 @@ const defaultNodeEnv =
         REDIS_HOST: Joi.string().empty('').default('localhost'),
         REDIS_PORT: Joi.number().empty('').default(6379),
         REDIS_PASSWORD: Joi.string().allow('').optional(),
+        REDIS_ALLOW_MEMORY_FALLBACK: Joi.when('NODE_ENV', {
+          is: deployedEnvironment,
+          then: Joi.boolean()
+            .truthy('true')
+            .falsy('false')
+            .valid(false)
+            .default(false),
+          otherwise: Joi.boolean().truthy('true').falsy('false').default(false),
+        }),
         OTP_EXPIRES_IN: Joi.string().allow('').optional(),
         OTP_LENGTH: Joi.string().allow('').optional(),
         OTP_DEV_CODE: Joi.string().allow('').optional(),
@@ -284,7 +293,7 @@ const defaultNodeEnv =
           },
         ],
         // Redis-backed so limits survive restarts and are shared across
-        // instances; degrades to per-instance memory when Redis is down.
+        // instances; deployed environments fail closed when Redis is down.
         storage: new RedisThrottlerStorage(redisService),
         // Rate limiting would make request-count assertions in the e2e suite
         // flaky; it is only meaningful in real deployments.

@@ -57,17 +57,50 @@ void main() {
 
     await tester.pumpAndSettle();
 
-    expect(find.text('NGN Wallet'), findsOneWidget);
+    expect(find.text('NGN Wallet'), findsWidgets);
     expect(find.text('Send Money'), findsOneWidget);
     expect(find.text('Receive Money'), findsOneWidget);
-    expect(find.text('Transaction History'), findsOneWidget);
-    expect(find.text('Wallet Deposit'), findsWidgets);
+
+    final walletScroll = find.descendant(
+      of: find.byType(CustomScrollView).first,
+      matching: find.byType(Scrollable),
+    ).first;
+    await tester.scrollUntilVisible(
+      find.text('Virtual Account — Active'),
+      300,
+      scrollable: walletScroll,
+    );
     expect(find.text('Virtual Account — Active'), findsOneWidget);
 
+    await tester.scrollUntilVisible(
+      find.text('Transaction History'),
+      300,
+      scrollable: walletScroll,
+    );
+    expect(find.text('Transaction History'), findsOneWidget);
+
+    await tester.drag(walletScroll, const Offset(0, -300));
+    await tester.pumpAndSettle();
+    expect(find.text('Wallet Deposit'), findsWidgets);
+
+    await tester.scrollUntilVisible(
+      find.text('Receive Money'),
+      -300,
+      scrollable: walletScroll,
+    );
     await tester.tap(find.text('Receive Money'));
     await tester.pumpAndSettle();
 
     expect(find.text('Receive Money'), findsWidgets);
+
+    await tester.scrollUntilVisible(
+      find.text('Recent Deposits'),
+      300,
+      scrollable: find.descendant(
+        of: find.byType(CustomScrollView).first,
+        matching: find.byType(Scrollable),
+      ).first,
+    );
     expect(find.text('Recent Deposits'), findsOneWidget);
   });
 }

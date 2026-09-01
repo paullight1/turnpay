@@ -45,17 +45,36 @@ void main() {
 
     await tester.pumpAndSettle();
 
-    expect(find.text('Welcome back'), findsOneWidget);
+    expect(
+      find.textContaining(RegExp(r'^Good (morning|afternoon|evening)$')),
+      findsOneWidget,
+    );
     expect(find.text('Top services'), findsOneWidget);
     expect(find.text('Ada Lovelace'), findsWidgets);
-    expect(find.text('Other wallets'), findsOneWidget);
-    expect(find.text('Recent transactions'), findsOneWidget);
-    expect(find.text('Fund success'), findsOneWidget);
 
     await tester.tap(find.byIcon(Icons.visibility_outlined).first);
     await tester.pumpAndSettle();
 
     expect(find.text('******'), findsWidgets);
+
+    final homeList = find.descendant(
+      of: find.byType(ListView).first,
+      matching: find.byType(Scrollable),
+    ).first;
+    await tester.scrollUntilVisible(
+      find.text('Other wallets'),
+      300,
+      scrollable: homeList,
+    );
+    expect(find.text('Other wallets'), findsOneWidget);
+
+    await tester.scrollUntilVisible(
+      find.text('Recent transactions'),
+      300,
+      scrollable: homeList,
+    );
+    expect(find.text('Recent transactions'), findsOneWidget);
+    expect(find.text('Fund success'), findsOneWidget);
 
     await tester.tap(find.text('View more'));
     await tester.pumpAndSettle();
@@ -94,6 +113,15 @@ void main() {
     expect(find.text('Feature hub'), findsOneWidget);
     expect(find.text('Explore features'), findsOneWidget);
     expect(find.text('Fund wallet'), findsOneWidget);
+
+    await tester.scrollUntilVisible(
+      find.text('Virtual cards'),
+      300,
+      scrollable: find.descendant(
+        of: find.byType(CustomScrollView).first,
+        matching: find.byType(Scrollable),
+      ).first,
+    );
     expect(find.text('Virtual cards'), findsOneWidget);
     expect(find.text('Coming soon'), findsOneWidget);
   });
@@ -137,9 +165,18 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Add money'), findsOneWidget);
-    expect(find.text('Copy account number'), findsOneWidget);
+
+    await tester.scrollUntilVisible(
+      find.text('Providus Bank'),
+      300,
+      scrollable: find.descendant(
+        of: find.byType(CustomScrollView).first,
+        matching: find.byType(Scrollable),
+      ).first,
+    );
+    expect(find.byTooltip('Copy account number'), findsOneWidget);
     expect(find.text('Providus Bank'), findsOneWidget);
-    expect(find.text('0123456789'), findsOneWidget);
+    expect(find.textContaining('0123456789'), findsOneWidget);
   });
 
   testWidgets('funding workflow opens directly from its route',
@@ -166,9 +203,18 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Add money'), findsOneWidget);
-    expect(find.text('Copy account number'), findsOneWidget);
+
+    await tester.scrollUntilVisible(
+      find.text('Providus Bank'),
+      300,
+      scrollable: find.descendant(
+        of: find.byType(CustomScrollView).first,
+        matching: find.byType(Scrollable),
+      ).first,
+    );
+    expect(find.byTooltip('Copy account number'), findsOneWidget);
     expect(find.text('Providus Bank'), findsOneWidget);
-    expect(find.text('0123456789'), findsOneWidget);
+    expect(find.textContaining('0123456789'), findsOneWidget);
   });
 
   testWidgets('home screen opens the wallets overview from manage',
@@ -199,6 +245,14 @@ void main() {
 
     await tester.pumpAndSettle();
 
+    await tester.scrollUntilVisible(
+      find.text('Manage'),
+      300,
+      scrollable: find.descendant(
+        of: find.byType(ListView).first,
+        matching: find.byType(Scrollable),
+      ).first,
+    );
     await tester.tap(find.text('Manage'));
     await tester.pumpAndSettle();
 

@@ -183,7 +183,7 @@ void main() {
     );
 
     await tester.tap(find.text('Show snackbar'));
-    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
 
     expect(find.text('Saved'), findsOneWidget);
   });

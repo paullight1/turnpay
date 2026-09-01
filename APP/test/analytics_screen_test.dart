@@ -23,7 +23,7 @@ void main() {
     expect(find.text('My Income'), findsOneWidget);
 
     await tester.tap(find.text('Outcome'));
-    await tester.pumpAndSettle();
+    await tester.pump(const Duration(milliseconds: 500));
 
     expect(find.text('My Spending'), findsOneWidget);
   });
