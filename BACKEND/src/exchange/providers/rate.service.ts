@@ -1,12 +1,13 @@
-import { Injectable, OnModuleInit } from "@nestjs/common";
-import { ConfigService } from "@nestjs/config";
-import { Cron, CronExpression } from "@nestjs/schedule";
-import { PrismaService } from "../../prisma/prisma.service";
-import { RedisService } from "../../redis/redis.service";
-import { HttpService } from "@nestjs/axios";
-import { firstValueFrom } from "rxjs";
-import { AxiosResponse } from "axios";
-import { PinoLogger } from "nestjs-pino";
+import { Injectable, OnModuleInit } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { Cron, CronExpression } from '@nestjs/schedule';
+import { PrismaService } from '../../prisma/prisma.service';
+import { RedisService } from '../../redis/redis.service';
+import { HttpService } from '@nestjs/axios';
+import { firstValueFrom } from 'rxjs';
+import { AxiosResponse } from 'axios';
+import { PinoLogger } from 'nestjs-pino';
+import { Prisma } from '@prisma/client';
 
 interface FxRateResponse {
   result?: string;
@@ -28,26 +29,23 @@ interface RateResult {
   isStale: boolean;
 }
 
-type CircuitState = "CLOSED" | "OPEN" | "HALF_OPEN";
+type CircuitState = 'CLOSED' | 'OPEN' | 'HALF_OPEN';
 
-const RATE_CACHE_REDIS_PREFIX = "fx:rate:";
+const RATE_CACHE_REDIS_PREFIX = 'fx:rate:';
 const RATE_FRESHNESS_TTL_MS = 60_000; // 60 seconds freshness
 const RATE_STALE_RETENTION_SECONDS = 300; // 5 min Redis retention for stale reads
 const CIRCUIT_FAILURE_THRESHOLD = 3;
 const CIRCUIT_RECOVERY_MS = 30_000; // 30 seconds before half-open attempt
-const CIRCUIT_REDIS_KEY = "fx:circuit:state";
-const CIRCUIT_FAILURES_KEY = "fx:circuit:failures";
-const CIRCUIT_OPENED_AT_KEY = "fx:circuit:openedAt";
+const CIRCUIT_REDIS_KEY = 'fx:circuit:state';
+const CIRCUIT_FAILURES_KEY = 'fx:circuit:failures';
+const CIRCUIT_OPENED_AT_KEY = 'fx:circuit:openedAt';
 const DEFAULT_MARKUP_PERCENT = 2.5;
 
 @Injectable()
 export class RateService implements OnModuleInit {
-  private readonly memoryCache: Map<
-    string,
-    CachedRate
-  > = new Map();
+  private readonly memoryCache: Map<string, CachedRate> = new Map();
 
-  private circuitState: CircuitState = "CLOSED";
+  private circuitState: CircuitState = 'CLOSED';
   private circuitFailures: number = 0;
   private circuitOpenedAt: number = 0;
 
@@ -68,7 +66,7 @@ export class RateService implements OnModuleInit {
 
   @Cron(CronExpression.EVERY_MINUTE)
   async scheduledRateFetch() {
-    this.logger.info({}, "Running scheduled rate fetch (every 60s)");
+    this.logger.info({}, 'Running scheduled rate fetch (every 60s)');
     await this.fetchRates();
   }
 
@@ -76,23 +74,28 @@ export class RateService implements OnModuleInit {
    * Get the current exchange rate for a currency pair.
    * Returns isStale=true when the circuit is open and a fallback rate is served.
    */
-  async getRate(
-    from: string,
-    to: string,
-  ): Promise<RateResult> {
+  async getRate(from: string, to: string): Promise<RateResult> {
     const key = `${from}_${to}`;
 
     // Check in-memory cache first (fast path)
     const memoryCached = this.memoryCache.get(key);
     if (memoryCached && this.isFresh(memoryCached.fetchedAt)) {
-      return { rate: memoryCached.rate, markup: memoryCached.markup, isStale: false };
+      return {
+        rate: memoryCached.rate,
+        markup: memoryCached.markup,
+        isStale: false,
+      };
     }
 
     // Try Redis cache (second layer, survives restarts)
     const redisCached = await this.loadFromRedis(key);
     if (redisCached && this.isFresh(redisCached.fetchedAt)) {
       this.memoryCache.set(key, redisCached);
-      return { rate: redisCached.rate, markup: redisCached.markup, isStale: false };
+      return {
+        rate: redisCached.rate,
+        markup: redisCached.markup,
+        isStale: false,
+      };
     }
 
     // Try DB stored rate
@@ -102,14 +105,18 @@ export class RateService implements OnModuleInit {
     }
 
     // Circuit is open — serve stale rate if available
-    if (this.circuitState === "OPEN") {
+    if (this.circuitState === 'OPEN') {
       const staleRate = await this.getStaleRate(key);
       if (staleRate) {
         this.logger.warn(
           { from, to, rate: staleRate.rate },
-          "Circuit OPEN — serving stale rate",
+          'Circuit OPEN — serving stale rate',
         );
-        return { rate: staleRate.rate, markup: staleRate.markup, isStale: true };
+        return {
+          rate: staleRate.rate,
+          markup: staleRate.markup,
+          isStale: true,
+        };
       }
     }
 
@@ -121,7 +128,7 @@ export class RateService implements OnModuleInit {
       return {
         rate: refreshed.rate,
         markup: refreshed.markup,
-        isStale: this.circuitState !== "CLOSED",
+        isStale: this.circuitState !== 'CLOSED',
       };
     }
 
@@ -130,7 +137,7 @@ export class RateService implements OnModuleInit {
     if (fallback) {
       this.logger.error(
         { from, to, rate: fallback.rate },
-        "No rate available — using hardcoded fallback",
+        'No rate available — using hardcoded fallback',
       );
       return { ...fallback, isStale: true };
     }
@@ -149,11 +156,11 @@ export class RateService implements OnModuleInit {
     markup: number,
     adminId?: string,
     reason?: string,
+    database: PrismaService | Prisma.TransactionClient = this.prisma,
+    options: { refreshCache?: boolean } = {},
   ): Promise<void> {
-    const key = `${from}_${to}`;
-
     // Get old rate for audit
-    const oldRate = await this.prisma.rate.findUnique({
+    const oldRate = await database.rate.findUnique({
       where: { from_to: { from, to } },
     });
 
@@ -165,38 +172,33 @@ export class RateService implements OnModuleInit {
         }
       : null;
 
-    await this.prisma.rate.upsert({
+    await database.rate.upsert({
       where: {
         from_to: { from, to },
       },
-      update: { rate: String(rate), markup: String(markup), source: "admin" },
+      update: { rate: String(rate), markup: String(markup), source: 'admin' },
       create: {
         from,
         to,
         rate: String(rate),
         markup: String(markup),
-        source: "admin",
+        source: 'admin',
       },
     });
 
-    // Update caches
-    const cached: CachedRate = {
-      rate,
-      markup,
-      fetchedAt: Date.now(),
-    };
-    this.memoryCache.set(key, cached);
-    await this.saveToRedis(key, cached);
+    if (options.refreshCache !== false) {
+      await this.refreshRateCache(from, to, rate, markup);
+    }
 
     // Write audit log
     if (adminId) {
-      await this.prisma.auditLog.create({
+      await database.auditLog.create({
         data: {
           adminId,
-          action: "FX_RATE_OVERRIDE",
-          targetType: "Rate",
+          action: 'FX_RATE_OVERRIDE',
+          targetType: 'Rate',
           targetId: `${from}_${to}`,
-          reason: reason || "Manual rate override",
+          reason: reason || 'Manual rate override',
           before: oldRateValue
             ? {
                 rate: oldRateValue.rate,
@@ -204,7 +206,7 @@ export class RateService implements OnModuleInit {
                 source: oldRateValue.source,
               }
             : { rate: null, markup: null },
-          after: { rate, markup, source: "admin" },
+          after: { rate, markup, source: 'admin' },
           metadata: { from, to },
         },
       });
@@ -212,8 +214,23 @@ export class RateService implements OnModuleInit {
 
     this.logger.info(
       { from, to, rate, markup, adminId },
-      "Manual rate set by admin",
+      'Manual rate set by admin',
     );
+  }
+
+  async refreshRateCache(
+    from: string,
+    to: string,
+    rate: number,
+    markup: number,
+  ): Promise<void> {
+    const cached: CachedRate = {
+      rate,
+      markup,
+      fetchedAt: Date.now(),
+    };
+    this.memoryCache.set(`${from}_${to}`, cached);
+    await this.saveToRedis(`${from}_${to}`, cached);
   }
 
   /**
@@ -224,11 +241,29 @@ export class RateService implements OnModuleInit {
     from: string,
     to: string,
     proposedRate: number,
+    proposedMarkup?: number,
   ): Promise<{ deviationPercent: number; requiresDualApproval: boolean }> {
     try {
       const current = await this.getRate(from, to);
+      // Compare the *effective* rate (rate * (1 - markup/100)) — the number
+      // that actually drives every exchange credit — not just the base rate.
+      // Otherwise an admin could hold `rate` at market (0% deviation, no second
+      // approver) while inflating `markup` to move the real economics far off
+      // market. When no markup is supplied, fall back to base-rate comparison.
+      const currentEffective = current.rate * (1 - (current.markup ?? 0) / 100);
+      const proposedEffective =
+        proposedMarkup === undefined
+          ? proposedRate
+          : proposedRate * (1 - proposedMarkup / 100);
+      const baseline =
+        proposedMarkup === undefined ? current.rate : currentEffective;
+
+      if (!baseline || !Number.isFinite(baseline)) {
+        return { deviationPercent: 100, requiresDualApproval: true };
+      }
+
       const deviation =
-        Math.abs(proposedRate - current.rate) / current.rate * 100;
+        (Math.abs(proposedEffective - baseline) / baseline) * 100;
       return {
         deviationPercent: Math.round(deviation * 100) / 100,
         requiresDualApproval: deviation > 5,
@@ -258,39 +293,39 @@ export class RateService implements OnModuleInit {
 
   private async fetchRates(): Promise<void> {
     // Circuit breaker check
-    if (this.circuitState === "OPEN") {
+    if (this.circuitState === 'OPEN') {
       if (Date.now() - this.circuitOpenedAt >= CIRCUIT_RECOVERY_MS) {
-        this.circuitState = "HALF_OPEN";
-        this.logger.info({}, "Circuit breaker half-open — attempting recovery");
+        this.circuitState = 'HALF_OPEN';
+        this.logger.info({}, 'Circuit breaker half-open — attempting recovery');
       } else {
         this.logger.warn(
           {},
-          "Circuit breaker open — skipping rate fetch, serving stale rates",
+          'Circuit breaker open — skipping rate fetch, serving stale rates',
         );
         return;
       }
     }
 
-    const apiUrl = this.configService.get<string>("FX_API_URL");
-    const apiKey = this.configService.get<string>("FX_API_KEY");
+    const apiUrl = this.configService.get<string>('FX_API_URL');
+    const apiKey = this.configService.get<string>('FX_API_KEY');
 
     if (!apiUrl || !apiKey) {
       const loadedStoredRates = await this.loadStoredRatesToMemory();
       if (loadedStoredRates) {
         this.logger.warn(
           {},
-          "FX Rate API not configured. Using stored exchange rates.",
+          'FX Rate API not configured. Using stored exchange rates.',
         );
         return;
       }
 
-      this.logger.warn({}, "FX Rate API not configured. Using fallback rates.");
+      this.logger.warn({}, 'FX Rate API not configured. Using fallback rates.');
       await this.loadFallbackRates();
       return;
     }
 
     // Fetch rates for both base currencies
-    const currencies = ["GHS", "NGN"] as const;
+    const currencies = ['GHS', 'NGN'] as const;
     let successCount = 0;
 
     for (const base of currencies) {
@@ -302,7 +337,7 @@ export class RateService implements OnModuleInit {
           }),
         );
 
-        const rates = this.extractRates(response.data, base);
+        const rates = this.extractRates(response.data);
         if (rates) {
           await this.saveRatesToDatabase(rates);
           successCount++;
@@ -311,7 +346,7 @@ export class RateService implements OnModuleInit {
         this.logger.error(
           {
             base,
-            error: error instanceof Error ? error.message : "Unknown error",
+            error: error instanceof Error ? error.message : 'Unknown error',
           },
           `Failed to fetch FX rates for ${base}`,
         );
@@ -332,33 +367,26 @@ export class RateService implements OnModuleInit {
       await this.recordSuccess();
       this.logger.info(
         { successCount },
-        "FX rates fetched and cached successfully",
+        'FX rates fetched and cached successfully',
       );
     }
   }
 
-  private buildApiUrl(
-    baseUrl: string,
-    apiKey: string,
-    base: string,
-  ): string {
+  private buildApiUrl(baseUrl: string, apiKey: string, base: string): string {
     // exchangerate-api.com format: https://v6.exchangerate-api.com/v6/{KEY}/latest/{BASE}
-    if (baseUrl.includes("exchangerate-api.com")) {
-      const cleanUrl = baseUrl.replace(/\/+$/, "");
+    if (baseUrl.includes('exchangerate-api.com')) {
+      const cleanUrl = baseUrl.replace(/\/+$/, '');
       return `${cleanUrl}/${apiKey}/latest/${base}`;
     }
 
     // Generic format: append ?base={BASE} or pass apiKey as query param
-    const separator = baseUrl.includes("?") ? "&" : "?";
+    const separator = baseUrl.includes('?') ? '&' : '?';
     return `${baseUrl}${separator}apikey=${apiKey}&base_currency=${base}`;
   }
 
-  private extractRates(
-    data: FxRateResponse,
-    base: string,
-  ): Record<string, number> | null {
+  private extractRates(data: FxRateResponse): Record<string, number> | null {
     // exchangerate-api.com format: { result: "success", base_code: "GHS", rates: {...} }
-    if (data.result === "success" && data.rates) {
+    if (data.result === 'success' && data.rates) {
       return data.rates;
     }
 
@@ -379,7 +407,7 @@ export class RateService implements OnModuleInit {
 
   private async recordSuccess(): Promise<void> {
     this.circuitFailures = 0;
-    this.circuitState = "CLOSED";
+    this.circuitState = 'CLOSED';
     this.circuitOpenedAt = 0;
     await this.persistCircuitState();
   }
@@ -389,9 +417,9 @@ export class RateService implements OnModuleInit {
 
     if (
       this.circuitFailures >= CIRCUIT_FAILURE_THRESHOLD &&
-      this.circuitState !== "OPEN"
+      this.circuitState !== 'OPEN'
     ) {
-      this.circuitState = "OPEN";
+      this.circuitState = 'OPEN';
       this.circuitOpenedAt = Date.now();
 
       this.logger.error(
@@ -399,16 +427,16 @@ export class RateService implements OnModuleInit {
           failures: this.circuitFailures,
           threshold: CIRCUIT_FAILURE_THRESHOLD,
         },
-        "Circuit breaker OPENED — rate provider is failing",
+        'Circuit breaker OPENED — rate provider is failing',
       );
 
       // Create audit log entry for admin alert
       try {
         await this.prisma.auditLog.create({
           data: {
-            action: "FX_RATE_CIRCUIT_OPENED",
-            targetType: "RateService",
-            targetId: "circuit-breaker",
+            action: 'FX_RATE_CIRCUIT_OPENED',
+            targetType: 'RateService',
+            targetId: 'circuit-breaker',
             reason: `Circuit opened after ${this.circuitFailures} consecutive failures`,
             metadata: {
               failureCount: this.circuitFailures,
@@ -419,8 +447,10 @@ export class RateService implements OnModuleInit {
         });
       } catch (auditError) {
         this.logger.error(
-          { error: auditError instanceof Error ? auditError.message : "Unknown" },
-          "Failed to write circuit-breaker audit log",
+          {
+            error: auditError instanceof Error ? auditError.message : 'Unknown',
+          },
+          'Failed to write circuit-breaker audit log',
         );
       }
     }
@@ -446,11 +476,11 @@ export class RateService implements OnModuleInit {
 
       // If circuit was open but recovery time has passed, go half-open
       if (
-        this.circuitState === "OPEN" &&
+        this.circuitState === 'OPEN' &&
         Date.now() - this.circuitOpenedAt >= CIRCUIT_RECOVERY_MS
       ) {
-        this.circuitState = "HALF_OPEN";
-        this.logger.info({}, "Circuit breaker restored to half-open state");
+        this.circuitState = 'HALF_OPEN';
+        this.logger.info({}, 'Circuit breaker restored to half-open state');
       }
     } catch {
       // Keep defaults
@@ -460,16 +490,8 @@ export class RateService implements OnModuleInit {
   private async persistCircuitState(): Promise<void> {
     await Promise.all([
       this.redis.set(CIRCUIT_REDIS_KEY, this.circuitState, 3600),
-      this.redis.set(
-        CIRCUIT_FAILURES_KEY,
-        String(this.circuitFailures),
-        3600,
-      ),
-      this.redis.set(
-        CIRCUIT_OPENED_AT_KEY,
-        String(this.circuitOpenedAt),
-        3600,
-      ),
+      this.redis.set(CIRCUIT_FAILURES_KEY, String(this.circuitFailures), 3600),
+      this.redis.set(CIRCUIT_OPENED_AT_KEY, String(this.circuitOpenedAt), 3600),
     ]);
   }
 
@@ -495,7 +517,7 @@ export class RateService implements OnModuleInit {
     }
 
     // Try DB
-    const [from, to] = key.split("_");
+    const [from, to] = key.split('_');
     return this.loadStoredRate(from, to);
   }
 
@@ -511,10 +533,7 @@ export class RateService implements OnModuleInit {
     return null;
   }
 
-  private async saveToRedis(
-    key: string,
-    cached: CachedRate,
-  ): Promise<void> {
+  private async saveToRedis(key: string, cached: CachedRate): Promise<void> {
     try {
       await this.redis.set(
         `${RATE_CACHE_REDIS_PREFIX}${key}`,
@@ -575,12 +594,12 @@ export class RateService implements OnModuleInit {
     };
 
     for (const [pair, { rate, markup }] of Object.entries(fallbackRates)) {
-      const [from, to] = pair.split("_");
+      const [from, to] = pair.split('_');
       const existing = await this.prisma.rate.findUnique({
         where: { from_to: { from, to } },
       });
 
-      if (existing?.source === "admin") {
+      if (existing?.source === 'admin') {
         this.memoryCache.set(pair, {
           rate: existing.rate.toNumber(),
           markup: existing.markup.toNumber(),
@@ -591,13 +610,13 @@ export class RateService implements OnModuleInit {
 
       await this.prisma.rate.upsert({
         where: { from_to: { from, to } },
-        update: { rate: String(rate), source: "fallback" },
+        update: { rate: String(rate), source: 'fallback' },
         create: {
           from,
           to,
           rate: String(rate),
           markup: String(markup),
-          source: "fallback",
+          source: 'fallback',
         },
       });
 
@@ -608,7 +627,7 @@ export class RateService implements OnModuleInit {
       });
     }
 
-    this.logger.info({}, "Fallback rates loaded");
+    this.logger.info({}, 'Fallback rates loaded');
   }
 
   private async saveRatesToDatabase(
@@ -617,24 +636,24 @@ export class RateService implements OnModuleInit {
     // Derive both pairs from the fetched rates
     // If we fetched with base=GHS, rates contains GHS→NGN directly
     // We also compute NGN→GHS as the inverse
-    const ghsToNgn = rates["NGN"]; // When base=GHS, NGN rate = GHS→NGN
-    const ngnToGhs = rates["GHS"]; // When base=NGN, GHS rate = NGN→GHS
+    const ghsToNgn = rates['NGN']; // When base=GHS, NGN rate = GHS→NGN
+    const ngnToGhs = rates['GHS']; // When base=NGN, GHS rate = NGN→GHS
 
     const ratePairs: Array<{ from: string; to: string; rate: number }> = [];
 
     if (ghsToNgn && ghsToNgn > 0) {
-      ratePairs.push({ from: "GHS", to: "NGN", rate: ghsToNgn });
+      ratePairs.push({ from: 'GHS', to: 'NGN', rate: ghsToNgn });
       // Compute inverse
-      ratePairs.push({ from: "NGN", to: "GHS", rate: 1 / ghsToNgn });
+      ratePairs.push({ from: 'NGN', to: 'GHS', rate: 1 / ghsToNgn });
     }
 
     if (ngnToGhs && ngnToGhs > 0) {
       // Don't duplicate NGN→GHS if already added from inverse
-      if (!ratePairs.some((p) => p.from === "NGN" && p.to === "GHS")) {
-        ratePairs.push({ from: "NGN", to: "GHS", rate: ngnToGhs });
+      if (!ratePairs.some((p) => p.from === 'NGN' && p.to === 'GHS')) {
+        ratePairs.push({ from: 'NGN', to: 'GHS', rate: ngnToGhs });
       }
-      if (!ratePairs.some((p) => p.from === "GHS" && p.to === "NGN")) {
-        ratePairs.push({ from: "GHS", to: "NGN", rate: 1 / ngnToGhs });
+      if (!ratePairs.some((p) => p.from === 'GHS' && p.to === 'NGN')) {
+        ratePairs.push({ from: 'GHS', to: 'NGN', rate: 1 / ngnToGhs });
       }
     }
 
@@ -643,7 +662,7 @@ export class RateService implements OnModuleInit {
         where: { from_to: { from, to } },
       });
 
-      if (existing?.source === "admin") {
+      if (existing?.source === 'admin') {
         const key = `${from}_${to}`;
         this.memoryCache.set(key, {
           rate: existing.rate.toNumber(),
@@ -653,19 +672,20 @@ export class RateService implements OnModuleInit {
         continue;
       }
 
-      const effectiveMarkup = existing?.source === "api"
-        ? existing.markup.toNumber()
-        : DEFAULT_MARKUP_PERCENT;
+      const effectiveMarkup =
+        existing?.source === 'api'
+          ? existing.markup.toNumber()
+          : DEFAULT_MARKUP_PERCENT;
 
       await this.prisma.rate.upsert({
         where: { from_to: { from, to } },
-        update: { rate: String(rate), source: "api", updatedAt: new Date() },
+        update: { rate: String(rate), source: 'api', updatedAt: new Date() },
         create: {
           from,
           to,
           rate: String(rate),
           markup: String(effectiveMarkup),
-          source: "api",
+          source: 'api',
         },
       });
 
@@ -681,7 +701,7 @@ export class RateService implements OnModuleInit {
 
     this.logger.info(
       { pairs: ratePairs.length },
-      "Rates saved to database and caches",
+      'Rates saved to database and caches',
     );
   }
 

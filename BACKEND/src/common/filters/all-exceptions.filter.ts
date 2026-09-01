@@ -4,10 +4,10 @@ import {
   ExceptionFilter,
   HttpException,
   HttpStatus,
-} from "@nestjs/common";
-import type { LoggerService } from "@nestjs/common";
-import { HttpAdapterHost } from "@nestjs/core";
-import type { Request, Response } from "express";
+} from '@nestjs/common';
+import type { LoggerService } from '@nestjs/common';
+import { HttpAdapterHost } from '@nestjs/core';
+import type { Request, Response } from 'express';
 
 @Catch()
 export class AllExceptionsFilter implements ExceptionFilter {
@@ -30,7 +30,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
     const rawMessage =
       exception instanceof HttpException
         ? this.normalizeExceptionResponse(exception.getResponse())
-        : "Internal server error";
+        : 'Internal server error';
 
     const responseBody = {
       statusCode: httpStatus,
@@ -55,36 +55,36 @@ export class AllExceptionsFilter implements ExceptionFilter {
     status: number,
     rawMessage: string | Record<string, unknown> | Array<unknown>,
   ) {
-    if (!path?.startsWith("/api/auth/")) {
+    if (!path?.startsWith('/api/auth/')) {
       return rawMessage;
     }
 
-    if (path.endsWith("/auth/login") && status === 401) {
-      return "Unable to sign in with those credentials";
+    if (path.endsWith('/auth/login') && status === 401) {
+      return 'Unable to sign in with those credentials';
     }
 
-    if (path.endsWith("/auth/refresh") && status === 401) {
-      return "Session expired. Please sign in again.";
+    if (path.endsWith('/auth/refresh') && status === 401) {
+      return 'Session expired. Please sign in again.';
     }
 
     if (
-      (path.endsWith("/auth/register") ||
-        path.includes("/api/auth/register")) &&
+      (path.endsWith('/auth/register') ||
+        path.includes('/api/auth/register')) &&
       status === 409
     ) {
-      return "Unable to complete registration";
+      return 'Unable to complete registration';
     }
 
     if (
-      (path.includes("/api/auth/otp") ||
-        path.includes("/api/auth/forgot-password")) &&
+      (path.includes('/api/auth/otp') ||
+        path.includes('/api/auth/forgot-password')) &&
       status === 400
     ) {
-      return "Authentication request failed";
+      return 'Authentication request failed';
     }
 
-    if (method === "GET" && path.includes("/api/auth/sessions")) {
-      return "Session action failed";
+    if (method === 'GET' && path.includes('/api/auth/sessions')) {
+      return 'Session action failed';
     }
 
     return rawMessage;
@@ -93,7 +93,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
   private normalizeExceptionResponse(
     value: string | object,
   ): string | Record<string, unknown> | Array<unknown> {
-    if (typeof value === "string" || Array.isArray(value)) {
+    if (typeof value === 'string' || Array.isArray(value)) {
       return value;
     }
 

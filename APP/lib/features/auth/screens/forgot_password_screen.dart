@@ -3,7 +3,6 @@ import 'package:go_router/go_router.dart';
 
 import '../../../core/theme/app_theme.dart';
 import '../../../core/router/app_router.dart';
-import '../../../core/widgets/tp_auth_background.dart';
 import '../../../core/widgets/tp_back_button.dart';
 import '../../../core/widgets/tp_card.dart';
 import '../../../core/widgets/tp_snackbar.dart';

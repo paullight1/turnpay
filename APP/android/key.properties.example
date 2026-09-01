@@ -1,0 +1,20 @@
+# TrustPay release signing configuration — TEMPLATE ONLY.
+#
+# TODO(launch): copy this file to android/key.properties and fill in the real
+# values AFTER creating the upload keystore out-of-band, e.g.:
+#
+#   keytool -genkey -v -keystore ~/trustpay-upload.jks \
+#     -keyalg RSA -keysize 2048 -validity 10000 -alias upload
+#
+# Release tasks now fail closed when android/key.properties is absent.
+# Keep using debug/profile builds for local development until the upload
+# keystore is provisioned in a secure operator-controlled channel.
+#
+# android/key.properties and the keystore (*.jks / *.keystore) are gitignored.
+# NEVER commit real secrets or the keystore to source control.
+
+storePassword=CHANGE_ME
+keyPassword=CHANGE_ME
+keyAlias=upload
+# Absolute path to the keystore, or path relative to android/app.
+storeFile=/absolute/path/to/trustpay-upload.jks

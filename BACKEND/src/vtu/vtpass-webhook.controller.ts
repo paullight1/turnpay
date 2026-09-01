@@ -7,13 +7,13 @@ import {
   Post,
   Query,
   Req,
-} from "@nestjs/common";
-import { ConfigService } from "@nestjs/config";
-import { Throttle } from "@nestjs/throttler";
-import { createHmac, timingSafeEqual } from "crypto";
-import { PinoLogger } from "nestjs-pino";
-import type { RawBodyRequest } from "../common/types/request-context";
-import { VtuService } from "./vtu.service";
+} from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { Throttle } from '@nestjs/throttler';
+import { createHmac, timingSafeEqual } from 'crypto';
+import { PinoLogger } from 'nestjs-pino';
+import type { RawBodyRequest } from '../common/types/request-context';
+import { VtuService } from './vtu.service';
 
 type VtpassWebhookPayload = Record<string, unknown>;
 
@@ -26,7 +26,7 @@ type VtpassWebhookEvent = {
   rawPayload: Record<string, unknown>;
 };
 
-@Controller("webhooks/vtu")
+@Controller('webhooks/vtu')
 export class VtpassWebhookController {
   constructor(
     private readonly vtuService: VtuService,
@@ -36,15 +36,15 @@ export class VtpassWebhookController {
     this.logger.setContext(VtpassWebhookController.name);
   }
 
-  @Post("vtpass")
+  @Post('vtpass')
   @HttpCode(200)
   @Throttle({ default: { limit: 100, ttl: 60000 } })
   async handleVtpassWebhook(
-    @Headers("x-vtpass-signature") vtpassSignature: string | undefined,
-    @Headers("x-webhook-signature") webhookSignature: string | undefined,
-    @Headers("x-signature") genericSignature: string | undefined,
-    @Headers("x-vtpass-webhook-secret") secretHeader: string | undefined,
-    @Query("token") token: string | undefined,
+    @Headers('x-vtpass-signature') vtpassSignature: string | undefined,
+    @Headers('x-webhook-signature') webhookSignature: string | undefined,
+    @Headers('x-signature') genericSignature: string | undefined,
+    @Headers('x-vtpass-webhook-secret') secretHeader: string | undefined,
+    @Query('token') token: string | undefined,
     @Req() req: RawBodyRequest,
     @Body() body: VtpassWebhookPayload,
   ) {
@@ -65,9 +65,9 @@ export class VtpassWebhookController {
           providerReference: event.providerReference,
           eventType: event.eventType,
           errorMessage:
-            error instanceof Error ? error.message : "Unknown webhook error",
+            error instanceof Error ? error.message : 'Unknown webhook error',
         },
-        "VTpass webhook background processing failed",
+        'VTpass webhook background processing failed',
       );
     });
 
@@ -78,10 +78,10 @@ export class VtpassWebhookController {
         providerReference: event.providerReference,
         status: event.status,
       },
-      "VTpass VTU webhook accepted",
+      'VTpass VTU webhook accepted',
     );
 
-    return { response: "success" };
+    return { response: 'success' };
   }
 
   private verifyWebhook(input: {
@@ -89,45 +89,45 @@ export class VtpassWebhookController {
     receivedSignature: string | undefined;
     receivedSecret: string | undefined;
   }) {
-    const secret = this.configService.get<string>("VTPASS_WEBHOOK_SECRET");
+    const secret = this.configService.get<string>('VTPASS_WEBHOOK_SECRET');
     if (!secret) {
-      this.logger.warn("VTPASS_WEBHOOK_SECRET is not configured");
+      this.logger.warn('VTPASS_WEBHOOK_SECRET is not configured');
       throw new BadRequestException(
-        "Webhook signature secret is not configured",
+        'Webhook signature secret is not configured',
       );
     }
 
     if (input.receivedSecret) {
       if (!this.timingSafeCompare(secret, input.receivedSecret)) {
-        this.logger.warn("Invalid VTpass webhook shared secret");
-        throw new BadRequestException("Invalid webhook secret");
+        this.logger.warn('Invalid VTpass webhook shared secret');
+        throw new BadRequestException('Invalid webhook secret');
       }
       return;
     }
 
     if (!input.receivedSignature) {
-      this.logger.warn("Missing VTpass webhook signature");
-      throw new BadRequestException("Missing signature header");
+      this.logger.warn('Missing VTpass webhook signature');
+      throw new BadRequestException('Missing signature header');
     }
 
     if (!input.rawBody) {
-      this.logger.warn("Missing raw body for VTpass webhook");
-      throw new BadRequestException("Missing request body");
+      this.logger.warn('Missing raw body for VTpass webhook');
+      throw new BadRequestException('Missing request body');
     }
 
-    const expectedHex = createHmac("sha256", secret)
+    const expectedHex = createHmac('sha256', secret)
       .update(input.rawBody)
-      .digest("hex");
-    const expectedBase64 = createHmac("sha256", secret)
+      .digest('hex');
+    const expectedBase64 = createHmac('sha256', secret)
       .update(input.rawBody)
-      .digest("base64");
+      .digest('base64');
 
     if (
       !this.timingSafeCompare(expectedHex, input.receivedSignature) &&
       !this.timingSafeCompare(expectedBase64, input.receivedSignature)
     ) {
-      this.logger.warn("Invalid VTpass webhook signature");
-      throw new BadRequestException("Invalid signature");
+      this.logger.warn('Invalid VTpass webhook signature');
+      throw new BadRequestException('Invalid signature');
     }
   }
 
@@ -156,7 +156,7 @@ export class VtpassWebhookController {
       .toLowerCase();
 
     if (!eventType || !providerRequestId || !status) {
-      throw new BadRequestException("Invalid VTpass webhook payload");
+      throw new BadRequestException('Invalid VTpass webhook payload');
     }
 
     return {
@@ -175,7 +175,7 @@ export class VtpassWebhookController {
   }
 
   private objectValue(value: unknown): Record<string, unknown> | undefined {
-    if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+    if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
       return value as Record<string, unknown>;
     }
 
@@ -183,19 +183,19 @@ export class VtpassWebhookController {
   }
 
   private stringValue(value: unknown) {
-    if (typeof value === "string") {
+    if (typeof value === 'string') {
       return value;
     }
 
-    if (typeof value === "number" || typeof value === "bigint") {
+    if (typeof value === 'number' || typeof value === 'bigint') {
       return value.toString();
     }
 
-    return "";
+    return '';
   }
 
   private timingSafeCompare(expected: string, received: string) {
-    const normalizedReceived = received.replace(/^sha256=/i, "").trim();
+    const normalizedReceived = received.replace(/^sha256=/i, '').trim();
     const expectedBuffer = Buffer.from(expected);
     const receivedBuffer = Buffer.from(normalizedReceived);
 

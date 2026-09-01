@@ -1,11 +1,17 @@
-import { Injectable, OnModuleInit, OnModuleDestroy } from "@nestjs/common";
-import { ConfigService } from "@nestjs/config";
-import IORedis from "ioredis";
-import { PinoLogger } from "nestjs-pino";
+import {
+  Injectable,
+  OnModuleDestroy,
+  OnModuleInit,
+  ServiceUnavailableException,
+} from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import IORedis from 'ioredis';
+import { PinoLogger } from 'nestjs-pino';
 
 @Injectable()
 export class RedisService implements OnModuleInit, OnModuleDestroy {
   private client: IORedis;
+  private readonly allowMemoryFallback: boolean;
   private readonly memoryStore = new Map<
     string,
     { value: string; expiresAt?: number }
@@ -15,6 +21,15 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
     private configService: ConfigService,
     private readonly logger: PinoLogger,
   ) {
+    const nodeEnv = this.configService.get<string>('NODE_ENV', 'development');
+    const configuredFallback = this.configService.get<boolean | string>(
+      'REDIS_ALLOW_MEMORY_FALLBACK',
+      false,
+    );
+    this.allowMemoryFallback =
+      (nodeEnv === 'development' || nodeEnv === 'test') &&
+      (configuredFallback === true || configuredFallback === 'true');
+
     const options = {
       retryStrategy: (times: number) => {
         if (times > 10) return null;
@@ -22,34 +37,51 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
       },
       maxRetriesPerRequest: 3,
     };
-    const redisUrl = this.configService.get<string>("REDIS_URL");
+    const redisUrl = this.configService.get<string>('REDIS_URL');
 
     this.client = redisUrl
       ? new IORedis(redisUrl, options)
       : new IORedis({
-          host: this.configService.get<string>("REDIS_HOST", "localhost"),
-          port: this.configService.get<number>("REDIS_PORT", 6379),
-          password: this.configService.get<string>("REDIS_PASSWORD", ""),
+          host: this.configService.get<string>('REDIS_HOST', 'localhost'),
+          port: this.configService.get<number>('REDIS_PORT', 6379),
+          password: this.configService.get<string>('REDIS_PASSWORD', ''),
           ...options,
         });
 
-    this.client.on("error", (err) => {
-      this.logger.error({ err }, "Redis connection error");
+    this.client.on('error', (err) => {
+      this.logger.error({ err }, 'Redis connection error');
     });
 
-    this.client.on("connect", () => {
-      this.logger.info({}, "Connected to Redis");
+    this.client.on('connect', () => {
+      this.logger.info({}, 'Connected to Redis');
+    });
+
+    this.client.on('close', () => {
+      this.logger.error(
+        {
+          alertCode: 'REDIS_READINESS_REMOVED',
+          redisMode: this.getMode(),
+        },
+        'Redis connection closed; readiness removed',
+      );
     });
   }
 
   async onModuleInit() {
     try {
       await this.client.ping();
-      this.logger.info({}, "Redis server is reachable");
-    } catch {
+      this.logger.info({}, 'Redis server is reachable');
+    } catch (error) {
+      if (!this.allowMemoryFallback) {
+        this.logger.error(
+          { err: this.describeError(error) },
+          'Redis is required but unavailable during startup',
+        );
+        throw this.unavailable();
+      }
       this.logger.warn(
         {},
-        "Redis server not reachable, falling back to memory storage",
+        'Redis unavailable; explicit local memory mode active',
       );
     }
   }
@@ -58,26 +90,26 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
     try {
       await this.client.quit();
     } catch (err) {
-      this.logger.warn({ err }, "Redis client was already closed");
+      this.logger.warn({ err: String(err) }, 'Redis client was already closed');
     }
   }
 
   async get(key: string): Promise<string | null> {
     if (!this.isRedisReady()) {
-      return this.getFromMemory(key);
+      return this.withMemoryFallback(() => this.getFromMemory(key));
     }
 
     try {
       return await this.client.get(key);
-    } catch {
-      return this.getFromMemory(key);
+    } catch (error) {
+      this.logCommandFailure('get', error);
+      return this.withMemoryFallback(() => this.getFromMemory(key));
     }
   }
 
   async set(key: string, value: string, ttl?: number): Promise<void> {
     if (!this.isRedisReady()) {
-      this.setInMemory(key, value, ttl);
-      return;
+      return this.withMemoryFallback(() => this.setInMemory(key, value, ttl));
     }
 
     try {
@@ -86,23 +118,26 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
       } else {
         await this.client.set(key, value);
       }
-    } catch {
-      this.logger.warn({ key }, "Failed to set Redis key");
-      this.setInMemory(key, value, ttl);
+    } catch (error) {
+      this.logCommandFailure('set', error);
+      return this.withMemoryFallback(() => this.setInMemory(key, value, ttl));
     }
   }
 
   async del(key: string): Promise<void> {
     if (!this.isRedisReady()) {
-      this.memoryStore.delete(key);
-      return;
+      return this.withMemoryFallback(() => {
+        this.memoryStore.delete(key);
+      });
     }
 
     try {
       await this.client.del(key);
-    } catch {
-      this.logger.warn({ key }, "Failed to delete Redis key");
-      this.memoryStore.delete(key);
+    } catch (error) {
+      this.logCommandFailure('delete', error);
+      return this.withMemoryFallback(() => {
+        this.memoryStore.delete(key);
+      });
     }
   }
 
@@ -112,28 +147,33 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
     ttlSeconds: number,
   ): Promise<boolean> {
     if (!this.isRedisReady()) {
-      return this.setInMemoryIfNotExists(key, value, ttlSeconds);
+      return this.withMemoryFallback(() =>
+        this.setInMemoryIfNotExists(key, value, ttlSeconds),
+      );
     }
 
     try {
-      const result = await this.client.set(key, value, "EX", ttlSeconds, "NX");
-      return result === "OK";
-    } catch {
-      this.logger.warn({ key }, "Failed to acquire Redis lock");
-      return this.setInMemoryIfNotExists(key, value, ttlSeconds);
+      const result = await this.client.set(key, value, 'EX', ttlSeconds, 'NX');
+      return result === 'OK';
+    } catch (error) {
+      this.logCommandFailure('set-if-not-exists', error);
+      return this.withMemoryFallback(() =>
+        this.setInMemoryIfNotExists(key, value, ttlSeconds),
+      );
     }
   }
 
   async exists(key: string): Promise<boolean> {
     if (!this.isRedisReady()) {
-      return this.getFromMemory(key) !== null;
+      return this.withMemoryFallback(() => this.getFromMemory(key) !== null);
     }
 
     try {
       const result = await this.client.exists(key);
       return result === 1;
-    } catch {
-      return this.getFromMemory(key) !== null;
+    } catch (error) {
+      this.logCommandFailure('exists', error);
+      return this.withMemoryFallback(() => this.getFromMemory(key) !== null);
     }
   }
 
@@ -141,20 +181,56 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
     return this.client;
   }
 
+  async execute<T>(
+    command: string,
+    operation: (client: IORedis) => Promise<T>,
+  ): Promise<T> {
+    if (!this.isRedisReady()) {
+      throw this.unavailable();
+    }
+    try {
+      return await operation(this.client);
+    } catch (error) {
+      this.logCommandFailure(command, error);
+      throw this.unavailable();
+    }
+  }
+
   isAvailable(): boolean {
-    return true;
+    return this.isRedisReady();
   }
 
   isRedisAvailable(): boolean {
     return this.isRedisReady();
   }
 
-  getMode(): "redis" | "memory" {
-    return this.isRedisReady() ? "redis" : "memory";
+  isMemoryFallbackAllowed(): boolean {
+    return this.allowMemoryFallback;
+  }
+
+  assertAvailable(): void {
+    if (!this.isRedisReady() && !this.allowMemoryFallback) {
+      throw this.unavailable();
+    }
+  }
+
+  reportOperationalAlert(
+    alertCode: string,
+    context: Record<string, string | number | boolean> = {},
+  ): void {
+    this.logger.warn(
+      { alertCode, ...context },
+      'Operational alert threshold reached',
+    );
+  }
+
+  getMode(): 'redis' | 'memory' | 'unavailable' {
+    if (this.isRedisReady()) return 'redis';
+    return this.allowMemoryFallback ? 'memory' : 'unavailable';
   }
 
   private isRedisReady(): boolean {
-    return this.client.status === "ready";
+    return this.client.status === 'ready';
   }
 
   private getFromMemory(key: string): string | null {
@@ -184,5 +260,31 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
     }
     this.setInMemory(key, value, ttlSeconds);
     return true;
+  }
+
+  private withMemoryFallback<T>(operation: () => T): T {
+    if (!this.allowMemoryFallback) {
+      throw this.unavailable();
+    }
+    return operation();
+  }
+
+  private unavailable() {
+    return new ServiceUnavailableException({
+      statusCode: 503,
+      code: 'DISTRIBUTED_CONTROLS_UNAVAILABLE',
+      message: 'Distributed controls unavailable',
+    });
+  }
+
+  private logCommandFailure(command: string, error: unknown) {
+    this.logger.error(
+      { command, err: this.describeError(error) },
+      'Redis command failed',
+    );
+  }
+
+  private describeError(error: unknown) {
+    return error instanceof Error ? error.message : String(error);
   }
 }

@@ -91,6 +91,13 @@ class VtuOrderStatus {
   }
 }
 
+class VtuMeterCustomer {
+  final String name;
+  final String address;
+
+  const VtuMeterCustomer({required this.name, required this.address});
+}
+
 class VtuService {
   VtuService({required ApiClient apiClient}) : _apiClient = apiClient;
 
@@ -132,6 +139,23 @@ class VtuService {
               Map<String, dynamic>.from(item),
             ))
         .toList();
+  }
+
+  Future<VtuMeterCustomer> validateMeter({
+    required String provider,
+    required String meterNumber,
+  }) async {
+    final response = await _apiClient.client.post<Map<String, dynamic>>(
+      '/api/vtu/validate/meter',
+      queryParameters: {'provider': provider, 'number': meterNumber},
+      data: const {},
+    );
+
+    final data = response.data ?? const {};
+    return VtuMeterCustomer(
+      name: '${data['name'] ?? ''}'.trim(),
+      address: '${data['address'] ?? ''}'.trim(),
+    );
   }
 
   Future<VtuOrderStatus> requeryOrder(

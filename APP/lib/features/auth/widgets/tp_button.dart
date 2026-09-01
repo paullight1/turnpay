@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../core/utils/haptics.dart';
 import '../../../core/widgets/trustpay_lottie.dart';
 
 /// Primary CTA button used across all auth screens.
@@ -25,7 +26,12 @@ class TpButton extends StatelessWidget {
     final effectiveDisabled = isDisabled || isLoading;
 
     return GestureDetector(
-      onTap: effectiveDisabled ? null : onTap,
+      onTap: effectiveDisabled
+          ? null
+          : () {
+              Haptics.medium();
+              onTap();
+            },
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),
         height: 56,
@@ -34,7 +40,7 @@ class TpButton extends StatelessWidget {
           color: isOutlined
               ? Colors.transparent
               : effectiveDisabled
-                  ? AppColors.primary.withOpacity(0.35)
+                  ? AppColors.primary.withValues(alpha: 0.35)
                   : AppColors.primary,
           borderRadius: BorderRadius.circular(AppRadius.full),
           border: isOutlined
@@ -43,7 +49,7 @@ class TpButton extends StatelessWidget {
           boxShadow: (!isOutlined && !effectiveDisabled)
               ? [
                   BoxShadow(
-                    color: AppColors.primary.withOpacity(0.3),
+                    color: AppColors.primary.withValues(alpha: 0.3),
                     blurRadius: 20,
                     offset: const Offset(0, 6),
                   ),

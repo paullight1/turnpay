@@ -1,14 +1,7 @@
-import { Transform, Type } from "class-transformer";
-import {
-  IsString,
-  IsNumber,
-  IsIn,
-  IsPositive,
-  IsOptional,
-  IsBoolean,
-} from "class-validator";
+import { Type } from 'class-transformer';
+import { IsString, IsNumber, IsIn, IsPositive } from 'class-validator';
 
-const SUPPORTED_CURRENCIES = ["NGN", "GHS"] as const;
+const SUPPORTED_CURRENCIES = ['NGN', 'GHS'] as const;
 
 export class CreateRateAlertDto {
   @IsString()
@@ -25,6 +18,6 @@ export class CreateRateAlertDto {
   targetRate: number;
 
   @IsString()
-  @IsIn(["ABOVE", "BELOW"])
-  direction: "ABOVE" | "BELOW";
+  @IsIn(['ABOVE', 'BELOW'])
+  direction: 'ABOVE' | 'BELOW';
 }

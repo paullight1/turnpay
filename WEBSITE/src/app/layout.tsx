@@ -7,9 +7,15 @@ import { Toaster } from "@/components/ui/sonner";
 import { ThemeProvider } from "@/components/theme-provider";
 
 export const metadata: Metadata = {
-  title: "TrustPay Admin - Banking Operations Workspace",
+  metadataBase: new URL(
+    process.env.NEXT_PUBLIC_SITE_URL || "https://trustpay.xyz",
+  ),
+  title: {
+    default: "TrustPay",
+    template: "%s | TrustPay",
+  },
   description:
-    "TrustPay Admin helps teams track wallets, KYC, transactions, provider health, reconciliation, and audit trails from one secure workspace.",
+    "TrustPay is a secure platform for multi-currency wallets, transfers, bill payments, and currency exchange.",
 };
 
 export const viewport: Viewport = {

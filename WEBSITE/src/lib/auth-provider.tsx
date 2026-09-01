@@ -16,6 +16,7 @@ import {
   clearSupabaseSession,
   readPersistedSupabaseSession,
   persistSupabaseSession,
+  refreshPersistedSupabaseSession,
 } from "@/lib/supabase-session";
 import type { User as TrustPayUser, Wallet } from "@/types";
 
@@ -47,10 +48,6 @@ type LoginResponse = {
   authMode?: AuthMode;
 };
 
-type RefreshResponse = {
-  session: AppSession | null;
-};
-
 type AuthDebugState = {
   stage: string;
   authMode?: AuthMode;
@@ -69,17 +66,6 @@ function setAuthDebug(state: AuthDebugState) {
 
   (window as Window & { __TRUSTPAY_AUTH_DEBUG__?: AuthDebugState }).__TRUSTPAY_AUTH_DEBUG__ =
     state;
-}
-
-function resolveActiveSession(
-  currentSession: AppSession | null,
-  persistedSession: AppSession | null,
-) {
-  if (persistedSession) {
-    return persistedSession;
-  }
-
-  return currentSession;
 }
 
 interface AuthContextType {
@@ -107,7 +93,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [profile, setProfile] = useState<TrustPayUser | null>(null);
   const [session, setSession] = useState<AppSession | null>(null);
-  const [isLoading, setIsLoading] = useState(isSupabaseConfigured);
+  const [isLoading, setIsLoading] = useState(true);
   const router = useRouter();
   const supabase = useMemo(
     () => (isSupabaseConfigured ? createClient() : null),
@@ -151,20 +137,28 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     [applySession],
   );
 
+  const persistAndBootstrapSession = useCallback(
+    async (nextSession: AppSession) => {
+      await persistSupabaseSession(nextSession);
+      await bootstrapSession(nextSession);
+    },
+    [bootstrapSession],
+  );
+
   useEffect(() => {
     let isMounted = true;
 
     const initializeSession = async () => {
       try {
+        const persistedSession =
+          (await readPersistedSupabaseSession()) as AppSession | null;
+
         if (supabase) {
           const {
             data: { session: currentSession },
           } = await supabase.auth.getSession();
-          const persistedSession = readPersistedSupabaseSession();
-          const activeSession = resolveActiveSession(
-            currentSession as AppSession | null,
-            persistedSession as AppSession | null,
-          );
+          const activeSession =
+            persistedSession ?? (currentSession as AppSession | null);
 
           if (!isMounted) return;
 
@@ -174,7 +168,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             await bootstrapSession(activeSession as AppSession);
           }
         } else {
-          const persistedSession = readPersistedSupabaseSession();
           if (!isMounted) return;
 
           applySession(persistedSession);
@@ -198,17 +191,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     if (supabase) {
       const result = supabase.auth.onAuthStateChange((_event, currentSession) => {
-        const persistedSession = readPersistedSupabaseSession();
-        const activeSession = resolveActiveSession(
-          currentSession as AppSession | null,
-          persistedSession as AppSession | null,
-        );
-        applySession(activeSession);
-        setIsLoading(false);
+        void (async () => {
+          const persistedSession =
+            (await readPersistedSupabaseSession()) as AppSession | null;
+          const activeSession =
+            persistedSession ?? (currentSession as AppSession | null);
+          applySession(activeSession);
+          setIsLoading(false);
 
-        if (activeSession) {
-          void bootstrapSession(activeSession).catch(() => undefined);
-        }
+          if (activeSession) {
+            await bootstrapSession(activeSession).catch(() => undefined);
+          }
+        })();
       });
       subscription = result.data.subscription;
     }
@@ -312,11 +306,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       });
       if (error) throw error;
 
-      if (sessionData.session) {
-        await bootstrapSession(sessionData.session as AppSession);
-      } else {
-        applySession(login.session, login.user);
-      }
+      const sessionToPersist = (sessionData.session ?? login.session) as AppSession;
+      await persistAndBootstrapSession(sessionToPersist);
     }
 
     router.push("/dashboard");
@@ -371,11 +362,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           refresh_token: registered.session.refresh_token,
         });
         if (error) throw error;
-        if (sessionData.session) {
-          await bootstrapSession(sessionData.session as AppSession);
-        } else {
-          applySession(registered.session, registered.user);
-        }
+        const sessionToPersist =
+          (sessionData.session ?? registered.session) as AppSession;
+        await persistAndBootstrapSession(sessionToPersist);
       }
       router.push("/dashboard");
       return;
@@ -387,7 +376,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const signOut = async () => {
     try {
       if (session) {
-        await authApi.logout(session.refresh_token);
+        await authApi.logout(session.refresh_token || undefined);
       }
     } finally {
       await clearSupabaseSession();
@@ -400,69 +389,26 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const refreshSession = async () => {
-    const currentSession = supabase
-      ? (
-          await supabase.auth.getSession()
-        ).data.session
-      : null;
-    const activeSession = resolveActiveSession(
-      currentSession as AppSession | null,
-      readPersistedSupabaseSession() as AppSession | null,
-    );
+    const refreshedSession =
+      (await refreshPersistedSupabaseSession()) as AppSession | null;
 
-    if (!activeSession?.refresh_token) {
+    if (!refreshedSession?.access_token) {
       applySession(null);
       return;
     }
 
-    const { data } = await authApi.refresh(
-      activeSession.refresh_token,
-      getAuthDeviceName(),
-    );
-    const refreshed = data as RefreshResponse;
-
-    if (refreshed.session?.access_token && refreshed.session.refresh_token) {
-      if (refreshed.session.authMode === "local") {
-        setAuthDebug({
-          stage: "refresh-local-session-persist-start",
-          authMode: refreshed.session.authMode,
-          hasSession: true,
-        });
-        await persistSupabaseSession(refreshed.session);
-        try {
-          await bootstrapSession(refreshed.session);
-          setAuthDebug({
-            stage: "refresh-local-session-persisted",
-            authMode: refreshed.session.authMode,
-            hasSession: true,
-          });
-        } catch (error) {
-          setAuthDebug({
-            stage: "refresh-local-bootstrap-failed",
-            authMode: refreshed.session.authMode,
-            hasSession: true,
-            error: error instanceof Error ? error.message : "Unknown error",
-          });
-          await clearSupabaseSession();
-          applySession(null);
-          throw error;
-        }
-      } else {
-        const authClient = requireSupabase();
-        const { data: sessionData, error } = await authClient.auth.setSession({
-          access_token: refreshed.session.access_token,
-          refresh_token: refreshed.session.refresh_token,
-        });
-        if (error) throw error;
-
-        if (sessionData.session) {
-          await bootstrapSession(sessionData.session as AppSession);
-        } else {
-          applySession(refreshed.session);
-        }
-      }
-    } else {
+    try {
+      await bootstrapSession(refreshedSession);
+    } catch (error) {
+      setAuthDebug({
+        stage: "refresh-bootstrap-failed",
+        authMode: refreshedSession.authMode,
+        hasSession: true,
+        error: error instanceof Error ? error.message : "Unknown error",
+      });
+      await clearSupabaseSession();
       applySession(null);
+      throw error;
     }
   };
 

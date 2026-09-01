@@ -3,26 +3,26 @@ import {
   ForbiddenException,
   Injectable,
   NotFoundException,
-} from "@nestjs/common";
-import { ConfigService } from "@nestjs/config";
-import { PrismaService } from "../prisma/prisma.service";
+} from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { PrismaService } from '../prisma/prisma.service';
 import {
   Prisma,
   type TransactionStatus,
   type TransactionType,
-} from "@prisma/client";
-import { WalletsService } from "../wallets/wallets.service";
-import { VtuApiProvider } from "./providers/vtu-api.provider";
-import { ReloadlyProvider } from "./providers/reloadly.provider";
-import { AutoDetectReloadlyOperatorDto, PurchaseVtuDto } from "./dto/vtu.dto";
-import { v4 as uuidv4 } from "uuid";
-import { PinoLogger } from "nestjs-pino";
-import { Decimal } from "@prisma/client/runtime/library";
-import { LedgerService } from "../wallets/ledger.service";
-import { maskAccountNumber, maskPhone } from "../common/utils/masking";
-import { TransactionPinService } from "../common/services/transaction-pin.service";
-import { formatKycTier, isKycTierAtLeast } from "../common/utils/kyc-tier";
-import { VtuProviderHealthResponse } from "./providers/provider-health.types";
+} from '@prisma/client';
+import { WalletsService } from '../wallets/wallets.service';
+import { VtuApiProvider } from './providers/vtu-api.provider';
+import { ReloadlyProvider } from './providers/reloadly.provider';
+import { AutoDetectReloadlyOperatorDto, PurchaseVtuDto } from './dto/vtu.dto';
+import { v4 as uuidv4 } from 'uuid';
+import { PinoLogger } from 'nestjs-pino';
+import { Decimal } from '@prisma/client/runtime/library';
+import { LedgerService } from '../wallets/ledger.service';
+import { maskAccountNumber, maskPhone } from '../common/utils/masking';
+import { TransactionPinService } from '../common/services/transaction-pin.service';
+import { formatKycTier, isKycTierAtLeast } from '../common/utils/kyc-tier';
+import { VtuProviderHealthResponse } from './providers/provider-health.types';
 
 type VtuProviderResult = {
   reference: string;
@@ -56,7 +56,7 @@ type VtuPricingContext = {
   countryCode: string;
   serviceType: TransactionType;
   provider: string;
-  scope: "LOCAL" | "INTERNATIONAL";
+  scope: 'LOCAL' | 'INTERNATIONAL';
 };
 
 @Injectable()
@@ -73,20 +73,20 @@ export class VtuService {
   ) {}
 
   async getProviders(type?: string, scope?: string, countryCode?: string) {
-    if (scope === "international") {
-      if (type && !["airtime", "data", "electricity"].includes(type)) {
+    if (scope === 'international') {
+      if (type && !['airtime', 'data', 'electricity'].includes(type)) {
         throw new BadRequestException(
-          "International VTU currently supports airtime, data, and Ghana electricity only",
+          'International VTU currently supports airtime, data, and Ghana electricity only',
         );
       }
 
-      if (type === "electricity") {
-        return this.reloadly.getUtilityBillers(countryCode, "electricity");
+      if (type === 'electricity') {
+        return this.reloadly.getUtilityBillers(countryCode, 'electricity');
       }
 
       return this.reloadly.getOperators(
         countryCode,
-        type === "data" ? "data" : "airtime",
+        type === 'data' ? 'data' : 'airtime',
       );
     }
 
@@ -127,7 +127,7 @@ export class VtuService {
     try {
       const log = await this.prisma.webhookLog.create({
         data: {
-          provider: "reloadly",
+          provider: 'reloadly',
           eventType: event.eventType,
           reference,
           payload: event.rawPayload as Prisma.InputJsonValue,
@@ -152,7 +152,7 @@ export class VtuService {
     try {
       const log = await this.prisma.webhookLog.create({
         data: {
-          provider: "vtpass",
+          provider: 'vtpass',
           eventType: event.eventType,
           reference,
           payload: event.rawPayload as Prisma.InputJsonValue,
@@ -184,7 +184,7 @@ export class VtuService {
     try {
       const order = await this.prisma.vtuOrder.findFirst({
         where: {
-          provider: "VTPASS",
+          provider: 'VTPASS',
           OR: [
             { providerRequestId: event.providerRequestId },
             ...(event.providerReference
@@ -214,11 +214,11 @@ export class VtuService {
         await this.markVtpassWebhookLog(
           reference,
           false,
-          "VTU order not found",
+          'VTU order not found',
         );
         this.logger.warn(
           { reference, providerRequestId: event.providerRequestId },
-          "VTpass webhook VTU order not found",
+          'VTpass webhook VTU order not found',
         );
         return { processed: false, orderFound: false };
       }
@@ -228,7 +228,7 @@ export class VtuService {
         result: {
           reference: event.providerReference || event.providerRequestId,
           status: event.status,
-          message: event.message || "VTpass webhook status update",
+          message: event.message || 'VTpass webhook status update',
           providerRequestId: event.providerRequestId,
           rawResponse: event.rawPayload,
         },
@@ -244,17 +244,17 @@ export class VtuService {
           status: event.status,
           orderId: order.id,
         },
-        "VTpass webhook VTU order processed",
+        'VTpass webhook VTU order processed',
       );
 
       return { processed: true, orderId: order.id, status: event.status };
     } catch (error) {
       const errorMessage =
-        error instanceof Error ? error.message : "Unknown VTpass webhook error";
+        error instanceof Error ? error.message : 'Unknown VTpass webhook error';
       await this.markVtpassWebhookLog(reference, false, errorMessage);
       this.logger.error(
         { reference, providerRequestId: event.providerRequestId, errorMessage },
-        "VTpass webhook VTU processing failed",
+        'VTpass webhook VTU processing failed',
       );
       throw error;
     }
@@ -285,7 +285,7 @@ export class VtuService {
 
       const order = await this.prisma.vtuOrder.findFirst({
         where: {
-          provider: "RELOADLY",
+          provider: 'RELOADLY',
           OR: orderFilters,
         },
         select: {
@@ -310,11 +310,11 @@ export class VtuService {
         await this.markReloadlyWebhookLog(
           reference,
           false,
-          "VTU order not found",
+          'VTU order not found',
         );
         this.logger.warn(
           { reference, providerReference: event.providerReference },
-          "Reloadly webhook VTU order not found",
+          'Reloadly webhook VTU order not found',
         );
         return { processed: false, orderFound: false };
       }
@@ -324,7 +324,7 @@ export class VtuService {
         result: {
           reference: event.providerReference,
           status: event.status,
-          message: event.message || "Reloadly webhook status update",
+          message: event.message || 'Reloadly webhook status update',
           providerRequestId: event.providerRequestId,
           rawResponse: event.rawPayload,
         },
@@ -339,7 +339,7 @@ export class VtuService {
           status: event.status,
           orderId: order.id,
         },
-        "Reloadly webhook VTU order processed",
+        'Reloadly webhook VTU order processed',
       );
 
       return { processed: true, orderId: order.id, status: event.status };
@@ -347,14 +347,29 @@ export class VtuService {
       const errorMessage =
         error instanceof Error
           ? error.message
-          : "Unknown Reloadly webhook error";
+          : 'Unknown Reloadly webhook error';
       await this.markReloadlyWebhookLog(reference, false, errorMessage);
       this.logger.error(
         { reference, providerReference: event.providerReference, errorMessage },
-        "Reloadly webhook VTU processing failed",
+        'Reloadly webhook VTU processing failed',
       );
       throw error;
     }
+  }
+
+  async getCountries(search?: string) {
+    const countries = await this.reloadly.getCountries();
+    const query = search?.trim().toLowerCase();
+
+    if (!query) {
+      return countries;
+    }
+
+    return countries.filter(
+      (country) =>
+        country.name.toLowerCase().includes(query) ||
+        country.code.toLowerCase() === query,
+    );
   }
 
   async validateSmartCard(provider: string, smartCardNumber: string) {
@@ -372,17 +387,17 @@ export class VtuService {
     await this.assertProviderSupportsType(dto);
 
     const amount = await this.resolveServerAmount(dto);
-    const wallet = await this.walletsService.getWallet(userId, "NGN");
+    const wallet = await this.walletsService.getWallet(userId, 'NGN');
     if (!wallet) {
-      throw new NotFoundException("NGN wallet not found");
+      throw new NotFoundException('NGN wallet not found');
     }
 
     if (!amount.isFinite() || amount.lessThanOrEqualTo(0)) {
-      throw new BadRequestException("Amount must be positive");
+      throw new BadRequestException('Amount must be positive');
     }
 
     if (amount.lessThan(50) || amount.greaterThan(1_000_000)) {
-      throw new BadRequestException("Amount must be between 50 and 1000000");
+      throw new BadRequestException('Amount must be between 50 and 1000000');
     }
 
     const pricing = await this.calculatePricingForPurchase(dto, amount);
@@ -393,9 +408,12 @@ export class VtuService {
       );
     }
 
+    const verification = await this.verifyCustomerForPurchase(dto);
+
     const reference = `VTU-${Date.now()}-${uuidv4().slice(0, 8)}`;
     const metadata = {
       ...this.buildSafeMetadata(dto),
+      ...verification,
       pricingRuleId: pricing.ruleId,
       fixedMargin: pricing.fixedMargin.toString(),
       percentMargin: pricing.percentMargin.toString(),
@@ -411,8 +429,8 @@ export class VtuService {
           userId,
           type: this.mapVtuType(dto.type),
           amount,
-          currency: "NGN",
-          status: "PENDING",
+          currency: 'NGN',
+          status: 'PENDING',
           reference,
           fee: pricing.fee,
           walletId: wallet.id,
@@ -423,11 +441,11 @@ export class VtuService {
       await this.ledger.debitWallet(
         {
           userId,
-          currency: "NGN",
+          currency: 'NGN',
           amount: debitAmount,
           transactionId: transaction.id,
           reference,
-          source: "VTU_PURCHASE",
+          source: 'VTU_PURCHASE',
           metadata,
         },
         tx,
@@ -437,19 +455,19 @@ export class VtuService {
         data: {
           transactionId: transaction.id,
           provider,
-          scope: this.isInternationalPurchase(dto) ? "INTERNATIONAL" : "LOCAL",
+          scope: this.isInternationalPurchase(dto) ? 'INTERNATIONAL' : 'LOCAL',
           serviceType: this.mapVtuType(dto.type),
           countryCode: this.isInternationalPurchase(dto)
             ? dto.countryCode
-            : "NG",
+            : 'NG',
           localProvider: this.isInternationalPurchase(dto)
             ? undefined
             : this.getLocalProvider(dto),
           operatorId: dto.operatorId,
           providerRequestId,
-          status: "PENDING",
+          status: 'PENDING',
           amount,
-          currency: "NGN",
+          currency: 'NGN',
           costAmount: amount,
           fee: pricing.fee,
           margin: pricing.fee,
@@ -471,9 +489,9 @@ export class VtuService {
     try {
       if (this.isInternationalPurchase(dto)) {
         purchaseResult =
-          dto.type === "electricity"
+          dto.type === 'electricity'
             ? await this.reloadly.payUtilityBill({
-                type: "electricity",
+                type: 'electricity',
                 billerId: dto.operatorId as string,
                 countryCode: dto.countryCode as string,
                 meterNumber: dto.meterNumber as string,
@@ -481,7 +499,7 @@ export class VtuService {
                 reference,
               })
             : await this.reloadly.purchase({
-                type: dto.type as "airtime" | "data",
+                type: dto.type as 'airtime' | 'data',
                 operatorId: dto.operatorId as string,
                 countryCode: dto.countryCode as string,
                 recipientNumber: dto.recipientNumber as string,
@@ -504,9 +522,9 @@ export class VtuService {
     } catch (error) {
       await this.markProviderResultUnknown(transactionRecord, {
         ...metadata,
-        providerStatus: "UNKNOWN",
+        providerStatus: 'UNKNOWN',
         providerError:
-          error instanceof Error ? error.message : "Unknown VTU provider error",
+          error instanceof Error ? error.message : 'Unknown VTU provider error',
       });
 
       this.logger.warn(
@@ -516,18 +534,18 @@ export class VtuService {
           error:
             error instanceof Error
               ? error.message
-              : "Unknown VTU provider error",
+              : 'Unknown VTU provider error',
         },
-        "VTU provider result unknown, purchase left pending",
+        'VTU provider result unknown, purchase left pending',
       );
 
       return {
         success: false,
-        status: "PENDING",
+        status: 'PENDING',
         reference: transactionRecord.reference,
         orderId: transactionRecord.orderId,
         message:
-          "VTU purchase submitted and pending provider confirmation. Funds remain reserved until verification completes.",
+          'VTU purchase submitted and pending provider confirmation. Funds remain reserved until verification completes.',
         amount: amount.toString(),
         fee: pricing.fee.toString(),
         totalDebit: debitAmount.toString(),
@@ -543,12 +561,12 @@ export class VtuService {
 
       return {
         success: false,
-        status: "PENDING",
+        status: 'PENDING',
         reference: transactionRecord.reference,
         orderId: transactionRecord.orderId,
         message:
           purchaseResult.message ||
-          "VTU purchase is pending provider confirmation.",
+          'VTU purchase is pending provider confirmation.',
         amount: amount.toString(),
         fee: pricing.fee.toString(),
         totalDebit: debitAmount.toString(),
@@ -567,8 +585,8 @@ export class VtuService {
           providerStatus: purchaseResult.status,
         },
         this.isProviderReversalStatus(purchaseResult.status)
-          ? "REVERSED"
-          : "FAILED",
+          ? 'REVERSED'
+          : 'FAILED',
       );
       throw new BadRequestException(
         `VTU purchase failed: ${purchaseResult.message}`,
@@ -584,11 +602,11 @@ export class VtuService {
 
       return {
         success: false,
-        status: "PENDING",
+        status: 'PENDING',
         reference: transactionRecord.reference,
         orderId: transactionRecord.orderId,
         message:
-          "VTU purchase submitted and pending provider confirmation. Funds remain reserved until verification completes.",
+          'VTU purchase submitted and pending provider confirmation. Funds remain reserved until verification completes.',
         amount: amount.toString(),
         fee: pricing.fee.toString(),
         totalDebit: debitAmount.toString(),
@@ -599,7 +617,7 @@ export class VtuService {
       await tx.transaction.update({
         where: { reference: transactionRecord.reference },
         data: {
-          status: "SUCCESS",
+          status: 'SUCCESS',
           metadata: {
             ...metadata,
             providerReference: purchaseResult.reference,
@@ -611,7 +629,7 @@ export class VtuService {
       await tx.vtuOrder.update({
         where: { id: transactionRecord.orderId },
         data: {
-          status: "SUCCESS",
+          status: 'SUCCESS',
           providerTransactionId: purchaseResult.reference,
           providerStatus: purchaseResult.status,
           rawResponse: purchaseResult.rawResponse as
@@ -629,18 +647,18 @@ export class VtuService {
         reference,
         type: dto.type,
         provider: this.isInternationalPurchase(dto)
-          ? "reloadly"
+          ? 'reloadly'
           : this.getLocalProvider(dto),
         amount: dto.amount,
       },
-      "VTU purchase successful",
+      'VTU purchase successful',
     );
 
     return {
       success: true,
       reference: transactionRecord.reference,
       orderId: transactionRecord.orderId,
-      status: "SUCCESS",
+      status: 'SUCCESS',
       message: purchaseResult.message,
       amount: amount.toString(),
       fee: pricing.fee.toString(),
@@ -653,10 +671,10 @@ export class VtuService {
       amount,
       countryCode: this.isInternationalPurchase(dto)
         ? (dto.countryCode as string)
-        : "NG",
+        : 'NG',
       serviceType: this.mapVtuType(dto.type),
       provider: this.getPricingProvider(dto),
-      scope: this.isInternationalPurchase(dto) ? "INTERNATIONAL" : "LOCAL",
+      scope: this.isInternationalPurchase(dto) ? 'INTERNATIONAL' : 'LOCAL',
     });
   }
 
@@ -685,7 +703,7 @@ export class VtuService {
           },
         ],
       },
-      orderBy: [{ priority: "desc" }, { createdAt: "desc" }],
+      orderBy: [{ priority: 'desc' }, { createdAt: 'desc' }],
     });
 
     if (!rule) {
@@ -716,13 +734,15 @@ export class VtuService {
   async requeryPendingOrders(limit = 25) {
     const orders = await this.prisma.vtuOrder.findMany({
       where: {
-        status: { in: ["PENDING", "PROCESSING", "UNKNOWN"] },
+        status: { in: ['PENDING', 'PROCESSING', 'UNKNOWN'] },
         OR: [{ nextRequeryAt: null }, { nextRequeryAt: { lte: new Date() } }],
         requeryAttempts: { lt: 12 },
       },
-      orderBy: [{ nextRequeryAt: "asc" }, { createdAt: "asc" }],
+      orderBy: [{ nextRequeryAt: 'asc' }, { createdAt: 'asc' }],
       take: limit,
-      include: { transaction: true },
+      // Only ids are used below; requeryOrder() re-fetches each order with the
+      // transaction relation, so joining it here is wasted work per cron cycle.
+      select: { id: true },
     });
 
     const results: Array<{ orderId: string; processed: boolean }> = [];
@@ -735,9 +755,9 @@ export class VtuService {
         this.logger.warn(
           {
             orderId: order.id,
-            error: error instanceof Error ? error.message : "Unknown error",
+            error: error instanceof Error ? error.message : 'Unknown error',
           },
-          "VTU order requery failed",
+          'VTU order requery failed',
         );
         results.push({ orderId: order.id, processed: false });
       }
@@ -753,27 +773,27 @@ export class VtuService {
     });
 
     if (!order) {
-      throw new NotFoundException("VTU order not found");
+      throw new NotFoundException('VTU order not found');
     }
 
-    if (["SUCCESS", "FAILED", "REVERSED"].includes(order.status)) {
+    if (['SUCCESS', 'FAILED', 'REVERSED'].includes(order.status)) {
       return { processed: false, terminal: true };
     }
 
     let result: VtuProviderResult;
 
     try {
-      if (order.provider === "RELOADLY") {
+      if (order.provider === 'RELOADLY') {
         if (!order.providerTransactionId) {
           await this.scheduleOrderRequery(
             order.id,
-            "Awaiting provider reference",
+            'Awaiting provider reference',
           );
           return { processed: false, pendingProviderReference: true };
         }
 
         result =
-          order.serviceType === "ELECTRICITY"
+          order.serviceType === 'ELECTRICITY'
             ? await this.reloadly.requeryUtilityPayment(order.providerRequestId)
             : await this.reloadly.requery(order.providerTransactionId);
       } else {
@@ -782,7 +802,7 @@ export class VtuService {
     } catch (error) {
       await this.scheduleOrderRequery(
         order.id,
-        error instanceof Error ? error.message : "Unknown requery error",
+        error instanceof Error ? error.message : 'Unknown requery error',
       );
       throw error;
     }
@@ -888,7 +908,7 @@ export class VtuService {
       });
 
       if (!byTransaction) {
-        throw new NotFoundException("VTU order not found");
+        throw new NotFoundException('VTU order not found');
       }
 
       return this.toOrderStatusResponse(byTransaction);
@@ -913,85 +933,125 @@ export class VtuService {
     });
 
     if (!user) {
-      throw new NotFoundException("User not found");
+      throw new NotFoundException('User not found');
     }
 
     if (user.isSuspended) {
-      throw new ForbiddenException("Account is suspended");
+      throw new ForbiddenException('Account is suspended');
     }
 
-    if (user.kycStatus !== "VERIFIED") {
-      throw new ForbiddenException("KYC verification is required");
+    if (user.kycStatus !== 'VERIFIED') {
+      throw new ForbiddenException('KYC verification is required');
     }
 
-    if (!isKycTierAtLeast(user.kycTier, "TIER_2")) {
+    if (!isKycTierAtLeast(user.kycTier, 'TIER_2')) {
       throw new ForbiddenException(
-        `KYC ${formatKycTier("TIER_2")} is required for VTU purchases`,
+        `KYC ${formatKycTier('TIER_2')} is required for VTU purchases`,
       );
     }
   }
 
   private isVtuKycBypassEnabled() {
-    const configured = this.configService.get<unknown>("VTU_KYC_BYPASS");
-    return configured === true || configured === "true";
+    const configured = this.configService.get<unknown>('VTU_KYC_BYPASS');
+    return configured === true || configured === 'true';
   }
 
   private assertRequiredTarget(dto: PurchaseVtuDto) {
     if (this.isInternationalPurchase(dto)) {
-      if (!["airtime", "data", "electricity"].includes(dto.type)) {
+      if (!['airtime', 'data', 'electricity'].includes(dto.type)) {
         throw new BadRequestException(
-          dto.countryCode === "GH"
-            ? "Ghana electricity and cable recharge are coming soon"
-            : "International VTU currently supports airtime and data only",
+          dto.countryCode === 'GH'
+            ? 'Ghana electricity and cable recharge are coming soon'
+            : 'International VTU currently supports airtime and data only',
         );
       }
 
       if (
-        dto.type === "electricity" &&
+        dto.type === 'electricity' &&
         dto.countryCode &&
-        dto.countryCode !== "GH"
+        dto.countryCode !== 'GH'
       ) {
         throw new BadRequestException(
-          "International electricity is currently available for Ghana only",
+          'International electricity is currently available for Ghana only',
         );
       }
 
       if (!dto.countryCode || !dto.operatorId) {
-        throw new BadRequestException("Country and operator are required");
+        throw new BadRequestException('Country and operator are required');
       }
 
-      if (dto.type === "electricity") {
+      if (dto.type === 'electricity') {
         if (!dto.meterNumber) {
-          throw new BadRequestException("Meter number is required");
+          throw new BadRequestException('Meter number is required');
         }
         return;
       }
 
       if (!dto.recipientNumber) {
-        throw new BadRequestException("Recipient phone number is required");
+        throw new BadRequestException('Recipient phone number is required');
       }
 
       return;
     }
 
     if (
-      (dto.type === "airtime" || dto.type === "data") &&
+      (dto.type === 'airtime' || dto.type === 'data') &&
       !dto.recipientNumber
     ) {
-      throw new BadRequestException("Recipient phone number is required");
+      throw new BadRequestException('Recipient phone number is required');
     }
 
-    if (dto.type === "data" && !dto.packageId) {
-      throw new BadRequestException("Data package is required");
+    if (dto.type === 'data' && !dto.packageId) {
+      throw new BadRequestException('Data package is required');
     }
 
-    if (dto.type === "cable" && !dto.smartCardNumber) {
-      throw new BadRequestException("Smart card number is required");
+    if (dto.type === 'cable' && !dto.smartCardNumber) {
+      throw new BadRequestException('Smart card number is required');
     }
 
-    if (dto.type === "electricity" && !dto.meterNumber) {
-      throw new BadRequestException("Meter number is required");
+    if (dto.type === 'electricity' && !dto.meterNumber) {
+      throw new BadRequestException('Meter number is required');
     }
+  }
+
+  /**
+   * Electricity and cable purchases must re-verify the customer server-side
+   * at purchase time; client-side validation alone can be skipped or spoofed
+   * and a mistyped meter/smartcard would burn real funds.
+   */
+  private async verifyCustomerForPurchase(dto: PurchaseVtuDto) {
+    if (this.isInternationalPurchase(dto)) {
+      return {};
+    }
+
+    if (dto.type === 'cable') {
+      const customer = await this.vtuApi.validateSmartCard(
+        this.getLocalProvider(dto),
+        dto.smartCardNumber as string,
+      );
+      return {
+        verifiedCustomerName: this.safeCustomerField(customer.name),
+        verifiedCustomerStatus: this.safeCustomerField(customer.status),
+      };
+    }
+
+    if (dto.type === 'electricity') {
+      const customer = await this.vtuApi.validateMeter(
+        this.getLocalProvider(dto),
+        dto.meterNumber as string,
+      );
+      return {
+        verifiedCustomerName: this.safeCustomerField(customer.name),
+        verifiedCustomerAddress: this.safeCustomerField(customer.address),
+      };
+    }
+
+    return {};
+  }
+
+  private safeCustomerField(value: string | undefined) {
+    const trimmed = (value ?? '').trim();
+    return trimmed ? trimmed.slice(0, 120) : undefined;
   }
 
   private async assertProviderSupportsType(dto: PurchaseVtuDto) {
@@ -1006,12 +1066,12 @@ export class VtuService {
         item.id === this.getLocalProvider(dto) &&
         item.isActive &&
         (item.type === dto.type ||
-          (dto.type === "data" && item.type === "airtime")),
+          (dto.type === 'data' && item.type === 'airtime')),
     );
 
     if (!provider) {
       throw new BadRequestException(
-        "Unsupported VTU provider for service type",
+        'Unsupported VTU provider for service type',
       );
     }
   }
@@ -1019,7 +1079,7 @@ export class VtuService {
   private async resolveServerAmount(dto: PurchaseVtuDto) {
     const amount = new Decimal(dto.amount);
 
-    if (dto.type !== "data" || this.isInternationalPurchase(dto)) {
+    if (dto.type !== 'data' || this.isInternationalPurchase(dto)) {
       return amount;
     }
 
@@ -1027,12 +1087,12 @@ export class VtuService {
     const selectedPackage = packages.find((item) => item.id === dto.packageId);
 
     if (!selectedPackage) {
-      throw new BadRequestException("Invalid VTU package");
+      throw new BadRequestException('Invalid VTU package');
     }
 
     const packagePrice = new Decimal(selectedPackage.price);
     if (!amount.equals(packagePrice)) {
-      throw new BadRequestException("Package price mismatch");
+      throw new BadRequestException('Package price mismatch');
     }
 
     return packagePrice;
@@ -1053,8 +1113,8 @@ export class VtuService {
       await tx.vtuOrder.update({
         where: { id: transaction.orderId },
         data: {
-          status: "UNKNOWN",
-          providerStatus: "UNKNOWN",
+          status: 'UNKNOWN',
+          providerStatus: 'UNKNOWN',
           metadata: metadata as Prisma.InputJsonValue,
           lastRequeryAt: new Date(),
           nextRequeryAt: this.nextRequeryAt(),
@@ -1097,7 +1157,7 @@ export class VtuService {
     await this.prisma.vtuOrder.update({
       where: { id: orderId },
       data: {
-        status: "UNKNOWN",
+        status: 'UNKNOWN',
         providerStatus: reason,
         requeryAttempts: { increment: 1 },
         lastRequeryAt: new Date(),
@@ -1117,7 +1177,7 @@ export class VtuService {
         reference: string;
         amount: Decimal;
         fee: Decimal;
-        currency: "NGN" | "GHS";
+        currency: 'NGN' | 'GHS';
         status: TransactionStatus;
       };
     };
@@ -1131,12 +1191,12 @@ export class VtuService {
         input.result.providerRequestId || input.order.providerRequestId,
     };
 
-    if (orderStatus === "SUCCESS") {
+    if (orderStatus === 'SUCCESS') {
       await this.prisma.$transaction(async (tx) => {
         await tx.transaction.updateMany({
-          where: { id: input.order.transactionId, status: "PENDING" },
+          where: { id: input.order.transactionId, status: 'PENDING' },
           data: {
-            status: "SUCCESS",
+            status: 'SUCCESS',
             metadata,
           },
         });
@@ -1144,7 +1204,7 @@ export class VtuService {
         await tx.vtuOrder.update({
           where: { id: input.order.id },
           data: {
-            status: "SUCCESS",
+            status: 'SUCCESS',
             providerTransactionId: input.result.reference,
             providerStatus: input.result.status,
             rawResponse: input.result.rawResponse as
@@ -1160,7 +1220,7 @@ export class VtuService {
       return;
     }
 
-    if (orderStatus === "FAILED" || orderStatus === "REVERSED") {
+    if (orderStatus === 'FAILED' || orderStatus === 'REVERSED') {
       await this.reverseVtuPurchase(
         input.order.transaction.userId,
         {
@@ -1200,36 +1260,14 @@ export class VtuService {
     amount: Decimal,
     reason: string,
     metadata: Record<string, unknown>,
-    finalStatus: Extract<TransactionStatus, "FAILED" | "REVERSED"> = "FAILED",
+    finalStatus: Extract<TransactionStatus, 'FAILED' | 'REVERSED'> = 'FAILED',
   ) {
-    await this.prisma.$transaction(async (tx) => {
-      const existingReversal = await tx.ledgerEntry.findFirst({
-        where: {
-          transactionId: transaction.id,
-          source: "VTU_REVERSAL",
-        },
-      });
-
-      if (!existingReversal) {
-        await this.ledger.creditWallet(
-          {
-            userId,
-            currency: "NGN",
-            amount,
-            transactionId: transaction.id,
-            reference: `${transaction.reference}-REVERSAL`,
-            source: "VTU_REVERSAL",
-            metadata: {
-              ...metadata,
-              reversalReason: reason,
-            },
-          },
-          tx,
-        );
-      }
-
-      await tx.transaction.update({
-        where: { reference: transaction.reference },
+    const reversed = await this.prisma.$transaction(async (tx) => {
+      // Guarded transition: only a still-PENDING purchase may be reversed.
+      // A late FAILED/REVERSED provider event after the order was already
+      // delivered (SUCCESS) or refunded (REVERSED) must not double-refund.
+      const transitioned = await tx.transaction.updateMany({
+        where: { reference: transaction.reference, status: 'PENDING' },
         data: {
           status: finalStatus,
           metadata: {
@@ -1239,17 +1277,46 @@ export class VtuService {
         },
       });
 
+      if (transitioned.count !== 1) {
+        return false;
+      }
+
+      const existingReversal = await tx.ledgerEntry.findFirst({
+        where: {
+          transactionId: transaction.id,
+          source: 'VTU_REVERSAL',
+        },
+      });
+
+      if (!existingReversal) {
+        await this.ledger.creditWallet(
+          {
+            userId,
+            currency: 'NGN',
+            amount,
+            transactionId: transaction.id,
+            reference: `${transaction.reference}-REVERSAL`,
+            source: 'VTU_REVERSAL',
+            metadata: {
+              ...metadata,
+              reversalReason: reason,
+            },
+          },
+          tx,
+        );
+      }
+
       if (transaction.orderId) {
         await tx.vtuOrder.update({
           where: { id: transaction.orderId },
           data: {
             status: finalStatus,
             providerTransactionId:
-              typeof metadata.providerReference === "string"
+              typeof metadata.providerReference === 'string'
                 ? metadata.providerReference
                 : undefined,
             providerStatus:
-              typeof metadata.providerStatus === "string"
+              typeof metadata.providerStatus === 'string'
                 ? metadata.providerStatus
                 : undefined,
             failedAt: new Date(),
@@ -1257,77 +1324,87 @@ export class VtuService {
           },
         });
       }
+
+      return true;
     });
+
+    if (!reversed) {
+      this.logger.info(
+        { userId, reference: transaction.reference },
+        'VTU reversal skipped; transaction already terminal',
+      );
+      return;
+    }
 
     this.logger.info(
       { userId, reference: transaction.reference, amount: amount.toString() },
-      "VTU purchase reversed, balance restored",
+      'VTU purchase reversed, balance restored',
     );
   }
 
   private isSuccessfulProviderStatus(status: string) {
     return [
-      "success",
-      "successful",
-      "completed",
-      "complete",
-      "delivered",
-      "completed-api",
+      'success',
+      'successful',
+      'completed',
+      'complete',
+      'delivered',
+      'completed-api',
     ].includes(status.toLowerCase());
   }
 
   private isPendingProviderStatus(status: string) {
     return [
-      "pending",
-      "processing",
-      "initiated",
-      "queued",
-      "processing-api",
-      "initiated-api",
-      "queued-api",
-      "unknown",
+      'pending',
+      'processing',
+      'initiated',
+      'queued',
+      'processing-api',
+      'initiated-api',
+      'queued-api',
+      'unknown',
     ].includes(status.toLowerCase());
   }
 
   private isFailedProviderStatus(status: string) {
     return [
-      "failed",
-      "failure",
-      "rejected",
-      "cancelled",
-      "canceled",
-      "refunded",
-      "reversed",
-      "not_processed",
+      'failed',
+      'failure',
+      'rejected',
+      'cancelled',
+      'canceled',
+      'refunded',
+      'reversed',
+      'not_processed',
     ].includes(status.toLowerCase());
   }
 
   private isProviderReversalStatus(status: string) {
-    return ["refunded", "reversed"].includes(status.toLowerCase());
+    return ['refunded', 'reversed'].includes(status.toLowerCase());
   }
 
   private orderStatusFromProviderStatus(status: string) {
     if (this.isSuccessfulProviderStatus(status)) {
-      return "SUCCESS";
+      return 'SUCCESS';
     }
 
     if (this.isProviderReversalStatus(status)) {
-      return "REVERSED";
+      return 'REVERSED';
     }
 
     if (this.isFailedProviderStatus(status)) {
-      return "FAILED";
+      return 'FAILED';
     }
 
     if (this.isPendingProviderStatus(status)) {
-      return ["processing", "initiated", "queued"].includes(
+      return ['processing', 'initiated', 'queued'].includes(
         status.toLowerCase(),
       )
-        ? "PROCESSING"
-        : "PENDING";
+        ? 'PROCESSING'
+        : 'PENDING';
     }
 
-    return "UNKNOWN";
+    return 'UNKNOWN';
   }
 
   private buildSafeMetadata(dto: PurchaseVtuDto) {
@@ -1335,7 +1412,7 @@ export class VtuService {
       vtuType: dto.type,
       scope: this.getScope(dto),
       provider: this.isInternationalPurchase(dto)
-        ? "reloadly"
+        ? 'reloadly'
         : this.getLocalProvider(dto),
       countryCode: dto.countryCode,
       operatorId: dto.operatorId,
@@ -1354,26 +1431,26 @@ export class VtuService {
 
   private mapVtuType(type: string): TransactionType {
     const typeMap: Record<string, TransactionType> = {
-      airtime: "AIRTIME",
-      data: "DATA",
-      cable: "CABLE",
-      electricity: "ELECTRICITY",
+      airtime: 'AIRTIME',
+      data: 'DATA',
+      cable: 'CABLE',
+      electricity: 'ELECTRICITY',
     };
 
-    return typeMap[type] || "AIRTIME";
+    return typeMap[type] || 'AIRTIME';
   }
 
   private isInternationalPurchase(dto: PurchaseVtuDto) {
-    return this.getScope(dto) === "international";
+    return this.getScope(dto) === 'international';
   }
 
   private getScope(dto: PurchaseVtuDto) {
-    return dto.scope || "local";
+    return dto.scope || 'local';
   }
 
   private getLocalProvider(dto: PurchaseVtuDto) {
     if (!dto.provider) {
-      throw new BadRequestException("Provider is required");
+      throw new BadRequestException('Provider is required');
     }
 
     return dto.provider;
@@ -1381,7 +1458,7 @@ export class VtuService {
 
   private getOrderProvider(dto: PurchaseVtuDto) {
     if (this.isInternationalPurchase(dto)) {
-      return "RELOADLY";
+      return 'RELOADLY';
     }
 
     return this.vtuApi.getProviderName();
@@ -1389,7 +1466,7 @@ export class VtuService {
 
   private getPricingProvider(dto: PurchaseVtuDto) {
     if (this.isInternationalPurchase(dto)) {
-      return "reloadly";
+      return 'reloadly';
     }
 
     return this.getLocalProvider(dto);
@@ -1432,7 +1509,7 @@ export class VtuService {
 
   private vtpassWebhookReference(event: VtpassWebhookEvent) {
     const providerReference =
-      event.providerReference || "no-provider-reference";
+      event.providerReference || 'no-provider-reference';
     return `vtpass:${event.eventType}:${event.providerRequestId}:${providerReference}:${event.status}`;
   }
 
@@ -1466,10 +1543,10 @@ export class VtuService {
 
   private isUniqueConstraintError(error: unknown) {
     return (
-      typeof error === "object" &&
+      typeof error === 'object' &&
       error !== null &&
-      "code" in error &&
-      error.code === "P2002"
+      'code' in error &&
+      error.code === 'P2002'
     );
   }
 

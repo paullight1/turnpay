@@ -6,21 +6,26 @@ import 'package:intl/intl.dart';
 import '../../../core/router/app_router.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/widgets/micro_interactions.dart';
+import '../../../core/widgets/tp_illustration.dart';
 import '../../../core/widgets/tp_page_header.dart';
 import '../../../core/widgets/tp_snackbar.dart';
 import '../../../services/wallet_service.dart';
 
 class WalletDetailScreen extends StatefulWidget {
   final String currency;
+  final WalletService walletService;
 
-  const WalletDetailScreen({super.key, required this.currency});
+  WalletDetailScreen({
+    super.key,
+    required this.currency,
+    WalletService? walletService,
+  }) : walletService = walletService ?? WalletService();
 
   @override
   State<WalletDetailScreen> createState() => _WalletDetailScreenState();
 }
 
 class _WalletDetailScreenState extends State<WalletDetailScreen> {
-  final _walletService = WalletService();
   late Future<WalletData?> _walletFuture;
   late Future<List<DepositRecord>> _depositsFuture;
 
@@ -31,8 +36,8 @@ class _WalletDetailScreenState extends State<WalletDetailScreen> {
   }
 
   void _loadData() {
-    _walletFuture = _walletService.fetchWallet(widget.currency);
-    _depositsFuture = _walletService.fetchRecentDeposits();
+    _walletFuture = widget.walletService.fetchWallet(widget.currency);
+    _depositsFuture = widget.walletService.fetchRecentDeposits();
   }
 
   void _refresh() {
@@ -132,6 +137,7 @@ class _WalletDetailScreenState extends State<WalletDetailScreen> {
                           // Virtual account section
                           _VirtualAccountSection(
                             currency: wallet.currency,
+                            walletService: widget.walletService,
                           ),
                           SizedBox(height: AppSpacing.xl),
 
@@ -178,12 +184,13 @@ class _WalletDetailScreenState extends State<WalletDetailScreen> {
                             ),
                             child: Column(
                               children: [
-                                Icon(
-                                  Icons.receipt_long_outlined,
-                                  color: AppColors.textHint,
-                                  size: 48,
+                                TpIllustration(
+                                  variant:
+                                      TpIllustrationVariant.emptyTransactions,
+                                  size: 128,
+                                  semanticLabel: 'No transactions yet',
                                 ),
-                                SizedBox(height: AppSpacing.md),
+                                SizedBox(height: AppSpacing.sm),
                                 Text(
                                   'No transactions yet',
                                   style: AppTextStyles.labelM,
@@ -402,21 +409,24 @@ class _ActionButton extends StatelessWidget {
 
 class _VirtualAccountSection extends StatefulWidget {
   final String currency;
+  final WalletService walletService;
 
-  const _VirtualAccountSection({required this.currency});
+  const _VirtualAccountSection({
+    required this.currency,
+    required this.walletService,
+  });
 
   @override
   State<_VirtualAccountSection> createState() => _VirtualAccountSectionState();
 }
 
 class _VirtualAccountSectionState extends State<_VirtualAccountSection> {
-  final _walletService = WalletService();
   late Future<List<VirtualAccountData>> _accountsFuture;
 
   @override
   void initState() {
     super.initState();
-    _accountsFuture = _walletService.fetchVirtualAccounts();
+    _accountsFuture = widget.walletService.fetchVirtualAccounts();
   }
 
   @override

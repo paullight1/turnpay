@@ -7,6 +7,18 @@ on:
     branches: [main, dev]
 
 jobs:
+  manifest-safety:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check production manifests for unsafe defaults
+        run: ./scripts/check-production-manifests.sh
+
+      - name: Check repository for committed secrets
+        run: ./scripts/check-secrets.sh
+
   backend-test:
     runs-on: ubuntu-latest
     defaults:
@@ -59,10 +71,51 @@ jobs:
         env:
           DATABASE_URL: postgresql://trustpay:trustpay_secret@localhost:5432/trustpay_test?schema=public
 
+      - name: Create Prisma shadow database
+        run: PGPASSWORD=trustpay_secret psql -h localhost -U trustpay -d postgres -c "CREATE DATABASE trustpay_shadow"
+
+      - name: Validate Prisma schema and migration drift
+        run: ./scripts/check-migration-drift.sh
+        env:
+          DATABASE_URL: postgresql://trustpay:trustpay_secret@localhost:5432/trustpay_test?schema=public
+          SHADOW_DATABASE_URL: postgresql://trustpay:trustpay_secret@localhost:5432/trustpay_shadow?schema=public
+
       - name: Deploy database migrations
         run: npm run db:deploy
         env:
           DATABASE_URL: postgresql://trustpay:trustpay_secret@localhost:5432/trustpay_test?schema=public
+
+      - name: Create disposable restore-drill database
+        run: PGPASSWORD=trustpay_secret psql -h localhost -U trustpay -d postgres -c "CREATE DATABASE trustpay_restore"
+
+      - name: Verify database backup restore
+        run: ./scripts/verify-backup-restore.sh
+        env:
+          DATABASE_URL: postgresql://trustpay:trustpay_secret@localhost:5432/trustpay_test?schema=public
+          RESTORE_DATABASE_URL: postgresql://trustpay:trustpay_secret@localhost:5432/trustpay_restore?schema=public
+
+      - name: Validate production config guard
+        run: ./scripts/validate-production-config.sh true
+        env:
+          NODE_ENV: production
+          WEB_URL: https://trustpay.example.com
+          ADMIN_URL: https://admin.trustpay.example.com
+          BANKING_ENABLED: "true"
+          VIRTUAL_ACCOUNTS_ENABLED: "true"
+          WITHDRAWALS_ENABLED: "true"
+          MONNIFY_API_KEY: monnify-api-key
+          MONNIFY_SECRET_KEY: monnify-secret-key
+          MONNIFY_CONTRACT_CODE: contract-code
+          MONNIFY_BASE_URL: https://monnify-live.example.com
+          MONNIFY_WEBHOOK_SECRET: monnify-webhook-secret
+          MONNIFY_WEBHOOK_URL: https://api.trustpay.example.com/api/webhooks/monnify
+          MONNIFY_EXCHANGE_COLLECTION_ACCOUNT_NUMBER: 1234567890
+          VTU_PROVIDER: vtpass
+          VTPASS_BASE_URL: https://vtpass-live.example.com/api
+          VTPASS_API_KEY: vtpass-api-key
+          VTPASS_PUBLIC_KEY: vtpass-public-key
+          VTPASS_SECRET_KEY: vtpass-secret-key
+          VTPASS_WEBHOOK_SECRET: vtpass-webhook-secret
 
       - name: Run tests
         run: npm run test
@@ -74,6 +127,7 @@ jobs:
           JWT_EXPIRES_IN: 15m
           JWT_REFRESH_SECRET: test-refresh-secret-for-ci
           JWT_REFRESH_EXPIRES_IN: 7d
+          MONNIFY_EXCHANGE_COLLECTION_ACCOUNT_NUMBER: "0000000000"
           WEB_URL: http://localhost:3001
           ADMIN_URL: http://localhost:3002
 
@@ -87,11 +141,34 @@ jobs:
           JWT_EXPIRES_IN: 15m
           JWT_REFRESH_SECRET: test-refresh-secret-for-ci
           JWT_REFRESH_EXPIRES_IN: 7d
+          MONNIFY_EXCHANGE_COLLECTION_ACCOUNT_NUMBER: "0000000000"
           WEB_URL: http://localhost:3001
           ADMIN_URL: http://localhost:3002
 
       - name: Build
         run: npm run build
+
+  backend-security:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: BACKEND
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: BACKEND/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=high
 
   website-test:
     runs-on: ubuntu-latest
@@ -118,7 +195,7 @@ jobs:
       - name: Build
         run: npm run build
         env:
-          NEXT_PUBLIC_API_URL: http://localhost:3000
+          NEXT_PUBLIC_API_URL: http://127.0.0.1:3100
 
       - name: Install Playwright browsers
         run: npx playwright install --with-deps
@@ -127,7 +204,29 @@ jobs:
         run: npm run test:e2e
         env:
           PORT: 3001
-          NEXT_PUBLIC_API_URL: http://localhost:3000
+          NEXT_PUBLIC_API_URL: http://127.0.0.1:3100
+
+  website-security:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: WEBSITE
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: WEBSITE/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=high
 
   flutter-test:
     runs-on: ubuntu-latest
@@ -154,7 +253,8 @@ jobs:
         run: flutter test
 
   docker:
-    needs: [backend-test, website-test, flutter-test]
+    needs:
+      [manifest-safety, backend-test, backend-security, website-test, website-security, flutter-test]
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main'
 

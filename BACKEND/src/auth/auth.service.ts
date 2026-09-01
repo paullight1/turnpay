@@ -61,8 +61,8 @@ export class AuthService {
   ) {}
 
   async register(registerDto: RegisterDto, context: SessionContext = {}) {
-    const email = registerDto.email.trim().toLowerCase();
-    const phone = registerDto.phone.replace(/\s+/g, '').trim();
+    const email = this.normalizeEmail(registerDto.email);
+    const phone = this.normalizePhone(registerDto.phone);
     const fullName = registerDto.fullName?.trim();
 
     const existingUser = await this.usersService.findByEmail(email);
@@ -144,6 +144,7 @@ export class AuthService {
         data: { failedAttempts: 0, lockedUntil: null },
       });
 
+      await this.otpService.assertOtpSendAllowed(phone);
       await this.otpService.sendOtp(phone);
 
       this.logger.info(
@@ -167,6 +168,7 @@ export class AuthService {
       deviceName: registerDto.deviceName,
     });
 
+    await this.otpService.assertOtpSendAllowed(phone);
     await this.otpService.sendOtp(phone);
 
     this.logger.info(
@@ -182,7 +184,7 @@ export class AuthService {
   }
 
   async login(loginDto: LoginDto, context: SessionContext = {}) {
-    const email = loginDto.email.trim().toLowerCase();
+    const email = this.normalizeEmail(loginDto.email);
     const localUser = await this.usersService.findByEmail(email);
     const lockoutExpired =
       localUser?.lockedUntil && localUser.lockedUntil <= new Date();
@@ -460,17 +462,23 @@ export class AuthService {
   }
 
   async sendOtp(phone: string) {
-    const user = await this.usersService.findByPhone(phone);
+    const normalizedPhone = this.normalizePhone(phone);
+    await this.otpService.assertOtpSendAllowed(normalizedPhone);
+
+    const user = await this.usersService.findByPhone(normalizedPhone);
     if (!user) {
       return { success: true, message: OTP_RESPONSE_MESSAGE };
     }
 
-    await this.otpService.sendOtp(phone);
+    await this.otpService.sendOtp(normalizedPhone);
     return { success: true, message: OTP_RESPONSE_MESSAGE };
   }
 
   async verifyOtp(phone: string, otp: string) {
-    const isValid = await this.otpService.verifyOtp(phone, otp);
+    const isValid = await this.otpService.verifyOtp(
+      this.normalizePhone(phone),
+      otp.trim(),
+    );
     if (!isValid) {
       throw new BadRequestException('Invalid or expired OTP');
     }
@@ -479,7 +487,8 @@ export class AuthService {
   }
 
   async sendPasswordResetEmail(email: string) {
-    const normalizedEmail = email.trim().toLowerCase();
+    const normalizedEmail = this.normalizeEmail(email);
+    await this.otpService.assertPasswordResetAllowed(normalizedEmail);
     const user = await this.usersService.findByEmail(normalizedEmail);
     if (!user) {
       return { success: true, message: RESET_RESPONSE_MESSAGE };
@@ -504,7 +513,7 @@ export class AuthService {
   }
 
   async resendConfirmationEmail(email: string) {
-    const normalizedEmail = email.trim().toLowerCase();
+    const normalizedEmail = this.normalizeEmail(email);
     const { error } = await this.supabaseService.authClient.auth.resend({
       type: 'signup',
       email: normalizedEmail,
@@ -867,5 +876,13 @@ export class AuthService {
       context.userAgent?.trim().slice(0, 120) ||
       'Unknown device'
     );
+  }
+
+  private normalizeEmail(email: string) {
+    return email.trim().toLowerCase();
+  }
+
+  private normalizePhone(phone: string) {
+    return phone.trim();
   }
 }

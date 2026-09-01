@@ -5,7 +5,7 @@ import '../../../core/widgets/trustpay_lottie.dart';
 
 /// Large wallet balance section.
 /// Shows "Wallet Balance" label, huge amount in GHS, and eye toggle icon.
-/// Matches reference: "$17,298.92 ðŸ‘" style.
+/// Matches the reference balance-and-visibility treatment.
 class WalletBalanceCard extends StatelessWidget {
   final double balanceGHS;
   final bool visible;
@@ -22,7 +22,7 @@ class WalletBalanceCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final formatted = NumberFormat.currency(
       locale: 'en_GH',
-      symbol: 'GHâ‚µ ',
+      symbol: 'GH₵ ',
       decimalDigits: 2,
     ).format(balanceGHS);
 
@@ -61,7 +61,7 @@ class WalletBalanceCard extends StatelessWidget {
                       overflow: TextOverflow.ellipsis,
                     )
                   : Text(
-                      'GHâ‚µ â€¢â€¢â€¢â€¢â€¢â€¢',
+                      'GH₵ ••••••',
                       style: AppTextStyles.displayLarge.copyWith(
                         fontSize: 36,
                         letterSpacing: 4,

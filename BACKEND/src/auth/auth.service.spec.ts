@@ -41,6 +41,8 @@ describe('AuthService Supabase integration', () => {
   const otp = {
     sendOtp: jest.fn(),
     verifyOtp: jest.fn(),
+    assertOtpSendAllowed: jest.fn(),
+    assertPasswordResetAllowed: jest.fn(),
   };
 
   const transactionPin = {
@@ -331,6 +333,26 @@ describe('AuthService Supabase integration', () => {
     expect(
       supabase.authClient.auth.resetPasswordForEmail,
     ).not.toHaveBeenCalled();
+  });
+
+  it('normalizes password reset identities before throttling and lookup', async () => {
+    users.findByEmail.mockResolvedValue(null);
+
+    await service.sendPasswordResetEmail('  Ada@Example.com  ');
+
+    expect(otp.assertPasswordResetAllowed).toHaveBeenCalledWith(
+      'ada@example.com',
+    );
+    expect(users.findByEmail).toHaveBeenCalledWith('ada@example.com');
+  });
+
+  it('normalizes OTP send identities before throttling and lookup', async () => {
+    users.findByPhone.mockResolvedValue(null);
+
+    await service.sendOtp('  +2348012345678  ');
+
+    expect(otp.assertOtpSendAllowed).toHaveBeenCalledWith('+2348012345678');
+    expect(users.findByPhone).toHaveBeenCalledWith('+2348012345678');
   });
 
   it('logs out the caller session with a user scoped Supabase client', async () => {

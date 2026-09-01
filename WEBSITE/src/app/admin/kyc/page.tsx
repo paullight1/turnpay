@@ -8,6 +8,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
   TableBody,
@@ -109,7 +110,7 @@ export default function AdminKycPage() {
     }
   }, [authLoading, profile, user, router]);
 
-  const { data: kycData, isLoading } = useQuery({
+  const { data: kycData, isLoading, isFetching } = useQuery({
     queryKey: ["admin-kyc", page],
     queryFn: async () => {
       const res = await apiClient.get(
@@ -150,8 +151,12 @@ export default function AdminKycPage() {
     },
   });
 
-  if (authLoading || !user || !profile || isLoading) {
-    return <div className="p-6">Loading...</div>;
+  if (authLoading || !user || !profile) {
+    return (
+      <DashboardLayout>
+        <Skeleton className="h-72 w-full" />
+      </DashboardLayout>
+    );
   }
 
   if (!isAdmin) {
@@ -197,17 +202,6 @@ export default function AdminKycPage() {
 
   return (
     <DashboardLayout>
-      <header className="hidden border-b bg-background">
-        <div className="container mx-auto flex h-16 items-center justify-between px-4">
-          <span className="text-xl font-bold text-primary">
-            TrustPay Admin — KYC Review
-          </span>
-          <Button variant="outline" onClick={() => window.history.back()}>
-            Back to Admin
-          </Button>
-        </div>
-      </header>
-
       <div className="flex flex-col gap-6">
         <div className="flex flex-col justify-between gap-3 md:flex-row md:items-end">
           <div>
@@ -220,10 +214,23 @@ export default function AdminKycPage() {
 
         <Card>
           <CardHeader>
-            <CardTitle>Pending KYC Documents ({kycData?.total || 0})</CardTitle>
+            <CardTitle className="flex items-center gap-2">
+              Pending KYC Documents ({kycData?.total || 0})
+              {isFetching && !isLoading && (
+                <span className="text-xs font-normal text-muted-foreground">
+                  Refreshing…
+                </span>
+              )}
+            </CardTitle>
           </CardHeader>
           <CardContent>
-            {kycData?.documents?.length === 0 ? (
+            {isLoading ? (
+              <div className="space-y-3">
+                {[1, 2, 3, 4, 5].map((item) => (
+                  <Skeleton key={item} className="h-12 w-full" />
+                ))}
+              </div>
+            ) : kycData?.documents?.length === 0 ? (
               <div className="text-center py-8 text-muted-foreground">
                 No pending KYC documents
               </div>

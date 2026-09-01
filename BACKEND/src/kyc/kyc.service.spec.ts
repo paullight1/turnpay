@@ -38,7 +38,7 @@ describe('KycService', () => {
   };
 
   const config = {
-    get: jest.fn((key: string) =>
+    get: jest.fn((key: string): string | undefined =>
       key === 'PII_ENCRYPTION_KEY'
         ? 'test-pii-key-with-enough-entropy'
         : undefined,

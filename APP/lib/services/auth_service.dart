@@ -1,6 +1,7 @@
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 
+import '../core/auth/auth_state.dart';
 import 'api_client.dart';
 
 class AuthService {
@@ -21,7 +22,10 @@ class AuthService {
       },
     );
 
-    return _persistSession(response.data);
+    return _persistSession(
+      response.data,
+      clearTransactionApprovalCache: true,
+    );
   }
 
   Future<bool> register({
@@ -46,7 +50,10 @@ class AuthService {
       },
     );
 
-    return _persistSession(response.data);
+    return _persistSession(
+      response.data,
+      clearTransactionApprovalCache: true,
+    );
   }
 
   Future<void> forgotPassword(String email) async {
@@ -97,6 +104,8 @@ class AuthService {
       // Local token cleanup should still happen if the API session is gone.
     } finally {
       await _apiClient.clearSession();
+      // This is a deliberate sign-out, not an expiry — clear any stale signal.
+      authStateNotifier.reset();
     }
   }
 
@@ -104,11 +113,17 @@ class AuthService {
     await _apiClient.client.post('/api/auth/bootstrap');
   }
 
-  Future<bool> refreshSession() async {
+  /// Attempts to restore a stored session.
+  ///
+  /// Tokens are ONLY cleared when the server explicitly rejects the refresh
+  /// (HTTP 401/403). A network/transport failure (timeout, airplane mode, no
+  /// response) keeps the session and returns [SessionRestoreState.offline] so
+  /// the caller can retry later instead of logging the user out.
+  Future<SessionRestoreState> restoreSession() async {
     final refreshToken = await _apiClient.readRefreshToken();
     if (refreshToken == null || refreshToken.isEmpty) {
-      await _apiClient.clearSession();
-      return false;
+      // Nothing to restore — treat as expired without touching storage.
+      return SessionRestoreState.expired;
     }
 
     try {
@@ -120,14 +135,32 @@ class AuthService {
         },
       );
 
-      return _persistSession(response.data);
-    } on DioException {
-      await _apiClient.clearSession();
-      return false;
+      final persisted = await _persistSession(response.data);
+      return persisted
+          ? SessionRestoreState.active
+          : SessionRestoreState.expired;
+    } on DioException catch (error) {
+      if (ApiClient.isAuthRejection(error)) {
+        await _apiClient.clearSession();
+        authStateNotifier.markExpired();
+        return SessionRestoreState.expired;
+      }
+
+      // Offline / transient transport error — keep the tokens and retry later.
+      return SessionRestoreState.offline;
     }
   }
 
-  Future<bool> _persistSession(dynamic payload) async {
+  /// Backwards-compatible boolean wrapper around [restoreSession]. Returns
+  /// true only when the session is confirmed active by the server.
+  Future<bool> refreshSession() async {
+    return await restoreSession() == SessionRestoreState.active;
+  }
+
+  Future<bool> _persistSession(
+    dynamic payload, {
+    bool clearTransactionApprovalCache = false,
+  }) async {
     if (payload is! Map<String, dynamic>) {
       return false;
     }
@@ -142,11 +175,18 @@ class AuthService {
       return false;
     }
 
+    if (clearTransactionApprovalCache) {
+      await _apiClient.clearTransactionApproval();
+    }
+
     final refreshToken = session['refresh_token'];
     await _apiClient.saveSession(
       accessToken: accessToken,
       refreshToken: refreshToken is String ? refreshToken : null,
     );
+
+    // A valid session clears any lingering "session expired" signal.
+    authStateNotifier.reset();
 
     return true;
   }

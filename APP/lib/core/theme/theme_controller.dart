@@ -7,31 +7,51 @@ final themeModeProvider =
   return ThemeModeController()..load();
 });
 
+/// Persists the user's appearance preference and exposes it as a [ThemeMode].
+///
+/// Supports three states:
+///  - [ThemeMode.system] (default): follow the device light/dark setting.
+///  - [ThemeMode.light] / [ThemeMode.dark]: an explicit manual override.
 class ThemeModeController extends StateNotifier<ThemeMode> {
-  ThemeModeController() : super(ThemeMode.light);
+  ThemeModeController() : super(ThemeMode.system);
 
   static const _storage = FlutterSecureStorage();
   static const _storageKey = 'trustpay_theme_mode';
 
   Future<void> load() async {
     final raw = await _storage.read(key: _storageKey);
-    if (raw == 'light') {
-      state = ThemeMode.light;
-      return;
-    }
-
-    state = ThemeMode.light;
+    state = _decode(raw);
   }
 
   Future<void> setMode(ThemeMode mode) async {
     state = mode;
-    await _storage.write(
-      key: _storageKey,
-      value: mode == ThemeMode.light ? 'light' : 'dark',
-    );
+    await _storage.write(key: _storageKey, value: _encode(mode));
   }
 
   Future<void> toggle(bool isLight) {
     return setMode(isLight ? ThemeMode.light : ThemeMode.dark);
+  }
+
+  static ThemeMode _decode(String? raw) {
+    switch (raw) {
+      case 'light':
+        return ThemeMode.light;
+      case 'dark':
+        return ThemeMode.dark;
+      case 'system':
+      default:
+        return ThemeMode.system;
+    }
+  }
+
+  static String _encode(ThemeMode mode) {
+    switch (mode) {
+      case ThemeMode.light:
+        return 'light';
+      case ThemeMode.dark:
+        return 'dark';
+      case ThemeMode.system:
+        return 'system';
+    }
   }
 }

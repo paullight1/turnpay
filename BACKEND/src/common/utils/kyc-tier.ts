@@ -1,4 +1,4 @@
-import { KYCTier } from "@prisma/client";
+import { KYCTier } from '@prisma/client';
 
 const KYC_TIER_RANK: Record<KYCTier, number> = {
   TIER_0: 0,
@@ -11,9 +11,9 @@ export function isKycTierAtLeast(
   currentTier: KYCTier | null | undefined,
   minimumTier: KYCTier,
 ) {
-  return KYC_TIER_RANK[currentTier ?? "TIER_0"] >= KYC_TIER_RANK[minimumTier];
+  return KYC_TIER_RANK[currentTier ?? 'TIER_0'] >= KYC_TIER_RANK[minimumTier];
 }
 
 export function formatKycTier(tier: KYCTier) {
-  return tier.replace("TIER_", "Tier ");
+  return tier.replace('TIER_', 'Tier ');
 }

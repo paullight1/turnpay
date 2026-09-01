@@ -33,11 +33,13 @@ enum MoneyActionFeedbackType { info, success, error, warning }
 class MoneyActionScreen extends StatefulWidget {
   final MoneyActionKind kind;
   final bool showBackButton;
+  final ApiClient? apiClient;
 
   const MoneyActionScreen({
     super.key,
     required this.kind,
     this.showBackButton = true,
+    this.apiClient,
   });
 
   @override
@@ -45,8 +47,8 @@ class MoneyActionScreen extends StatefulWidget {
 }
 
 class _MoneyActionScreenState extends State<MoneyActionScreen> {
-  final _apiClient = ApiClient();
-  final _homeDataService = HomeDataService();
+  late final ApiClient _apiClient;
+  late final HomeDataService _homeDataService;
   final _transactionSecurityService = TransactionSecurityService();
   final _amountController = TextEditingController();
   final _recipientController = TextEditingController();
@@ -88,6 +90,12 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
   String _electricityBillerId = '';
   String? _dataPackageId;
   bool _isElectricityPaymentStep = false;
+  bool _isVerifyingMeter = false;
+  String? _meterCustomerName;
+  String? _meterCustomerAddress;
+  bool _meterVerifySkippable = false;
+  Timer? _orderPollTimer;
+  int _orderPollAttempts = 0;
   String? _message;
   MoneyActionFeedbackType _messageType = MoneyActionFeedbackType.info;
   bool _messageCanRetry = false;
@@ -125,8 +133,11 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
   @override
   void initState() {
     super.initState();
+    _apiClient = widget.apiClient ?? ApiClient();
+    _homeDataService = HomeDataService(apiClient: _apiClient);
     _vtuService = VtuService(apiClient: _apiClient);
     _amountController.addListener(_onAmountChanged);
+    _recipientController.addListener(_onRecipientChanged);
     _accountNumberController.addListener(_scheduleWithdrawalAccountResolve);
     _withdrawBankController.addListener(_onWithdrawalBankTyped);
     _loadFundingAccounts();
@@ -140,7 +151,9 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
   @override
   void dispose() {
     _withdrawalResolveDebounce?.cancel();
+    _orderPollTimer?.cancel();
     _amountController.removeListener(_onAmountChanged);
+    _recipientController.removeListener(_onRecipientChanged);
     _accountNumberController.removeListener(_scheduleWithdrawalAccountResolve);
     _amountController.dispose();
     _recipientController.dispose();
@@ -155,8 +168,22 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
   }
 
   void _onAmountChanged() {
-    if (widget.kind == MoneyActionKind.exchange && mounted) {
+    if (mounted &&
+        (widget.kind == MoneyActionKind.exchange ||
+            widget.kind == MoneyActionKind.airtime ||
+            widget.kind == MoneyActionKind.electricity)) {
       setState(() {});
+    }
+  }
+
+  void _onRecipientChanged() {
+    if (widget.kind != MoneyActionKind.electricity || !mounted) return;
+    if (_meterCustomerName != null || _meterVerifySkippable) {
+      setState(() {
+        _meterCustomerName = null;
+        _meterCustomerAddress = null;
+        _meterVerifySkippable = false;
+      });
     }
   }
 
@@ -872,7 +899,11 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
     }
   }
 
-  void _continueToElectricityPayment() {
+  Future<void> _continueToElectricityPayment({
+    bool skipVerification = false,
+  }) async {
+    if (_isVerifyingMeter) return;
+
     final providers = _providersForCurrentFlow();
     if (providers.isEmpty) {
       _showMessage(
@@ -890,7 +921,8 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
       return;
     }
 
-    if (_recipientController.text.trim().isEmpty) {
+    final meterNumber = _recipientController.text.trim();
+    if (meterNumber.isEmpty) {
       _showMessage(
         'Enter the meter number before continuing.',
         type: MoneyActionFeedbackType.warning,
@@ -898,7 +930,50 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
       return;
     }
 
+    // Meter-name lookup is only wired for the Nigerian (VTPass) route today.
+    if (_electricityCountryCode == 'NG' && !skipVerification) {
+      setState(() {
+        _isVerifyingMeter = true;
+        _setMessageState(null);
+      });
+
+      try {
+        final customer = await _vtuService.validateMeter(
+          provider: _vtuProvider,
+          meterNumber: meterNumber,
+        );
+        if (!mounted) return;
+        setState(() {
+          _isVerifyingMeter = false;
+          _meterCustomerName =
+              customer.name.isEmpty ? 'Unknown customer' : customer.name;
+          _meterCustomerAddress = customer.address;
+          _meterVerifySkippable = false;
+          _isElectricityPaymentStep = true;
+          _setMessageState(null);
+        });
+      } catch (error) {
+        if (!mounted) return;
+        setState(() {
+          _isVerifyingMeter = false;
+          _meterVerifySkippable = true;
+          _setMessageState(
+            authErrorMessage(
+              error,
+              'We could not verify this meter number. Check it and try again.',
+            ),
+            type: MoneyActionFeedbackType.warning,
+          );
+        });
+      }
+      return;
+    }
+
     setState(() {
+      if (skipVerification) {
+        _meterCustomerName = null;
+        _meterCustomerAddress = null;
+      }
       _isElectricityPaymentStep = true;
       _setMessageState(null);
     });
@@ -1235,6 +1310,8 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
           type: MoneyActionFeedbackType.success,
         );
       });
+      _orderPollAttempts = 0;
+      _scheduleVtuOrderAutoCheck();
     } catch (error) {
       setState(() {
         _setMessageState(
@@ -1297,6 +1374,44 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
     if (value == null) return fallback;
     final text = value.toString().trim();
     return text.isEmpty ? fallback : text;
+  }
+
+  static const _terminalOrderStatuses = {'SUCCESS', 'FAILED', 'REVERSED'};
+
+  void _scheduleVtuOrderAutoCheck() {
+    _orderPollTimer?.cancel();
+    if (!_isVtuAction ||
+        _pendingOrderReference == null ||
+        _orderPollAttempts >= 4) {
+      return;
+    }
+    final status = _trackedOrder?.orderStatus;
+    if (status != null && _terminalOrderStatuses.contains(status)) {
+      return;
+    }
+
+    final delay = Duration(seconds: _orderPollAttempts == 0 ? 4 : 7);
+    _orderPollTimer = Timer(delay, () async {
+      final reference = _pendingOrderReference;
+      if (!mounted || reference == null) return;
+      _orderPollAttempts++;
+      try {
+        final order = await _vtuService.getOrderStatus(reference);
+        if (!mounted) return;
+        setState(() {
+          _trackedOrder = order;
+          if (_terminalOrderStatuses.contains(order.orderStatus)) {
+            _setMessageState(
+              _orderStatusMessage(order),
+              type: _feedbackTypeForOrder(order),
+            );
+          }
+        });
+      } catch (_) {
+        // Background refresh only; the panel keeps its manual check button.
+      }
+      _scheduleVtuOrderAutoCheck();
+    });
   }
 
   Future<void> _checkVtuOrderStatus() async {
@@ -1691,8 +1806,23 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
                   style: AppTextStyles.headingM),
               content: Column(
                 mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  for (final row in rows)
+                  Text(
+                    rows.first.label,
+                    textAlign: TextAlign.center,
+                    style: AppTextStyles.bodyS.copyWith(
+                      color: AppColors.textSecondary,
+                    ),
+                  ),
+                  const SizedBox(height: AppSpacing.xs),
+                  Text(
+                    rows.first.value,
+                    textAlign: TextAlign.center,
+                    style: AppTextStyles.headingL,
+                  ),
+                  const SizedBox(height: AppSpacing.md),
+                  for (final row in rows.skip(1))
                     _ReviewDialogRow(label: row.label, value: row.value),
                   const SizedBox(height: AppSpacing.sm),
                   Text(
@@ -1777,8 +1907,13 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
         ];
       case MoneyActionKind.airtime:
         return [
-          _ReviewRowData('Amount', '$amount $_currency'),
-          _ReviewRowData('Destination', _airtimeScope),
+          _ReviewRowData('You pay', _formatNairaAmount(amount)),
+          _ReviewRowData(
+            'Destination',
+            _airtimeScope == 'international'
+                ? _countryName(_airtimeCountryCode)
+                : 'Nigeria',
+          ),
           _ReviewRowData(
             _airtimeScope == 'international' ? 'Operator' : 'Network',
             _airtimeScope == 'international'
@@ -1788,13 +1923,11 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
                   )
                 : _providerName(_localAirtimeProviders, _vtuProvider),
           ),
-          if (_airtimeScope == 'international')
-            _ReviewRowData('Country', _countryName(_airtimeCountryCode)),
           _ReviewRowData('Phone', _recipientController.text.trim()),
         ];
       case MoneyActionKind.data:
         return [
-          _ReviewRowData('Amount', '$amount $_currency'),
+          _ReviewRowData('You pay', _formatNairaAmount(amount)),
           _ReviewRowData('Country', _countryName(_dataCountryCode)),
           _ReviewRowData(
             _dataCountryCode == 'GH' ? 'Operator' : 'Network',
@@ -1811,7 +1944,7 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
         ];
       case MoneyActionKind.electricity:
         return [
-          _ReviewRowData('Amount', '$amount $_currency'),
+          _ReviewRowData('You pay', _formatNairaAmount(amount)),
           _ReviewRowData('Country', _countryName(_electricityCountryCode)),
           _ReviewRowData(
             _electricityCountryCode == 'GH' ? 'Biller' : 'Provider',
@@ -1823,6 +1956,8 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
                 : _providerName(_localElectricityProviders, _vtuProvider),
           ),
           _ReviewRowData('Meter', _recipientController.text.trim()),
+          if (_meterCustomerName != null)
+            _ReviewRowData('Customer', _meterCustomerName!),
         ];
     }
   }
@@ -1863,8 +1998,8 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
                   SizedBox(height: AppSpacing.lg),
                   Text(pageSubtitle, style: AppTextStyles.bodyL),
                   SizedBox(height: AppSpacing.lg),
-                  if (widget.kind != MoneyActionKind.fund &&
-                      widget.kind != MoneyActionKind.electricity) ...[
+                  if (widget.kind == MoneyActionKind.send ||
+                      widget.kind == MoneyActionKind.withdraw) ...[
                     _CurrencySelector(
                       value: _currency,
                       onChanged: (value) => setState(() => _currency = value),
@@ -1872,20 +2007,18 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
                     SizedBox(height: AppSpacing.md),
                     _InputField(
                       controller: _amountController,
-                      label: widget.kind == MoneyActionKind.data &&
-                              _dataCountryCode == 'NG'
-                          ? 'Amount from selected package'
-                          : 'Amount',
+                      label: 'Amount',
                       keyboardType:
                           const TextInputType.numberWithOptions(decimal: true),
-                      enabled: !(widget.kind == MoneyActionKind.data &&
-                          _dataCountryCode == 'NG'),
                       inputFormatters: [
                         FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
                       ],
                     ),
                   ],
                   ..._extraFields(),
+                  if (_isVtuAction &&
+                      widget.kind != MoneyActionKind.electricity)
+                    ..._vtuAmountSection(),
                   if (widget.kind != MoneyActionKind.fund &&
                       widget.kind != MoneyActionKind.electricity) ...[
                     SizedBox(height: AppSpacing.lg),
@@ -2013,6 +2146,11 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
     return NumberFormat('#,##0.00').format(amount);
   }
 
+  String _formatNairaAmount(String amount) {
+    final parsed = double.tryParse(amount);
+    return parsed == null ? '₦$amount' : '₦${_formatAmount(parsed)}';
+  }
+
   String _formatRate(double rate) {
     if (rate >= 1) return rate.toStringAsFixed(4);
     return rate.toStringAsFixed(6);
@@ -2092,6 +2230,41 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
     );
 
     return approvedPin;
+  }
+
+  List<Widget> _vtuAmountSection() {
+    if (widget.kind == MoneyActionKind.data && _dataCountryCode == 'NG') {
+      final amountText = _resolvedAmountText();
+      final amount = double.tryParse(amountText ?? '');
+      if (amount == null || amount <= 0) return const [];
+      return [
+        SizedBox(height: AppSpacing.md),
+        _TotalDueLine(amountLabel: '₦${_formatAmount(amount)}'),
+      ];
+    }
+
+    return [
+      SizedBox(height: AppSpacing.md),
+      _InputField(
+        controller: _amountController,
+        label: 'Amount',
+        prefixText: '₦ ',
+        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+        inputFormatters: [
+          FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
+        ],
+      ),
+      if (widget.kind == MoneyActionKind.airtime) ...[
+        SizedBox(height: AppSpacing.sm),
+        _QuickAmountChips(
+          amounts: const [100, 200, 500, 1000, 2000, 5000],
+          selectedText: _amountController.text.trim(),
+          onSelected: (value) {
+            setState(() => _amountController.text = value);
+          },
+        ),
+      ],
+    ];
   }
 
   List<Widget> _extraFields() {
@@ -2179,21 +2352,21 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
       case MoneyActionKind.airtime:
         final airtimeOperators =
             _airtimeOperatorsForCountry(_airtimeCountryCode);
+        final isLocalAirtime = _airtimeScope != 'international';
         return [
-          SizedBox(height: AppSpacing.md),
-          const _VtuProviderRoutePanel(
-            title: 'Nigeria via VTPass',
-            description: 'Ghana airtime is routed through Reloadly.',
-          ),
           SizedBox(height: AppSpacing.md),
           _ChoiceRow(
             label: 'Top-up destination',
             value: _airtimeScope,
             values: const ['local', 'international'],
+            labels: const {
+              'local': 'Nigeria',
+              'international': 'International',
+            },
             onChanged: _setAirtimeScope,
           ),
           SizedBox(height: AppSpacing.md),
-          if (_airtimeScope == 'international') ...[
+          if (!isLocalAirtime) ...[
             _ChoiceRow(
               label: 'Service country',
               value: _airtimeCountryCode,
@@ -2206,7 +2379,10 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
             ),
             SizedBox(height: AppSpacing.md),
             if (_isLoadingVtuCatalog && airtimeOperators.isEmpty) ...[
-              const _InfoPanel(text: 'Loading available operators...'),
+              const _InfoPanel(
+                text: 'Loading available operators...',
+                isLoading: true,
+              ),
               SizedBox(height: AppSpacing.md),
             ] else if (airtimeOperators.isEmpty) ...[
               _InfoPanel(
@@ -2226,16 +2402,15 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
             ],
           ] else ...[
             if (_isLoadingVtuCatalog && _localAirtimeProviders.isEmpty) ...[
-              const _InfoPanel(text: 'Loading VTPass airtime networks...'),
+              const _NetworkTilesSkeleton(),
               SizedBox(height: AppSpacing.md),
             ] else if (_localAirtimeProviders.isEmpty) ...[
               const _InfoPanel(
-                text: 'No Nigerian airtime networks are available yet.',
+                text: 'No airtime networks are available yet.',
               ),
               SizedBox(height: AppSpacing.md),
             ] else ...[
-              _VtuProviderSelector(
-                label: 'Network',
+              _VtuNetworkTiles(
                 value: _vtuProvider,
                 providers: _localAirtimeProviders,
                 onChanged: (value) => _setVtuProvider(value),
@@ -2247,16 +2422,17 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
             controller: _recipientController,
             label: 'Phone number',
             keyboardType: TextInputType.phone,
+            inputFormatters: isLocalAirtime
+                ? [
+                    FilteringTextInputFormatter.digitsOnly,
+                    LengthLimitingTextInputFormatter(11),
+                  ]
+                : null,
           ),
         ];
       case MoneyActionKind.data:
         final ghanaDataOperators = _dataOperatorsForCountry('GH');
         return [
-          SizedBox(height: AppSpacing.md),
-          const _VtuProviderRoutePanel(
-            title: 'Nigeria data via VTPass',
-            description: 'Packages load after you choose a Nigerian network.',
-          ),
           SizedBox(height: AppSpacing.md),
           _ChoiceRow(
             label: 'Service country',
@@ -2271,7 +2447,10 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
           SizedBox(height: AppSpacing.md),
           if (_dataCountryCode == 'GH') ...[
             if (_isLoadingVtuCatalog && ghanaDataOperators.isEmpty) ...[
-              const _InfoPanel(text: 'Loading available data operators...'),
+              const _InfoPanel(
+                text: 'Loading available data operators...',
+                isLoading: true,
+              ),
               SizedBox(height: AppSpacing.md),
             ] else if (ghanaDataOperators.isEmpty) ...[
               const _InfoPanel(
@@ -2295,16 +2474,15 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
             SizedBox(height: AppSpacing.md),
           ] else ...[
             if (_isLoadingVtuCatalog && _localDataProviders.isEmpty) ...[
-              const _InfoPanel(text: 'Loading VTPass data networks...'),
+              const _NetworkTilesSkeleton(),
               SizedBox(height: AppSpacing.md),
             ] else if (_localDataProviders.isEmpty) ...[
               const _InfoPanel(
-                text: 'No Nigerian data networks are available yet.',
+                text: 'No data networks are available yet.',
               ),
               SizedBox(height: AppSpacing.md),
             ] else ...[
-              _VtuProviderSelector(
-                label: 'Network',
+              _VtuNetworkTiles(
                 value: _vtuProvider,
                 providers: _localDataProviders,
                 onChanged: (value) => _setVtuProvider(value),
@@ -2312,13 +2490,16 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
               SizedBox(height: AppSpacing.md),
             ],
             if (_isLoadingVtuCatalog)
-              const _InfoPanel(text: 'Loading VTPass data packages...')
+              const _InfoPanel(
+                text: 'Loading live packages and prices...',
+                isLoading: true,
+              )
             else if (_dataPackages.isEmpty)
               const _InfoPanel(
                 text: 'No data packages are available for this network yet.',
               )
             else
-              _VtuPackageSelector(
+              _VtuPackageGrid(
                 value: _dataPackageId,
                 packages: _dataPackages,
                 onChanged: (value) => setState(() => _selectDataPackage(value)),
@@ -2329,6 +2510,12 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
             controller: _recipientController,
             label: 'Phone number',
             keyboardType: TextInputType.phone,
+            inputFormatters: _dataCountryCode == 'NG'
+                ? [
+                    FilteringTextInputFormatter.digitsOnly,
+                    LengthLimitingTextInputFormatter(11),
+                  ]
+                : null,
           ),
         ];
       case MoneyActionKind.electricity:
@@ -2341,19 +2528,38 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
               title: 'Payment details',
               subtitle: 'Enter the recharge amount and submit the request.',
               children: [
-                _CurrencySelector(
-                  value: _currency,
-                  onChanged: (value) => setState(() => _currency = value),
-                ),
-                SizedBox(height: AppSpacing.md),
+                if (_meterCustomerName != null) ...[
+                  _VerifiedCustomerPanel(
+                    name: _meterCustomerName!,
+                    address: _meterCustomerAddress,
+                    meterNumber: _recipientController.text.trim(),
+                  ),
+                  SizedBox(height: AppSpacing.md),
+                ] else ...[
+                  _InfoPanel(
+                    text:
+                        'Meter ${_recipientController.text.trim()} — continuing without name verification. Double-check the number before paying.',
+                    icon: Icons.warning_amber_rounded,
+                  ),
+                  SizedBox(height: AppSpacing.md),
+                ],
                 _InputField(
                   controller: _amountController,
                   label: 'Amount',
+                  prefixText: '₦ ',
                   keyboardType:
                       const TextInputType.numberWithOptions(decimal: true),
                   inputFormatters: [
                     FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
                   ],
+                ),
+                SizedBox(height: AppSpacing.sm),
+                _QuickAmountChips(
+                  amounts: const [1000, 2000, 3000, 5000, 10000],
+                  selectedText: _amountController.text.trim(),
+                  onSelected: (value) {
+                    setState(() => _amountController.text = value);
+                  },
                 ),
                 SizedBox(height: AppSpacing.lg),
                 _buildSubmitButton(
@@ -2389,6 +2595,7 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
                     ghanaElectricityBillers.isEmpty) ...[
                   const _InfoPanel(
                     text: 'Loading available electricity billers...',
+                    isLoading: true,
                   ),
                   SizedBox(height: AppSpacing.md),
                 ] else if (ghanaElectricityBillers.isEmpty) ...[
@@ -2413,6 +2620,7 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
                     _localElectricityProviders.isEmpty) ...[
                   const _InfoPanel(
                     text: 'Loading VTPass electricity providers...',
+                    isLoading: true,
                   ),
                   SizedBox(height: AppSpacing.md),
                 ] else if (_localElectricityProviders.isEmpty) ...[
@@ -2435,17 +2643,45 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
                 controller: _recipientController,
                 label: 'Meter number',
                 keyboardType: TextInputType.number,
+                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
               ),
               SizedBox(height: AppSpacing.lg),
               FilledButton(
-                onPressed: _continueToElectricityPayment,
+                onPressed:
+                    _isVerifyingMeter ? null : _continueToElectricityPayment,
                 style: FilledButton.styleFrom(
                   backgroundColor: AppColors.primary,
                   foregroundColor: Colors.white,
                   minimumSize: const Size.fromHeight(54),
                 ),
-                child: const Text('Continue'),
+                child: _isVerifyingMeter
+                    ? const TrustPayLottie(
+                        variant: TrustPayAnimationVariant.loading,
+                        size: 20,
+                        semanticsLabel: 'Verifying meter',
+                      )
+                    : Text(
+                        _electricityCountryCode == 'NG'
+                            ? 'Verify meter & continue'
+                            : 'Continue',
+                      ),
               ),
+              if (_meterVerifySkippable) ...[
+                SizedBox(height: AppSpacing.sm),
+                Center(
+                  child: TextButton(
+                    onPressed: () => _continueToElectricityPayment(
+                      skipVerification: true,
+                    ),
+                    child: Text(
+                      'Continue without verification',
+                      style: AppTextStyles.labelM.copyWith(
+                        color: AppColors.textSecondary,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
             ],
           ),
         ];
@@ -2603,43 +2839,427 @@ class _VtuProviderSelector extends StatelessWidget {
   }
 }
 
-class _VtuPackageSelector extends StatelessWidget {
+class _VtuNetworkTiles extends StatelessWidget {
+  final String value;
+  final List<VtuProviderOption> providers;
+  final ValueChanged<String> onChanged;
+
+  const _VtuNetworkTiles({
+    required this.value,
+    required this.providers,
+    required this.onChanged,
+  });
+
+  static const _brandColors = <String, Color>{
+    'mtn': Color(0xFFFFC403),
+    'airtel': Color(0xFFE4002B),
+    'glo': Color(0xFF50B651),
+    '9mobile': Color(0xFF006B38),
+    'etisalat': Color(0xFF006B38),
+  };
+
+  static const _shortNames = <String, String>{
+    'mtn': 'MTN',
+    'airtel': 'Airtel',
+    'glo': 'Glo',
+    '9mobile': '9mob',
+    'etisalat': '9mob',
+  };
+
+  @override
+  Widget build(BuildContext context) {
+    // Brand tiles only pay off for the compact network row; longer catalogs
+    // (electricity discos, international operators) stay in a dropdown.
+    if (providers.length > 6) {
+      return _VtuProviderSelector(
+        label: 'Network',
+        value: value,
+        providers: providers,
+        onChanged: onChanged,
+      );
+    }
+
+    return Row(
+      children: [
+        for (var i = 0; i < providers.length; i++) ...[
+          if (i > 0) const SizedBox(width: AppSpacing.sm),
+          Expanded(child: _tile(providers[i])),
+        ],
+      ],
+    );
+  }
+
+  Widget _tile(VtuProviderOption provider) {
+    final brand = _brandColors[provider.id.toLowerCase()] ?? AppColors.primary;
+    final selected = provider.id == value;
+
+    return TapScale(
+      onTap: () => onChanged(provider.id),
+      borderRadius: BorderRadius.circular(AppRadius.md),
+      semanticLabel: '${provider.name} network',
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 160),
+        curve: Curves.easeOutCubic,
+        padding: const EdgeInsets.symmetric(
+          vertical: AppSpacing.sm + 4,
+          horizontal: AppSpacing.xs,
+        ),
+        decoration: BoxDecoration(
+          color: selected
+              ? AppColors.primary.withValues(alpha: 0.08)
+              : AppColors.surfaceVariant,
+          borderRadius: BorderRadius.circular(AppRadius.md),
+          border: Border.all(
+            color: selected ? AppColors.primary : AppColors.border,
+            width: selected ? 1.6 : 1,
+          ),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 34,
+              height: 34,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: brand,
+                shape: BoxShape.circle,
+              ),
+              child: Text(
+                (_shortNames[provider.id.toLowerCase()] ?? provider.name)
+                    .characters
+                    .first
+                    .toUpperCase(),
+                style: AppTextStyles.labelM.copyWith(
+                  color: _luminanceInk(brand),
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ),
+            const SizedBox(height: AppSpacing.xs),
+            Text(
+              _shortNames[provider.id.toLowerCase()] ?? provider.name,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: (selected ? AppTextStyles.labelM : AppTextStyles.labelS)
+                  .copyWith(
+                color: selected
+                    ? AppColors.textPrimary
+                    : AppColors.textSecondary,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Color _luminanceInk(Color background) {
+    return background.computeLuminance() > 0.5
+        ? const Color(0xFF12131A)
+        : Colors.white;
+  }
+}
+
+class _NetworkTilesSkeleton extends StatelessWidget {
+  const _NetworkTilesSkeleton();
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        for (var i = 0; i < 4; i++) ...[
+          if (i > 0) const SizedBox(width: AppSpacing.sm),
+          const Expanded(child: ShimmerBlock(width: double.infinity, height: 76)),
+        ],
+      ],
+    );
+  }
+}
+
+class _VtuPackageGrid extends StatefulWidget {
   final String? value;
   final List<VtuPackageOption> packages;
   final ValueChanged<String> onChanged;
 
-  const _VtuPackageSelector({
+  const _VtuPackageGrid({
     required this.value,
     required this.packages,
     required this.onChanged,
   });
 
   @override
-  Widget build(BuildContext context) {
-    final selectedValue =
-        value != null && packages.any((item) => item.id == value)
-            ? value
-            : packages.first.id;
+  State<_VtuPackageGrid> createState() => _VtuPackageGridState();
+}
 
-    return DropdownButtonFormField<String>(
-      initialValue: selectedValue,
-      items: packages
-          .map(
-            (item) => DropdownMenuItem(
-              value: item.id,
-              child: Text(
-                '${item.name} - NGN ${item.price.toStringAsFixed(2)}',
-                overflow: TextOverflow.ellipsis,
+class _VtuPackageGridState extends State<_VtuPackageGrid> {
+  static const _collapsedCount = 9;
+  bool _showAll = false;
+
+  static final _allowancePattern = RegExp(
+    r'(\d+(?:\.\d+)?\s*(?:TB|GB|MB))',
+    caseSensitive: false,
+  );
+
+  String _allowanceFor(VtuPackageOption package) {
+    final match = _allowancePattern.firstMatch(package.name);
+    if (match != null) {
+      return match.group(1)!.replaceAll(RegExp(r'\s+'), '').toUpperCase();
+    }
+    return package.name;
+  }
+
+  String _priceFor(VtuPackageOption package) {
+    final price = package.price;
+    final pattern =
+        price % 1 == 0 ? NumberFormat('#,##0') : NumberFormat('#,##0.00');
+    return '₦${pattern.format(price)}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final visible = _showAll
+        ? widget.packages
+        : widget.packages.take(_collapsedCount).toList();
+    final hiddenCount = widget.packages.length - visible.length;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        GridView.builder(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: 3,
+            mainAxisSpacing: AppSpacing.sm,
+            crossAxisSpacing: AppSpacing.sm,
+            childAspectRatio: 1.15,
+          ),
+          itemCount: visible.length,
+          itemBuilder: (context, index) {
+            final package = visible[index];
+            final selected = package.id == widget.value;
+
+            return TapScale(
+              onTap: () => widget.onChanged(package.id),
+              borderRadius: BorderRadius.circular(AppRadius.md),
+              semanticLabel:
+                  '${package.name} for ${_priceFor(package)}, ${package.validity}',
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 160),
+                curve: Curves.easeOutCubic,
+                padding: const EdgeInsets.all(AppSpacing.sm),
+                decoration: BoxDecoration(
+                  color: selected
+                      ? AppColors.primary.withValues(alpha: 0.08)
+                      : AppColors.surfaceVariant,
+                  borderRadius: BorderRadius.circular(AppRadius.md),
+                  border: Border.all(
+                    color: selected ? AppColors.primary : AppColors.border,
+                    width: selected ? 1.6 : 1,
+                  ),
+                ),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text(
+                      _allowanceFor(package),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: AppTextStyles.labelL.copyWith(
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      _priceFor(package),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: AppTextStyles.labelM.copyWith(
+                        color: AppColors.primary,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      package.validity,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: AppTextStyles.caption,
+                    ),
+                  ],
+                ),
               ),
+            );
+          },
+        ),
+        if (hiddenCount > 0 || _showAll) ...[
+          const SizedBox(height: AppSpacing.xs),
+          TextButton(
+            onPressed: () => setState(() => _showAll = !_showAll),
+            child: Text(
+              _showAll ? 'Show fewer packages' : 'Show all packages',
+              style: AppTextStyles.labelM.copyWith(color: AppColors.primary),
             ),
-          )
-          .toList(),
-      onChanged: (next) {
-        if (next != null) onChanged(next);
-      },
-      dropdownColor: AppColors.surface,
-      decoration: _inputDecoration('Data package'),
-      style: AppTextStyles.bodyM.copyWith(color: AppColors.textPrimary),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+class _QuickAmountChips extends StatelessWidget {
+  final List<int> amounts;
+  final String selectedText;
+  final ValueChanged<String> onSelected;
+
+  const _QuickAmountChips({
+    required this.amounts,
+    required this.selectedText,
+    required this.onSelected,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final selectedValue = double.tryParse(selectedText);
+
+    return Wrap(
+      spacing: AppSpacing.sm,
+      runSpacing: AppSpacing.sm,
+      children: [
+        for (final amount in amounts)
+          Builder(
+            builder: (context) {
+              final selected = selectedValue != null &&
+                  selectedValue == amount.toDouble();
+              return TapScale(
+                onTap: () => onSelected(amount.toString()),
+                borderRadius: BorderRadius.circular(AppRadius.full),
+                semanticLabel: 'Set amount to $amount naira',
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 160),
+                  curve: Curves.easeOutCubic,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: AppSpacing.md,
+                    vertical: AppSpacing.sm,
+                  ),
+                  decoration: BoxDecoration(
+                    color: selected
+                        ? AppColors.primary.withValues(alpha: 0.1)
+                        : AppColors.surfaceVariant,
+                    borderRadius: BorderRadius.circular(AppRadius.full),
+                    border: Border.all(
+                      color: selected ? AppColors.primary : AppColors.border,
+                      width: selected ? 1.4 : 1,
+                    ),
+                  ),
+                  child: Text(
+                    '₦${NumberFormat('#,##0').format(amount)}',
+                    style: AppTextStyles.labelM.copyWith(
+                      color: selected
+                          ? AppColors.primary
+                          : AppColors.textPrimary,
+                    ),
+                  ),
+                ),
+              );
+            },
+          ),
+      ],
+    );
+  }
+}
+
+class _TotalDueLine extends StatelessWidget {
+  final String amountLabel;
+
+  const _TotalDueLine({required this.amountLabel});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.md,
+        vertical: AppSpacing.sm + 4,
+      ),
+      decoration: BoxDecoration(
+        color: AppColors.primary.withValues(alpha: 0.06),
+        borderRadius: BorderRadius.circular(AppRadius.sm),
+        border: Border.all(color: AppColors.primary.withValues(alpha: 0.25)),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text('You pay', style: AppTextStyles.labelM),
+          ),
+          Text(
+            amountLabel,
+            style: AppTextStyles.headingM.copyWith(
+              color: AppColors.textPrimary,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _VerifiedCustomerPanel extends StatelessWidget {
+  final String name;
+  final String? address;
+  final String meterNumber;
+
+  const _VerifiedCustomerPanel({
+    required this.name,
+    required this.address,
+    required this.meterNumber,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(AppSpacing.md),
+      decoration: BoxDecoration(
+        color: AppColors.success.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(AppRadius.sm),
+        border: Border.all(color: AppColors.success.withValues(alpha: 0.35)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(
+            Icons.verified_user_rounded,
+            size: 20,
+            color: AppColors.success,
+          ),
+          const SizedBox(width: AppSpacing.sm),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(name, style: AppTextStyles.labelM),
+                const SizedBox(height: AppSpacing.xs),
+                Text(
+                  'Meter $meterNumber',
+                  style: AppTextStyles.bodyS.copyWith(
+                    color: AppColors.textSecondary,
+                  ),
+                ),
+                if (address != null && address!.isNotEmpty) ...[
+                  const SizedBox(height: AppSpacing.xs),
+                  Text(
+                    address!,
+                    style: AppTextStyles.bodyS.copyWith(
+                      color: AppColors.textSecondary,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -2696,16 +3316,16 @@ class _InputField extends StatelessWidget {
   final String label;
   final TextInputType? keyboardType;
   final List<TextInputFormatter>? inputFormatters;
-  final bool enabled;
   final ValueChanged<String>? onChanged;
+  final String? prefixText;
 
   const _InputField({
     required this.controller,
     required this.label,
     this.keyboardType,
     this.inputFormatters,
-    this.enabled = true,
     this.onChanged,
+    this.prefixText,
   });
 
   @override
@@ -2714,10 +3334,9 @@ class _InputField extends StatelessWidget {
       controller: controller,
       keyboardType: keyboardType,
       inputFormatters: inputFormatters,
-      enabled: enabled,
       onChanged: onChanged,
       style: AppTextStyles.bodyM.copyWith(color: AppColors.textPrimary),
-      decoration: _inputDecoration(label),
+      decoration: _inputDecoration(label, prefixText: prefixText),
     );
   }
 }
@@ -3070,13 +3689,15 @@ class _FundingDetailRow extends StatelessWidget {
   }
 }
 
-class _VtuProviderRoutePanel extends StatelessWidget {
-  final String title;
-  final String description;
+class _InfoPanel extends StatelessWidget {
+  final String text;
+  final IconData icon;
+  final bool isLoading;
 
-  const _VtuProviderRoutePanel({
-    required this.title,
-    required this.description,
+  const _InfoPanel({
+    required this.text,
+    this.icon = Icons.info_outline_rounded,
+    this.isLoading = false,
   });
 
   @override
@@ -3085,52 +3706,25 @@ class _VtuProviderRoutePanel extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Container(
-            width: 34,
-            height: 34,
-            decoration: BoxDecoration(
-              color: AppColors.primary.withValues(alpha: 0.12),
-              borderRadius: BorderRadius.circular(AppRadius.sm),
-            ),
-            child: Icon(
-              Icons.verified_rounded,
-              color: AppColors.primary,
-              size: 18,
-            ),
+          SizedBox(
+            width: 18,
+            height: 18,
+            child: isLoading
+                ? CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: AppColors.primary,
+                  )
+                : Icon(icon, size: 18, color: AppColors.textSecondary),
           ),
-          SizedBox(width: AppSpacing.sm),
+          const SizedBox(width: AppSpacing.sm),
           Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(title, style: AppTextStyles.labelM),
-                SizedBox(height: AppSpacing.xs),
-                Text(
-                  description,
-                  style: AppTextStyles.bodyS.copyWith(
-                    color: AppColors.textSecondary,
-                  ),
-                ),
-              ],
+            child: Text(
+              text,
+              style:
+                  AppTextStyles.bodyS.copyWith(color: AppColors.textPrimary),
             ),
           ),
         ],
-      ),
-    );
-  }
-}
-
-class _InfoPanel extends StatelessWidget {
-  final String text;
-
-  const _InfoPanel({required this.text});
-
-  @override
-  Widget build(BuildContext context) {
-    return _Panel(
-      child: Text(
-        text,
-        style: AppTextStyles.bodyS.copyWith(color: AppColors.textPrimary),
       ),
     );
   }
@@ -5009,10 +5603,12 @@ class _BarcodePainter extends CustomPainter {
   bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
 
-InputDecoration _inputDecoration(String label) {
+InputDecoration _inputDecoration(String label, {String? prefixText}) {
   return InputDecoration(
     labelText: label,
     labelStyle: AppTextStyles.bodyM,
+    prefixText: prefixText,
+    prefixStyle: AppTextStyles.labelL.copyWith(color: AppColors.textPrimary),
     filled: true,
     fillColor: AppColors.surfaceVariant,
     enabledBorder: OutlineInputBorder(
@@ -5024,20 +5620,6 @@ InputDecoration _inputDecoration(String label) {
       borderSide: BorderSide(color: AppColors.primary),
     ),
   );
-}
-
-TrustPayAnimationVariant _animationFor(MoneyActionKind kind) {
-  switch (kind) {
-    case MoneyActionKind.fund:
-      return TrustPayAnimationVariant.loading;
-    case MoneyActionKind.send:
-    case MoneyActionKind.withdraw:
-    case MoneyActionKind.exchange:
-    case MoneyActionKind.airtime:
-    case MoneyActionKind.data:
-    case MoneyActionKind.electricity:
-      return TrustPayAnimationVariant.send;
-  }
 }
 
 _ActionConfig _configFor(MoneyActionKind kind) {

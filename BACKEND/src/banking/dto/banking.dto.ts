@@ -4,12 +4,12 @@ import {
   IsString,
   Matches,
   MaxLength,
-} from "class-validator";
+} from 'class-validator';
 
-const SUPPORTED_CURRENCIES = ["NGN", "GHS"] as const;
-const VIRTUAL_ACCOUNT_CURRENCIES = ["NGN"] as const;
-const VIRTUAL_ACCOUNT_PROVIDERS = ["monnify"] as const;
-const BANK_RESOLVE_PROVIDERS = ["monnify"] as const;
+const SUPPORTED_CURRENCIES = ['NGN', 'GHS'] as const;
+const VIRTUAL_ACCOUNT_CURRENCIES = ['NGN'] as const;
+const VIRTUAL_ACCOUNT_PROVIDERS = ['monnify'] as const;
+const BANK_RESOLVE_PROVIDERS = ['monnify'] as const;
 
 export class ProvisionVirtualAccountDto {
   @IsString()
@@ -21,13 +21,18 @@ export class ProvisionVirtualAccountDto {
   @IsIn(VIRTUAL_ACCOUNT_PROVIDERS)
   provider?: (typeof VIRTUAL_ACCOUNT_PROVIDERS)[number];
 
+  // Deprecated: the account name is derived server-side from the user's
+  // verified profile name. These remain only as a fallback for profiles that
+  // predate legal-name capture.
+  @IsOptional()
   @IsString()
   @MaxLength(64)
-  firstName: string;
+  firstName?: string;
 
+  @IsOptional()
   @IsString()
   @MaxLength(64)
-  lastName: string;
+  lastName?: string;
 
   @IsOptional()
   @IsString()

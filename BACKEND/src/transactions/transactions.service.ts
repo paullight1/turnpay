@@ -1,5 +1,5 @@
-import { Injectable } from "@nestjs/common";
-import { PrismaService } from "../prisma/prisma.service";
+import { Injectable } from '@nestjs/common';
+import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
 export class TransactionsService {
@@ -28,7 +28,7 @@ export class TransactionsService {
         where,
         skip,
         take: limit,
-        orderBy: { createdAt: "desc" },
+        orderBy: { createdAt: 'desc' },
         select: {
           id: true,
           type: true,
@@ -59,7 +59,7 @@ export class TransactionsService {
       where: { reference, userId },
       include: {
         ledgerEntries: {
-          orderBy: { createdAt: "asc" },
+          orderBy: { createdAt: 'asc' },
           select: {
             id: true,
             direction: true,
@@ -72,7 +72,7 @@ export class TransactionsService {
           },
         },
         transferAttempts: {
-          orderBy: { attemptNo: "asc" },
+          orderBy: { attemptNo: 'asc' },
           select: {
             id: true,
             provider: true,
@@ -161,7 +161,7 @@ export class TransactionsService {
           },
         },
         ledgerEntries: {
-          orderBy: { createdAt: "asc" },
+          orderBy: { createdAt: 'asc' },
           select: {
             id: true,
             direction: true,
@@ -174,7 +174,7 @@ export class TransactionsService {
           },
         },
         transferAttempts: {
-          orderBy: { attemptNo: "asc" },
+          orderBy: { attemptNo: 'asc' },
           select: {
             id: true,
             provider: true,
@@ -260,11 +260,11 @@ export class TransactionsService {
     return this.prisma.auditLog.findMany({
       where: {
         OR: [
-          { targetType: "TRANSACTION", targetId: transaction.id },
+          { targetType: 'TRANSACTION', targetId: transaction.id },
           { reference },
         ],
       },
-      orderBy: { createdAt: "desc" },
+      orderBy: { createdAt: 'desc' },
       include: {
         admin: {
           select: {
@@ -299,7 +299,7 @@ export class TransactionsService {
         where,
         skip,
         take: limit,
-        orderBy: { createdAt: "desc" },
+        orderBy: { createdAt: 'desc' },
         include: {
           user: {
             select: {

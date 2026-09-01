@@ -1,8 +1,7 @@
-import { createHmac } from "crypto";
-import { Decimal } from "@prisma/client/runtime/library";
-import { WebhookController } from "./payment-webhook.controller";
+import { createHmac } from 'crypto';
+import { WebhookController } from './payment-webhook.controller';
 
-describe("WebhookController", () => {
+describe('WebhookController', () => {
   const paymentService = {
     verifyPaystackSignature: jest.fn(),
     verifyFlutterwaveSignature: jest.fn(),
@@ -17,6 +16,10 @@ describe("WebhookController", () => {
 
   const exchangeService = {
     processMonnifyExchangeDepositWebhook: jest.fn(),
+  };
+
+  const webhookInbox = {
+    accept: jest.fn(),
   };
 
   const configService = {
@@ -39,23 +42,23 @@ describe("WebhookController", () => {
   };
 
   const webhookBody = {
-    eventType: "SUCCESSFUL_TRANSACTION",
+    eventType: 'SUCCESSFUL_TRANSACTION',
     eventData: {
-      transactionReference: "MNF-1",
-      paymentReference: "PY-1",
+      transactionReference: 'MNF-1',
+      paymentReference: 'PY-1',
       amountPaid: 1500,
-      currency: "NGN",
-      paymentStatus: "PAID",
+      currency: 'NGN',
+      paymentStatus: 'PAID',
       destinationAccountInformation: {
-        accountNumber: "0123456789",
+        accountNumber: '0123456789',
       },
     },
   };
 
   const rawBody = JSON.stringify(webhookBody);
-  const validSignature = createHmac("sha512", "webhook-secret")
+  const validSignature = createHmac('sha512', 'webhook-secret')
     .update(rawBody)
-    .digest("hex");
+    .digest('hex');
 
   const request = { rawBody };
 
@@ -65,20 +68,23 @@ describe("WebhookController", () => {
     jest.clearAllMocks();
 
     configService.get.mockImplementation((key: string) => {
-      if (key === "MONNIFY_WEBHOOK_SECRET") return "webhook-secret";
+      if (key === 'MONNIFY_WEBHOOK_SECRET') return 'webhook-secret';
       return undefined;
     });
 
     controller = new WebhookController(
       paymentService as any,
-      bankingService as any,
-      exchangeService as any,
+      webhookInbox as any,
       configService as any,
       logger as any,
       prisma as any,
     );
-    prisma.webhookLog.create.mockResolvedValue({ id: "webhook-log-1" });
-    prisma.webhookLog.update.mockResolvedValue({ id: "webhook-log-1" });
+    prisma.webhookLog.create.mockResolvedValue({ id: 'webhook-log-1' });
+    prisma.webhookLog.update.mockResolvedValue({ id: 'webhook-log-1' });
+    webhookInbox.accept.mockResolvedValue({
+      eventId: 'evt-1',
+      duplicate: false,
+    });
 
     bankingService.processVirtualAccountDeposit.mockResolvedValue({
       received: true,
@@ -90,60 +96,23 @@ describe("WebhookController", () => {
     });
   });
 
-  it("rejects Monnify webhooks without a signature", async () => {
+  it('rejects Monnify webhooks without a signature', async () => {
     await expect(
       controller.handleMonnifyWebhook(
         undefined as unknown as string,
         request as any,
         webhookBody,
       ),
-    ).rejects.toThrow("Missing signature header");
+    ).rejects.toThrow('Missing signature header');
   });
 
-  it("rejects Monnify webhooks with an invalid signature", async () => {
+  it('rejects Monnify webhooks with an invalid signature', async () => {
     await expect(
-      controller.handleMonnifyWebhook("invalid", request as any, webhookBody),
-    ).rejects.toThrow("Invalid signature");
+      controller.handleMonnifyWebhook('invalid', request as any, webhookBody),
+    ).rejects.toThrow('Invalid signature');
   });
 
-  it("routes matched Monnify exchange webhooks to the exchange service", async () => {
-    exchangeService.processMonnifyExchangeDepositWebhook.mockResolvedValue({
-      matched: true,
-      processed: true,
-      receiptId: "receipt-1",
-    });
-
-    const response = await controller.handleMonnifyWebhook(
-      validSignature,
-      request as any,
-      webhookBody,
-    );
-
-    expect(response).toEqual({ received: true, routed: "exchange" });
-
-    expect(
-      exchangeService.processMonnifyExchangeDepositWebhook,
-    ).toHaveBeenCalledWith(
-      expect.objectContaining({
-        eventType: "SUCCESSFUL_TRANSACTION",
-        providerReference: "MNF-1",
-        paymentReference: "PY-1",
-        accountNumber: "0123456789",
-        currency: "NGN",
-      }),
-    );
-
-    const exchangeInput = exchangeService.processMonnifyExchangeDepositWebhook
-      .mock.calls[0]?.[0] as {
-      eventType: string;
-      amount: Decimal;
-    };
-    expect(exchangeInput.amount.toString()).toBe("1500");
-    expect(exchangeInput.eventType).toBe("SUCCESSFUL_TRANSACTION");
-    expect(bankingService.processVirtualAccountDeposit).not.toHaveBeenCalled();
-  });
-
-  it("falls back to virtual account deposit when no exchange receipt matches", async () => {
+  it('accepts verified Monnify webhooks into the inbox and acknowledges immediately', async () => {
     const response = await controller.handleMonnifyWebhook(
       validSignature,
       request as any,
@@ -151,28 +120,35 @@ describe("WebhookController", () => {
     );
 
     expect(response).toEqual({ received: true });
+    expect(webhookInbox.accept).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: 'MONNIFY',
+        eventType: 'SUCCESSFUL_TRANSACTION',
+        providerReference: 'MNF-1',
+        payload: webhookBody,
+      }),
+    );
+    expect(bankingService.processVirtualAccountDeposit).not.toHaveBeenCalled();
     expect(
       exchangeService.processMonnifyExchangeDepositWebhook,
-    ).toHaveBeenCalledTimes(1);
-    expect(bankingService.processVirtualAccountDeposit).toHaveBeenCalledTimes(
-      1,
-    );
+    ).not.toHaveBeenCalled();
   });
 
-  it("does not re-route duplicate exchange match events through deposits", async () => {
-    exchangeService.processMonnifyExchangeDepositWebhook.mockResolvedValue({
-      matched: true,
-      processed: false,
-      duplicate: true,
-    });
+  it('rejects Monnify payloads that are missing the event type after signature verification', async () => {
+    const invalidBody = {
+      eventData: webhookBody.eventData,
+    };
+    const invalidRawBody = JSON.stringify(invalidBody);
+    const invalidSignature = createHmac('sha512', 'webhook-secret')
+      .update(invalidRawBody)
+      .digest('hex');
 
-    const response = await controller.handleMonnifyWebhook(
-      validSignature,
-      request as any,
-      webhookBody,
-    );
-
-    expect(response).toEqual({ received: true, routed: "exchange" });
-    expect(bankingService.processVirtualAccountDeposit).not.toHaveBeenCalled();
+    await expect(
+      controller.handleMonnifyWebhook(
+        invalidSignature,
+        { rawBody: invalidRawBody } as any,
+        invalidBody as any,
+      ),
+    ).rejects.toThrow('eventType must be a string');
   });
 });

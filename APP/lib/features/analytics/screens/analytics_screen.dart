@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../core/utils/haptics.dart';
+import '../../../core/widgets/tp_illustration.dart';
 
 // â”€â”€â”€ SPEND CATEGORY MODEL â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 class SpendCategory {
@@ -139,7 +141,10 @@ class _AnalyticsHeader extends StatelessWidget {
       child: Row(
         children: [
           GestureDetector(
-            onTap: () => Navigator.of(context).maybePop(),
+            onTap: () {
+              Haptics.selection();
+              Navigator.of(context).maybePop();
+            },
             child: Container(
               width: 40,
               height: 40,
@@ -224,7 +229,10 @@ class _ToggleTab extends StatelessWidget {
   Widget build(BuildContext context) {
     return Expanded(
       child: GestureDetector(
-        onTap: onTap,
+        onTap: () {
+          if (!isSelected) Haptics.selection();
+          onTap();
+        },
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 250),
           curve: Curves.easeInOut,
@@ -234,7 +242,7 @@ class _ToggleTab extends StatelessWidget {
             boxShadow: isSelected
                 ? [
                     BoxShadow(
-                      color: AppColors.primary.withOpacity(0.3),
+                      color: AppColors.primary.withValues(alpha: 0.3),
                       blurRadius: 12,
                       offset: const Offset(0, 4),
                     ),
@@ -374,7 +382,7 @@ class _MiniBarchart extends StatelessWidget {
                   decoration: BoxDecoration(
                     color: isActive
                         ? AppColors.primary
-                        : AppColors.primary.withOpacity(0.22),
+                        : AppColors.primary.withValues(alpha: 0.22),
                     borderRadius: BorderRadius.circular(4),
                   ),
                 );
@@ -577,11 +585,22 @@ class _SpendBreakdownCard extends StatelessWidget {
           if (categories.isEmpty)
             Padding(
               padding: const EdgeInsets.all(AppSpacing.lg),
-              child: Text(
-                'Your settled transfers, bills, and exchange activity will appear here.',
-                style: AppTextStyles.bodyM.copyWith(
-                  color: AppColors.textSecondary,
-                ),
+              child: Column(
+                children: [
+                  TpIllustration(
+                    variant: TpIllustrationVariant.emptySearch,
+                    size: 128,
+                    semanticLabel: 'No spending activity yet',
+                  ),
+                  const SizedBox(height: AppSpacing.sm),
+                  Text(
+                    'Your settled transfers, bills, and exchange activity will appear here.',
+                    style: AppTextStyles.bodyM.copyWith(
+                      color: AppColors.textSecondary,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                ],
               ),
             )
           else

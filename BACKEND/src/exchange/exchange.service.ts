@@ -1,15 +1,21 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   NotFoundException,
   Optional,
-} from "@nestjs/common";
-import { ConfigService } from "@nestjs/config";
-import { createHash } from "crypto";
-import { ExchangePayoutStatus, ExchangeReceiptStatus, KYCTier, Prisma } from "@prisma/client";
-import { PrismaService } from "../prisma/prisma.service";
-import { RateService } from "./providers/rate.service";
-import { RedisService } from "../redis/redis.service";
+} from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { createHash } from 'crypto';
+import {
+  ExchangePayoutStatus,
+  ExchangeReceiptStatus,
+  KYCTier,
+  Prisma,
+} from '@prisma/client';
+import { PrismaService } from '../prisma/prisma.service';
+import { RateService } from './providers/rate.service';
+import { RedisService } from '../redis/redis.service';
 import {
   AdminMarkPayoutSentDto,
   AdminReviewExchangeReceiptDto,
@@ -20,16 +26,16 @@ import {
   CreateMonnifyExchangeDepositDto,
   ExecuteQuoteDto,
   SubmitExchangeReceiptDto,
-} from "./dto/exchange.dto";
-import { v4 as uuidv4 } from "uuid";
-import { PinoLogger } from "nestjs-pino";
-import { Decimal } from "@prisma/client/runtime/library";
-import { LedgerService } from "../wallets/ledger.service";
-import { TransactionPinService } from "../common/services/transaction-pin.service";
-import { formatKycTier, isKycTierAtLeast } from "../common/utils/kyc-tier";
-import { SupabaseService } from "../supabase/supabase.service";
-import { redactProviderPayload } from "../common/utils/masking";
-import { BankingService } from "../banking/banking.service";
+} from './dto/exchange.dto';
+import { v4 as uuidv4 } from 'uuid';
+import { PinoLogger } from 'nestjs-pino';
+import { Decimal } from '@prisma/client/runtime/library';
+import { LedgerService } from '../wallets/ledger.service';
+import { TransactionPinService } from '../common/services/transaction-pin.service';
+import { formatKycTier, isKycTierAtLeast } from '../common/utils/kyc-tier';
+import { SupabaseService } from '../supabase/supabase.service';
+import { redactProviderPayload } from '../common/utils/masking';
+import { BankingService } from '../banking/banking.service';
 
 export interface QuoteData {
   id: string;
@@ -46,21 +52,27 @@ export interface QuoteData {
   createdAt: Date;
 }
 
-const MANUAL_RECEIPT_CREDIT_SOURCE = "MANUAL_EXCHANGE_RECEIPT_CREDIT";
-const MONNIFY_EXCHANGE_PROVIDER = "MONNIFY";
-const MONNIFY_EXCHANGE_FLOW = "MONNIFY_VERIFIED_EXCHANGE_DEPOSIT";
+const MANUAL_RECEIPT_CREDIT_SOURCE = 'MANUAL_EXCHANGE_RECEIPT_CREDIT';
+const MONNIFY_EXCHANGE_PROVIDER = 'MONNIFY';
+const MONNIFY_EXCHANGE_FLOW = 'MONNIFY_VERIFIED_EXCHANGE_DEPOSIT';
+// A bank reference must be at least this long before we accept a fuzzy
+// substring match against the raw webhook payload. Short references (e.g. a
+// 3-4 char narration) can collide incidentally with another same-amount
+// intent's payload and mis-attribute a verified deposit; exact matches on the
+// provider/payment reference are always allowed regardless of length.
+const MIN_FUZZY_REFERENCE_MATCH_LENGTH = 6;
 const MANUAL_RECEIPT_TERMINAL_STATUSES: ExchangeReceiptStatus[] = [
-  "CREDITED",
-  "REJECTED",
+  'CREDITED',
+  'REJECTED',
 ];
-const DEFAULT_EXCHANGE_RECEIPT_BUCKET = "exchange-receipts";
+const DEFAULT_EXCHANGE_RECEIPT_BUCKET = 'exchange-receipts';
 const DEFAULT_RECEIPT_PROOF_URL_TTL_SECONDS = 300;
 const MAX_RECEIPT_FILE_SIZE = 8 * 1024 * 1024;
 const RECEIPT_CONTENT_TYPE_EXTENSIONS: Record<string, string> = {
-  "image/jpeg": ".jpg",
-  "image/png": ".png",
-  "image/webp": ".webp",
-  "application/pdf": ".pdf",
+  'image/jpeg': '.jpg',
+  'image/png': '.png',
+  'image/webp': '.webp',
+  'application/pdf': '.pdf',
 };
 
 @Injectable()
@@ -91,7 +103,7 @@ export class ExchangeService {
       to,
       baseRate: rate,
       markupPercent: markup,
-      effectiveRate: rate * (1 + markup / 100),
+      effectiveRate: rate * (1 - markup / 100),
       isStale,
     };
   }
@@ -99,18 +111,18 @@ export class ExchangeService {
   async createQuote(userId: string, dto: CreateQuoteDto): Promise<QuoteData> {
     if (dto.from === dto.to) {
       throw new BadRequestException(
-        "Source and destination currencies must be different",
+        'Source and destination currencies must be different',
       );
     }
 
     const { rate, markup } = await this.rateService.getRate(dto.from, dto.to);
     const effectiveRate = new Decimal(rate).mul(
-      new Decimal(1).plus(new Decimal(markup).div(100)),
+      new Decimal(1).minus(new Decimal(markup).div(100)),
     );
 
     const amount = new Decimal(dto.amount);
     if (amount.greaterThan(10_000_000)) {
-      throw new BadRequestException("Amount must be at most 10000000");
+      throw new BadRequestException('Amount must be at most 10000000');
     }
     const fee = this.calculateFee(amount, markup);
     const sendAmount = amount.plus(fee);
@@ -148,7 +160,7 @@ export class ExchangeService {
         fee,
         receiveAmount,
       },
-      "Exchange quote created",
+      'Exchange quote created',
     );
 
     return quote;
@@ -161,20 +173,20 @@ export class ExchangeService {
 
     if (!raw) {
       throw new NotFoundException(
-        "Quote not found. Please create a new quote.",
+        'Quote not found. Please create a new quote.',
       );
     }
 
     const quote = JSON.parse(raw) as QuoteData;
 
     if (quote.userId !== userId) {
-      throw new BadRequestException("Quote does not belong to this user");
+      throw new BadRequestException('Quote does not belong to this user');
     }
 
     if (new Date() > quote.expiresAt) {
       await this.redis.del(`quote:${quote.id}`);
       throw new BadRequestException(
-        "Quote has expired. Please create a new quote.",
+        'Quote has expired. Please create a new quote.',
       );
     }
 
@@ -188,125 +200,147 @@ export class ExchangeService {
     });
 
     if (!user) {
-      throw new NotFoundException("User not found");
+      throw new NotFoundException('User not found');
     }
 
     if (user.isSuspended) {
-      throw new BadRequestException("Account is suspended");
+      throw new BadRequestException('Account is suspended');
     }
 
-    this.assertExchangeKycEligible(user, "execute an exchange");
+    this.assertExchangeKycEligible(user, 'execute an exchange');
 
     const amount = new Decimal(quote.amount);
     const fee = new Decimal(quote.fee);
     const sendAmount = new Decimal(quote.sendAmount);
     const receiveAmount = new Decimal(quote.receiveAmount);
 
-    const result = await this.prisma.$transaction(
-      async (tx) => {
-        const sourceWallet = await tx.wallet.findUnique({
-          where: {
-            userId_currency: {
+    // Atomically claim the quote before any money movement. Without this,
+    // two concurrent executeQuote calls carrying different Idempotency-Key
+    // headers both read the still-present quote and each open its own DB
+    // transaction with a distinct transaction id — so the
+    // LedgerEntry @@unique([transactionId, source]) guard never collides and
+    // the wallet is debited (and the target credited) twice at the locked
+    // rate. SET NX ensures only one caller wins the claim.
+    const execLockKey = `quote:${quote.id}:exec`;
+    const claimed = await this.redis.setIfNotExists(execLockKey, '1', 60);
+    if (!claimed) {
+      throw new ConflictException(
+        'This quote is already being processed. Please wait a moment and try again.',
+      );
+    }
+
+    const result = await this.prisma
+      .$transaction(
+        async (tx) => {
+          const sourceWallet = await tx.wallet.findUnique({
+            where: {
+              userId_currency: {
+                userId,
+                currency: quote.from as 'NGN' | 'GHS',
+              },
+            },
+            select: { id: true },
+          });
+
+          if (!sourceWallet) {
+            throw new NotFoundException(`${quote.from} wallet not found`);
+          }
+
+          const targetWallet = await tx.wallet.findUnique({
+            where: {
+              userId_currency: {
+                userId,
+                currency: quote.to as 'NGN' | 'GHS',
+              },
+            },
+            select: { id: true },
+          });
+
+          if (!targetWallet) {
+            throw new NotFoundException(`${quote.to} wallet not found`);
+          }
+
+          const reference = `EXC-${Date.now()}-${uuidv4().slice(0, 8)}`;
+
+          const transaction = await tx.transaction.create({
+            data: {
               userId,
-              currency: quote.from as "NGN" | "GHS",
+              type: 'EXCHANGE',
+              amount,
+              currency: quote.from as 'NGN' | 'GHS',
+              status: 'SUCCESS',
+              reference,
+              fee,
+              metadata: {
+                quoteId: quote.id,
+                from: quote.from,
+                to: quote.to,
+                rate: quote.rate,
+                markupPercent: quote.markupPercent,
+                receiveAmount: quote.receiveAmount,
+                sendAmount: quote.sendAmount,
+              },
+              walletId: sourceWallet.id,
             },
-          },
-          select: { id: true },
-        });
+          });
 
-        if (!sourceWallet) {
-          throw new NotFoundException(`${quote.from} wallet not found`);
-        }
-
-        const targetWallet = await tx.wallet.findUnique({
-          where: {
-            userId_currency: {
+          const sourceMovement = await this.ledger.debitWallet(
+            {
               userId,
-              currency: quote.to as "NGN" | "GHS",
+              currency: quote.from as 'NGN' | 'GHS',
+              amount: sendAmount,
+              transactionId: transaction.id,
+              reference,
+              source: 'EXCHANGE_DEBIT',
+              metadata: {
+                quoteId: quote.id,
+                fee: fee.toString(),
+                targetCurrency: quote.to,
+              },
             },
-          },
-          select: { id: true },
-        });
+            tx,
+          );
 
-        if (!targetWallet) {
-          throw new NotFoundException(`${quote.to} wallet not found`);
-        }
-
-        const reference = `EXC-${Date.now()}-${uuidv4().slice(0, 8)}`;
-
-        const transaction = await tx.transaction.create({
-          data: {
-            userId,
-            type: "EXCHANGE",
-            amount,
-            currency: quote.from as "NGN" | "GHS",
-            status: "SUCCESS",
-            reference,
-            fee,
-            metadata: {
-              quoteId: quote.id,
-              from: quote.from,
-              to: quote.to,
-              rate: quote.rate,
-              markupPercent: quote.markupPercent,
-              receiveAmount: quote.receiveAmount,
-              sendAmount: quote.sendAmount,
+          const targetMovement = await this.ledger.creditWallet(
+            {
+              userId,
+              currency: quote.to as 'NGN' | 'GHS',
+              amount: receiveAmount,
+              transactionId: transaction.id,
+              reference,
+              source: 'EXCHANGE_CREDIT',
+              metadata: {
+                quoteId: quote.id,
+                sourceCurrency: quote.from,
+                rate: quote.rate,
+              },
             },
-            walletId: sourceWallet.id,
-          },
-        });
+            tx,
+          );
 
-        const sourceMovement = await this.ledger.debitWallet(
-          {
-            userId,
-            currency: quote.from as "NGN" | "GHS",
-            amount: sendAmount,
-            transactionId: transaction.id,
-            reference,
-            source: "EXCHANGE_DEBIT",
-            metadata: {
-              quoteId: quote.id,
-              fee: fee.toString(),
-              targetCurrency: quote.to,
+          return {
+            transaction,
+            sourceWallet: {
+              currency: quote.from,
+              balance: sourceMovement.balanceAfter,
             },
-          },
-          tx,
-        );
-
-        const targetMovement = await this.ledger.creditWallet(
-          {
-            userId,
-            currency: quote.to as "NGN" | "GHS",
-            amount: receiveAmount,
-            transactionId: transaction.id,
-            reference,
-            source: "EXCHANGE_CREDIT",
-            metadata: {
-              quoteId: quote.id,
-              sourceCurrency: quote.from,
-              rate: quote.rate,
+            targetWallet: {
+              currency: quote.to,
+              balance: targetMovement.balanceAfter,
             },
-          },
-          tx,
-        );
-
-        return {
-          transaction,
-          sourceWallet: {
-            currency: quote.from,
-            balance: sourceMovement.balanceAfter,
-          },
-          targetWallet: {
-            currency: quote.to,
-            balance: targetMovement.balanceAfter,
-          },
-        };
-      },
-      {
-        timeout: this.transactionTimeout,
-        maxWait: 3000,
-      },
-    );
+          };
+        },
+        {
+          timeout: this.transactionTimeout,
+          maxWait: 3000,
+        },
+      )
+      .catch(async (error) => {
+        // Release the claim so a transient failure (e.g. DB timeout) does not
+        // block the user from legitimately retrying the same quote.
+        await this.redis.del(execLockKey);
+        throw error;
+      });
 
     await this.redis.del(`quote:${quote.id}`);
 
@@ -320,7 +354,7 @@ export class ExchangeService {
         amount: quote.amount,
         fee: quote.fee,
       },
-      "Exchange executed successfully",
+      'Exchange executed successfully',
     );
 
     return {
@@ -348,11 +382,11 @@ export class ExchangeService {
     const receiptProof = dto.receiptObjectKey ?? dto.receiptUrl;
 
     if (!receiptProof) {
-      throw new BadRequestException("Receipt proof is required");
+      throw new BadRequestException('Receipt proof is required');
     }
 
     if (amount.greaterThan(10_000_000)) {
-      throw new BadRequestException("Amount must be at most 10000000");
+      throw new BadRequestException('Amount must be at most 10000000');
     }
 
     const user = await this.prisma.user.findUnique({
@@ -363,29 +397,29 @@ export class ExchangeService {
         kycTier: true,
         isSuspended: true,
         wallets: {
-          where: { currency: "GHS" },
+          where: { currency: 'GHS' },
           select: { id: true },
         },
       },
     });
 
     if (!user) {
-      throw new NotFoundException("User not found");
+      throw new NotFoundException('User not found');
     }
 
     if (user.isSuspended) {
-      throw new BadRequestException("Account is suspended");
+      throw new BadRequestException('Account is suspended');
     }
 
-    this.assertExchangeKycEligible(user, "submit an exchange receipt");
+    this.assertExchangeKycEligible(user, 'submit an exchange receipt');
 
     if (user.wallets.length === 0) {
-      throw new NotFoundException("GHS wallet not found");
+      throw new NotFoundException('GHS wallet not found');
     }
 
-    const { rate, markup } = await this.rateService.getRate("NGN", "GHS");
+    const { rate, markup } = await this.rateService.getRate('NGN', 'GHS');
     const effectiveRate = new Decimal(rate).mul(
-      new Decimal(1).plus(new Decimal(markup).div(100)),
+      new Decimal(1).minus(new Decimal(markup).div(100)),
     );
     const expectedCreditAmount = amount
       .mul(effectiveRate)
@@ -398,16 +432,16 @@ export class ExchangeService {
           const transaction = await tx.transaction.create({
             data: {
               userId,
-              type: "EXCHANGE",
+              type: 'EXCHANGE',
               amount,
-              currency: "NGN",
-              status: "PENDING",
+              currency: 'NGN',
+              status: 'PENDING',
               reference,
               fee: new Decimal(0),
               metadata: {
-                flow: "MANUAL_EXCHANGE_RECEIPT",
-                sourceCurrency: "NGN",
-                targetCurrency: "GHS",
+                flow: 'MANUAL_EXCHANGE_RECEIPT',
+                sourceCurrency: 'NGN',
+                targetCurrency: 'GHS',
                 expectedCreditAmount: expectedCreditAmount.toFixed(2),
                 rate: effectiveRate.toFixed(6),
                 markupPercent: new Decimal(markup).toFixed(2),
@@ -420,8 +454,8 @@ export class ExchangeService {
             data: {
               userId,
               transactionId: transaction.id,
-              sourceCurrency: "NGN",
-              targetCurrency: "GHS",
+              sourceCurrency: 'NGN',
+              targetCurrency: 'GHS',
               amount,
               expectedCreditAmount,
               rate: effectiveRate,
@@ -433,8 +467,8 @@ export class ExchangeService {
               metadata: {
                 note: dto.note,
                 receiptProofType: dto.receiptObjectKey
-                  ? "MANAGED_STORAGE_OBJECT"
-                  : "EXTERNAL_URL",
+                  ? 'MANAGED_STORAGE_OBJECT'
+                  : 'EXTERNAL_URL',
                 submittedAt: new Date().toISOString(),
               },
             },
@@ -458,10 +492,10 @@ export class ExchangeService {
       .catch((error: unknown) => {
         if (
           error instanceof Prisma.PrismaClientKnownRequestError &&
-          error.code === "P2002"
+          error.code === 'P2002'
         ) {
           throw new BadRequestException(
-            "Receipt reference has already been submitted",
+            'Receipt reference has already been submitted',
           );
         }
 
@@ -474,7 +508,7 @@ export class ExchangeService {
         receiptId: result.id,
         transactionReference: reference,
       },
-      "Manual exchange receipt submitted",
+      'Manual exchange receipt submitted',
     );
 
     return this.mapExchangeReceipt(result);
@@ -488,7 +522,7 @@ export class ExchangeService {
     this.assertPositiveMoney(amount);
 
     if (amount.greaterThan(10_000_000)) {
-      throw new BadRequestException("Amount must be at most 10000000");
+      throw new BadRequestException('Amount must be at most 10000000');
     }
 
     const user = await this.prisma.user.findUnique({
@@ -501,30 +535,30 @@ export class ExchangeService {
         kycTier: true,
         isSuspended: true,
         wallets: {
-          where: { currency: "GHS" },
+          where: { currency: 'GHS' },
           select: { id: true },
         },
       },
     });
 
     if (!user) {
-      throw new NotFoundException("User not found");
+      throw new NotFoundException('User not found');
     }
 
     if (user.isSuspended) {
-      throw new BadRequestException("Account is suspended");
+      throw new BadRequestException('Account is suspended');
     }
 
-    this.assertExchangeKycEligible(user, "create a Monnify exchange deposit");
+    this.assertExchangeKycEligible(user, 'create a Monnify exchange deposit');
 
     if (user.wallets.length === 0) {
-      throw new NotFoundException("GHS wallet not found");
+      throw new NotFoundException('GHS wallet not found');
     }
 
     const collectionAccount = this.getMonnifyExchangeCollectionAccount();
     if (!collectionAccount && !this.bankingService) {
       throw new BadRequestException(
-        "Monnify exchange collection account is not configured",
+        'Monnify exchange collection account is not configured',
       );
     }
 
@@ -532,9 +566,9 @@ export class ExchangeService {
       ? null
       : await this.resolveUserMonnifyVirtualAccount(userId);
 
-    const { rate, markup } = await this.rateService.getRate("NGN", "GHS");
+    const { rate, markup } = await this.rateService.getRate('NGN', 'GHS');
     const effectiveRate = new Decimal(rate).mul(
-      new Decimal(1).plus(new Decimal(markup).div(100)),
+      new Decimal(1).minus(new Decimal(markup).div(100)),
     );
     const expectedCreditAmount = amount
       .mul(effectiveRate)
@@ -546,22 +580,22 @@ export class ExchangeService {
         const transaction = await tx.transaction.create({
           data: {
             userId,
-            type: "EXCHANGE",
+            type: 'EXCHANGE',
             amount,
-            currency: "NGN",
-            status: "PENDING",
+            currency: 'NGN',
+            status: 'PENDING',
             reference,
             fee: new Decimal(0),
             metadata: {
               flow: MONNIFY_EXCHANGE_FLOW,
               provider: MONNIFY_EXCHANGE_PROVIDER,
-              sourceCurrency: "NGN",
-              targetCurrency: "GHS",
+              sourceCurrency: 'NGN',
+              targetCurrency: 'GHS',
               expectedCreditAmount: expectedCreditAmount.toFixed(2),
               rate: effectiveRate.toFixed(6),
               markupPercent: new Decimal(markup).toFixed(2),
               exchangeRequestReference: reference,
-              providerVerificationStatus: "PENDING",
+              providerVerificationStatus: 'PENDING',
               collectionAccount: collectionAccount || fallbackCollectionAccount,
             },
           },
@@ -571,8 +605,8 @@ export class ExchangeService {
           data: {
             userId,
             transactionId: transaction.id,
-            sourceCurrency: "NGN",
-            targetCurrency: "GHS",
+            sourceCurrency: 'NGN',
+            targetCurrency: 'GHS',
             amount,
             expectedCreditAmount,
             rate: effectiveRate,
@@ -584,7 +618,7 @@ export class ExchangeService {
               flow: MONNIFY_EXCHANGE_FLOW,
               provider: MONNIFY_EXCHANGE_PROVIDER,
               exchangeRequestReference: reference,
-              providerVerificationStatus: "PENDING",
+              providerVerificationStatus: 'PENDING',
               collectionAccount: collectionAccount || fallbackCollectionAccount,
               submittedAt: new Date().toISOString(),
             },
@@ -611,7 +645,7 @@ export class ExchangeService {
         receiptId: result.id,
         transactionReference: reference,
       },
-      "Monnify exchange deposit intent created",
+      'Monnify exchange deposit intent created',
     );
 
     return this.mapExchangeReceipt(result);
@@ -623,10 +657,10 @@ export class ExchangeService {
     paymentReference?: string;
     accountNumber?: string;
     amount: Decimal;
-    currency: "NGN" | "GHS";
+    currency: 'NGN' | 'GHS';
     rawPayload: Record<string, unknown>;
   }) {
-    if (event.currency !== "NGN") {
+    if (event.currency !== 'NGN') {
       return { matched: false, processed: false };
     }
 
@@ -648,7 +682,7 @@ export class ExchangeService {
       rawPayload: event.rawPayload,
     });
 
-    if (providerEvent.status === "PROCESSED") {
+    if (providerEvent.status === 'PROCESSED') {
       return { matched: true, processed: false, duplicate: true };
     }
 
@@ -671,18 +705,18 @@ export class ExchangeService {
           const candidates = await tx.exchangeReceipt.findMany({
             where: {
               amount: event.amount,
-              sourceCurrency: "NGN",
-              targetCurrency: "GHS",
-              status: { in: ["SUBMITTED", "UNDER_REVIEW"] },
+              sourceCurrency: 'NGN',
+              targetCurrency: 'GHS',
+              status: { in: ['SUBMITTED', 'UNDER_REVIEW'] },
               metadata: {
-                path: ["flow"],
+                path: ['flow'],
                 equals: MONNIFY_EXCHANGE_FLOW,
               },
             },
             include: {
               transaction: true,
             },
-            orderBy: { createdAt: "asc" },
+            orderBy: { createdAt: 'asc' },
             take: 25,
           });
 
@@ -698,7 +732,8 @@ export class ExchangeService {
             return (
               candidateReference === providerReferenceNormalized ||
               candidateReference === paymentReferenceNormalized ||
-              searchablePayload.includes(candidateReference)
+              (candidateReference.length >= MIN_FUZZY_REFERENCE_MATCH_LENGTH &&
+                searchablePayload.includes(candidateReference))
             );
           });
 
@@ -706,18 +741,18 @@ export class ExchangeService {
             await tx.providerEvent.update({
               where: { id: providerEvent.id },
               data: {
-                status: "IGNORED",
+                status: 'IGNORED',
                 errorMessage:
-                  "No pending Monnify exchange deposit intent matched",
+                  'No pending Monnify exchange deposit intent matched',
                 processedAt: new Date(),
               },
             });
             return { matched: false, processed: false };
           }
 
-          if (receipt.transaction.status !== "PENDING") {
+          if (receipt.transaction.status !== 'PENDING') {
             throw new BadRequestException(
-              "Matched exchange transaction is not pending",
+              'Matched exchange transaction is not pending',
             );
           }
 
@@ -727,18 +762,18 @@ export class ExchangeService {
             transactionStatus: receipt.transaction.status,
             providerVerificationStatus: this.toSafeString(
               existingMetadata.providerVerificationStatus,
-              "PENDING",
+              'PENDING',
             ),
           };
 
           await tx.exchangeReceipt.update({
             where: { id: receipt.id },
             data: {
-              status: "APPROVED",
+              status: 'APPROVED',
               receiptUrl: `monnify://transaction/${event.providerReference}`,
               metadata: this.toJsonInput({
                 ...existingMetadata,
-                providerVerificationStatus: "VERIFIED",
+                providerVerificationStatus: 'VERIFIED',
                 provider: MONNIFY_EXCHANGE_PROVIDER,
                 providerReference: event.providerReference,
                 paymentReference: event.paymentReference,
@@ -756,7 +791,7 @@ export class ExchangeService {
             data: {
               metadata: this.toJsonInput({
                 ...this.asRecord(receipt.transaction.metadata),
-                providerVerificationStatus: "VERIFIED",
+                providerVerificationStatus: 'VERIFIED',
                 provider: MONNIFY_EXCHANGE_PROVIDER,
                 providerReference: event.providerReference,
                 paymentReference: event.paymentReference,
@@ -767,20 +802,20 @@ export class ExchangeService {
 
           await tx.providerEvent.update({
             where: { id: providerEvent.id },
-            data: { status: "PROCESSED", processedAt: new Date() },
+            data: { status: 'PROCESSED', processedAt: new Date() },
           });
 
           await tx.auditLog.create({
             data: {
-              action: "MONNIFY_EXCHANGE_DEPOSIT_VERIFIED",
-              targetType: "ExchangeReceipt",
+              action: 'MONNIFY_EXCHANGE_DEPOSIT_VERIFIED',
+              targetType: 'ExchangeReceipt',
               targetId: receipt.id,
               reference: receipt.transaction.reference,
               before,
               after: {
-                status: "APPROVED",
-                transactionStatus: "PENDING",
-                providerVerificationStatus: "VERIFIED",
+                status: 'APPROVED',
+                transactionStatus: 'PENDING',
+                providerVerificationStatus: 'VERIFIED',
                 providerReference: event.providerReference,
               },
               metadata: {
@@ -805,7 +840,7 @@ export class ExchangeService {
             providerReference: event.providerReference,
             receiptId: result.receiptId,
           },
-          "Monnify exchange deposit verified",
+          'Monnify exchange deposit verified',
         );
       }
 
@@ -814,9 +849,9 @@ export class ExchangeService {
       await this.prisma.providerEvent.update({
         where: { id: providerEvent.id },
         data: {
-          status: "FAILED",
+          status: 'FAILED',
           errorMessage:
-            error instanceof Error ? error.message : "Unknown processing error",
+            error instanceof Error ? error.message : 'Unknown processing error',
           processedAt: new Date(),
         },
       });
@@ -830,17 +865,17 @@ export class ExchangeService {
     dto: CreateExchangeReceiptUploadDto,
   ) {
     if (!this.supabaseService) {
-      throw new BadRequestException("Receipt upload storage is not configured");
+      throw new BadRequestException('Receipt upload storage is not configured');
     }
 
     const extension = RECEIPT_CONTENT_TYPE_EXTENSIONS[dto.contentType];
 
     if (!extension) {
-      throw new BadRequestException("Unsupported receipt file type");
+      throw new BadRequestException('Unsupported receipt file type');
     }
 
     if (dto.fileSize > MAX_RECEIPT_FILE_SIZE) {
-      throw new BadRequestException("Receipt file must be 8MB or smaller");
+      throw new BadRequestException('Receipt file must be 8MB or smaller');
     }
 
     const user = await this.prisma.user.findUnique({
@@ -853,14 +888,14 @@ export class ExchangeService {
     });
 
     if (!user) {
-      throw new NotFoundException("User not found");
+      throw new NotFoundException('User not found');
     }
 
     if (user.isSuspended) {
-      throw new BadRequestException("Account is suspended");
+      throw new BadRequestException('Account is suspended');
     }
 
-    this.assertExchangeKycEligible(user, "upload an exchange receipt");
+    this.assertExchangeKycEligible(user, 'upload an exchange receipt');
 
     const objectKey = `exchange-receipts/${userId}/${Date.now()}-${uuidv4()}${extension}`;
     const bucket = this.getExchangeReceiptBucket();
@@ -871,7 +906,7 @@ export class ExchangeService {
 
     this.logger.info(
       { userId, objectKey },
-      "Exchange receipt upload URL created",
+      'Exchange receipt upload URL created',
     );
 
     return {
@@ -887,7 +922,7 @@ export class ExchangeService {
     const receipts = await this.prisma.exchangeReceipt.findMany({
       where: { userId },
       take: 50,
-      orderBy: { createdAt: "desc" },
+      orderBy: { createdAt: 'desc' },
       include: {
         transaction: {
           select: {
@@ -911,7 +946,7 @@ export class ExchangeService {
     const receipts = await this.prisma.exchangeReceipt.findMany({
       where: status ? { status } : undefined,
       take: limit,
-      orderBy: { createdAt: "asc" },
+      orderBy: { createdAt: 'asc' },
       include: {
         user: {
           select: {
@@ -965,20 +1000,20 @@ export class ExchangeService {
     });
 
     if (!receipt) {
-      throw new NotFoundException("Exchange receipt not found");
+      throw new NotFoundException('Exchange receipt not found');
     }
 
     if (MANUAL_RECEIPT_TERMINAL_STATUSES.includes(receipt.status)) {
-      throw new BadRequestException("Receipt is already in a terminal state");
+      throw new BadRequestException('Receipt is already in a terminal state');
     }
 
     if (receipt.user.isSuspended) {
-      throw new BadRequestException("User account is suspended");
+      throw new BadRequestException('User account is suspended');
     }
 
-    this.assertExchangeKycEligible(receipt.user, "review an exchange receipt");
+    this.assertExchangeKycEligible(receipt.user, 'review an exchange receipt');
 
-    if (dto.status === "APPROVED") {
+    if (dto.status === 'APPROVED') {
       return this.approveManualReceipt(receiptId, adminId, dto.reason, now);
     }
 
@@ -1015,26 +1050,26 @@ export class ExchangeService {
         });
 
         if (!receipt) {
-          throw new NotFoundException("Exchange receipt not found");
+          throw new NotFoundException('Exchange receipt not found');
         }
 
         if (MANUAL_RECEIPT_TERMINAL_STATUSES.includes(receipt.status)) {
           throw new BadRequestException(
-            "Receipt is already in a terminal state",
+            'Receipt is already in a terminal state',
           );
         }
 
-        if (receipt.transaction.status !== "PENDING") {
+        if (receipt.transaction.status !== 'PENDING') {
           throw new BadRequestException(
-            "Receipt transaction is not pending review",
+            'Receipt transaction is not pending review',
           );
         }
 
         if (receipt.user.isSuspended) {
-          throw new BadRequestException("User account is suspended");
+          throw new BadRequestException('User account is suspended');
         }
 
-        this.assertExchangeKycEligible(receipt.user, "credit an exchange");
+        this.assertExchangeKycEligible(receipt.user, 'credit an exchange');
         this.assertProviderVerificationAllowsCredit(receipt);
 
         const before = {
@@ -1042,7 +1077,7 @@ export class ExchangeService {
           transactionStatus: receipt.transaction.status,
           providerVerificationStatus: this.toSafeString(
             this.asRecord(receipt.metadata).providerVerificationStatus,
-            "NOT_REQUIRED",
+            'NOT_REQUIRED',
           ),
         };
 
@@ -1052,7 +1087,7 @@ export class ExchangeService {
             status: { notIn: MANUAL_RECEIPT_TERMINAL_STATUSES },
           },
           data: {
-            status: "CREDITED",
+            status: 'CREDITED',
             adminId,
             reviewReason: reason,
             reviewedAt,
@@ -1061,18 +1096,18 @@ export class ExchangeService {
         });
 
         if (updatedReceipt.count !== 1) {
-          throw new BadRequestException("Receipt was already reviewed");
+          throw new BadRequestException('Receipt was already reviewed');
         }
 
         await tx.transaction.update({
           where: { id: receipt.transactionId },
-          data: { status: "SUCCESS" },
+          data: { status: 'SUCCESS' },
         });
 
         await this.ledger.creditWallet(
           {
             userId: receipt.userId,
-            currency: "GHS",
+            currency: 'GHS',
             amount: new Decimal(receipt.expectedCreditAmount),
             transactionId: receipt.transactionId,
             reference: receipt.transaction.reference,
@@ -1082,7 +1117,7 @@ export class ExchangeService {
               adminId,
               reason,
               bankReference: receipt.bankReference,
-              sourceCurrency: "NGN",
+              sourceCurrency: 'NGN',
               sourceAmount: new Decimal(receipt.amount).toFixed(2),
               rate: new Decimal(receipt.rate).toFixed(6),
             },
@@ -1093,19 +1128,19 @@ export class ExchangeService {
         await tx.auditLog.create({
           data: {
             adminId,
-            action: "MANUAL_EXCHANGE_RECEIPT_CREDIT",
-            targetType: "ExchangeReceipt",
+            action: 'MANUAL_EXCHANGE_RECEIPT_CREDIT',
+            targetType: 'ExchangeReceipt',
             targetId: receipt.id,
             reference: receipt.transaction.reference,
             reason,
             before,
             after: {
-              status: "CREDITED",
-              transactionStatus: "SUCCESS",
+              status: 'CREDITED',
+              transactionStatus: 'SUCCESS',
               creditedAmount: new Decimal(receipt.expectedCreditAmount).toFixed(
                 2,
               ),
-              creditedCurrency: "GHS",
+              creditedCurrency: 'GHS',
             },
             metadata: {
               bankReference: receipt.bankReference,
@@ -1147,7 +1182,7 @@ export class ExchangeService {
 
     this.logger.info(
       { adminId, receiptId },
-      "Manual exchange receipt credited",
+      'Manual exchange receipt credited',
     );
 
     return this.mapExchangeReceipt(result);
@@ -1156,7 +1191,7 @@ export class ExchangeService {
   private async closeManualReceiptWithoutCredit(
     receiptId: string,
     adminId: string,
-    status: "REJECTED" | "NEEDS_MORE_INFO",
+    status: 'REJECTED' | 'NEEDS_MORE_INFO',
     reason: string,
     reviewedAt: Date,
   ) {
@@ -1168,12 +1203,12 @@ export class ExchangeService {
         });
 
         if (!receipt) {
-          throw new NotFoundException("Exchange receipt not found");
+          throw new NotFoundException('Exchange receipt not found');
         }
 
         if (MANUAL_RECEIPT_TERMINAL_STATUSES.includes(receipt.status)) {
           throw new BadRequestException(
-            "Receipt is already in a terminal state",
+            'Receipt is already in a terminal state',
           );
         }
 
@@ -1181,7 +1216,7 @@ export class ExchangeService {
           status: receipt.status,
           transactionStatus: receipt.transaction.status,
         };
-        const transactionStatus = status === "REJECTED" ? "FAILED" : "PENDING";
+        const transactionStatus = status === 'REJECTED' ? 'FAILED' : 'PENDING';
 
         const updatedReceipt = await tx.exchangeReceipt.updateMany({
           where: {
@@ -1197,7 +1232,7 @@ export class ExchangeService {
         });
 
         if (updatedReceipt.count !== 1) {
-          throw new BadRequestException("Receipt was already reviewed");
+          throw new BadRequestException('Receipt was already reviewed');
         }
 
         await tx.transaction.update({
@@ -1209,7 +1244,7 @@ export class ExchangeService {
           data: {
             adminId,
             action: `MANUAL_EXCHANGE_RECEIPT_${status}`,
-            targetType: "ExchangeReceipt",
+            targetType: 'ExchangeReceipt',
             targetId: receipt.id,
             reference: receipt.transaction.reference,
             reason,
@@ -1258,7 +1293,7 @@ export class ExchangeService {
 
     this.logger.info(
       { adminId, receiptId, status },
-      "Manual exchange receipt reviewed without credit",
+      'Manual exchange receipt reviewed without credit',
     );
 
     return this.mapExchangeReceipt(result);
@@ -1275,36 +1310,36 @@ export class ExchangeService {
         kycTier: true,
         isSuspended: true,
         wallets: {
-          where: { currency: "NGN" },
+          where: { currency: 'NGN' },
           select: { id: true },
         },
       },
     });
 
     if (!user) {
-      throw new NotFoundException("User not found");
+      throw new NotFoundException('User not found');
     }
 
     if (user.isSuspended) {
-      throw new BadRequestException("Account is suspended");
+      throw new BadRequestException('Account is suspended');
     }
 
-    this.assertExchangeKycEligible(user, "request a payout");
+    this.assertExchangeKycEligible(user, 'request a payout');
 
     if (user.wallets.length === 0) {
-      throw new NotFoundException("NGN wallet not found");
+      throw new NotFoundException('NGN wallet not found');
     }
 
-    const { rate, markup } = await this.rateService.getRate("NGN", "GHS");
+    const { rate, markup } = await this.rateService.getRate('NGN', 'GHS');
     const effectiveRate = new Decimal(rate).mul(
-      new Decimal(1).plus(new Decimal(markup).div(100)),
+      new Decimal(1).minus(new Decimal(markup).div(100)),
     );
 
     const sourceAmount = new Decimal(dto.sourceAmount);
     this.assertPositiveMoney(sourceAmount);
 
     if (sourceAmount.greaterThan(10_000_000)) {
-      throw new BadRequestException("Amount must be at most 10000000");
+      throw new BadRequestException('Amount must be at most 10000000');
     }
 
     const fee = this.calculateFee(sourceAmount, markup);
@@ -1320,16 +1355,16 @@ export class ExchangeService {
         const transaction = await tx.transaction.create({
           data: {
             userId,
-            type: "EXCHANGE",
+            type: 'EXCHANGE',
             amount: sourceAmount,
-            currency: "NGN",
-            status: "PENDING",
+            currency: 'NGN',
+            status: 'PENDING',
             reference,
             fee,
             metadata: {
-              flow: "EXCHANGE_PAYOUT",
-              sourceCurrency: "NGN",
-              destinationCurrency: "GHS",
+              flow: 'EXCHANGE_PAYOUT',
+              sourceCurrency: 'NGN',
+              destinationCurrency: 'GHS',
               destinationAmount: destinationAmount.toFixed(2),
               rate: effectiveRate.toFixed(6),
               markupPercent: new Decimal(markup).toFixed(2),
@@ -1343,13 +1378,13 @@ export class ExchangeService {
         await this.ledger.debitWallet(
           {
             userId,
-            currency: "NGN",
+            currency: 'NGN',
             amount: sendAmount,
             transactionId: transaction.id,
             reference,
-            source: "EXCHANGE_PAYOUT_DEBIT",
+            source: 'EXCHANGE_PAYOUT_DEBIT',
             metadata: {
-              destinationCurrency: "GHS",
+              destinationCurrency: 'GHS',
               destinationAmount: destinationAmount.toString(),
               rate: effectiveRate.toString(),
               fee: fee.toString(),
@@ -1362,8 +1397,8 @@ export class ExchangeService {
           data: {
             userId,
             transactionId: transaction.id,
-            sourceCurrency: "NGN",
-            destinationCurrency: "GHS",
+            sourceCurrency: 'NGN',
+            destinationCurrency: 'GHS',
             sourceAmount,
             destinationAmount,
             rate: effectiveRate,
@@ -1400,7 +1435,7 @@ export class ExchangeService {
         sourceAmount: sourceAmount.toFixed(2),
         destinationAmount: destinationAmount.toFixed(2),
       },
-      "Exchange payout request created",
+      'Exchange payout request created',
     );
 
     return this.mapExchangePayout(result);
@@ -1410,7 +1445,7 @@ export class ExchangeService {
     const payouts = await this.prisma.exchangePayout.findMany({
       where: { userId },
       take: 50,
-      orderBy: { createdAt: "desc" },
+      orderBy: { createdAt: 'desc' },
       include: {
         transaction: {
           select: {
@@ -1434,7 +1469,7 @@ export class ExchangeService {
       const payouts = await this.prisma.exchangePayout.findMany({
         where,
         take: limit,
-        orderBy: { createdAt: "asc" },
+        orderBy: { createdAt: 'asc' },
         include: {
           user: {
             select: {
@@ -1471,9 +1506,9 @@ export class ExchangeService {
                   message: error.message,
                   stack: error.stack,
                 }
-              : error,
+              : String(error),
         },
-        "Failed to load admin exchange payouts",
+        'Failed to load admin exchange payouts',
       );
       throw error;
     }
@@ -1481,30 +1516,24 @@ export class ExchangeService {
 
   async getAdminPayoutStats() {
     try {
-      const counts = await Promise.all([
-        this.prisma.exchangePayout.count({
-          where: { status: "PENDING_APPROVAL" },
-        }),
-        this.prisma.exchangePayout.count({
-          where: { status: "APPROVED" },
-        }),
-        this.prisma.exchangePayout.count({
-          where: { status: "PROCESSING" },
-        }),
-        this.prisma.exchangePayout.count({
-          where: { status: "SENT" },
-        }),
-        this.prisma.exchangePayout.count({
-          where: { status: "FAILED" },
-        }),
-      ]);
+      // One grouped aggregate instead of five separate COUNT round-trips.
+      const grouped = await this.prisma.exchangePayout.groupBy({
+        by: ['status'],
+        _count: { _all: true },
+      });
+
+      const countByStatus = new Map(
+        grouped.map((row) => [row.status, row._count._all]),
+      );
+      const countFor = (status: ExchangePayoutStatus) =>
+        countByStatus.get(status) ?? 0;
 
       return {
-        pendingApproval: counts[0],
-        approved: counts[1],
-        processing: counts[2],
-        sent: counts[3],
-        failed: counts[4],
+        pendingApproval: countFor('PENDING_APPROVAL'),
+        approved: countFor('APPROVED'),
+        processing: countFor('PROCESSING'),
+        sent: countFor('SENT'),
+        failed: countFor('FAILED'),
       };
     } catch (error) {
       this.logger.error(
@@ -1516,9 +1545,9 @@ export class ExchangeService {
                   message: error.message,
                   stack: error.stack,
                 }
-              : error,
+              : String(error),
         },
-        "Failed to load admin payout stats",
+        'Failed to load admin payout stats',
       );
       throw error;
     }
@@ -1545,23 +1574,23 @@ export class ExchangeService {
     });
 
     if (!payout) {
-      throw new NotFoundException("Payout request not found");
+      throw new NotFoundException('Payout request not found');
     }
 
     const terminalStatuses: ExchangePayoutStatus[] = [
-      "SENT",
-      "FAILED",
-      "REVERSED",
+      'SENT',
+      'FAILED',
+      'REVERSED',
     ];
     if (terminalStatuses.includes(payout.status)) {
-      throw new BadRequestException("Payout is already in a terminal state");
+      throw new BadRequestException('Payout is already in a terminal state');
     }
 
     if (payout.user.isSuspended) {
-      throw new BadRequestException("User account is suspended");
+      throw new BadRequestException('User account is suspended');
     }
 
-    if (dto.status === "APPROVED") {
+    if (dto.status === 'APPROVED') {
       return this.processPayoutApproval(
         payoutId,
         adminId,
@@ -1613,12 +1642,24 @@ export class ExchangeService {
         });
 
         if (!payout) {
-          throw new NotFoundException("Payout request not found");
+          throw new NotFoundException('Payout request not found');
         }
 
-        if (payout.status !== "APPROVED") {
+        if (payout.status !== 'APPROVED') {
           throw new BadRequestException(
-            "Payout must be approved before marking as sent",
+            'Payout must be approved before marking as sent',
+          );
+        }
+
+        if (!payout.adminId) {
+          throw new BadRequestException(
+            'Payout approval actor is missing; resubmit the approval before settlement',
+          );
+        }
+
+        if (payout.adminId === adminId) {
+          throw new BadRequestException(
+            'Payout settlement requires a different admin from the approver',
           );
         }
 
@@ -1627,43 +1668,49 @@ export class ExchangeService {
           notificationSent: payout.notificationSent,
         };
 
-        await tx.exchangePayout.update({
-          where: { id: payout.id },
+        const sentPayout = await tx.exchangePayout.updateMany({
+          where: { id: payout.id, status: 'APPROVED' },
           data: {
-            status: "SENT",
-            adminId,
+            status: 'SENT',
             adminPaymentReceipt: dto.paymentReceiptUrl,
             notificationSent: true,
             sentAt: now,
           },
         });
 
+        if (sentPayout.count !== 1) {
+          throw new BadRequestException(
+            'Payout was already marked as sent or is no longer approved',
+          );
+        }
+
         await tx.transaction.update({
           where: { id: payout.transactionId },
-          data: { status: "SUCCESS" },
+          data: { status: 'SUCCESS' },
         });
 
         await tx.auditLog.create({
           data: {
             adminId,
-            action: "EXCHANGE_PAYOUT_MARKED_SENT",
-            targetType: "ExchangePayout",
+            action: 'EXCHANGE_PAYOUT_MARKED_SENT',
+            targetType: 'ExchangePayout',
             targetId: payout.id,
             reference: payout.transaction.reference,
             reason: dto.reason,
             before,
             after: {
-              status: "SENT",
+              status: 'SENT',
               notificationSent: true,
               paymentReceiptUrl: dto.paymentReceiptUrl,
               sentAt: now,
             },
             metadata: {
+              approvalAdminId: payout.adminId,
               destinationBankName: payout.destinationBankName,
               destinationAccountNumber: payout.destinationAccountNumber,
-              destinationAmount: new Decimal(
-                payout.destinationAmount,
-              ).toFixed(2),
+              destinationAmount: new Decimal(payout.destinationAmount).toFixed(
+                2,
+              ),
             },
           },
         });
@@ -1701,7 +1748,7 @@ export class ExchangeService {
 
     this.logger.info(
       { adminId, payoutId, paymentReceiptUrl: dto.paymentReceiptUrl },
-      "Exchange payout marked as sent",
+      'Exchange payout marked as sent',
     );
 
     return this.mapExchangePayout(result);
@@ -1729,13 +1776,11 @@ export class ExchangeService {
         });
 
         if (!payout) {
-          throw new NotFoundException("Payout request not found");
+          throw new NotFoundException('Payout request not found');
         }
 
-        if (payout.status !== "PENDING_APPROVAL") {
-          throw new BadRequestException(
-            "Only pending payouts can be approved",
-          );
+        if (payout.status !== 'PENDING_APPROVAL') {
+          throw new BadRequestException('Only pending payouts can be approved');
         }
 
         const before = {
@@ -1743,10 +1788,10 @@ export class ExchangeService {
           transactionStatus: payout.transaction.status,
         };
 
-        await tx.exchangePayout.update({
-          where: { id: payout.id },
+        const approvedPayout = await tx.exchangePayout.updateMany({
+          where: { id: payout.id, status: 'PENDING_APPROVAL' },
           data: {
-            status: "APPROVED",
+            status: 'APPROVED',
             adminId,
             adminNote: reason,
             notificationSent: true,
@@ -1754,31 +1799,35 @@ export class ExchangeService {
           },
         });
 
+        if (approvedPayout.count !== 1) {
+          throw new BadRequestException('Only pending payouts can be approved');
+        }
+
         await tx.transaction.update({
           where: { id: payout.transactionId },
-          data: { status: "SUCCESS" },
+          data: { status: 'SUCCESS' },
         });
 
         await tx.auditLog.create({
           data: {
             adminId,
-            action: "EXCHANGE_PAYOUT_APPROVED",
-            targetType: "ExchangePayout",
+            action: 'EXCHANGE_PAYOUT_APPROVED',
+            targetType: 'ExchangePayout',
             targetId: payout.id,
             reference: payout.transaction.reference,
             reason,
             before,
             after: {
-              status: "APPROVED",
-              transactionStatus: "SUCCESS",
+              status: 'APPROVED',
+              transactionStatus: 'SUCCESS',
               notificationSent: true,
             },
             metadata: {
               destinationBankName: payout.destinationBankName,
               destinationAccountNumber: payout.destinationAccountNumber,
-              destinationAmount: new Decimal(
-                payout.destinationAmount,
-              ).toFixed(2),
+              destinationAmount: new Decimal(payout.destinationAmount).toFixed(
+                2,
+              ),
             },
           },
         });
@@ -1814,10 +1863,7 @@ export class ExchangeService {
       },
     );
 
-    this.logger.info(
-      { adminId, payoutId },
-      "Exchange payout approved",
-    );
+    this.logger.info({ adminId, payoutId }, 'Exchange payout approved');
 
     return this.mapExchangePayout(result);
   }
@@ -1844,13 +1890,11 @@ export class ExchangeService {
         });
 
         if (!payout) {
-          throw new NotFoundException("Payout request not found");
+          throw new NotFoundException('Payout request not found');
         }
 
-        if (payout.status !== "PENDING_APPROVAL") {
-          throw new BadRequestException(
-            "Only pending payouts can be rejected",
-          );
+        if (payout.status !== 'PENDING_APPROVAL') {
+          throw new BadRequestException('Only pending payouts can be rejected');
         }
 
         const before = {
@@ -1858,37 +1902,41 @@ export class ExchangeService {
           transactionStatus: payout.transaction.status,
         };
 
-        await tx.exchangePayout.update({
-          where: { id: payout.id },
+        const rejectedPayout = await tx.exchangePayout.updateMany({
+          where: { id: payout.id, status: 'PENDING_APPROVAL' },
           data: {
-            status: "FAILED",
+            status: 'FAILED',
             adminId,
             adminNote: reason,
             reviewedAt,
           },
         });
 
+        if (rejectedPayout.count !== 1) {
+          throw new BadRequestException('Only pending payouts can be rejected');
+        }
+
         await tx.transaction.update({
           where: { id: payout.transactionId },
-          data: { status: "FAILED" },
+          data: { status: 'FAILED' },
         });
 
         // Reverse the NGN debit — credit back to user
         await this.ledger.creditWallet(
           {
             userId: payout.userId,
-            currency: "NGN",
+            currency: 'NGN',
             amount: new Decimal(payout.sourceAmount).plus(
               new Decimal(payout.fee),
             ),
             transactionId: payout.transactionId,
             reference: payout.transaction.reference,
-            source: "EXCHANGE_PAYOUT_REVERSAL",
+            source: 'EXCHANGE_PAYOUT_REVERSAL',
             metadata: {
               payoutId: payout.id,
               adminId,
               reason,
-              originalSource: "EXCHANGE_PAYOUT_DEBIT",
+              originalSource: 'EXCHANGE_PAYOUT_DEBIT',
             },
           },
           tx,
@@ -1897,22 +1945,22 @@ export class ExchangeService {
         await tx.auditLog.create({
           data: {
             adminId,
-            action: "EXCHANGE_PAYOUT_REJECTED",
-            targetType: "ExchangePayout",
+            action: 'EXCHANGE_PAYOUT_REJECTED',
+            targetType: 'ExchangePayout',
             targetId: payout.id,
             reference: payout.transaction.reference,
             reason,
             before,
             after: {
-              status: "FAILED",
-              transactionStatus: "FAILED",
+              status: 'FAILED',
+              transactionStatus: 'FAILED',
               reversed: true,
             },
             metadata: {
               destinationBankName: payout.destinationBankName,
-              reversedAmount: new Decimal(payout.sourceAmount).plus(
-                new Decimal(payout.fee),
-              ).toFixed(2),
+              reversedAmount: new Decimal(payout.sourceAmount)
+                .plus(new Decimal(payout.fee))
+                .toFixed(2),
             },
           },
         });
@@ -1950,7 +1998,7 @@ export class ExchangeService {
 
     this.logger.info(
       { adminId, payoutId },
-      "Exchange payout rejected and reversed",
+      'Exchange payout rejected and reversed',
     );
 
     return this.mapExchangePayout(result);
@@ -2064,8 +2112,8 @@ export class ExchangeService {
       senderBankName: receipt.senderBankName,
       receiptUrl: receipt.receiptUrl,
       receiptProofType: this.isManagedReceiptObjectKey(receipt.receiptUrl)
-        ? "MANAGED_STORAGE_OBJECT"
-        : "EXTERNAL_URL",
+        ? 'MANAGED_STORAGE_OBJECT'
+        : 'EXTERNAL_URL',
       status: receipt.status,
       adminId: receipt.adminId,
       reviewReason: receipt.reviewReason,
@@ -2092,7 +2140,7 @@ export class ExchangeService {
 
   private assertPositiveMoney(amount: Decimal) {
     if (!amount.isFinite() || amount.lessThanOrEqualTo(0)) {
-      throw new BadRequestException("Amount must be positive");
+      throw new BadRequestException('Amount must be positive');
     }
   }
 
@@ -2100,26 +2148,26 @@ export class ExchangeService {
     user: { kycStatus: string; kycTier?: KYCTier | null },
     action: string,
   ) {
-    if (user.kycStatus !== "VERIFIED") {
+    if (user.kycStatus !== 'VERIFIED') {
       throw new BadRequestException(`Verified KYC is required to ${action}`);
     }
 
-    if (!isKycTierAtLeast(user.kycTier, "TIER_2")) {
+    if (!isKycTierAtLeast(user.kycTier, 'TIER_2')) {
       throw new BadRequestException(
-        `KYC ${formatKycTier("TIER_2")} is required to ${action}`,
+        `KYC ${formatKycTier('TIER_2')} is required to ${action}`,
       );
     }
   }
 
   private sanitizeReceiptMetadata(metadata: unknown) {
-    if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
+    if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
       return metadata;
     }
 
     const sanitized: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(metadata)) {
       if (/secret|token|password|authorization|key/i.test(key)) {
-        sanitized[key] = "[REDACTED]";
+        sanitized[key] = '[REDACTED]';
         continue;
       }
 
@@ -2149,7 +2197,7 @@ export class ExchangeService {
     });
 
     if (!receipt) {
-      throw new NotFoundException("Exchange receipt not found");
+      throw new NotFoundException('Exchange receipt not found');
     }
 
     if (!this.isManagedReceiptObjectKey(receipt.receiptUrl)) {
@@ -2161,7 +2209,7 @@ export class ExchangeService {
     }
 
     if (!this.supabaseService) {
-      throw new BadRequestException("Receipt proof storage is not configured");
+      throw new BadRequestException('Receipt proof storage is not configured');
     }
 
     const expiresInSeconds = this.getReceiptProofUrlTtlSeconds();
@@ -2175,8 +2223,8 @@ export class ExchangeService {
       await this.prisma.auditLog.create({
         data: {
           adminId: requesterId,
-          action: "MANUAL_EXCHANGE_RECEIPT_PROOF_VIEW",
-          targetType: "ExchangeReceipt",
+          action: 'MANUAL_EXCHANGE_RECEIPT_PROOF_VIEW',
+          targetType: 'ExchangeReceipt',
           targetId: receipt.id,
           reference: receipt.transaction.reference,
           metadata: {
@@ -2200,12 +2248,12 @@ export class ExchangeService {
 
     const accounts = await this.bankingService.getVirtualAccounts(userId);
     const account = accounts.find(
-      (item) => item.provider === "MONNIFY" && item.currency === "NGN",
+      (item) => item.provider === 'MONNIFY' && item.currency === 'NGN',
     );
 
     if (!account) {
       throw new NotFoundException(
-        "Monnify NGN virtual account not found for this user",
+        'Monnify NGN virtual account not found for this user',
       );
     }
 
@@ -2213,7 +2261,7 @@ export class ExchangeService {
   }
 
   private async findOrCreateProviderEvent(input: {
-    provider: "MONNIFY";
+    provider: 'MONNIFY';
     eventType: string;
     providerReference: string;
     rawPayload: Record<string, unknown>;
@@ -2238,7 +2286,7 @@ export class ExchangeService {
           provider: input.provider,
           eventType: input.eventType,
           providerReference: input.providerReference,
-          status: "PROCESSING",
+          status: 'PROCESSING',
           payload: this.toJsonInput(redactProviderPayload(input.rawPayload)),
           payloadHash: this.hashPayload(input.rawPayload),
         },
@@ -2246,7 +2294,7 @@ export class ExchangeService {
     } catch (error) {
       if (
         error instanceof Prisma.PrismaClientKnownRequestError &&
-        error.code === "P2002"
+        error.code === 'P2002'
       ) {
         const existingAfterRace =
           await this.prisma.providerEvent.findUniqueOrThrow({
@@ -2273,15 +2321,15 @@ export class ExchangeService {
       return;
     }
 
-    if (metadata.providerVerificationStatus !== "VERIFIED") {
+    if (metadata.providerVerificationStatus !== 'VERIFIED') {
       throw new BadRequestException(
-        "Monnify verification is required before crediting this exchange",
+        'Monnify verification is required before crediting this exchange',
       );
     }
   }
 
   private asRecord(value: unknown): Record<string, unknown> {
-    if (!value || typeof value !== "object" || Array.isArray(value)) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
       return {};
     }
 
@@ -2291,16 +2339,16 @@ export class ExchangeService {
   private normalizeReferenceSearchText(values: Array<string | undefined>) {
     return values
       .filter((value): value is string => !!value)
-      .join(" ")
+      .join(' ')
       .toUpperCase();
   }
 
   private toSafeString(value: unknown, fallback: string) {
-    if (typeof value === "string") {
+    if (typeof value === 'string') {
       return value;
     }
 
-    if (typeof value === "number" || typeof value === "boolean") {
+    if (typeof value === 'number' || typeof value === 'boolean') {
       return String(value);
     }
 
@@ -2308,7 +2356,7 @@ export class ExchangeService {
   }
 
   private hashPayload(payload: Record<string, unknown>) {
-    return createHash("sha256").update(JSON.stringify(payload)).digest("hex");
+    return createHash('sha256').update(JSON.stringify(payload)).digest('hex');
   }
 
   private toJsonInput(value: unknown): Prisma.InputJsonValue {
@@ -2321,8 +2369,8 @@ export class ExchangeService {
 
   private getMonnifyExchangeCollectionAccount() {
     return this.configService.get<string>(
-      "MONNIFY_EXCHANGE_COLLECTION_ACCOUNT_NUMBER",
-      "",
+      'MONNIFY_EXCHANGE_COLLECTION_ACCOUNT_NUMBER',
+      '',
     );
   }
 
@@ -2330,7 +2378,13 @@ export class ExchangeService {
 
   async createPendingRateOverride(
     adminId: string,
-    dto: { from: string; to: string; rate: number; markup: number; reason: string },
+    dto: {
+      from: string;
+      to: string;
+      rate: number;
+      markup: number;
+      reason: string;
+    },
     deviationPercent: number,
   ) {
     const currentRate = await this.prisma.rate.findUnique({
@@ -2351,15 +2405,15 @@ export class ExchangeService {
         currentRate: currentRateValue,
         deviationPercent,
         reason: dto.reason,
-        status: "PENDING_APPROVAL",
+        status: 'PENDING_APPROVAL',
       },
     });
 
     await this.prisma.auditLog.create({
       data: {
         adminId,
-        action: "RATE_OVERRIDE_REQUESTED",
-        targetType: "RateOverride",
+        action: 'RATE_OVERRIDE_REQUESTED',
+        targetType: 'RateOverride',
         targetId: override.id,
         reason: dto.reason,
         before: {
@@ -2367,7 +2421,7 @@ export class ExchangeService {
           proposedRate: dto.rate,
           deviationPercent,
         },
-        after: { status: "PENDING_APPROVAL" },
+        after: { status: 'PENDING_APPROVAL' },
         metadata: {
           from: dto.from,
           to: dto.to,
@@ -2384,7 +2438,7 @@ export class ExchangeService {
         to: dto.to,
         deviationPercent,
       },
-      "Rate override pending dual approval",
+      'Rate override pending dual approval',
     );
 
     return override;
@@ -2392,9 +2446,9 @@ export class ExchangeService {
 
   async getPendingRateOverrides(limit = 20) {
     return this.prisma.rateOverride.findMany({
-      where: { status: "PENDING_APPROVAL" },
+      where: { status: 'PENDING_APPROVAL' },
       take: limit,
-      orderBy: { createdAt: "asc" },
+      orderBy: { createdAt: 'asc' },
       include: {
         requestedBy: {
           select: {
@@ -2409,62 +2463,73 @@ export class ExchangeService {
   async reviewRateOverride(
     overrideId: string,
     adminId: string,
-    dto: { status: "APPROVED" | "REJECTED"; reason: string },
+    dto: { status: 'APPROVED' | 'REJECTED'; reason: string },
   ) {
-    const override = await this.prisma.rateOverride.findUnique({
-      where: { id: overrideId },
-    });
-
-    if (!override) {
-      throw new NotFoundException("Rate override request not found");
-    }
-
-    if (override.status !== "PENDING_APPROVAL") {
-      throw new BadRequestException("Rate override is not pending approval");
-    }
-
-    if (override.requestedById === adminId) {
-      throw new BadRequestException(
-        "Cannot approve your own rate override request",
-      );
-    }
-
+    const approved = dto.status === 'APPROVED';
     const now = new Date();
-
-    if (dto.status === "APPROVED") {
-      await this.rateService.setManualRate(
-        override.fromCurrency,
-        override.toCurrency,
-        override.proposedRate.toNumber(),
-        override.proposedMarkup.toNumber(),
-        override.requestedById,
-        override.reason,
-      );
-
-      await this.prisma.rateOverride.update({
+    const cacheRefresh = await this.prisma.$transaction(async (tx) => {
+      const override = await tx.rateOverride.findUnique({
         where: { id: overrideId },
+      });
+
+      if (!override) {
+        throw new NotFoundException('Rate override request not found');
+      }
+
+      if (override.status !== 'PENDING_APPROVAL') {
+        throw new BadRequestException('Rate override is not pending approval');
+      }
+
+      if (override.requestedById === adminId) {
+        throw new BadRequestException(
+          'Cannot approve your own rate override request',
+        );
+      }
+
+      if (approved) {
+        await this.rateService.setManualRate(
+          override.fromCurrency,
+          override.toCurrency,
+          override.proposedRate.toNumber(),
+          override.proposedMarkup.toNumber(),
+          undefined,
+          undefined,
+          tx,
+          { refreshCache: false },
+        );
+      }
+
+      const updated = await tx.rateOverride.updateMany({
+        where: { id: overrideId, status: 'PENDING_APPROVAL' },
         data: {
-          status: "APPROVED",
+          status: approved ? 'APPROVED' : 'REJECTED',
           approvedById: adminId,
           reviewReason: dto.reason,
           reviewedAt: now,
         },
       });
 
-      await this.prisma.auditLog.create({
+      if (updated.count !== 1) {
+        throw new BadRequestException('Rate override was already reviewed');
+      }
+
+      await tx.auditLog.create({
         data: {
           adminId,
-          action: "RATE_OVERRIDE_APPROVED",
-          targetType: "RateOverride",
+          action: approved
+            ? 'RATE_OVERRIDE_APPROVED'
+            : 'RATE_OVERRIDE_REJECTED',
+          targetType: 'RateOverride',
           targetId: overrideId,
           reason: dto.reason,
           before: {
-            status: "PENDING_APPROVAL",
+            status: 'PENDING_APPROVAL',
             proposedRate: override.proposedRate.toNumber(),
+            proposedMarkup: override.proposedMarkup.toNumber(),
             deviationPercent: override.deviationPercent.toNumber(),
           },
           after: {
-            status: "APPROVED",
+            status: approved ? 'APPROVED' : 'REJECTED',
             approvedBy: adminId,
             reviewedAt: now,
           },
@@ -2476,50 +2541,31 @@ export class ExchangeService {
         },
       });
 
-      this.logger.info(
-        { adminId, overrideId, requestedBy: override.requestedById },
-        "Rate override approved",
-      );
-    } else {
-      await this.prisma.rateOverride.update({
-        where: { id: overrideId },
-        data: {
-          status: "REJECTED",
-          approvedById: adminId,
-          reviewReason: dto.reason,
-          reviewedAt: now,
-        },
-      });
+      if (approved) {
+        return {
+          from: override.fromCurrency,
+          to: override.toCurrency,
+          rate: override.proposedRate.toNumber(),
+          markup: override.proposedMarkup.toNumber(),
+        };
+      }
 
-      await this.prisma.auditLog.create({
-        data: {
-          adminId,
-          action: "RATE_OVERRIDE_REJECTED",
-          targetType: "RateOverride",
-          targetId: overrideId,
-          reason: dto.reason,
-          before: {
-            status: "PENDING_APPROVAL",
-            proposedRate: override.proposedRate.toNumber(),
-          },
-          after: {
-            status: "REJECTED",
-            approvedBy: adminId,
-            reviewedAt: now,
-          },
-          metadata: {
-            requestedBy: override.requestedById,
-            from: override.fromCurrency,
-            to: override.toCurrency,
-          },
-        },
-      });
+      return null;
+    });
 
-      this.logger.info(
-        { adminId, overrideId, requestedBy: override.requestedById },
-        "Rate override rejected",
+    if (cacheRefresh) {
+      await this.rateService.refreshRateCache(
+        cacheRefresh.from,
+        cacheRefresh.to,
+        cacheRefresh.rate,
+        cacheRefresh.markup,
       );
     }
+
+    this.logger.info(
+      { adminId, overrideId, status: dto.status },
+      `Rate override ${approved ? 'approved' : 'rejected'}`,
+    );
 
     return this.prisma.rateOverride.findUnique({
       where: { id: overrideId },
@@ -2536,14 +2582,14 @@ export class ExchangeService {
 
   private getExchangeReceiptBucket() {
     return (
-      this.configService.get<string>("EXCHANGE_RECEIPT_BUCKET") ||
+      this.configService.get<string>('EXCHANGE_RECEIPT_BUCKET') ||
       DEFAULT_EXCHANGE_RECEIPT_BUCKET
     );
   }
 
   private getReceiptProofUrlTtlSeconds() {
     return this.configService.get<number>(
-      "EXCHANGE_RECEIPT_PROOF_URL_TTL_SECONDS",
+      'EXCHANGE_RECEIPT_PROOF_URL_TTL_SECONDS',
       DEFAULT_RECEIPT_PROOF_URL_TTL_SECONDS,
     );
   }

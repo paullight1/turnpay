@@ -1,12 +1,12 @@
 "use client";
 
-import { useDeferredValue, useEffect, useMemo, useState } from "react";
+import { Suspense, useDeferredValue, useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/lib/auth-provider";
 import { getErrorMessage } from "@/lib/errors";
 import { createMoneyAttemptIdempotencyKey } from "@/lib/idempotency";
 import { maskEmail, maskPhone } from "@/lib/privacy";
 import { cn } from "@/lib/utils";
-import { adminExchangeApi, adminExchangePayoutApi, adminUserApi, adminVtuApi, apiClient } from "@/services/api";
+import { adminExchangeApi, adminExchangePayoutApi, adminExchangeRateApi, adminUserApi, adminVtuApi, apiClient } from "@/services/api";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Activity,
@@ -22,8 +22,9 @@ import {
   WalletCards,
 } from "lucide-react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import DashboardLayout from "@/components/layout/dashboard-layout";
+import { RateControlCard } from "@/components/admin/rate-control";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -1601,12 +1602,25 @@ function UserDrilldownCard({
   );
 }
 
-export default function AdminPage() {
+const ADMIN_TABS = ["ops", "finance", "users", "exchange", "currencies"];
+
+function AdminPageContent() {
   const { user, profile, isLoading: authLoading } = useAuth();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const queryClient = useQueryClient();
   const isAdmin = user?.role === "ADMIN" || profile?.role === "ADMIN";
-  const [adminTab, setAdminTab] = useState("ops");
+  const [adminTab, setAdminTab] = useState(() => {
+    const requested = searchParams.get("tab");
+    return requested && ADMIN_TABS.includes(requested) ? requested : "ops";
+  });
+
+  const changeAdminTab = (value: string) => {
+    setAdminTab(value);
+    const params = new URLSearchParams(searchParams.toString());
+    params.set("tab", value);
+    router.replace(`/admin?${params.toString()}`, { scroll: false });
+  };
   const [transactionType, setTransactionType] = useState("ALL");
   const [kycStatus, setKycStatus] = useState("ALL");
   const [userSearch, setUserSearch] = useState("");
@@ -1787,6 +1801,7 @@ export default function AdminPage() {
     },
     enabled: isAdmin,
     staleTime: 30000,
+    refetchInterval: 60000,
   });
 
   const pendingWithdrawalsQuery = useQuery({
@@ -1799,6 +1814,7 @@ export default function AdminPage() {
     },
     enabled: isAdmin,
     staleTime: 30000,
+    refetchInterval: 60000,
   });
 
   const reconciliationQuery = useQuery({
@@ -1903,6 +1919,21 @@ export default function AdminPage() {
     },
     enabled: isAdmin,
     staleTime: 30000,
+  });
+
+  const currencyRateQuery = useQuery({
+    queryKey: ["admin-currencies-rate", "NGN", "GHS"],
+    queryFn: async () => {
+      const res = await adminExchangeRateApi.getRate("NGN", "GHS");
+      return res.data as {
+        baseRate: number | string;
+        markupPercent: number | string;
+        effectiveRate: number | string;
+        isStale: boolean;
+      };
+    },
+    enabled: isAdmin,
+    staleTime: 60000,
   });
 
   const opsSummaryQuery = useQuery({
@@ -2473,7 +2504,7 @@ export default function AdminPage() {
           />
         </div>
 
-        <Tabs value={adminTab} onValueChange={setAdminTab} className="gap-4">
+        <Tabs value={adminTab} onValueChange={changeAdminTab} className="gap-4">
           <TabsList className="w-full justify-start overflow-x-auto md:w-fit">
             <TabsTrigger value="ops">
               <Activity className="size-4" />
@@ -2547,7 +2578,7 @@ export default function AdminPage() {
                   <Button
                     variant="outline"
                     className="h-auto items-start justify-between gap-3 px-4 py-3 text-left"
-                    onClick={() => setAdminTab("users")}
+                    onClick={() => changeAdminTab("users")}
                   >
                     <span>
                       <span className="block text-sm font-medium">Users</span>
@@ -2559,7 +2590,7 @@ export default function AdminPage() {
                   <Button
                     variant="outline"
                     className="h-auto items-start justify-between gap-3 px-4 py-3 text-left"
-                    onClick={() => setAdminTab("finance")}
+                    onClick={() => changeAdminTab("finance")}
                   >
                     <span>
                       <span className="block text-sm font-medium">Finance</span>
@@ -2571,7 +2602,7 @@ export default function AdminPage() {
                   <Button
                     variant="outline"
                     className="h-auto items-start justify-between gap-3 px-4 py-3 text-left"
-                    onClick={() => setAdminTab("exchange")}
+                    onClick={() => changeAdminTab("exchange")}
                   >
                     <span>
                       <span className="block text-sm font-medium">Exchange</span>
@@ -2583,14 +2614,16 @@ export default function AdminPage() {
                   <Button
                     variant="outline"
                     className="h-auto items-start justify-between gap-3 px-4 py-3 text-left"
-                    onClick={() => setAdminTab("vtu")}
+                    asChild
                   >
-                    <span>
-                      <span className="block text-sm font-medium">VTU Ops</span>
-                      <span className="block text-xs font-normal text-muted-foreground">
-                        Check provider health and service volume.
+                    <Link href="/admin/vtu">
+                      <span>
+                        <span className="block text-sm font-medium">VTU Ops</span>
+                        <span className="block text-xs font-normal text-muted-foreground">
+                          Check provider health and service volume.
+                        </span>
                       </span>
-                    </span>
+                    </Link>
                   </Button>
                   <Button
                     variant="outline"
@@ -3249,6 +3282,19 @@ export default function AdminPage() {
                         <Skeleton key={item} className="h-10 w-full" />
                       ))}
                     </div>
+                  ) : transactionsQuery.isError ? (
+                    <div className="flex flex-col items-center gap-3 py-10 text-center">
+                      <p className="text-sm text-muted-foreground">
+                        Could not load transactions.
+                      </p>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => void transactionsQuery.refetch()}
+                      >
+                        Retry
+                      </Button>
+                    </div>
                   ) : filteredTransactions.length === 0 ? (
                     <div className="py-10 text-center text-muted-foreground">
                       No transactions for this filter
@@ -3302,6 +3348,16 @@ export default function AdminPage() {
                       </TableBody>
                     </Table>
                   )}
+                  {!transactionsQuery.isLoading &&
+                    !transactionsQuery.isError &&
+                    filteredTransactions.length > 0 && (
+                      <p className="mt-3 text-xs text-muted-foreground">
+                        Showing {Math.min(12, filteredTransactions.length)} of{" "}
+                        {filteredTransactions.length} in the latest 50 fetched.
+                        Narrow with the filter or open the audit trail for the
+                        full history.
+                      </p>
+                    )}
                 </CardContent>
               </Card>
 
@@ -3365,7 +3421,22 @@ export default function AdminPage() {
                 <CardTitle>Failed provider events</CardTitle>
               </CardHeader>
               <CardContent>
-                {(providerEventsQuery.data ?? []).length === 0 ? (
+                {providerEventsQuery.isLoading ? (
+                  <Skeleton className="h-40 w-full" />
+                ) : providerEventsQuery.isError ? (
+                  <div className="flex flex-col items-center gap-3 py-8 text-center">
+                    <p className="text-sm text-muted-foreground">
+                      Could not load provider events.
+                    </p>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => void providerEventsQuery.refetch()}
+                    >
+                      Retry
+                    </Button>
+                  </div>
+                ) : (providerEventsQuery.data ?? []).length === 0 ? (
                   <div className="py-8 text-center text-muted-foreground">
                     No failed provider events
                   </div>
@@ -3384,10 +3455,19 @@ export default function AdminPage() {
                       {providerEventsQuery.data?.map((event) => (
                         <TableRow
                           key={event.id}
-                          className="cursor-pointer"
+                          role="button"
+                          tabIndex={0}
+                          aria-label={`Inspect provider event ${event.providerReference}`}
+                          className="cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                           onClick={() =>
                             openTransactionDrilldown(event.providerReference)
                           }
+                          onKeyDown={(keyEvent) => {
+                            if (keyEvent.key === "Enter" || keyEvent.key === " ") {
+                              keyEvent.preventDefault();
+                              openTransactionDrilldown(event.providerReference);
+                            }
+                          }}
                         >
                           <TableCell>{event.provider}</TableCell>
                           <TableCell className="font-mono text-xs">
@@ -3425,6 +3505,19 @@ export default function AdminPage() {
                 <CardContent>
                   {pendingWithdrawalsQuery.isLoading ? (
                     <Skeleton className="h-40 w-full" />
+                  ) : pendingWithdrawalsQuery.isError ? (
+                    <div className="flex flex-col items-center gap-3 py-8 text-center">
+                      <p className="text-sm text-muted-foreground">
+                        Could not load pending withdrawals.
+                      </p>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => void pendingWithdrawalsQuery.refetch()}
+                      >
+                        Retry
+                      </Button>
+                    </div>
                   ) : (pendingWithdrawalsQuery.data ?? []).length === 0 ? (
                     <div className="py-8 text-center text-muted-foreground">
                       No pending withdrawals
@@ -3911,6 +4004,8 @@ export default function AdminPage() {
             value="exchange"
             className="grid gap-4 xl:grid-cols-[1fr_1.2fr]"
           >
+            <RateControlCard />
+
             <Card>
               <CardHeader>
                 <CardTitle>NGN to GHS exchange lane</CardTitle>
@@ -4568,8 +4663,40 @@ export default function AdminPage() {
 
           <TabsContent value="currencies">
             <Card>
-              <CardHeader>
+              <CardHeader className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                 <CardTitle>Currency coverage</CardTitle>
+                <div className="rounded-lg border border-border bg-muted/30 px-4 py-2 text-sm">
+                  {currencyRateQuery.isLoading ? (
+                    <span className="text-muted-foreground">
+                      Loading live NGN → GHS rate…
+                    </span>
+                  ) : currencyRateQuery.isError ? (
+                    <span className="text-muted-foreground">
+                      Live NGN → GHS rate unavailable
+                    </span>
+                  ) : (
+                    <span className="flex items-center gap-2">
+                      <span className="text-muted-foreground">Live NGN → GHS</span>
+                      <span className="font-semibold">
+                        {Number(
+                          currencyRateQuery.data?.effectiveRate ?? 0,
+                        ).toLocaleString(undefined, {
+                          minimumFractionDigits: 4,
+                          maximumFractionDigits: 4,
+                        })}
+                      </span>
+                      <Badge
+                        variant={
+                          currencyRateQuery.data?.isStale
+                            ? "destructive"
+                            : "outline"
+                        }
+                      >
+                        {currencyRateQuery.data?.isStale ? "Stale" : "Live"}
+                      </Badge>
+                    </span>
+                  )}
+                </div>
               </CardHeader>
               <CardContent>
                 <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
@@ -4599,5 +4726,19 @@ export default function AdminPage() {
         </Tabs>
       </div>
     </DashboardLayout>
+  );
+}
+
+export default function AdminPage() {
+  return (
+    <Suspense
+      fallback={
+        <DashboardLayout>
+          <Skeleton className="h-72 w-full" />
+        </DashboardLayout>
+      }
+    >
+      <AdminPageContent />
+    </Suspense>
   );
 }

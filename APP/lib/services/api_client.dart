@@ -3,27 +3,30 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:uuid/uuid.dart';
 
+import '../core/auth/auth_state.dart';
 import '../core/constants/app_constants.dart';
+import 'transaction_security_service.dart';
 
 class ApiClient {
   static const _accessTokenKey = 'trustpay_access_token';
   static const _refreshTokenKey = 'trustpay_refresh_token';
   static const _storage = FlutterSecureStorage();
   static const _uuid = Uuid();
+  static final _transactionSecurity = TransactionSecurityService();
   static Future<String?>? _refreshInFlight;
 
   late final Dio _dio;
 
-  ApiClient() {
-    _dio = Dio(
-      BaseOptions(
-        baseUrl: AppConstants.apiBaseUrl,
-        connectTimeout: AppConstants.apiTimeout,
-        receiveTimeout: AppConstants.apiTimeout,
-        headers: {'Content-Type': 'application/json'},
-      ),
-    );
-
+  ApiClient({Dio? dio})
+      : _dio = dio ??
+            Dio(
+              BaseOptions(
+                baseUrl: AppConstants.apiBaseUrl,
+                connectTimeout: AppConstants.apiTimeout,
+                receiveTimeout: AppConstants.apiTimeout,
+                headers: {'Content-Type': 'application/json'},
+              ),
+            ) {
     _dio.interceptors.add(
       SafeDioLogInterceptor(enabled: kDebugMode),
     );
@@ -52,7 +55,10 @@ class ApiClient {
 
           final accessToken = await _refreshAccessToken();
           if (accessToken == null) {
-            await clearSession();
+            // The session is only cleared when the refresh endpoint explicitly
+            // rejected it (401/403) — see _performRefresh. On a network/timeout
+            // failure we keep the tokens so an offline blip doesn't sign the
+            // user out; the next request will retry the refresh.
             return handler.next(error);
           }
 
@@ -89,6 +95,11 @@ class ApiClient {
   Future<void> clearSession() async {
     await _storage.delete(key: _accessTokenKey);
     await _storage.delete(key: _refreshTokenKey);
+    await clearTransactionApproval();
+  }
+
+  Future<void> clearTransactionApproval() {
+    return _transactionSecurity.clearEphemeralTransactionApproval();
   }
 
   bool _shouldRefresh(DioException error) {
@@ -113,6 +124,8 @@ class ApiClient {
   Future<String?> _performRefresh() async {
     final refreshToken = await readRefreshToken();
     if (refreshToken == null || refreshToken.isEmpty) {
+      // Nothing to refresh with — the session is effectively gone.
+      await _handleAuthRejected();
       return null;
     }
 
@@ -146,9 +159,27 @@ class ApiClient {
       );
 
       return accessToken;
-    } on DioException {
+    } on DioException catch (error) {
+      // Only a server-side rejection (401/403) means the refresh token is no
+      // longer valid. Network/timeout failures must NOT clear the session.
+      if (isAuthRejection(error)) {
+        await _handleAuthRejected();
+      }
       return null;
     }
+  }
+
+  /// Clears the stored session and signals the router that the session has
+  /// expired so it can redirect to the login screen.
+  Future<void> _handleAuthRejected() async {
+    await clearSession();
+    authStateNotifier.markExpired();
+  }
+
+  /// True when a refresh failed because the server explicitly rejected it.
+  static bool isAuthRejection(DioException error) {
+    final status = error.response?.statusCode;
+    return status == 401 || status == 403;
   }
 }
 

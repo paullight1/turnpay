@@ -1,47 +1,98 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { createServerClient } from "@supabase/ssr";
+import {
+  decodeSessionCookie,
+  encodeSessionCookie,
+  getSessionCookieOptions,
+  refreshSessionWithBackend,
+  SESSION_COOKIE_NAME,
+} from "@/lib/server-auth-session";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseAnonKey =
   process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ||
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-const LOCAL_SESSION_COOKIE_NAME = "supabase.auth.token";
+const apiBaseUrl = process.env.NEXT_PUBLIC_API_URL;
 
 const PROTECTED_ROUTES = ["/dashboard"];
 const ADMIN_ROUTES = ["/admin"];
 const AUTH_ROUTES = ["/login", "/register"];
 
-type LocalSessionCookie = {
-  access_token: string;
-};
-
-function decodeBase64Url(value: string) {
-  const normalized = value.replace(/-/g, "+").replace(/_/g, "/");
-  const padding = "=".repeat((4 - (normalized.length % 4)) % 4);
-  return atob(normalized + padding);
+// Reads the locally-persisted session cookie ONLY to recover a candidate
+// bearer token. The presence/contents of this cookie are NOT trusted for
+// authentication or authorization: the token is always re-validated against
+// Supabase (getUser) or the backend (/api/auth/bootstrap) before access is
+// granted. A forged cookie therefore grants nothing.
+function readLocalSessionCandidateToken(request: NextRequest) {
+  return (
+    decodeSessionCookie(request.cookies.get(SESSION_COOKIE_NAME)?.value)
+      ?.access_token ?? null
+  );
 }
 
-function readLocalSessionCookie(request: NextRequest) {
-  const cookieValue = request.cookies.get(LOCAL_SESSION_COOKIE_NAME)?.value;
-
-  if (!cookieValue?.startsWith("base64-")) {
-    return null;
-  }
-
+// Verifies a bearer token against the backend, which validates the token
+// signature (Supabase- or backend-issued) and returns the authoritative,
+// server-derived role. This is the only trusted source of the admin role;
+// Supabase user_metadata is user-editable and must never be used for authz.
+async function verifyWithBackend(
+  accessToken: string,
+  request: NextRequest,
+): Promise<{ ok: boolean; role?: string }> {
   try {
-    const parsed = JSON.parse(
-      decodeBase64Url(cookieValue.slice("base64-".length)),
-    ) as Partial<LocalSessionCookie>;
+    const bootstrapUrl = apiBaseUrl
+      ? `${apiBaseUrl.replace(/\/$/, "")}/api/auth/bootstrap`
+      : new URL("/api/auth/bootstrap", request.url).toString();
 
-    if (!parsed.access_token) {
-      return null;
+    const res = await fetch(bootstrapUrl, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    });
+
+    if (!res.ok) {
+      return { ok: false };
     }
 
-    return parsed as LocalSessionCookie;
+    const data = (await res.json().catch(() => null)) as
+      | { user?: { role?: string } }
+      | null;
+
+    return { ok: true, role: data?.user?.role };
   } catch {
+    return { ok: false };
+  }
+}
+
+async function refreshCookieBackedSession(
+  request: NextRequest,
+  response: NextResponse,
+) {
+  const storedSession = decodeSessionCookie(
+    request.cookies.get(SESSION_COOKIE_NAME)?.value,
+  );
+
+  if (!storedSession?.refresh_token) {
     return null;
   }
+
+  const refreshedSession = await refreshSessionWithBackend(storedSession, request);
+  if (!refreshedSession?.access_token) {
+    response.cookies.set(
+      SESSION_COOKIE_NAME,
+      "",
+      getSessionCookieOptions(0, request.url),
+    );
+    return null;
+  }
+
+  response.cookies.set(
+    SESSION_COOKIE_NAME,
+    encodeSessionCookie(refreshedSession),
+    getSessionCookieOptions(undefined, request.url),
+  );
+  return refreshedSession.access_token;
 }
 
 export async function proxy(request: NextRequest) {
@@ -58,51 +109,103 @@ export async function proxy(request: NextRequest) {
 
   const isAuthRoute = AUTH_ROUTES.includes(pathname);
 
-  if (!supabaseUrl || !supabaseAnonKey) {
-    if (isProtected || isAdmin) {
-      const url = new URL("/login", request.url);
-      url.searchParams.set("callbackUrl", pathname);
-      return NextResponse.redirect(url);
+  const redirectToLogin = () => {
+    const url = new URL("/login", request.url);
+    url.searchParams.set("callbackUrl", pathname);
+    return NextResponse.redirect(url);
+  };
+
+  // Candidate bearer token for backend verification. Prefer a Supabase-
+  // validated session when Supabase is configured; otherwise use the local
+  // cookie only as a candidate that must still pass backend verification.
+  // This keeps backend-issued local sessions usable without weakening the
+  // fail-closed behavior for forged or unverifiable cookies.
+  let hasVerifiedSupabaseUser = false;
+  let candidateToken: string | null = null;
+
+  if (supabaseUrl && supabaseAnonKey) {
+    const supabase = createServerClient(supabaseUrl, supabaseAnonKey, {
+      cookies: {
+        getAll() {
+          return request.cookies.getAll();
+        },
+        setAll(cookiesToSet) {
+          cookiesToSet.forEach(({ name, value, options }) => {
+            response.cookies.set(name, value, options);
+          });
+        },
+      },
+    });
+
+    // getUser() validates the JWT signature against Supabase (unlike
+    // getSession(), which only decodes the cookie).
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    hasVerifiedSupabaseUser = Boolean(user);
+    if (user) {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      candidateToken = session?.access_token ?? null;
+    }
+  }
+
+  if (!candidateToken) {
+    candidateToken = readLocalSessionCandidateToken(request);
+  }
+
+  if (isAdmin) {
+    if (!candidateToken) {
+      return redirectToLogin();
+    }
+
+    let result = await verifyWithBackend(candidateToken, request);
+    if (!result.ok) {
+      const refreshedToken = await refreshCookieBackedSession(request, response);
+      if (!refreshedToken) {
+        return redirectToLogin();
+      }
+
+      candidateToken = refreshedToken;
+      result = await verifyWithBackend(candidateToken, request);
+      if (!result.ok) {
+        return redirectToLogin();
+      }
+    }
+    if (result.role !== "ADMIN") {
+      return NextResponse.redirect(new URL("/dashboard", request.url));
     }
 
     return response;
   }
 
-  // Create Supabase client for server-side session check
-  const supabase = createServerClient(supabaseUrl, supabaseAnonKey, {
-    cookies: {
-      getAll() {
-        return request.cookies.getAll();
-      },
-      setAll(cookiesToSet) {
-        cookiesToSet.forEach(({ name, value, options }) => {
-          response.cookies.set(name, value, options);
-        });
-      },
-    },
-  });
-
-  const { data: { session } } = await supabase.auth.getSession();
-  const localSession = readLocalSessionCookie(request);
-
-  if (isProtected && !session && !localSession?.access_token) {
-    const url = new URL("/login", request.url);
-    url.searchParams.set("callbackUrl", pathname);
-    return NextResponse.redirect(url);
-  }
-
-  if (isAdmin) {
-    if (!session && !localSession?.access_token) {
-      const url = new URL("/login", request.url);
-      url.searchParams.set("callbackUrl", pathname);
-      return NextResponse.redirect(url);
+  if (isProtected) {
+    if (hasVerifiedSupabaseUser) {
+      return response;
     }
 
-    // Admin authorization is enforced by the backend. User metadata is not
-    // trusted here because Supabase user_metadata is user-editable.
+    // Supabase could not verify a session (e.g. backend "local" auth mode).
+    // Fall back to verifying the candidate token with the backend.
+    if (candidateToken) {
+      if ((await verifyWithBackend(candidateToken, request)).ok) {
+        return response;
+      }
+
+      const refreshedToken = await refreshCookieBackedSession(request, response);
+      if (refreshedToken && (await verifyWithBackend(refreshedToken, request)).ok) {
+        return response;
+      }
+    }
+
+    return redirectToLogin();
   }
 
-  if (isAuthRoute && (session || localSession?.access_token)) {
+  // Auth routes: only bounce away Supabase-verified users. We intentionally do
+  // NOT redirect based on the unverified local cookie here, to avoid a redirect
+  // loop if the backend is unreachable.
+  if (isAuthRoute && hasVerifiedSupabaseUser) {
     return NextResponse.redirect(new URL("/dashboard", request.url));
   }
 

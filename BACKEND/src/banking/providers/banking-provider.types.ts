@@ -1,15 +1,20 @@
-import { Decimal } from "@prisma/client/runtime/library";
+import { Decimal } from '@prisma/client/runtime/library';
 
-export type BankingProviderName = "paystack" | "flutterwave" | "monnify";
-export type NormalizedProviderName = "PAYSTACK" | "FLUTTERWAVE" | "MONNIFY";
-export type BankingCurrency = "NGN" | "GHS";
+export type BankingProviderName = 'paystack' | 'flutterwave' | 'monnify';
+export type NormalizedProviderName = 'PAYSTACK' | 'FLUTTERWAVE' | 'MONNIFY';
+export type BankingCurrency = 'NGN' | 'GHS';
 
 export interface ProvisionVirtualAccountInput {
   userId: string;
   email: string;
   phone: string;
-  firstName: string;
-  lastName: string;
+  /**
+   * Verified legal name resolved server-side (never client-supplied). This is
+   * what the partner bank displays to payers, optionally behind a brand prefix.
+   */
+  accountHolderName: string;
+  firstName?: string;
+  lastName?: string;
   middleName?: string;
   country: string;
   currency: BankingCurrency;
@@ -28,7 +33,7 @@ export interface ProviderVirtualAccount {
   bankName: string;
   bankCode?: string;
   currency: BankingCurrency;
-  status: "ACTIVE" | "PENDING" | "FAILED" | "DISABLED";
+  status: 'ACTIVE' | 'PENDING' | 'FAILED' | 'DISABLED';
   raw?: Record<string, unknown>;
 }
 
@@ -38,6 +43,8 @@ export interface NormalizedDepositEvent {
   providerReference: string;
   accountNumber: string;
   amount: Decimal;
+  /** Net amount the provider settles after its fees, when reported. */
+  settlementAmount?: Decimal;
   currency: BankingCurrency;
   rawPayload: Record<string, unknown>;
 }

@@ -2,9 +2,9 @@ import {
   BadRequestException,
   Injectable,
   NotFoundException,
-} from "@nestjs/common";
-import { ConfigService } from "@nestjs/config";
-import { PrismaService } from "../prisma/prisma.service";
+} from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { PrismaService } from '../prisma/prisma.service';
 import {
   AdminActionReasonDto,
   AdminAuditLogsQueryDto,
@@ -12,8 +12,8 @@ import {
   AdminTransferVerificationDto,
   AdminUpdateVtuPricingRuleDto,
   AdminUpdateUserDto,
-} from "./dto/admin.dto";
-import { PinoLogger } from "nestjs-pino";
+} from './dto/admin.dto';
+import { PinoLogger } from 'nestjs-pino';
 import {
   ExchangePayoutStatus,
   ExchangeReceiptStatus,
@@ -24,29 +24,30 @@ import {
   WalletCurrency,
   VtuOrderStatus,
   VtuOrderScope,
-} from "@prisma/client";
-import { Decimal } from "@prisma/client/runtime/library";
-import { LedgerService } from "../wallets/ledger.service";
-import { PaystackProvider } from "../payments/providers/paystack.provider";
-import { FlutterwaveProvider } from "../payments/providers/flutterwave.provider";
-import { SupabaseService } from "../supabase/supabase.service";
-import { VtuService } from "../vtu/vtu.service";
-import { maskAccountNumber } from "../common/utils/masking";
+} from '@prisma/client';
+import { Decimal } from '@prisma/client/runtime/library';
+import { LedgerService } from '../wallets/ledger.service';
+import { PaystackProvider } from '../payments/providers/paystack.provider';
+import { FlutterwaveProvider } from '../payments/providers/flutterwave.provider';
+import { SupabaseService } from '../supabase/supabase.service';
+import { VtuService } from '../vtu/vtu.service';
+import { BankingService } from '../banking/banking.service';
+import { maskAccountNumber } from '../common/utils/masking';
 
 const STALE_VTU_STATUSES: VtuOrderStatus[] = [
-  "PENDING",
-  "PROCESSING",
-  "UNKNOWN",
+  'PENDING',
+  'PROCESSING',
+  'UNKNOWN',
 ];
 const USER_SERVICE_ORDER: TransactionType[] = [
-  "AIRTIME",
-  "DATA",
-  "CABLE",
-  "ELECTRICITY",
-  "EXCHANGE",
-  "FUND",
-  "WITHDRAW",
-  "INTERNAL_TRANSFER",
+  'AIRTIME',
+  'DATA',
+  'CABLE',
+  'ELECTRICITY',
+  'EXCHANGE',
+  'FUND',
+  'WITHDRAW',
+  'INTERNAL_TRANSFER',
 ];
 const PLATFORM_SERVICE_TREND_DAYS = 7;
 
@@ -61,6 +62,7 @@ export class AdminService {
     private readonly configService: ConfigService,
     private readonly supabaseService: SupabaseService,
     private readonly vtuService: VtuService,
+    private readonly bankingService: BankingService,
   ) {}
 
   async getUsers(
@@ -73,33 +75,33 @@ export class AdminService {
     const skip = (page - 1) * limit;
     const whereClauses: Prisma.UserWhereInput[] = [];
 
-    if (role) whereClauses.push({ role: role as Prisma.UserWhereInput["role"] });
+    if (role)
+      whereClauses.push({ role: role as Prisma.UserWhereInput['role'] });
     if (kycStatus) {
       whereClauses.push({
-        kycStatus: kycStatus as Prisma.UserWhereInput["kycStatus"],
+        kycStatus: kycStatus as Prisma.UserWhereInput['kycStatus'],
       });
     }
 
     if (q) {
       whereClauses.push({
         OR: [
-          { email: { contains: q, mode: "insensitive" } },
-          { phone: { contains: q, mode: "insensitive" } },
-          { fullName: { contains: q, mode: "insensitive" } },
-          { referralCode: { contains: q, mode: "insensitive" } },
+          { email: { contains: q, mode: 'insensitive' } },
+          { phone: { contains: q, mode: 'insensitive' } },
+          { fullName: { contains: q, mode: 'insensitive' } },
+          { referralCode: { contains: q, mode: 'insensitive' } },
         ],
       });
     }
 
-    const where =
-      whereClauses.length > 0 ? { AND: whereClauses } : undefined;
+    const where = whereClauses.length > 0 ? { AND: whereClauses } : undefined;
 
     const [users, total] = await this.prisma.$transaction([
       this.prisma.user.findMany({
         where,
         skip,
         take: limit,
-        orderBy: { createdAt: "desc" },
+        orderBy: { createdAt: 'desc' },
         select: {
           id: true,
           email: true,
@@ -139,7 +141,7 @@ export class AdminService {
         createdAt: true,
         updatedAt: true,
         wallets: {
-          orderBy: { currency: "asc" },
+          orderBy: { currency: 'asc' },
           select: {
             id: true,
             currency: true,
@@ -148,7 +150,7 @@ export class AdminService {
           },
         },
         virtualAccounts: {
-          orderBy: { createdAt: "desc" },
+          orderBy: { createdAt: 'desc' },
           take: 5,
           select: {
             id: true,
@@ -165,7 +167,7 @@ export class AdminService {
           },
         },
         bankAccounts: {
-          orderBy: { createdAt: "desc" },
+          orderBy: { createdAt: 'desc' },
           take: 5,
           select: {
             id: true,
@@ -187,7 +189,7 @@ export class AdminService {
               gt: new Date(),
             },
           },
-          orderBy: { lastUsedAt: "desc" },
+          orderBy: { lastUsedAt: 'desc' },
           take: 10,
           select: {
             id: true,
@@ -202,7 +204,7 @@ export class AdminService {
         },
         transactions: {
           take: 20,
-          orderBy: { createdAt: "desc" },
+          orderBy: { createdAt: 'desc' },
           select: {
             id: true,
             type: true,
@@ -215,7 +217,7 @@ export class AdminService {
         },
         disputes: {
           take: 10,
-          orderBy: { createdAt: "desc" },
+          orderBy: { createdAt: 'desc' },
           select: {
             id: true,
             type: true,
@@ -239,7 +241,7 @@ export class AdminService {
         },
         exchangeReceipts: {
           take: 5,
-          orderBy: { createdAt: "desc" },
+          orderBy: { createdAt: 'desc' },
           select: {
             id: true,
             bankReference: true,
@@ -261,7 +263,7 @@ export class AdminService {
         },
         exchangePayouts: {
           take: 5,
-          orderBy: { createdAt: "desc" },
+          orderBy: { createdAt: 'desc' },
           select: {
             id: true,
             status: true,
@@ -289,24 +291,21 @@ export class AdminService {
     });
 
     if (!user) {
-      throw new NotFoundException("User not found");
+      throw new NotFoundException('User not found');
     }
 
     const { refreshTokens, exchangePayouts, ...rest } = user;
     const relatedAuditClauses: Prisma.AuditLogWhereInput[] = [
-      { targetType: "User", targetId: userId },
+      { targetType: 'User', targetId: userId },
       {
         metadata: {
-          path: ["userId"],
+          path: ['userId'],
           equals: userId,
         },
       },
     ];
 
-    const addTargetClause = (
-      targetType: string,
-      targetIds: string[],
-    ) => {
+    const addTargetClause = (targetType: string, targetIds: string[]) => {
       if (targetIds.length > 0) {
         relatedAuditClauses.push({
           targetType,
@@ -316,30 +315,30 @@ export class AdminService {
     };
 
     addTargetClause(
-      "Transaction",
+      'Transaction',
       user.transactions.map((transaction) => transaction.id),
     );
     addTargetClause(
-      "UserSession",
+      'UserSession',
       refreshTokens.map((session) => session.id),
     );
     addTargetClause(
-      "Dispute",
+      'Dispute',
       user.disputes.map((dispute) => dispute.id),
     );
     addTargetClause(
-      "ExchangeReceipt",
+      'ExchangeReceipt',
       user.exchangeReceipts.map((receipt) => receipt.id),
     );
     addTargetClause(
-      "ExchangePayout",
+      'ExchangePayout',
       exchangePayouts.map((payout) => payout.id),
     );
 
     const [auditLogs, serviceRows] = await Promise.all([
       this.prisma.auditLog.findMany({
         where: { OR: relatedAuditClauses },
-        orderBy: { createdAt: "desc" },
+        orderBy: { createdAt: 'desc' },
         take: 12,
         select: {
           id: true,
@@ -363,7 +362,7 @@ export class AdminService {
         },
       }),
       this.prisma.transaction.groupBy({
-        by: ["type", "currency"],
+        by: ['type', 'currency'],
         where: { userId },
         _count: { _all: true },
         _sum: {
@@ -394,8 +393,10 @@ export class AdminService {
           return orderDiff;
         }
 
-        return new Date(right.lastActivityAt ?? 0).getTime() -
-          new Date(left.lastActivityAt ?? 0).getTime();
+        return (
+          new Date(right.lastActivityAt ?? 0).getTime() -
+          new Date(left.lastActivityAt ?? 0).getTime()
+        );
       });
 
     return {
@@ -442,7 +443,7 @@ export class AdminService {
     });
 
     if (!session) {
-      throw new NotFoundException("Session not found");
+      throw new NotFoundException('Session not found');
     }
 
     if (session.revokedAt) {
@@ -470,8 +471,8 @@ export class AdminService {
       await tx.auditLog.create({
         data: {
           adminId,
-          action: "USER_SESSION_REVOKE",
-          targetType: "UserSession",
+          action: 'USER_SESSION_REVOKE',
+          targetType: 'UserSession',
           targetId: sessionId,
           reference: session.deviceId,
           reason: dto.reason,
@@ -492,8 +493,8 @@ export class AdminService {
 
     if (sessionRevoked) {
       this.logger.info(
-        { adminId, userId, sessionId, event: "admin_user_session_revoked" },
-        "Admin revoked user session",
+        { adminId, userId, sessionId, event: 'admin_user_session_revoked' },
+        'Admin revoked user session',
       );
     }
 
@@ -507,10 +508,25 @@ export class AdminService {
     });
 
     if (!existing) {
-      throw new NotFoundException("User not found");
+      throw new NotFoundException('User not found');
     }
 
     const { reason, ...updates } = dto;
+
+    if (updates.dailyWithdrawLimit || updates.monthlyWithdrawLimit) {
+      const nextDaily = new Decimal(
+        updates.dailyWithdrawLimit ?? existing.dailyWithdrawLimit,
+      );
+      const nextMonthly = new Decimal(
+        updates.monthlyWithdrawLimit ?? existing.monthlyWithdrawLimit,
+      );
+
+      if (nextMonthly.lessThan(nextDaily)) {
+        throw new BadRequestException(
+          'monthlyWithdrawLimit cannot be less than dailyWithdrawLimit',
+        );
+      }
+    }
 
     const updated = await this.prisma.$transaction(async (tx) => {
       const updatedUser = await tx.user.update({
@@ -523,6 +539,8 @@ export class AdminService {
           role: true,
           kycStatus: true,
           kycTier: true,
+          dailyWithdrawLimit: true,
+          monthlyWithdrawLimit: true,
           isSuspended: true,
           updatedAt: true,
         },
@@ -531,8 +549,8 @@ export class AdminService {
       await tx.auditLog.create({
         data: {
           adminId,
-          action: "USER_UPDATE",
-          targetType: "User",
+          action: 'USER_UPDATE',
+          targetType: 'User',
           targetId: userId,
           reason,
           before: this.sanitizeMetadata(existing) as Prisma.InputJsonValue,
@@ -546,7 +564,7 @@ export class AdminService {
 
     this.logger.info(
       { adminId, userId, changes: Object.keys(updates) },
-      "Admin updated user",
+      'Admin updated user',
     );
 
     if (updates.role) {
@@ -557,9 +575,9 @@ export class AdminService {
           {
             adminId,
             userId,
-            error: error instanceof Error ? error.message : "Unknown error",
+            error: error instanceof Error ? error.message : 'Unknown error',
           },
-          "Unable to sync Supabase app_metadata role after admin role update",
+          'Unable to sync Supabase app_metadata role after admin role update',
         );
       }
     }
@@ -603,11 +621,11 @@ export class AdminService {
       this.prisma.transaction.count(),
       this.prisma.transaction.aggregate({
         _sum: { amount: true },
-        where: { status: "SUCCESS" },
+        where: { status: 'SUCCESS' },
       }),
       this.prisma.transaction.aggregate({
         _sum: { fee: true },
-        where: { status: "SUCCESS" },
+        where: { status: 'SUCCESS' },
       }),
       this.prisma.user.count({
         where: {
@@ -634,7 +652,7 @@ export class AdminService {
   async getRecentTransactions(limit = 20) {
     return this.prisma.transaction.findMany({
       take: limit,
-      orderBy: { createdAt: "desc" },
+      orderBy: { createdAt: 'desc' },
       include: {
         user: {
           select: {
@@ -671,7 +689,7 @@ export class AdminService {
           },
         },
         ledgerEntries: {
-          orderBy: { createdAt: "asc" },
+          orderBy: { createdAt: 'asc' },
           select: {
             id: true,
             direction: true,
@@ -686,14 +704,14 @@ export class AdminService {
           },
         },
         transferAttempts: {
-          orderBy: { createdAt: "desc" },
+          orderBy: { createdAt: 'desc' },
         },
         vtuOrders: {
-          orderBy: { createdAt: "desc" },
+          orderBy: { createdAt: 'desc' },
         },
         exchangeReceipt: true,
         disputes: {
-          orderBy: { createdAt: "desc" },
+          orderBy: { createdAt: 'desc' },
           select: {
             id: true,
             type: true,
@@ -708,10 +726,66 @@ export class AdminService {
     });
 
     if (!transaction) {
-      throw new NotFoundException("Transaction not found");
+      throw new NotFoundException('Transaction not found');
     }
 
-    return this.sanitizeTransactionDrilldown(transaction);
+    // Provider events are keyed by the provider's reference, which for
+    // withdrawals lives on the transfer attempt rather than our reference.
+    const candidateReferences = Array.from(
+      new Set(
+        [
+          transaction.reference,
+          ...transaction.transferAttempts.map(
+            (attempt) => attempt.providerReference,
+          ),
+        ].filter((value): value is string => Boolean(value)),
+      ),
+    );
+
+    const [providerEvents, auditTrail] = await Promise.all([
+      this.prisma.providerEvent.findMany({
+        where: { providerReference: { in: candidateReferences } },
+        orderBy: { createdAt: 'desc' },
+        take: 20,
+        select: {
+          id: true,
+          provider: true,
+          eventType: true,
+          providerReference: true,
+          status: true,
+          errorMessage: true,
+          processedAt: true,
+          createdAt: true,
+        },
+      }),
+      this.prisma.auditLog.findMany({
+        where: {
+          OR: [
+            { targetId: transaction.id },
+            { targetId: transaction.reference },
+            { reference: transaction.reference },
+          ],
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 50,
+        select: {
+          id: true,
+          adminId: true,
+          action: true,
+          targetType: true,
+          targetId: true,
+          reference: true,
+          reason: true,
+          createdAt: true,
+        },
+      }),
+    ]);
+
+    return {
+      ...this.sanitizeTransactionDrilldown(transaction),
+      providerEvents,
+      auditTrail,
+    };
   }
 
   updateTransactionStatus(
@@ -721,10 +795,10 @@ export class AdminService {
   ) {
     this.logger.warn(
       { adminId, reference, requestedStatus: status },
-      "Blocked generic admin transaction status update",
+      'Blocked generic admin transaction status update',
     );
     throw new BadRequestException(
-      "Generic transaction status updates are disabled. Use a typed audited banking operation.",
+      'Generic transaction status updates are disabled. Use a typed audited banking operation.',
     );
   }
 
@@ -739,16 +813,16 @@ export class AdminService {
       failedProviderEvents,
       failedTransferAttempts,
     ] = await Promise.all([
-      this.prisma.virtualAccount.count({ where: { status: "ACTIVE" } }),
-      this.prisma.virtualAccount.count({ where: { status: "FAILED" } }),
+      this.prisma.virtualAccount.count({ where: { status: 'ACTIVE' } }),
+      this.prisma.virtualAccount.count({ where: { status: 'FAILED' } }),
       this.prisma.transaction.count({
-        where: { type: "WITHDRAW", status: "PENDING" },
+        where: { type: 'WITHDRAW', status: 'PENDING' },
       }),
       this.prisma.transferAttempt.count({
-        where: { status: "PENDING", createdAt: { lt: staleCutoff } },
+        where: { status: 'PENDING', createdAt: { lt: staleCutoff } },
       }),
-      this.prisma.providerEvent.count({ where: { status: "FAILED" } }),
-      this.prisma.transferAttempt.count({ where: { status: "FAILED" } }),
+      this.prisma.providerEvent.count({ where: { status: 'FAILED' } }),
+      this.prisma.transferAttempt.count({ where: { status: 'FAILED' } }),
     ]);
 
     return {
@@ -771,7 +845,7 @@ export class AdminService {
   async getVirtualAccounts(limit = 50) {
     return this.prisma.virtualAccount.findMany({
       take: limit,
-      orderBy: { createdAt: "desc" },
+      orderBy: { createdAt: 'desc' },
       select: {
         id: true,
         userId: true,
@@ -793,7 +867,7 @@ export class AdminService {
     const events = await this.prisma.providerEvent.findMany({
       take: limit,
       where: status ? { status: status as ProviderEventStatus } : undefined,
-      orderBy: { createdAt: "desc" },
+      orderBy: { createdAt: 'desc' },
       select: {
         id: true,
         provider: true,
@@ -819,10 +893,10 @@ export class AdminService {
     const withdrawals = await this.prisma.transaction.findMany({
       take: limit,
       where: {
-        type: "WITHDRAW",
-        status: "PENDING",
+        type: 'WITHDRAW',
+        status: 'PENDING',
       },
-      orderBy: { createdAt: "asc" },
+      orderBy: { createdAt: 'asc' },
       select: {
         id: true,
         userId: true,
@@ -845,7 +919,7 @@ export class AdminService {
           },
         },
         transferAttempts: {
-          orderBy: { createdAt: "desc" },
+          orderBy: { createdAt: 'desc' },
           take: 3,
           select: {
             provider: true,
@@ -875,8 +949,8 @@ export class AdminService {
   async getWithdrawalDrilldown(reference: string) {
     const transaction = await this.getTransactionDrilldown(reference);
 
-    if (transaction.type !== "WITHDRAW") {
-      throw new NotFoundException("Withdrawal not found");
+    if (transaction.type !== 'WITHDRAW') {
+      throw new NotFoundException('Withdrawal not found');
     }
 
     return transaction;
@@ -893,19 +967,19 @@ export class AdminService {
       where: { reference },
       include: {
         transferAttempts: {
-          orderBy: { createdAt: "desc" },
+          orderBy: { createdAt: 'desc' },
           take: 1,
         },
       },
     });
 
-    if (!transaction || transaction.type !== "WITHDRAW") {
-      throw new NotFoundException("Withdrawal not found");
+    if (!transaction || transaction.type !== 'WITHDRAW') {
+      throw new NotFoundException('Withdrawal not found');
     }
 
     const latestAttempt = transaction.transferAttempts[0];
     if (!latestAttempt) {
-      throw new BadRequestException("Withdrawal has no transfer attempt");
+      throw new BadRequestException('Withdrawal has no transfer attempt');
     }
 
     const providerVerification =
@@ -914,8 +988,8 @@ export class AdminService {
       providerVerification.providerStatus,
     );
 
-    if (["SUCCESS", "REVERSED"].includes(transaction.status)) {
-      throw new BadRequestException("Terminal withdrawal cannot be changed");
+    if (['SUCCESS', 'REVERSED'].includes(transaction.status)) {
+      throw new BadRequestException('Terminal withdrawal cannot be changed');
     }
 
     const result = await this.prisma.$transaction(async (tx) => {
@@ -945,7 +1019,7 @@ export class AdminService {
           lastCheckedAt: new Date(),
           metadata: {
             ...(latestAttempt.metadata &&
-            typeof latestAttempt.metadata === "object" &&
+            typeof latestAttempt.metadata === 'object' &&
             !Array.isArray(latestAttempt.metadata)
               ? (latestAttempt.metadata as Record<string, unknown>)
               : {}),
@@ -958,13 +1032,13 @@ export class AdminService {
 
       const shouldReverse =
         updatedStatus.count === 1 &&
-        ["FAILED", "REVERSED"].includes(verifiedStatus);
+        ['FAILED', 'REVERSED'].includes(verifiedStatus);
 
       if (shouldReverse) {
         const existingReversal = await tx.ledgerEntry.findFirst({
           where: {
             transactionId: transaction.id,
-            source: "WITHDRAWAL_REVERSAL",
+            source: 'WITHDRAWAL_REVERSAL',
           },
         });
 
@@ -976,7 +1050,7 @@ export class AdminService {
               amount: new Decimal(transaction.amount),
               transactionId: transaction.id,
               reference: `${transaction.reference}-REVERSAL`,
-              source: "WITHDRAWAL_REVERSAL",
+              source: 'WITHDRAWAL_REVERSAL',
               metadata: {
                 adminId,
                 reason: dto.reason,
@@ -1009,8 +1083,8 @@ export class AdminService {
       await tx.auditLog.create({
         data: {
           adminId,
-          action: "TRANSFER_VERIFY",
-          targetType: "Transaction",
+          action: 'TRANSFER_VERIFY',
+          targetType: 'Transaction',
           targetId: transaction.id,
           reference,
           reason: dto.reason,
@@ -1021,7 +1095,7 @@ export class AdminService {
           },
           metadata: {
             reversed:
-              ["FAILED", "REVERSED"].includes(verifiedStatus) &&
+              ['FAILED', 'REVERSED'].includes(verifiedStatus) &&
               updatedStatus.count === 1,
           },
         },
@@ -1031,7 +1105,7 @@ export class AdminService {
         where: { id: transaction.id },
         include: {
           transferAttempts: {
-            orderBy: { createdAt: "desc" },
+            orderBy: { createdAt: 'desc' },
             take: 1,
           },
         },
@@ -1040,85 +1114,166 @@ export class AdminService {
 
     this.logger.info(
       { adminId, reference, status: verifiedStatus },
-      "Admin verified withdrawal transfer",
+      'Admin verified withdrawal transfer',
     );
 
     return result;
   }
 
-  async getReconciliationReport() {
+  async getReconciliationReport(from?: Date, to?: Date) {
     const staleCutoff = this.getStalePendingCutoff();
+    const createdAtRange =
+      from || to
+        ? {
+            createdAt: {
+              ...(from ? { gte: from } : {}),
+              ...(to ? { lte: to } : {}),
+            },
+          }
+        : {};
 
-    const [providerEvents, transactions, localOnlyWithdrawals, stalePending] =
-      await Promise.all([
-        this.prisma.providerEvent.findMany({
-          take: 200,
-          orderBy: { createdAt: "desc" },
-          select: {
-            id: true,
-            provider: true,
-            eventType: true,
-            providerReference: true,
-            status: true,
-            payload: true,
-            createdAt: true,
-          },
-        }),
-        this.prisma.transaction.findMany({
-          take: 200,
-          orderBy: { createdAt: "desc" },
-          select: {
-            id: true,
-            reference: true,
-            type: true,
-            amount: true,
-            currency: true,
-            status: true,
-          },
-        }),
-        this.prisma.transaction.findMany({
-          where: {
-            type: "WITHDRAW",
-            transferAttempts: { none: {} },
-          },
-          take: 100,
-          orderBy: { createdAt: "desc" },
-          select: {
-            id: true,
-            reference: true,
-            amount: true,
-            currency: true,
-            status: true,
-            createdAt: true,
-          },
-        }),
-        this.prisma.transferAttempt.findMany({
-          where: {
-            status: "PENDING",
-            createdAt: { lt: staleCutoff },
-          },
-          take: 100,
-          orderBy: { createdAt: "asc" },
-          select: {
-            id: true,
-            transactionId: true,
-            provider: true,
-            providerReference: true,
-            providerStatus: true,
-            status: true,
-            createdAt: true,
-            lastCheckedAt: true,
-            transaction: {
-              select: {
-                reference: true,
-                status: true,
-                amount: true,
-                currency: true,
-              },
+    const [
+      providerEvents,
+      transactions,
+      localOnlyWithdrawals,
+      stalePending,
+      failedProviderEvents,
+    ] = await Promise.all([
+      this.prisma.providerEvent.findMany({
+        where: { ...createdAtRange },
+        take: 200,
+        orderBy: { createdAt: 'desc' },
+        select: {
+          id: true,
+          provider: true,
+          eventType: true,
+          providerReference: true,
+          status: true,
+          payload: true,
+          createdAt: true,
+        },
+      }),
+      this.prisma.transaction.findMany({
+        where: { ...createdAtRange },
+        take: 200,
+        orderBy: { createdAt: 'desc' },
+        select: {
+          id: true,
+          reference: true,
+          type: true,
+          amount: true,
+          currency: true,
+          status: true,
+        },
+      }),
+      this.prisma.transaction.findMany({
+        where: {
+          type: 'WITHDRAW',
+          transferAttempts: { none: {} },
+          ...createdAtRange,
+        },
+        take: 100,
+        orderBy: { createdAt: 'desc' },
+        select: {
+          id: true,
+          reference: true,
+          amount: true,
+          currency: true,
+          status: true,
+          createdAt: true,
+        },
+      }),
+      this.prisma.transferAttempt.findMany({
+        where: {
+          status: 'PENDING',
+          createdAt: { lt: staleCutoff },
+        },
+        take: 100,
+        orderBy: { createdAt: 'asc' },
+        select: {
+          id: true,
+          transactionId: true,
+          provider: true,
+          providerReference: true,
+          providerStatus: true,
+          status: true,
+          createdAt: true,
+          lastCheckedAt: true,
+          transaction: {
+            select: {
+              reference: true,
+              status: true,
+              amount: true,
+              currency: true,
             },
           },
-        }),
-      ]);
+        },
+      }),
+      // Deposits whose webhook processing failed (e.g. lapsed KYC at credit
+      // time) — money is at the provider but never credited. Replayable via
+      // POST /admin/banking/deposits/:reference/replay.
+      this.prisma.providerEvent.findMany({
+        where: { status: 'FAILED', ...createdAtRange },
+        take: 100,
+        orderBy: { createdAt: 'desc' },
+        select: {
+          id: true,
+          provider: true,
+          eventType: true,
+          providerReference: true,
+          errorMessage: true,
+          createdAt: true,
+        },
+      }),
+    ]);
+
+    // Wallet balances vs net ledger movement must be compared over all time
+    // regardless of the requested range: balances are cumulative state.
+    const [walletTotals, ledgerTotals] = await Promise.all([
+      this.prisma.wallet.groupBy({
+        by: ['currency'],
+        _sum: { balance: true },
+      }),
+      this.prisma.ledgerEntry.groupBy({
+        by: ['currency', 'direction'],
+        _sum: { amount: true },
+      }),
+    ]);
+
+    const ledgerNetByCurrency = new Map<string, Decimal>();
+    for (const row of ledgerTotals) {
+      const amount = new Decimal(row._sum.amount ?? 0);
+      const current = ledgerNetByCurrency.get(row.currency) ?? new Decimal(0);
+      ledgerNetByCurrency.set(
+        row.currency,
+        row.direction === 'CREDIT'
+          ? current.plus(amount)
+          : current.minus(amount),
+      );
+    }
+
+    const currencies = new Set<string>([
+      ...walletTotals.map((row) => row.currency),
+      ...ledgerNetByCurrency.keys(),
+    ]);
+    const walletLedgerReconciliation = Array.from(currencies)
+      .sort()
+      .map((currency) => {
+        const walletTotal = new Decimal(
+          walletTotals.find((row) => row.currency === currency)?._sum.balance ??
+            0,
+        );
+        const ledgerNet = ledgerNetByCurrency.get(currency) ?? new Decimal(0);
+        const drift = walletTotal.minus(ledgerNet);
+
+        return {
+          currency,
+          walletTotal: walletTotal.toString(),
+          ledgerNet: ledgerNet.toString(),
+          drift: drift.toString(),
+          inSync: drift.isZero(),
+        };
+      });
 
     const transactionByReference = new Map(
       transactions.map((transaction) => [transaction.reference, transaction]),
@@ -1165,36 +1320,198 @@ export class AdminService {
         localWithdrawalsWithoutTransferAttempt: localOnlyWithdrawals.length,
         amountMismatches: amountMismatches.length,
         stalePendingTransfers: stalePending.length,
+        failedProviderEvents: failedProviderEvents.length,
       },
       providerOnlyEvents,
       localWithdrawalsWithoutTransferAttempt: localOnlyWithdrawals,
       amountMismatches,
       stalePendingTransfers: stalePending,
+      failedProviderEvents,
+      walletLedgerReconciliation,
     };
   }
 
   async runReconciliation(adminId: string, dto: AdminActionReasonDto) {
     this.assertReason(dto.reason);
-    const report = await this.getReconciliationReport();
+    const run = await this.prisma.reconciliationRun.create({
+      data: {
+        scope: 'ADMIN_BANKING',
+        initiatedById: adminId,
+      },
+    });
+
+    try {
+      const report = await this.getReconciliationReport();
+      const walletDriftCount = report.walletLedgerReconciliation.filter(
+        (entry) => !entry.inSync,
+      ).length;
+      const mismatchCount =
+        Object.values(report.summary).reduce(
+          (total, count) => total + count,
+          0,
+        ) + walletDriftCount;
+      const status = mismatchCount > 0 ? 'BLOCKED' : 'COMPLETED';
+
+      await this.prisma.reconciliationRun.update({
+        where: { id: run.id },
+        data: {
+          status,
+          completedAt: new Date(),
+          checkedCount: report.providerOnlyEvents.length,
+          mismatchCount,
+          mismatchDetails: this.sanitizeMetadata({
+            summary: report.summary,
+            walletLedgerReconciliation: report.walletLedgerReconciliation,
+            amountMismatches: report.amountMismatches,
+            stalePendingTransfers: report.stalePendingTransfers,
+            failedProviderEvents: report.failedProviderEvents,
+          }) as Prisma.InputJsonValue,
+        },
+      });
+
+      await this.prisma.auditLog.create({
+        data: {
+          adminId,
+          action: 'RECONCILIATION_RUN',
+          targetType: 'ReconciliationReport',
+          targetId: `report-${Date.now()}`,
+          reason: dto.reason,
+          after: report,
+          metadata: { summary: report.summary },
+        },
+      });
+
+      return report;
+    } catch (error) {
+      await this.prisma.reconciliationRun.update({
+        where: { id: run.id },
+        data: {
+          status: 'FAILED',
+          completedAt: new Date(),
+          errorMessage: error instanceof Error ? error.message : String(error),
+        },
+      });
+      throw error;
+    }
+  }
+
+  async getReconciliationRuns(limit = 20) {
+    return this.prisma.reconciliationRun.findMany({
+      take: Math.min(Math.max(limit, 1), 100),
+      orderBy: { createdAt: 'desc' },
+      select: {
+        id: true,
+        scope: true,
+        status: true,
+        initiatedById: true,
+        startedAt: true,
+        completedAt: true,
+        checkedCount: true,
+        mismatchCount: true,
+        errorMessage: true,
+        createdAt: true,
+      },
+    });
+  }
+
+  /**
+   * Replays a Monnify virtual-account deposit whose webhook processing failed
+   * (e.g. the user's KYC had lapsed when the money arrived). Reprocessing is
+   * idempotent: an already-PROCESSED provider event is a no-op.
+   */
+  async replayVirtualAccountDeposit(
+    reference: string,
+    dto: AdminActionReasonDto,
+    adminId: string,
+  ) {
+    this.assertReason(dto.reason);
+
+    const webhookLog = await this.prisma.webhookLog.findUnique({
+      where: { reference },
+    });
+
+    if (!webhookLog || webhookLog.provider !== 'MONNIFY') {
+      throw new NotFoundException(
+        'No Monnify webhook log found for this reference',
+      );
+    }
+
+    const payload = webhookLog.payload as {
+      eventType?: string;
+      eventData?: {
+        transactionReference?: string;
+        paymentReference?: string;
+        paymentStatus?: string;
+        amountPaid?: number;
+        totalPayable?: number;
+        settlementAmount?: number;
+        currency?: string;
+        destinationAccountInformation?: { accountNumber?: string };
+      };
+    };
+    const data = payload?.eventData;
+    const accountNumber = data?.destinationAccountInformation?.accountNumber;
+    const amount = data?.amountPaid ?? data?.totalPayable;
+    const providerReference =
+      data?.transactionReference || data?.paymentReference || reference;
+
+    if (
+      payload?.eventType !== 'SUCCESSFUL_TRANSACTION' ||
+      data?.paymentStatus !== 'PAID' ||
+      !accountNumber ||
+      !amount
+    ) {
+      throw new BadRequestException(
+        'Webhook log is not a replayable virtual account deposit',
+      );
+    }
+
+    const result = await this.bankingService.processVirtualAccountDeposit({
+      provider: 'monnify',
+      eventType: payload.eventType,
+      providerReference,
+      accountNumber,
+      amount: new Decimal(amount),
+      settlementAmount:
+        data?.settlementAmount !== undefined
+          ? new Decimal(data.settlementAmount)
+          : undefined,
+      currency: (data?.currency || 'NGN') as 'NGN' | 'GHS',
+      rawPayload: webhookLog.payload as Record<string, unknown>,
+    });
+
+    await this.prisma.webhookLog.update({
+      where: { reference },
+      data: { processed: true, errorMessage: null },
+    });
 
     await this.prisma.auditLog.create({
       data: {
         adminId,
-        action: "RECONCILIATION_RUN",
-        targetType: "ReconciliationReport",
-        targetId: `report-${Date.now()}`,
+        action: 'BANKING_DEPOSIT_REPLAY',
+        targetType: 'WebhookLog',
+        targetId: webhookLog.id,
+        reference: providerReference,
         reason: dto.reason,
-        after: report,
-        metadata: { summary: report.summary },
+        metadata: {
+          accountNumberMasked: maskAccountNumber(accountNumber),
+          amount: String(amount),
+          result,
+        },
       },
     });
 
-    return report;
+    this.logger.info(
+      { adminId, reference: providerReference, result },
+      'Admin replayed virtual account deposit',
+    );
+
+    return result;
   }
 
   async getStaleVtuOrders(olderThanMinutes = 10, limit = 50) {
     if (!Number.isInteger(olderThanMinutes) || olderThanMinutes < 1) {
-      throw new BadRequestException("olderThanMinutes must be at least 1");
+      throw new BadRequestException('olderThanMinutes must be at least 1');
     }
 
     const cutoff = new Date(Date.now() - olderThanMinutes * 60 * 1000);
@@ -1204,7 +1521,7 @@ export class AdminService {
         status: { in: STALE_VTU_STATUSES },
         createdAt: { lt: cutoff },
       },
-      orderBy: [{ createdAt: "asc" }],
+      orderBy: [{ createdAt: 'asc' }],
       select: {
         id: true,
         provider: true,
@@ -1283,14 +1600,14 @@ export class AdminService {
 
   async getVtuReconciliationReport(olderThanMinutes = 10, limit = 50) {
     if (!Number.isInteger(olderThanMinutes) || olderThanMinutes < 1) {
-      throw new BadRequestException("olderThanMinutes must be at least 1");
+      throw new BadRequestException('olderThanMinutes must be at least 1');
     }
 
     const generatedAt = new Date();
     const cutoff = new Date(generatedAt.getTime() - olderThanMinutes * 60000);
     const orders = await this.prisma.vtuOrder.findMany({
       take: limit,
-      orderBy: [{ createdAt: "desc" }],
+      orderBy: [{ createdAt: 'desc' }],
       select: {
         id: true,
         provider: true,
@@ -1388,11 +1705,11 @@ export class AdminService {
       const expectedDebit = orderAmount.plus(orderFee);
       const debitLedger = order.transaction.ledgerEntries.find(
         (entry) =>
-          entry.source === "VTU_PURCHASE" && entry.direction === "DEBIT",
+          entry.source === 'VTU_PURCHASE' && entry.direction === 'DEBIT',
       );
       const reversalCredit = order.transaction.ledgerEntries.find(
         (entry) =>
-          entry.source === "VTU_REVERSAL" && entry.direction === "CREDIT",
+          entry.source === 'VTU_REVERSAL' && entry.direction === 'CREDIT',
       );
 
       summary.totalOrderAmount = summary.totalOrderAmount.plus(orderAmount);
@@ -1400,7 +1717,7 @@ export class AdminService {
       summary.totalDebitAmount = summary.totalDebitAmount.plus(expectedDebit);
       this.addVtuBreakdown(
         providerBreakdown,
-        "provider",
+        'provider',
         order.provider,
         orderAmount,
         orderFee,
@@ -1408,7 +1725,7 @@ export class AdminService {
       );
       this.addVtuBreakdown(
         statusBreakdown,
-        "status",
+        'status',
         order.status,
         orderAmount,
         orderFee,
@@ -1466,7 +1783,7 @@ export class AdminService {
         });
       }
 
-      if (["FAILED", "REVERSED"].includes(order.status) && !reversalCredit) {
+      if (['FAILED', 'REVERSED'].includes(order.status) && !reversalCredit) {
         summary.terminalWithoutReversalCredit += 1;
         exceptions.terminalWithoutReversalCredit.push({
           ...this.toVtuReconciliationOrderReference(order),
@@ -1509,17 +1826,17 @@ export class AdminService {
 
     const before = await this.vtuService.findOrderForAdmin(reference);
     if (!before) {
-      throw new NotFoundException("VTU order not found");
+      throw new NotFoundException('VTU order not found');
     }
 
-    let requeryResult: Awaited<ReturnType<VtuService["requeryOrder"]>> | null =
+    let requeryResult: Awaited<ReturnType<VtuService['requeryOrder']>> | null =
       null;
     let requeryError: string | null = null;
 
     try {
       requeryResult = await this.vtuService.requeryOrder(before.id);
     } catch (error) {
-      requeryError = error instanceof Error ? error.message : "Unknown error";
+      requeryError = error instanceof Error ? error.message : 'Unknown error';
     }
 
     const after = await this.vtuService.findOrderForAdmin(before.id);
@@ -1527,8 +1844,8 @@ export class AdminService {
     await this.prisma.auditLog.create({
       data: {
         adminId,
-        action: "VTU_ORDER_REQUERY",
-        targetType: "VtuOrder",
+        action: 'VTU_ORDER_REQUERY',
+        targetType: 'VtuOrder',
         targetId: before.id,
         reference,
         reason: dto.reason,
@@ -1556,9 +1873,9 @@ export class AdminService {
           orderId: before.id,
           error: requeryError,
         },
-        "Admin manual VTU order requery failed",
+        'Admin manual VTU order requery failed',
       );
-      throw new BadRequestException("VTU order requery failed");
+      throw new BadRequestException('VTU order requery failed');
     }
 
     this.logger.info(
@@ -1568,7 +1885,7 @@ export class AdminService {
         orderId: before.id,
         status: after?.status,
       },
-      "Admin manually requeried VTU order",
+      'Admin manually requeried VTU order',
     );
 
     return {
@@ -1599,9 +1916,9 @@ export class AdminService {
       take: query.limit ?? 50,
       where,
       orderBy: [
-        { isActive: "desc" },
-        { priority: "desc" },
-        { createdAt: "desc" },
+        { isActive: 'desc' },
+        { priority: 'desc' },
+        { createdAt: 'desc' },
       ],
     });
   }
@@ -1622,8 +1939,8 @@ export class AdminService {
       await tx.auditLog.create({
         data: {
           adminId,
-          action: "VTU_PRICING_RULE_CREATE",
-          targetType: "VtuPricingRule",
+          action: 'VTU_PRICING_RULE_CREATE',
+          targetType: 'VtuPricingRule',
           targetId: rule.id,
           reason,
           after: this.toVtuPricingRuleAuditSnapshot(rule),
@@ -1642,7 +1959,7 @@ export class AdminService {
 
     this.logger.info(
       { adminId, ruleId: created.id },
-      "Admin created VTU pricing rule",
+      'Admin created VTU pricing rule',
     );
 
     return created;
@@ -1661,7 +1978,7 @@ export class AdminService {
     });
 
     if (!existing) {
-      throw new NotFoundException("VTU pricing rule not found");
+      throw new NotFoundException('VTU pricing rule not found');
     }
 
     const { reason, ...ruleInput } = dto;
@@ -1674,8 +1991,8 @@ export class AdminService {
       await tx.auditLog.create({
         data: {
           adminId,
-          action: "VTU_PRICING_RULE_UPDATE",
-          targetType: "VtuPricingRule",
+          action: 'VTU_PRICING_RULE_UPDATE',
+          targetType: 'VtuPricingRule',
           targetId: ruleId,
           reason,
           before: this.toVtuPricingRuleAuditSnapshot(existing),
@@ -1689,7 +2006,7 @@ export class AdminService {
       return rule;
     });
 
-    this.logger.info({ adminId, ruleId }, "Admin updated VTU pricing rule");
+    this.logger.info({ adminId, ruleId }, 'Admin updated VTU pricing rule');
 
     return updated;
   }
@@ -1706,7 +2023,7 @@ export class AdminService {
     });
 
     if (!existing) {
-      throw new NotFoundException("VTU pricing rule not found");
+      throw new NotFoundException('VTU pricing rule not found');
     }
 
     const updated = await this.prisma.$transaction(async (tx) => {
@@ -1718,8 +2035,8 @@ export class AdminService {
       await tx.auditLog.create({
         data: {
           adminId,
-          action: "VTU_PRICING_RULE_DEACTIVATE",
-          targetType: "VtuPricingRule",
+          action: 'VTU_PRICING_RULE_DEACTIVATE',
+          targetType: 'VtuPricingRule',
           targetId: ruleId,
           reason: dto.reason,
           before: this.toVtuPricingRuleAuditSnapshot(existing),
@@ -1730,17 +2047,15 @@ export class AdminService {
       return rule;
     });
 
-    this.logger.info({ adminId, ruleId }, "Admin deactivated VTU pricing rule");
+    this.logger.info({ adminId, ruleId }, 'Admin deactivated VTU pricing rule');
 
     return updated;
   }
 
-  async getAuditLogs(
-    query: number | AdminAuditLogsQueryDto = 50,
-  ) {
-    const limit = typeof query === "number" ? query : query.limit ?? 50;
+  async getAuditLogs(query: number | AdminAuditLogsQueryDto = 50) {
+    const limit = typeof query === 'number' ? query : (query.limit ?? 50);
     const filters =
-      typeof query === "number"
+      typeof query === 'number'
         ? {}
         : {
             q: query.q?.trim(),
@@ -1782,22 +2097,22 @@ export class AdminService {
     if (filters.q) {
       whereClauses.push({
         OR: [
-          { action: { contains: filters.q, mode: "insensitive" } },
-          { targetType: { contains: filters.q, mode: "insensitive" } },
-          { targetId: { contains: filters.q, mode: "insensitive" } },
-          { reference: { contains: filters.q, mode: "insensitive" } },
-          { reason: { contains: filters.q, mode: "insensitive" } },
+          { action: { contains: filters.q, mode: 'insensitive' } },
+          { targetType: { contains: filters.q, mode: 'insensitive' } },
+          { targetId: { contains: filters.q, mode: 'insensitive' } },
+          { reference: { contains: filters.q, mode: 'insensitive' } },
+          { reason: { contains: filters.q, mode: 'insensitive' } },
           {
             admin: {
               is: {
-                email: { contains: filters.q, mode: "insensitive" },
+                email: { contains: filters.q, mode: 'insensitive' },
               },
             },
           },
           {
             admin: {
               is: {
-                fullName: { contains: filters.q, mode: "insensitive" },
+                fullName: { contains: filters.q, mode: 'insensitive' },
               },
             },
           },
@@ -1805,13 +2120,12 @@ export class AdminService {
       });
     }
 
-    const where =
-      whereClauses.length > 0 ? { AND: whereClauses } : undefined;
+    const where = whereClauses.length > 0 ? { AND: whereClauses } : undefined;
 
     const logs = await this.prisma.auditLog.findMany({
       where,
       take: limit,
-      orderBy: { createdAt: "desc" },
+      orderBy: { createdAt: 'desc' },
       select: {
         id: true,
         adminId: true,
@@ -1844,43 +2158,36 @@ export class AdminService {
 
   async getOpsSummary(limit = 10) {
     if (!Number.isInteger(limit) || limit < 1 || limit > 100) {
-      throw new BadRequestException("limit must be between 1 and 100");
+      throw new BadRequestException('limit must be between 1 and 100');
     }
 
     const receiptStatuses = {
-      submitted: "SUBMITTED",
-      underReview: "UNDER_REVIEW",
-      approved: "APPROVED",
-      credited: "CREDITED",
-      rejected: "REJECTED",
-      needsMoreInfo: "NEEDS_MORE_INFO",
+      submitted: 'SUBMITTED',
+      underReview: 'UNDER_REVIEW',
+      approved: 'APPROVED',
+      credited: 'CREDITED',
+      rejected: 'REJECTED',
+      needsMoreInfo: 'NEEDS_MORE_INFO',
     } as const satisfies Record<string, ExchangeReceiptStatus>;
     const payoutStatuses = {
-      pendingApproval: "PENDING_APPROVAL",
-      approved: "APPROVED",
-      processing: "PROCESSING",
-      sent: "SENT",
-      failed: "FAILED",
-      reversed: "REVERSED",
+      pendingApproval: 'PENDING_APPROVAL',
+      approved: 'APPROVED',
+      processing: 'PROCESSING',
+      sent: 'SENT',
+      failed: 'FAILED',
+      reversed: 'REVERSED',
     } as const satisfies Record<string, ExchangePayoutStatus>;
-    const vtuOrderStatuses: VtuOrderStatus[] = [
-      "PENDING",
-      "PROCESSING",
-      "SUCCESS",
-      "FAILED",
-      "REVERSED",
-      "UNKNOWN",
-    ];
     const serviceOrder: TransactionType[] = [
-      "AIRTIME",
-      "DATA",
-      "CABLE",
-      "ELECTRICITY",
+      'AIRTIME',
+      'DATA',
+      'CABLE',
+      'ELECTRICITY',
     ];
     const platformServiceTrendStart = new Date();
     platformServiceTrendStart.setUTCHours(0, 0, 0, 0);
     platformServiceTrendStart.setUTCDate(
-      platformServiceTrendStart.getUTCDate() - (PLATFORM_SERVICE_TREND_DAYS - 1),
+      platformServiceTrendStart.getUTCDate() -
+        (PLATFORM_SERVICE_TREND_DAYS - 1),
     );
 
     const [
@@ -1899,14 +2206,14 @@ export class AdminService {
     ] = await Promise.all([
       this.getStats(),
       this.prisma.user.count({ where: { isSuspended: true } }),
-      this.prisma.user.count({ where: { kycStatus: "VERIFIED" } }),
+      this.prisma.user.count({ where: { kycStatus: 'VERIFIED' } }),
       this.prisma.wallet.groupBy({
-        by: ["currency"],
+        by: ['currency'],
         _count: { _all: true },
         _sum: { balance: true },
       }),
       this.prisma.exchangeReceipt.groupBy({
-        by: ["status"],
+        by: ['status'],
         _count: { _all: true },
         _sum: {
           amount: true,
@@ -1914,7 +2221,7 @@ export class AdminService {
         },
       }),
       this.prisma.exchangePayout.groupBy({
-        by: ["status"],
+        by: ['status'],
         _count: { _all: true },
         _sum: {
           sourceAmount: true,
@@ -1923,8 +2230,8 @@ export class AdminService {
         },
       }),
       this.prisma.transaction.groupBy({
-        by: ["type", "currency"],
-        where: { status: "SUCCESS" },
+        by: ['type', 'currency'],
+        where: { status: 'SUCCESS' },
         _count: { _all: true },
         _sum: {
           amount: true,
@@ -1936,13 +2243,13 @@ export class AdminService {
       }),
       this.prisma.transaction.findMany({
         where: {
-          status: "SUCCESS",
+          status: 'SUCCESS',
           type: { in: USER_SERVICE_ORDER },
           createdAt: {
             gte: platformServiceTrendStart,
           },
         },
-        orderBy: { createdAt: "asc" },
+        orderBy: { createdAt: 'asc' },
         select: {
           type: true,
           currency: true,
@@ -1952,7 +2259,7 @@ export class AdminService {
         },
       }),
       this.prisma.vtuOrder.groupBy({
-        by: ["serviceType"],
+        by: ['serviceType'],
         _count: { _all: true },
         _sum: {
           amount: true,
@@ -1963,12 +2270,12 @@ export class AdminService {
       }),
       this.prisma.vtuOrder.count({
         where: {
-          status: { in: ["PENDING", "PROCESSING", "UNKNOWN"] },
+          status: { in: ['PENDING', 'PROCESSING', 'UNKNOWN'] },
         },
       }),
       this.prisma.transaction.findMany({
         take: limit,
-        orderBy: { createdAt: "desc" },
+        orderBy: { createdAt: 'desc' },
         select: {
           id: true,
           reference: true,
@@ -1989,7 +2296,7 @@ export class AdminService {
       }),
       this.prisma.auditLog.findMany({
         take: limit,
-        orderBy: { createdAt: "desc" },
+        orderBy: { createdAt: 'desc' },
         select: {
           id: true,
           action: true,
@@ -2017,13 +2324,14 @@ export class AdminService {
       }))
       .sort((left, right) => {
         const order: Record<string, number> = { NGN: 0, GHS: 1 };
-        return (
-          (order[left.currency] ?? 99) - (order[right.currency] ?? 99)
-        );
+        return (order[left.currency] ?? 99) - (order[right.currency] ?? 99);
       });
 
     const totalWalletExposure = walletExposureByCurrency
-      .reduce((total, entry) => total.plus(new Decimal(entry.balance)), new Decimal(0))
+      .reduce(
+        (total, entry) => total.plus(new Decimal(entry.balance)),
+        new Decimal(0),
+      )
       .toFixed(2);
 
     const receiptStatusCounts = this.groupStatusCounts(
@@ -2078,8 +2386,8 @@ export class AdminService {
       }))
       .sort((left, right) => {
         const typeDiff =
-          USER_SERVICE_ORDER.indexOf(left.serviceType as TransactionType) -
-          USER_SERVICE_ORDER.indexOf(right.serviceType as TransactionType);
+          USER_SERVICE_ORDER.indexOf(left.serviceType) -
+          USER_SERVICE_ORDER.indexOf(right.serviceType);
         if (typeDiff !== 0) {
           return typeDiff;
         }
@@ -2123,8 +2431,8 @@ export class AdminService {
       }))
       .sort(
         (left, right) =>
-          serviceOrder.indexOf(left.serviceType as TransactionType) -
-          serviceOrder.indexOf(right.serviceType as TransactionType),
+          serviceOrder.indexOf(left.serviceType) -
+          serviceOrder.indexOf(right.serviceType),
       );
 
     const totalVtuAmount = vtuBuckets
@@ -2141,7 +2449,8 @@ export class AdminService {
       .toFixed(2);
     const totalVtuCostAmount = vtuBuckets
       .reduce(
-        (total, entry) => total.plus(this.toDecimalOrZero(entry._sum.costAmount)),
+        (total, entry) =>
+          total.plus(this.toDecimalOrZero(entry._sum.costAmount)),
         new Decimal(0),
       )
       .toFixed(2);
@@ -2153,10 +2462,9 @@ export class AdminService {
       .toFixed(2);
 
     const settlementAccountNumber =
-      this.configService.get<string>(
-        "MONNIFY_EXCHANGE_COLLECTION_ACCOUNT_NUMBER",
-        "",
-      )?.trim() || "";
+      this.configService
+        .get<string>('MONNIFY_EXCHANGE_COLLECTION_ACCOUNT_NUMBER', '')
+        ?.trim() || '';
 
     return {
       generatedAt: new Date(),
@@ -2167,14 +2475,14 @@ export class AdminService {
       },
       treasury: {
         settlementAccount: {
-          provider: "MONNIFY",
+          provider: 'MONNIFY',
           configured: settlementAccountNumber.length > 0,
           accountNumberMasked: settlementAccountNumber
             ? maskAccountNumber(settlementAccountNumber)
             : null,
           note: settlementAccountNumber
-            ? "Exchange deposits settle to the configured Monnify collection account."
-            : "Configure MONNIFY_EXCHANGE_COLLECTION_ACCOUNT_NUMBER to lock exchange deposits to one settlement account.",
+            ? 'Exchange deposits settle to the configured Monnify collection account.'
+            : 'Configure MONNIFY_EXCHANGE_COLLECTION_ACCOUNT_NUMBER to lock exchange deposits to one settlement account.',
         },
         walletExposure: walletExposureByCurrency,
         totalWalletExposure,
@@ -2183,9 +2491,8 @@ export class AdminService {
         receipts: {
           ...receiptStatusCounts,
           totalSourceAmount: receiptTotals.sourceAmount.toFixed(2),
-          totalExpectedCreditAmount: receiptTotals.expectedCreditAmount.toFixed(
-            2,
-          ),
+          totalExpectedCreditAmount:
+            receiptTotals.expectedCreditAmount.toFixed(2),
         },
         payouts: {
           ...payoutStatusCounts,
@@ -2229,7 +2536,7 @@ export class AdminService {
     providerReference: string;
     metadata: unknown;
   }) {
-    if (latestAttempt.provider === "PAYSTACK") {
+    if (latestAttempt.provider === 'PAYSTACK') {
       const transfer = await this.paystack.verifyTransfer(
         latestAttempt.providerReference,
       );
@@ -2240,15 +2547,15 @@ export class AdminService {
       };
     }
 
-    if (latestAttempt.provider !== "FLUTTERWAVE") {
+    if (latestAttempt.provider !== 'FLUTTERWAVE') {
       throw new BadRequestException(
-        "Provider transfer verification is not supported for this provider",
+        'Provider transfer verification is not supported for this provider',
       );
     }
 
     const metadata =
       latestAttempt.metadata &&
-      typeof latestAttempt.metadata === "object" &&
+      typeof latestAttempt.metadata === 'object' &&
       !Array.isArray(latestAttempt.metadata)
         ? (latestAttempt.metadata as Record<string, unknown>)
         : {};
@@ -2256,7 +2563,7 @@ export class AdminService {
 
     if (!Number.isFinite(providerTransferId)) {
       throw new BadRequestException(
-        "Flutterwave transfer id is required for provider verification",
+        'Flutterwave transfer id is required for provider verification',
       );
     }
 
@@ -2272,26 +2579,26 @@ export class AdminService {
     const normalized = status.toLowerCase();
 
     if (
-      ["success", "successful", "completed", "complete"].includes(normalized)
+      ['success', 'successful', 'completed', 'complete'].includes(normalized)
     ) {
-      return "SUCCESS";
+      return 'SUCCESS';
     }
 
-    if (normalized === "reversed") {
-      return "REVERSED";
+    if (normalized === 'reversed') {
+      return 'REVERSED';
     }
 
-    if (["failed", "abandoned", "blocked", "rejected"].includes(normalized)) {
-      return "FAILED";
+    if (['failed', 'abandoned', 'blocked', 'rejected'].includes(normalized)) {
+      return 'FAILED';
     }
 
-    return "PENDING";
+    return 'PENDING';
   }
 
   private assertReason(reason: string) {
     if (!reason || reason.trim().length < 10) {
       throw new BadRequestException(
-        "A reason of at least 10 characters is required",
+        'A reason of at least 10 characters is required',
       );
     }
   }
@@ -2322,9 +2629,7 @@ export class AdminService {
     };
   }
 
-  private groupStatusCounts<
-    TStatusMap extends Record<string, string>,
-  >(
+  private groupStatusCounts<TStatusMap extends Record<string, string>>(
     statuses: TStatusMap,
     rows: Array<{ status: string; _count: { _all: number } }>,
   ) {
@@ -2353,18 +2658,18 @@ export class AdminService {
         : new Decimal(input.percentMargin);
 
     if (fixedMargin.lessThan(0) || percentMargin.lessThan(0)) {
-      throw new BadRequestException("VTU margins cannot be negative");
+      throw new BadRequestException('VTU margins cannot be negative');
     }
 
     if (percentMargin.greaterThan(100)) {
-      throw new BadRequestException("VTU percent margin cannot exceed 100");
+      throw new BadRequestException('VTU percent margin cannot exceed 100');
     }
 
     if (input.minAmount && input.maxAmount) {
       const minAmount = new Decimal(input.minAmount);
       const maxAmount = new Decimal(input.maxAmount);
       if (minAmount.greaterThan(maxAmount)) {
-        throw new BadRequestException("minAmount cannot exceed maxAmount");
+        throw new BadRequestException('minAmount cannot exceed maxAmount');
       }
     }
   }
@@ -2482,7 +2787,9 @@ export class AdminService {
       currencyBucket.amount = currencyBucket.amount.plus(
         this.toDecimalOrZero(row.amount),
       );
-      currencyBucket.fee = currencyBucket.fee.plus(this.toDecimalOrZero(row.fee));
+      currencyBucket.fee = currencyBucket.fee.plus(
+        this.toDecimalOrZero(row.fee),
+      );
       bucket.currencyBreakdown.set(row.currency, currencyBucket);
     }
 
@@ -2533,7 +2840,7 @@ export class AdminService {
         totalDebitAmount: Decimal;
       }
     >,
-    label: "provider" | "status",
+    label: 'provider' | 'status',
     key: string,
     amount: Decimal,
     fee: Decimal,
@@ -2569,7 +2876,7 @@ export class AdminService {
   ) {
     return Array.from(breakdown.values()).map((item) => ({
       ...item,
-      currency: "NGN",
+      currency: 'NGN',
       amount: item.totalAmount.toString(),
       costAmount: item.totalAmount.toString(),
       fees: item.totalFees.toString(),
@@ -2603,7 +2910,7 @@ export class AdminService {
         summary.amountMismatches +
         summary.missingDebitLedger +
         summary.terminalWithoutReversalCredit,
-      currency: "NGN",
+      currency: 'NGN',
       totalOrderAmount: summary.totalOrderAmount.toString(),
       totalFees: summary.totalFees.toString(),
       totalDebitAmount: summary.totalDebitAmount.toString(),
@@ -2653,7 +2960,7 @@ export class AdminService {
   }
 
   private extractProviderAmount(payload: unknown): Decimal | null {
-    if (!payload || typeof payload !== "object") {
+    if (!payload || typeof payload !== 'object') {
       return null;
     }
 
@@ -2664,7 +2971,7 @@ export class AdminService {
       return null;
     }
 
-    if (typeof rawAmount !== "string" && typeof rawAmount !== "number") {
+    if (typeof rawAmount !== 'string' && typeof rawAmount !== 'number') {
       return null;
     }
 
@@ -2677,7 +2984,7 @@ export class AdminService {
   }
 
   private sanitizeMetadata(metadata: unknown) {
-    if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
+    if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
       return {};
     }
 
@@ -2732,7 +3039,7 @@ export class AdminService {
   }
 
   private toVtuOrderAuditSnapshot(
-    order: Awaited<ReturnType<VtuService["findOrderForAdmin"]>>,
+    order: Awaited<ReturnType<VtuService['findOrderForAdmin']>>,
   ): Prisma.InputJsonValue {
     if (!order) {
       return {};

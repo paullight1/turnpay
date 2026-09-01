@@ -7,7 +7,7 @@ services:
       - '5432'
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-trustpay}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
       POSTGRES_DB: ${POSTGRES_DB:-trustpay_db}
     volumes:
       - postgres_data:/var/lib/postgresql/data
@@ -25,9 +25,9 @@ services:
     restart: unless-stopped
     expose:
       - '6379'
-    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD}
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
     environment:
-      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
     volumes:
       - redis_data:/data
     healthcheck:
@@ -49,10 +49,10 @@ services:
     environment:
       NODE_ENV: production
       PORT: 3000
-      DATABASE_URL: postgresql://${POSTGRES_USER:-trustpay}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-trustpay_db}?schema=public
+      DATABASE_URL: postgresql://${POSTGRES_USER:-trustpay}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:-trustpay_db}?schema=public
       REDIS_HOST: redis
       REDIS_PORT: 6379
-      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
       WEB_URL: ${WEB_URL}
       ADMIN_URL: ${ADMIN_URL}
       SUPABASE_URL: ${SUPABASE_URL}
@@ -67,6 +67,19 @@ services:
       FLUTTERWAVE_PUBLIC_KEY: ${FLUTTERWAVE_PUBLIC_KEY}
       FLUTTERWAVE_ENCRYPTION_KEY: ${FLUTTERWAVE_ENCRYPTION_KEY}
       FLUTTERWAVE_SECRET_HASH: ${FLUTTERWAVE_SECRET_HASH}
+      MONNIFY_API_KEY: ${MONNIFY_API_KEY}
+      MONNIFY_SECRET_KEY: ${MONNIFY_SECRET_KEY}
+      MONNIFY_CONTRACT_CODE: ${MONNIFY_CONTRACT_CODE}
+      MONNIFY_BASE_URL: ${MONNIFY_BASE_URL}
+      MONNIFY_WEBHOOK_SECRET: ${MONNIFY_WEBHOOK_SECRET}
+      MONNIFY_WEBHOOK_URL: ${MONNIFY_WEBHOOK_URL}
+      MONNIFY_EXCHANGE_COLLECTION_ACCOUNT_NUMBER: ${MONNIFY_EXCHANGE_COLLECTION_ACCOUNT_NUMBER}
+      VTU_PROVIDER: ${VTU_PROVIDER:-generic}
+      VTPASS_BASE_URL: ${VTPASS_BASE_URL}
+      VTPASS_API_KEY: ${VTPASS_API_KEY}
+      VTPASS_PUBLIC_KEY: ${VTPASS_PUBLIC_KEY}
+      VTPASS_SECRET_KEY: ${VTPASS_SECRET_KEY}
+      VTPASS_WEBHOOK_SECRET: ${VTPASS_WEBHOOK_SECRET}
       PII_ENCRYPTION_KEY: ${PII_ENCRYPTION_KEY}
       BANK_ACCOUNT_ENCRYPTION_KEY: ${BANK_ACCOUNT_ENCRYPTION_KEY}
       TRANSACTION_PIN_REQUIRED: ${TRANSACTION_PIN_REQUIRED:-true}
@@ -75,6 +88,13 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    healthcheck:
+      test:
+        ['CMD', 'node', '-e', "fetch('http://127.0.0.1:3000/api/health').then((res) => { if (!res.ok) process.exit(1); }).catch(() => process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
     networks:
       - trustpay
 
@@ -90,9 +110,18 @@ services:
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
       NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL}
       NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY}
+      NEXT_PUBLIC_SITE_URL: ${NEXT_PUBLIC_SITE_URL}
       NODE_ENV: production
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test:
+        ['CMD', 'node', '-e', "fetch('http://127.0.0.1:3001/').then((res) => { if (!res.ok) process.exit(1); }).catch(() => process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
     networks:
       - trustpay
 

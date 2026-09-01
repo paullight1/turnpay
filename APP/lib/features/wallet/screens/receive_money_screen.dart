@@ -3,7 +3,9 @@ import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 
 import '../../../core/theme/app_theme.dart';
+import '../../../core/utils/haptics.dart';
 import '../../../core/widgets/micro_interactions.dart';
+import '../../../core/widgets/tp_illustration.dart';
 import '../../../core/widgets/tp_page_header.dart';
 import '../../../core/widgets/tp_snackbar.dart';
 import '../../../services/api_client.dart';
@@ -12,15 +14,21 @@ import '../../../services/home_data_service.dart';
 import '../../../services/wallet_service.dart';
 
 class ReceiveMoneyScreen extends StatefulWidget {
-  const ReceiveMoneyScreen({super.key});
+  final WalletService walletService;
+  final HomeDataService homeDataService;
+
+  ReceiveMoneyScreen({
+    super.key,
+    WalletService? walletService,
+    HomeDataService? homeDataService,
+  })  : walletService = walletService ?? WalletService(),
+        homeDataService = homeDataService ?? HomeDataService();
 
   @override
   State<ReceiveMoneyScreen> createState() => _ReceiveMoneyScreenState();
 }
 
 class _ReceiveMoneyScreenState extends State<ReceiveMoneyScreen> {
-  final _walletService = WalletService();
-  final _homeDataService = HomeDataService();
   final _accountRequestAttempt = MoneyAttemptIdempotency();
   late Future<List<VirtualAccountData>> _accountsFuture;
   late Future<List<DepositRecord>> _depositsFuture;
@@ -33,8 +41,8 @@ class _ReceiveMoneyScreenState extends State<ReceiveMoneyScreen> {
   }
 
   void _loadData() {
-    _accountsFuture = _walletService.fetchVirtualAccounts();
-    _depositsFuture = _walletService.fetchRecentDeposits(limit: 20);
+    _accountsFuture = widget.walletService.fetchVirtualAccounts();
+    _depositsFuture = widget.walletService.fetchRecentDeposits(limit: 20);
   }
 
   void _refresh() {
@@ -49,10 +57,10 @@ class _ReceiveMoneyScreenState extends State<ReceiveMoneyScreen> {
     setState(() => _isRequestingAccount = true);
 
     try {
-      final dashboard = await _homeDataService.fetchDashboard();
+      final dashboard = await widget.homeDataService.fetchDashboard();
       final names = _virtualAccountNameParts(dashboard.user);
 
-      await _homeDataService.provisionVirtualAccount(
+      await widget.homeDataService.provisionVirtualAccount(
         firstName: names.firstName,
         lastName: names.lastName,
         middleName: names.middleName,
@@ -106,13 +114,28 @@ class _ReceiveMoneyScreenState extends State<ReceiveMoneyScreen> {
         child: FutureBuilder<List<VirtualAccountData>>(
           future: _accountsFuture,
           builder: (context, accountsSnapshot) {
+            // Loading: no account data has arrived yet. Never fall through to
+            // the "No virtual account yet" empty state while a fetch is pending.
+            if (accountsSnapshot.connectionState == ConnectionState.waiting &&
+                !accountsSnapshot.hasData) {
+              return const _ReceiveMoneyLoadingState();
+            }
+
+            // Error: the request failed and we have no data to show. Surface a
+            // retry instead of masking the failure as "you have no account".
+            if (accountsSnapshot.hasError && !accountsSnapshot.hasData) {
+              return _ReceiveMoneyErrorState(
+                message: 'Could not load your receiving account',
+                onRetry: _refresh,
+              );
+            }
+
             final accounts = accountsSnapshot.data ?? [];
+            final hasAccount = accounts.isNotEmpty;
 
             return FutureBuilder<List<DepositRecord>>(
               future: _depositsFuture,
               builder: (context, depositsSnapshot) {
-                final deposits = depositsSnapshot.data ?? [];
-
                 return CustomScrollView(
                   physics: const AlwaysScrollableScrollPhysics(
                     parent: BouncingScrollPhysics(),
@@ -128,7 +151,7 @@ class _ReceiveMoneyScreenState extends State<ReceiveMoneyScreen> {
                       sliver: SliverList.list(
                         children: [
                           // Virtual account card
-                          if (accounts.isNotEmpty)
+                          if (hasAccount)
                             ...accounts.map((account) {
                               return Padding(
                                 padding: const EdgeInsets.only(
@@ -145,7 +168,10 @@ class _ReceiveMoneyScreenState extends State<ReceiveMoneyScreen> {
                               onRequest: _requestVirtualAccount,
                             ),
 
-                          if (accounts.isEmpty) ...[
+                          // "How to receive money" refers to the account number
+                          // shown above, so only render it once the user has an
+                          // account to share.
+                          if (hasAccount) ...[
                             SizedBox(height: AppSpacing.md),
 
                             // Deposit instructions
@@ -217,63 +243,95 @@ class _ReceiveMoneyScreenState extends State<ReceiveMoneyScreen> {
                       ),
                     ),
 
-                    // Deposits list
-                    if (deposits.isEmpty)
-                      SliverPadding(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: AppSpacing.lg,
-                        ),
-                        sliver: SliverToBoxAdapter(
-                          child: Container(
-                            padding: const EdgeInsets.all(AppSpacing.xl),
-                            decoration: BoxDecoration(
-                              color: AppColors.surfaceVariant,
-                              borderRadius: BorderRadius.circular(AppRadius.md),
-                            ),
-                            child: Column(
-                              children: [
-                                Icon(
-                                  Icons.history_rounded,
-                                  color: AppColors.textHint,
-                                  size: 48,
-                                ),
-                                SizedBox(height: AppSpacing.md),
-                                Text(
-                                  'No deposits yet',
-                                  style: AppTextStyles.labelM,
-                                ),
-                                SizedBox(height: AppSpacing.xs),
-                                Text(
-                                  'Deposits will appear here once someone sends money to your virtual account',
-                                  style: AppTextStyles.bodyS,
-                                  textAlign: TextAlign.center,
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      )
-                    else
-                      SliverPadding(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: AppSpacing.lg,
-                        ),
-                        sliver: SliverList.separated(
-                          itemCount: deposits.length,
-                          separatorBuilder: (_, __) =>
-                              SizedBox(height: AppSpacing.sm),
-                          itemBuilder: (context, index) {
-                            final deposit = deposits[index];
-                            return _DepositRow(deposit: deposit);
-                          },
-                        ),
-                      ),
+                    // Deposits section (loading / error / empty / list)
+                    _buildDepositsSliver(depositsSnapshot),
                   ],
                 );
               },
             );
           },
         ),
+      ),
+    );
+  }
+
+  Widget _buildDepositsSliver(AsyncSnapshot<List<DepositRecord>> snapshot) {
+    // Loading: history is still being fetched and nothing has arrived yet.
+    if (snapshot.connectionState == ConnectionState.waiting &&
+        !snapshot.hasData) {
+      return SliverPadding(
+        padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
+        sliver: SliverList.separated(
+          itemCount: 4,
+          separatorBuilder: (_, __) => SizedBox(height: AppSpacing.sm),
+          itemBuilder: (context, index) => ShimmerBlock(
+            width: double.infinity,
+            height: 68,
+            borderRadius: BorderRadius.circular(AppRadius.sm),
+          ),
+        ),
+      );
+    }
+
+    // Error: the fetch failed and we have no cached history. Show a retry
+    // affordance instead of a misleading "no deposits yet" empty state.
+    if (snapshot.hasError && !snapshot.hasData) {
+      return SliverPadding(
+        padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
+        sliver: SliverToBoxAdapter(
+          child: _DepositsErrorCard(onRetry: _refresh),
+        ),
+      );
+    }
+
+    final deposits = snapshot.data ?? [];
+
+    // Genuinely empty history.
+    if (deposits.isEmpty) {
+      return SliverPadding(
+        padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
+        sliver: SliverToBoxAdapter(
+          child: Container(
+            padding: const EdgeInsets.all(AppSpacing.xl),
+            decoration: BoxDecoration(
+              color: AppColors.surfaceVariant,
+              borderRadius: BorderRadius.circular(AppRadius.md),
+            ),
+            child: Column(
+              children: [
+                TpIllustration(
+                  variant: TpIllustrationVariant.emptyTransactions,
+                  size: 128,
+                  semanticLabel: 'No deposits yet',
+                ),
+                SizedBox(height: AppSpacing.sm),
+                Text(
+                  'No deposits yet',
+                  style: AppTextStyles.labelM,
+                ),
+                SizedBox(height: AppSpacing.xs),
+                Text(
+                  'Deposits will appear here once someone sends money to your virtual account',
+                  style: AppTextStyles.bodyS,
+                  textAlign: TextAlign.center,
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    // History available.
+    return SliverPadding(
+      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
+      sliver: SliverList.separated(
+        itemCount: deposits.length,
+        separatorBuilder: (_, __) => SizedBox(height: AppSpacing.sm),
+        itemBuilder: (context, index) {
+          final deposit = deposits[index];
+          return _DepositRow(deposit: deposit);
+        },
       ),
     );
   }
@@ -330,6 +388,7 @@ class _VirtualAccountCard extends StatelessWidget {
       'Account number copied',
       type: TpSnackbarType.success,
     );
+    // showTpSnackbar already fires a success haptic.
   }
 
   @override
@@ -548,12 +607,12 @@ class _NoVirtualAccountCard extends StatelessWidget {
       ),
       child: Column(
         children: [
-          Icon(
-            Icons.account_balance_outlined,
-            color: AppColors.textHint,
-            size: 48,
+          TpIllustration(
+            variant: TpIllustrationVariant.emptyWallet,
+            size: 132,
+            semanticLabel: 'No virtual account yet',
           ),
-          SizedBox(height: AppSpacing.md),
+          SizedBox(height: AppSpacing.sm),
           Text(
             'No virtual account yet',
             style: AppTextStyles.labelM,
@@ -566,7 +625,12 @@ class _NoVirtualAccountCard extends StatelessWidget {
           ),
           SizedBox(height: AppSpacing.lg),
           FilledButton(
-            onPressed: isRequesting ? null : onRequest,
+            onPressed: isRequesting
+                ? null
+                : () {
+                    Haptics.medium();
+                    onRequest();
+                  },
             child: isRequesting
                 ? const SizedBox(
                     width: 18,
@@ -574,6 +638,157 @@ class _NoVirtualAccountCard extends StatelessWidget {
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
                 : const Text('Request virtual account'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ReceiveMoneyLoadingState extends StatelessWidget {
+  const _ReceiveMoneyLoadingState();
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      physics: const AlwaysScrollableScrollPhysics(
+        parent: BouncingScrollPhysics(),
+      ),
+      padding: const EdgeInsets.fromLTRB(
+        AppSpacing.lg,
+        AppSpacing.md,
+        AppSpacing.lg,
+        AppSpacing.xxl,
+      ),
+      children: [
+        // Virtual account card skeleton
+        ShimmerBlock(
+          width: double.infinity,
+          height: 220,
+          borderRadius: BorderRadius.circular(AppRadius.md),
+        ),
+        SizedBox(height: AppSpacing.xl),
+        // "Recent Deposits" header skeleton
+        ShimmerBlock(
+          width: 160,
+          height: 20,
+          borderRadius: BorderRadius.circular(AppRadius.sm),
+        ),
+        SizedBox(height: AppSpacing.md),
+        ...List.generate(4, (_) {
+          return Padding(
+            padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+            child: ShimmerBlock(
+              width: double.infinity,
+              height: 68,
+              borderRadius: BorderRadius.circular(AppRadius.sm),
+            ),
+          );
+        }),
+      ],
+    );
+  }
+}
+
+class _ReceiveMoneyErrorState extends StatelessWidget {
+  final String message;
+  final VoidCallback onRetry;
+
+  const _ReceiveMoneyErrorState({
+    required this.message,
+    required this.onRetry,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    // Scrollable so pull-to-refresh still works even in the error state.
+    return ListView(
+      physics: const AlwaysScrollableScrollPhysics(
+        parent: BouncingScrollPhysics(),
+      ),
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.lg,
+        vertical: AppSpacing.xxl,
+      ),
+      children: [
+        Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.cloud_off_rounded,
+              color: AppColors.primary,
+              size: 48,
+            ),
+            SizedBox(height: AppSpacing.md),
+            Text(
+              message,
+              style: AppTextStyles.labelM,
+              textAlign: TextAlign.center,
+            ),
+            SizedBox(height: AppSpacing.xs),
+            Text(
+              'Check your connection and try again.',
+              style: AppTextStyles.bodyS,
+              textAlign: TextAlign.center,
+            ),
+            SizedBox(height: AppSpacing.lg),
+            FilledButton(
+              onPressed: onRetry,
+              child: const Text('Retry'),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+class _DepositsErrorCard extends StatelessWidget {
+  final VoidCallback onRetry;
+
+  const _DepositsErrorCard({required this.onRetry});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(AppSpacing.xl),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceVariant,
+        borderRadius: BorderRadius.circular(AppRadius.md),
+      ),
+      child: Column(
+        children: [
+          Icon(
+            Icons.cloud_off_rounded,
+            color: AppColors.primary,
+            size: 40,
+          ),
+          SizedBox(height: AppSpacing.sm),
+          Text(
+            'Could not load deposits',
+            style: AppTextStyles.labelM,
+          ),
+          SizedBox(height: AppSpacing.xs),
+          Text(
+            'Something went wrong while loading your deposit history.',
+            style: AppTextStyles.bodyS,
+            textAlign: TextAlign.center,
+          ),
+          SizedBox(height: AppSpacing.md),
+          OutlinedButton.icon(
+            onPressed: onRetry,
+            icon: const Icon(Icons.refresh_rounded, size: 18),
+            label: const Text('Retry'),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: AppColors.primary,
+              side: BorderSide(
+                color: AppColors.primary.withValues(alpha: 0.35),
+              ),
+              minimumSize: const Size.fromHeight(44),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(AppRadius.full),
+              ),
+            ),
           ),
         ],
       ),

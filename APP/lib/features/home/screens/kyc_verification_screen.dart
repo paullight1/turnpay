@@ -5,6 +5,8 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/router/app_router.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../core/utils/haptics.dart';
+import '../../../core/widgets/tp_illustration.dart';
 import '../../../core/widgets/tp_page_header.dart';
 import '../../../services/api_client.dart';
 import '../../../services/auth_service.dart';
@@ -386,7 +388,12 @@ class _StatusHeroCard extends StatelessWidget {
             children: [
               Expanded(
                 child: ElevatedButton.icon(
-                  onPressed: isStarting ? null : onStart,
+                  onPressed: isStarting
+                      ? null
+                      : () {
+                          Haptics.medium();
+                          onStart();
+                        },
                   icon: isStarting
                       ? const SizedBox(
                           width: 18,
@@ -787,7 +794,11 @@ class _KycErrorView extends StatelessWidget {
       title: 'Could not load KYC',
       child: Column(
         children: [
-          _KycIconBadge(icon: Icons.cloud_off_rounded, color: AppColors.error),
+          TpIllustration(
+            variant: TpIllustrationVariant.connectionLost,
+            size: 140,
+            semanticLabel: 'Could not load KYC',
+          ),
           const SizedBox(height: AppSpacing.md),
           Text(
             message,
@@ -796,7 +807,10 @@ class _KycErrorView extends StatelessWidget {
           ),
           const SizedBox(height: AppSpacing.lg),
           ElevatedButton.icon(
-            onPressed: onRetry,
+            onPressed: () {
+              Haptics.selection();
+              onRetry();
+            },
             icon: const Icon(Icons.refresh_rounded),
             label: const Text('Retry'),
           ),

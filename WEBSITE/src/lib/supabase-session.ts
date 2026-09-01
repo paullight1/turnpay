@@ -4,124 +4,32 @@ import type { Session } from "@supabase/supabase-js";
 
 const SESSION_COOKIE_NAME = "supabase.auth.token";
 const SESSION_STORAGE_KEY = "trustpay.auth.session";
-const SESSION_COOKIE_MAX_AGE_SECONDS = 30 * 24 * 60 * 60;
 const CHUNK_COUNT = 8;
+const SESSION_REFRESH_BUFFER_SECONDS = 60;
 
 type PersistedSession = Session & {
   authMode?: "supabase" | "local";
 };
 
+type SessionRouteResponse = {
+  session: PersistedSession | null;
+  csrfToken?: string;
+};
+
 let inMemorySession: PersistedSession | null = null;
-
-function base64UrlEncode(value: string) {
-  const bytes = new TextEncoder().encode(value);
-  let binary = "";
-
-  bytes.forEach((byte) => {
-    binary += String.fromCharCode(byte);
-  });
-
-  return btoa(binary)
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=+$/g, "");
-}
-
-function setCookie(name: string, value: string, maxAgeSeconds: number) {
-  document.cookie = `${name}=${value}; path=/; max-age=${maxAgeSeconds}; samesite=lax`;
-}
+let inMemoryCsrfToken: string | null = null;
+let pendingSessionRead: Promise<PersistedSession | null> | null = null;
 
 function clearCookie(name: string) {
   document.cookie = `${name}=; path=/; max-age=0; samesite=lax`;
 }
 
-function clearSessionChunks() {
+function clearLegacySessionChunks() {
   clearCookie(SESSION_COOKIE_NAME);
 
   for (let index = 0; index < CHUNK_COUNT; index += 1) {
     clearCookie(`${SESSION_COOKIE_NAME}.${index}`);
   }
-}
-
-function writeSessionStorage(session: PersistedSession) {
-  if (typeof window === "undefined") {
-    return;
-  }
-
-  try {
-    window.localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(session));
-  } catch {
-    // Ignore storage failures and fall back to cookies + memory.
-  }
-}
-
-function clearSessionStorage() {
-  if (typeof window === "undefined") {
-    return;
-  }
-
-  try {
-    window.localStorage.removeItem(SESSION_STORAGE_KEY);
-  } catch {
-    // Ignore storage failures when clearing stale state.
-  }
-}
-
-async function syncSessionCookieViaForm(session: PersistedSession) {
-  if (typeof document === "undefined") {
-    return;
-  }
-
-  const host = document.body || document.documentElement;
-  if (!host) {
-    return;
-  }
-
-  await new Promise<void>((resolve) => {
-    const iframeName = `trustpay-auth-session-${Date.now()}-${Math.random()
-      .toString(36)
-      .slice(2)}`;
-    const iframe = document.createElement("iframe");
-    const form = document.createElement("form");
-    const input = document.createElement("input");
-
-    let timeoutId = 0;
-    const cleanup = () => {
-      window.clearTimeout(timeoutId);
-      form.remove();
-      iframe.remove();
-      resolve();
-    };
-
-    iframe.name = iframeName;
-    iframe.style.display = "none";
-    iframe.addEventListener("load", cleanup, { once: true });
-
-    form.method = "POST";
-    form.action = "/api/auth/session";
-    form.target = iframeName;
-    form.style.display = "none";
-
-    input.type = "hidden";
-    input.name = "session";
-    input.value = JSON.stringify({ session });
-    form.appendChild(input);
-
-    host.appendChild(iframe);
-    host.appendChild(form);
-
-    timeoutId = window.setTimeout(cleanup, 1500);
-
-    try {
-      form.submit();
-    } catch {
-      cleanup();
-    }
-  });
-}
-
-function encodeSession(session: PersistedSession) {
-  return `base64-${base64UrlEncode(JSON.stringify(session))}`;
 }
 
 function isPersistedSession(candidate: unknown): candidate is PersistedSession {
@@ -134,140 +42,168 @@ function isPersistedSession(candidate: unknown): candidate is PersistedSession {
   );
 }
 
-function decodeSession(value: string | null): PersistedSession | null {
-  if (!value) {
-    return null;
-  }
-
-  try {
-    const parsed = value.startsWith("base64-")
-      ? JSON.parse(
-          new TextDecoder().decode(
-            Uint8Array.from(atob(value.slice("base64-".length)), (char) =>
-              char.charCodeAt(0),
-            ),
-          ),
-        )
-      : JSON.parse(value);
-
-    return isPersistedSession(parsed) ? parsed : null;
-  } catch {
-    return null;
-  }
+function isSessionExpiringSoon(session: PersistedSession) {
+  return (
+    (session.expires_at ?? 0) <=
+    Math.floor(Date.now() / 1000) + SESSION_REFRESH_BUFFER_SECONDS
+  );
 }
 
-function readCookieValue(name: string) {
-  if (typeof document === "undefined") {
-    return null;
+async function parseSessionRouteResponse(response: Response) {
+  const payload = (await response.json().catch(() => null)) as
+    | SessionRouteResponse
+    | null;
+
+  if (payload?.csrfToken) {
+    inMemoryCsrfToken = payload.csrfToken;
   }
 
-  const prefix = `${name}=`;
-  const cookies = document.cookie.split("; ");
-  const match = cookies.find((entry) => entry.startsWith(prefix));
-  return match ? match.slice(prefix.length) : null;
+  return isPersistedSession(payload?.session) ? payload.session : null;
 }
 
-function readSessionFromCookies(): PersistedSession | null {
-  const directCookie = decodeSession(readCookieValue(SESSION_COOKIE_NAME));
-  if (directCookie) {
-    return directCookie;
-  }
+async function requestSession(method: "GET" | "PUT") {
+  const response = await fetch("/api/auth/session", {
+    method,
+    cache: "no-store",
+    headers:
+      method === "PUT" && inMemoryCsrfToken
+        ? {
+            "x-csrf-token": inMemoryCsrfToken,
+          }
+        : undefined,
+  });
 
-  for (let index = 0; index < CHUNK_COUNT; index += 1) {
-    const chunkCookie = decodeSession(
-      readCookieValue(`${SESSION_COOKIE_NAME}.${index}`),
-    );
-    if (chunkCookie) {
-      return chunkCookie;
+  if (!response.ok) {
+    if (response.status === 401 || response.status === 403) {
+      inMemorySession = null;
+      inMemoryCsrfToken = null;
     }
-  }
-
-  return null;
-}
-
-function readSessionFromStorage(): PersistedSession | null {
-  if (typeof window === "undefined") {
     return null;
   }
 
-  try {
-    const stored = window.localStorage.getItem(SESSION_STORAGE_KEY);
-    if (!stored) {
-      return null;
-    }
-
-    const parsed = JSON.parse(stored) as unknown;
-    return isPersistedSession(parsed) ? parsed : null;
-  } catch {
-    return null;
-  }
+  return parseSessionRouteResponse(response);
 }
 
 export async function persistSupabaseSession(session: Session) {
   const persistedSession = session as PersistedSession;
 
   inMemorySession = persistedSession;
-  if (typeof document === "undefined") {
+  if (typeof window === "undefined") {
     return;
   }
 
-  clearSessionChunks();
-  setCookie(SESSION_COOKIE_NAME, encodeSession(persistedSession), SESSION_COOKIE_MAX_AGE_SECONDS);
-  writeSessionStorage(persistedSession);
+  clearLegacySessionChunks();
 
   if (typeof fetch === "function") {
     try {
-      await fetch("/api/auth/session", {
+      const response = await fetch("/api/auth/session", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({ session: persistedSession }),
       });
-    } catch {
-      // Ignore route failures and keep the client-side fallback in place.
+
+      if (!response.ok) {
+        throw new Error("Unable to create a secure session");
+      }
+
+      await parseSessionRouteResponse(response);
+
+      // WebKit can resolve the POST before its Set-Cookie update is visible to
+      // the next navigation. A same-origin read creates an ordering barrier and
+      // also fails closed if the HttpOnly session was not actually persisted.
+      const confirmedSession = await requestSession("GET");
+      if (confirmedSession?.access_token !== persistedSession.access_token) {
+        throw new Error("Unable to confirm the secure session");
+      }
+    } catch (error) {
+      inMemorySession = null;
+      throw error;
     }
   }
 
-  await syncSessionCookieViaForm(persistedSession);
+  try {
+    window.localStorage.removeItem(SESSION_STORAGE_KEY);
+  } catch {
+    // Ignore storage failures when clearing stale state.
+  }
+}
+
+export async function refreshPersistedSupabaseSession() {
+  if (typeof window === "undefined") {
+    return inMemorySession;
+  }
+
+  try {
+    const refreshedSession = await requestSession("PUT");
+    inMemorySession = refreshedSession;
+    return refreshedSession;
+  } catch {
+    return null;
+  }
 }
 
 export async function clearSupabaseSession() {
   inMemorySession = null;
-  if (typeof document === "undefined") {
+  if (typeof window === "undefined") {
     return;
   }
 
-  clearSessionChunks();
-  clearSessionStorage();
+  clearLegacySessionChunks();
+
+  try {
+    window.localStorage.removeItem(SESSION_STORAGE_KEY);
+  } catch {
+    // Ignore storage failures when clearing stale state.
+  }
 
   if (typeof fetch === "function") {
     try {
       await fetch("/api/auth/session", {
         method: "DELETE",
+        headers: inMemoryCsrfToken
+          ? {
+              "x-csrf-token": inMemoryCsrfToken,
+            }
+          : undefined,
       });
     } catch {
       // Ignore route failures when clearing stale state.
     }
   }
+
+  inMemoryCsrfToken = null;
 }
 
-export function readPersistedSupabaseSession() {
-  if (inMemorySession) {
+export async function readPersistedSupabaseSession() {
+  if (inMemorySession && !isSessionExpiringSoon(inMemorySession)) {
     return inMemorySession;
   }
 
-  const storedSession = readSessionFromStorage();
-  if (storedSession) {
-    inMemorySession = storedSession;
-    return storedSession;
+  if (pendingSessionRead) {
+    return pendingSessionRead;
   }
 
-  const cookieSession = readSessionFromCookies();
-  if (cookieSession) {
-    inMemorySession = cookieSession;
-    return cookieSession;
-  }
+  pendingSessionRead = (async () => {
+    const sessionFromServer = await requestSession("GET");
+    if (!sessionFromServer) {
+      inMemorySession = null;
+      pendingSessionRead = null;
+      return null;
+    }
 
-  return null;
+    if (isSessionExpiringSoon(sessionFromServer)) {
+      const refreshedSession = await refreshPersistedSupabaseSession();
+      inMemorySession = refreshedSession;
+      pendingSessionRead = null;
+      return refreshedSession;
+    }
+
+    inMemorySession = sessionFromServer;
+    pendingSessionRead = null;
+    return sessionFromServer;
+  })();
+
+  return pendingSessionRead;
 }

@@ -1,7 +1,7 @@
-import { Request } from "express";
-import { AuthController } from "./auth.controller";
+import { Request } from 'express';
+import { AuthController } from './auth.controller';
 
-describe("AuthController", () => {
+describe('AuthController', () => {
   const authService = {
     register: jest.fn(),
     login: jest.fn(),
@@ -20,8 +20,8 @@ describe("AuthController", () => {
   };
 
   const mockRequest = {
-    ip: "127.0.0.1",
-    get: jest.fn().mockReturnValue("jest-agent"),
+    ip: '127.0.0.1',
+    get: jest.fn().mockReturnValue('jest-agent'),
   } as unknown as Request;
 
   let controller: AuthController;
@@ -31,172 +31,182 @@ describe("AuthController", () => {
     controller = new AuthController(authService as never);
   });
 
-  it("passes sanitized context to register", async () => {
+  it('passes sanitized context to register', async () => {
     const payload = {
-      email: "test@example.com",
-      password: "Passw0rd!",
-      phone: "08012345678",
-      fullName: "Tester",
-      transactionPin: "1234",
+      email: 'test@example.com',
+      password: 'Passw0rd!',
+      phone: '+2348012345678',
+      fullName: 'Tester',
+      transactionPin: '1234',
     };
-    const response = { user: { id: "user-1" }, session: { access_token: "t" } };
+    const response = { user: { id: 'user-1' }, session: { access_token: 't' } };
     authService.register.mockResolvedValue(response);
 
     const result = await controller.register(payload, mockRequest);
 
-    expect(authService.register).toHaveBeenCalledWith(
-      payload,
-      {
-        ipAddress: "127.0.0.1",
-        userAgent: "jest-agent",
-      },
-    );
+    expect(authService.register).toHaveBeenCalledWith(payload, {
+      ipAddress: '127.0.0.1',
+      userAgent: 'jest-agent',
+    });
     expect(result).toBe(response);
   });
 
-  it("passes login request to auth service with request context", async () => {
+  it('passes login request to auth service with request context', async () => {
     const payload = {
-      email: "test@example.com",
-      password: "Passw0rd!",
-      deviceName: "web",
+      email: 'test@example.com',
+      password: 'Passw0rd!',
+      deviceName: 'web',
     };
-    const response = { user: { id: "user-1" }, session: { access_token: "x" } };
+    const response = { user: { id: 'user-1' }, session: { access_token: 'x' } };
     authService.login.mockResolvedValue(response);
 
     const result = await controller.login(payload, mockRequest);
 
-    expect(authService.login).toHaveBeenCalledWith(
-      payload,
-      {
-        ipAddress: "127.0.0.1",
-        userAgent: "jest-agent",
-      },
-    );
+    expect(authService.login).toHaveBeenCalledWith(payload, {
+      ipAddress: '127.0.0.1',
+      userAgent: 'jest-agent',
+    });
     expect(result).toBe(response);
   });
 
-  it("passes refresh token and context through to refreshTokens", async () => {
-    const payload = { refreshToken: "refresh-token", deviceName: "chrome" };
-    const response = { session: { access_token: "new" } };
+  it('passes refresh token and context through to refreshTokens', async () => {
+    const payload = { refreshToken: 'refresh-token', deviceName: 'chrome' };
+    const response = { session: { access_token: 'new' } };
     authService.refreshToken.mockResolvedValue(response);
 
     const result = await controller.refreshTokens(payload, mockRequest);
 
-    expect(authService.refreshToken).toHaveBeenCalledWith("refresh-token", {
-      ipAddress: "127.0.0.1",
-      userAgent: "jest-agent",
-      deviceName: "chrome",
+    expect(authService.refreshToken).toHaveBeenCalledWith('refresh-token', {
+      ipAddress: '127.0.0.1',
+      userAgent: 'jest-agent',
+      deviceName: 'chrome',
     });
     expect(result).toBe(response);
   });
 
-  it("forwards logout access token and refresh token to auth service", async () => {
+  it('forwards logout access token and refresh token to auth service', async () => {
     authService.logout.mockResolvedValue({ success: true });
 
-    const result = await controller.logout("Bearer abc.def", {
-      refreshToken: "refresh-token",
+    const result = await controller.logout('Bearer abc.def', {
+      refreshToken: 'refresh-token',
     });
 
-    expect(authService.logout).toHaveBeenCalledWith("abc.def", "refresh-token");
+    expect(authService.logout).toHaveBeenCalledWith('abc.def', 'refresh-token');
     expect(result).toEqual({ success: true });
   });
 
-  it("forwards logout without refresh token when omitted", async () => {
+  it('forwards logout without refresh token when omitted', async () => {
     authService.logout.mockResolvedValue({ success: true });
 
-    const result = await controller.logout("Bearer abc.def");
+    const result = await controller.logout('Bearer abc.def');
 
-    expect(authService.logout).toHaveBeenCalledWith("abc.def", undefined);
+    expect(authService.logout).toHaveBeenCalledWith('abc.def', undefined);
     expect(result).toEqual({ success: true });
   });
 
-  it("forwards bootstrap session data", async () => {
-    const payload = { userId: "user-1" };
-    const response = { user: { id: "user-1" }, wallets: [] };
+  it('forwards bootstrap session data', async () => {
+    const payload = { userId: 'user-1' };
+    const response = { user: { id: 'user-1' }, wallets: [] };
     authService.bootstrap.mockResolvedValue(response);
 
     const result = await controller.bootstrap(payload);
 
-    expect(authService.bootstrap).toHaveBeenCalledWith("user-1");
+    expect(authService.bootstrap).toHaveBeenCalledWith('user-1');
     expect(result).toBe(response);
   });
 
-  it("forwards session list and revoke calls", async () => {
+  it('forwards session list and revoke calls', async () => {
     authService.listSessions.mockResolvedValue([]);
     authService.revokeSession.mockResolvedValue({ revoked: true });
 
-    const user = { userId: "user-1" };
+    const user = { userId: 'user-1' };
     const list = await controller.sessions(user);
-    const revoke = await controller.revokeSession(user, "session-1");
+    const revoke = await controller.revokeSession(user, 'session-1');
 
-    expect(authService.listSessions).toHaveBeenCalledWith("user-1");
-    expect(authService.revokeSession).toHaveBeenCalledWith("user-1", "session-1");
+    expect(authService.listSessions).toHaveBeenCalledWith('user-1');
+    expect(authService.revokeSession).toHaveBeenCalledWith(
+      'user-1',
+      'session-1',
+    );
     expect(list).toEqual([]);
     expect(revoke).toEqual({ revoked: true });
   });
 
-  it("forwards change-password and OTP operations", async () => {
+  it('forwards change-password and OTP operations', async () => {
     authService.changePassword.mockResolvedValue({ success: true });
-    authService.sendOtp.mockResolvedValue({ message: "otp sent" });
+    authService.sendOtp.mockResolvedValue({ message: 'otp sent' });
     authService.verifyOtp.mockResolvedValue({ valid: true });
-    authService.sendPasswordResetEmail.mockResolvedValue({ message: "email sent" });
-    authService.resendConfirmationEmail.mockResolvedValue({ message: "email sent" });
+    authService.sendPasswordResetEmail.mockResolvedValue({
+      message: 'email sent',
+    });
+    authService.resendConfirmationEmail.mockResolvedValue({
+      message: 'email sent',
+    });
 
-    const user = { userId: "user-1" };
+    const user = { userId: 'user-1' };
     const changePassword = await controller.changePassword(
       user,
-      "Bearer access-token",
-      { currentPassword: "old", newPassword: "new" },
+      'Bearer access-token',
+      { currentPassword: 'old', newPassword: 'new' },
     );
-    const sendOtp = await controller.sendOtp({ phone: "0801" });
-    const verifyOtp = await controller.verifyOtp({ phone: "0801", otp: "000000" });
-    const forgotPassword = await controller.forgotPassword({ email: "test@example.com" });
+    const sendOtp = await controller.sendOtp({ phone: '+2348012345678' });
+    const verifyOtp = await controller.verifyOtp({
+      phone: '+2348012345678',
+      otp: '000000',
+    });
+    const forgotPassword = await controller.forgotPassword({
+      email: 'test@example.com',
+    });
     const resendConfirmation = await controller.resendConfirmation({
-      email: "test@example.com",
+      email: 'test@example.com',
     });
 
     expect(authService.changePassword).toHaveBeenCalledWith(
-      "user-1",
-      "access-token",
-      "old",
-      "new",
+      'user-1',
+      'access-token',
+      'old',
+      'new',
     );
-    expect(authService.sendOtp).toHaveBeenCalledWith("0801");
-    expect(authService.verifyOtp).toHaveBeenCalledWith("0801", "000000");
+    expect(authService.sendOtp).toHaveBeenCalledWith('+2348012345678');
+    expect(authService.verifyOtp).toHaveBeenCalledWith(
+      '+2348012345678',
+      '000000',
+    );
     expect(authService.sendPasswordResetEmail).toHaveBeenCalledWith(
-      "test@example.com",
+      'test@example.com',
     );
     expect(authService.resendConfirmationEmail).toHaveBeenCalledWith(
-      "test@example.com",
+      'test@example.com',
     );
     expect(changePassword).toEqual({ success: true });
-    expect(sendOtp).toEqual({ message: "otp sent" });
+    expect(sendOtp).toEqual({ message: 'otp sent' });
     expect(verifyOtp).toEqual({ valid: true });
-    expect(forgotPassword).toEqual({ message: "email sent" });
-    expect(resendConfirmation).toEqual({ message: "email sent" });
+    expect(forgotPassword).toEqual({ message: 'email sent' });
+    expect(resendConfirmation).toEqual({ message: 'email sent' });
   });
 
-  it("forwards transaction pin operations", async () => {
-    const user = { userId: "user-1" };
+  it('forwards transaction pin operations', async () => {
+    const user = { userId: 'user-1' };
     authService.setupTransactionPin.mockResolvedValue({ success: true });
     authService.resetTransactionPin.mockResolvedValue({ success: true });
 
     const setup = await controller.setupTransactionPin(user, {
-      pin: "1234",
+      pin: '1234',
     });
     const reset = await controller.resetTransactionPin(user, {
-      currentPassword: "old",
-      pin: "1234",
-      otp: "000000",
-      phone: "0801",
+      currentPin: '1234',
+      newPin: '5678',
+      otp: '000000',
     });
 
-    expect(authService.setupTransactionPin).toHaveBeenCalledWith("user-1", "1234");
-    expect(authService.resetTransactionPin).toHaveBeenCalledWith("user-1", {
-      currentPassword: "old",
-      pin: "1234",
-      otp: "000000",
-      phone: "0801",
+    expect(authService.setupTransactionPin).toHaveBeenCalledWith(
+      'user-1',
+      '1234',
+    );
+    expect(authService.resetTransactionPin).toHaveBeenCalledWith('user-1', {
+      currentPin: '1234',
+      newPin: '5678',
+      otp: '000000',
     });
     expect(setup).toEqual({ success: true });
     expect(reset).toEqual({ success: true });

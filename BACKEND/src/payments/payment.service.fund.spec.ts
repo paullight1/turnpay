@@ -1,7 +1,7 @@
-import { BadRequestException } from "@nestjs/common";
-import { PaymentService } from "./payment.service";
+import { BadRequestException } from '@nestjs/common';
+import { PaymentService } from './payment.service';
 
-describe("PaymentService funding", () => {
+describe('PaymentService funding', () => {
   const prisma = {
     transaction: {
       create: jest.fn(),
@@ -24,11 +24,11 @@ describe("PaymentService funding", () => {
     getOrThrow: jest.Mock<string, [string]>;
   } = {
     get: jest.fn((key: string) => {
-      if (key === "WEB_URL") return "https://app.trustpay.example";
-      if (key === "NODE_ENV") return "production";
+      if (key === 'WEB_URL') return 'https://app.trustpay.example';
+      if (key === 'NODE_ENV') return 'production';
       return undefined;
     }),
-    getOrThrow: jest.fn((key: string) => (key ? "secret" : "secret")),
+    getOrThrow: jest.fn((key: string) => (key ? 'secret' : 'secret')),
   };
   const logger = {
     info: jest.fn(),
@@ -45,15 +45,15 @@ describe("PaymentService funding", () => {
     jest.clearAllMocks();
     prisma.transaction.create.mockResolvedValue({});
     prisma.transaction.update.mockResolvedValue({});
-    users.findOne.mockResolvedValue({ id: "user-1", email: "ada@example.com" });
+    users.findOne.mockResolvedValue({ id: 'user-1', email: 'ada@example.com' });
     paystack.initializePayment.mockResolvedValue({
       data: {
-        authorization_url: "https://paystack.example/pay",
-        reference: "FUND-1",
+        authorization_url: 'https://paystack.example/pay',
+        reference: 'FUND-1',
       },
     });
     flutterwave.initializePayment.mockResolvedValue({
-      paymentUrl: "https://flutterwave.example/pay",
+      paymentUrl: 'https://flutterwave.example/pay',
       transactionId: 123,
     });
     service = new PaymentService(
@@ -71,27 +71,27 @@ describe("PaymentService funding", () => {
     );
   });
 
-  it("builds Paystack callback URL server-side and sends minor-unit amount", async () => {
-    await service.fundWallet("user-1", {
-      amount: "1000.25",
-      currency: "NGN",
-      provider: "paystack",
-      callbackUrl: "https://evil.example/callback",
+  it('builds Paystack callback URL server-side and sends minor-unit amount', async () => {
+    await service.fundWallet('user-1', {
+      amount: '1000.25',
+      currency: 'NGN',
+      provider: 'paystack',
+      callbackUrl: 'https://evil.example/callback',
     } as any);
 
     expect(paystack.initializePayment).toHaveBeenCalledWith(
       expect.objectContaining({
         amountMinor: 100025,
-        callbackUrl: "https://app.trustpay.example/payment/callback",
+        callbackUrl: 'https://app.trustpay.example/payment/callback',
       }),
     );
     expect(prisma.transaction.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
-          status: "PENDING",
+          status: 'PENDING',
           metadata: expect.objectContaining({
-            provider: "paystack",
-            providerInitStatus: "PENDING",
+            provider: 'paystack',
+            providerInitStatus: 'PENDING',
           }),
         }),
       }),
@@ -103,47 +103,47 @@ describe("PaymentService funding", () => {
       expect.objectContaining({
         data: expect.objectContaining({
           metadata: expect.objectContaining({
-            paymentUrl: "https://paystack.example/pay",
-            providerInitStatus: "INITIALIZED",
+            paymentUrl: 'https://paystack.example/pay',
+            providerInitStatus: 'INITIALIZED',
           }),
         }),
       }),
     );
   });
 
-  it("builds Flutterwave callback URL server-side and sends decimal-string amount", async () => {
-    await service.fundWallet("user-1", {
-      amount: "1000.25",
-      currency: "GHS",
-      provider: "flutterwave",
+  it('builds Flutterwave callback URL server-side and sends decimal-string amount', async () => {
+    await service.fundWallet('user-1', {
+      amount: '1000.25',
+      currency: 'GHS',
+      provider: 'flutterwave',
     });
 
     expect(flutterwave.initializePayment).toHaveBeenCalledWith(
       expect.objectContaining({
-        amount: "1000.25",
-        redirectUrl: "https://app.trustpay.example/payment/callback",
+        amount: '1000.25',
+        redirectUrl: 'https://app.trustpay.example/payment/callback',
       }),
     );
   });
 
-  it("marks the pending funding transaction failed when provider initialization fails", async () => {
-    const providerError = new Error("provider unavailable");
+  it('marks the pending funding transaction failed when provider initialization fails', async () => {
+    const providerError = new Error('provider unavailable');
     paystack.initializePayment.mockRejectedValue(providerError);
 
     await expect(
-      service.fundWallet("user-1", {
-        amount: "1000.25",
-        currency: "NGN",
-        provider: "paystack",
+      service.fundWallet('user-1', {
+        amount: '1000.25',
+        currency: 'NGN',
+        provider: 'paystack',
       }),
     ).rejects.toThrow(providerError);
 
     expect(prisma.transaction.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
-          status: "PENDING",
+          status: 'PENDING',
           metadata: expect.objectContaining({
-            providerInitStatus: "PENDING",
+            providerInitStatus: 'PENDING',
           }),
         }),
       }),
@@ -154,36 +154,36 @@ describe("PaymentService funding", () => {
     expect(prisma.transaction.update).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
-          status: "FAILED",
+          status: 'FAILED',
           metadata: expect.objectContaining({
-            providerInitStatus: "FAILED",
-            providerErrorCode: "PROVIDER_INITIALIZATION_FAILED",
+            providerInitStatus: 'FAILED',
+            providerErrorCode: 'PROVIDER_INITIALIZATION_FAILED',
           }),
         }),
       }),
     );
     expect(logger.warn).toHaveBeenCalledWith(
       expect.objectContaining({
-        userId: "user-1",
-        provider: "paystack",
-        error: "provider unavailable",
+        userId: 'user-1',
+        provider: 'paystack',
+        error: 'provider unavailable',
       }),
-      "Fund wallet provider initialization failed",
+      'Fund wallet provider initialization failed',
     );
   });
 
-  it("rejects insecure production callback configuration", async () => {
+  it('rejects insecure production callback configuration', async () => {
     config.get.mockImplementation((key: string) => {
-      if (key === "WEB_URL") return "http://app.trustpay.example";
-      if (key === "NODE_ENV") return "production";
+      if (key === 'WEB_URL') return 'http://app.trustpay.example';
+      if (key === 'NODE_ENV') return 'production';
       return undefined;
     });
 
     await expect(
-      service.fundWallet("user-1", {
-        amount: "1000.25",
-        currency: "NGN",
-        provider: "paystack",
+      service.fundWallet('user-1', {
+        amount: '1000.25',
+        currency: 'NGN',
+        provider: 'paystack',
       }),
     ).rejects.toBeInstanceOf(BadRequestException);
 

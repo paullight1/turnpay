@@ -4,25 +4,25 @@ import {
   IsString,
   MaxLength,
   MinLength,
-} from "class-validator";
+} from 'class-validator';
 
 const SUPPORT_CATEGORIES = [
-  "ACCOUNT",
-  "KYC",
-  "WALLET",
-  "TRANSACTION",
-  "WITHDRAWAL",
-  "EXCHANGE",
-  "VTU",
-  "OTHER",
+  'ACCOUNT',
+  'KYC',
+  'WALLET',
+  'TRANSACTION',
+  'WITHDRAWAL',
+  'EXCHANGE',
+  'VTU',
+  'OTHER',
 ] as const;
 
 const SUPPORT_STATUSES = [
-  "OPEN",
-  "UNDER_REVIEW",
-  "RESOLVED",
-  "CLOSED",
-  "ESCALATED",
+  'OPEN',
+  'UNDER_REVIEW',
+  'RESOLVED',
+  'CLOSED',
+  'ESCALATED',
 ] as const;
 
 export class CreateSupportTicketDto {
@@ -48,8 +48,8 @@ export class CreateSupportTicketDto {
 
 export class ResolveSupportTicketDto {
   @IsString()
-  @IsIn(["RESOLVED", "CLOSED", "ESCALATED"])
-  status: "RESOLVED" | "CLOSED" | "ESCALATED";
+  @IsIn(['RESOLVED', 'CLOSED', 'ESCALATED'])
+  status: 'RESOLVED' | 'CLOSED' | 'ESCALATED';
 
   @IsString()
   @IsOptional()

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../theme/app_theme.dart';
+import '../utils/haptics.dart';
 
 enum TpSnackbarType { info, success, error, warning }
 
@@ -8,6 +9,7 @@ void showTpSnackbar(
   String message, {
   TpSnackbarType type = TpSnackbarType.info,
   Duration duration = const Duration(seconds: 3),
+  bool haptic = true,
 }) {
   final color = switch (type) {
     TpSnackbarType.success => AppColors.success,
@@ -15,6 +17,23 @@ void showTpSnackbar(
     TpSnackbarType.warning => AppColors.warning,
     TpSnackbarType.info => AppColors.primary,
   };
+
+  if (haptic) {
+    switch (type) {
+      case TpSnackbarType.success:
+        Haptics.success();
+        break;
+      case TpSnackbarType.error:
+        Haptics.error();
+        break;
+      case TpSnackbarType.warning:
+        Haptics.warning();
+        break;
+      case TpSnackbarType.info:
+        Haptics.light();
+        break;
+    }
+  }
 
   ScaffoldMessenger.of(context).showSnackBar(
     SnackBar(

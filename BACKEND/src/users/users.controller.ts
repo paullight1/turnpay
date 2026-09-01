@@ -1,22 +1,22 @@
-import { Controller, Get, Patch, Body, UseGuards } from "@nestjs/common";
-import { UsersService } from "./users.service";
-import { UpdateUserDto } from "./dto/update-user.dto";
-import { JwtAuthGuard } from "../auth/guards/jwt-auth.guard";
-import { RolesGuard } from "../common/guards/roles.guard";
-import { Roles } from "../common/decorators/roles.decorator";
-import { CurrentUser } from "../common/decorators/current-user.decorator";
+import { Controller, Get, Patch, Body, UseGuards } from '@nestjs/common';
+import { UsersService } from './users.service';
+import { UpdateUserDto } from './dto/update-user.dto';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { RolesGuard } from '../common/guards/roles.guard';
+import { Roles } from '../common/decorators/roles.decorator';
+import { CurrentUser } from '../common/decorators/current-user.decorator';
 
-@Controller("users")
+@Controller('users')
 @UseGuards(JwtAuthGuard)
 export class UsersController {
   constructor(private readonly usersService: UsersService) {}
 
-  @Get("me")
+  @Get('me')
   async getProfile(@CurrentUser() user: { userId: string }) {
     return this.usersService.findOne(user.userId);
   }
 
-  @Patch("me")
+  @Patch('me')
   async updateProfile(
     @CurrentUser() user: { userId: string },
     @Body() updateUserDto: UpdateUserDto,
@@ -25,7 +25,7 @@ export class UsersController {
   }
 
   @Get()
-  @Roles("ADMIN")
+  @Roles('ADMIN')
   @UseGuards(RolesGuard)
   async findAll() {
     return this.usersService.findAll();
