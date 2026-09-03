@@ -82,6 +82,11 @@ else
   check_absent "https://api.sandbox.ninja.boucloud.io" "render.yaml"
 fi
 
+# Render's public ingress contributes two trusted entries to the forwarded-for
+# chain. A lower value rejects legitimate traffic before it reaches Nest; a
+# higher value would accept a caller-supplied address beyond the platform edge.
+check_env_value "TRUST_PROXY_HOPS" "2" "render.yaml"
+
 check_absent "https://api-service.vtpass.com" "render.yaml"
 check_env_value "VTU_ENABLED" "true" "render.yaml"
 check_env_value "VTU_SIMULATION_ENABLED" "false" "render.yaml"
