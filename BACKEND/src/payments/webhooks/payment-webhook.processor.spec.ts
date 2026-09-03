@@ -12,7 +12,6 @@ describe('PaymentWebhookProcessorService', () => {
 
   const paymentService = {
     processTransferWebhook: jest.fn(),
-    processWebhookDeposit: jest.fn(),
   };
 
   const bankingService = {

@@ -74,14 +74,6 @@ describe('AdminService banking operations', () => {
     creditWallet: jest.fn(),
   };
 
-  const paystack = {
-    verifyTransfer: jest.fn(),
-  };
-
-  const flutterwave = {
-    verifyTransfer: jest.fn(),
-  };
-
   const configService = {
     get: jest.fn((key: string, defaultValue?: unknown) => {
       if (key === 'MONNIFY_EXCHANGE_COLLECTION_ACCOUNT_NUMBER') {
@@ -104,6 +96,7 @@ describe('AdminService banking operations', () => {
 
   const bankingService = {
     processVirtualAccountDeposit: jest.fn(),
+    getTransferStatus: jest.fn(),
   };
 
   let service: AdminService;
@@ -114,8 +107,6 @@ describe('AdminService banking operations', () => {
       prisma,
       logger as any,
       ledger as any,
-      paystack as any,
-      flutterwave as any,
       configService as any,
       supabase as any,
       vtuService as any,
@@ -1037,7 +1028,7 @@ describe('AdminService banking operations', () => {
       transferAttempts: [
         {
           id: 'attempt-1',
-          provider: 'PAYSTACK',
+          provider: 'MONNIFY',
           providerReference: 'WD-1',
           providerStatus: 'pending',
           status: 'PENDING',
@@ -1045,11 +1036,10 @@ describe('AdminService banking operations', () => {
         },
       ],
     });
-    paystack.verifyTransfer.mockResolvedValue({
+    bankingService.getTransferStatus.mockResolvedValue({
       status: 'success',
       reference: 'WD-1',
-      amount: 100000,
-      currency: 'NGN',
+      raw: { requestSuccessful: true },
     });
     prisma.transaction.updateMany.mockResolvedValue({ count: 1 });
 
@@ -1059,7 +1049,7 @@ describe('AdminService banking operations', () => {
       'admin-1',
     );
 
-    expect(paystack.verifyTransfer).toHaveBeenCalledWith('WD-1');
+    expect(bankingService.getTransferStatus).toHaveBeenCalledWith('WD-1');
     expect(prisma.transaction.updateMany).toHaveBeenCalledWith({
       where: { id: 'tx-1', status: 'PENDING' },
       data: { status: 'SUCCESS' },
@@ -1096,7 +1086,7 @@ describe('AdminService banking operations', () => {
       transferAttempts: [
         {
           id: 'attempt-1',
-          provider: 'PAYSTACK',
+          provider: 'MONNIFY',
           providerReference: 'WD-1',
           providerStatus: 'pending',
           status: 'PENDING',
@@ -1104,7 +1094,11 @@ describe('AdminService banking operations', () => {
         },
       ],
     });
-    paystack.verifyTransfer.mockResolvedValue({ status: 'failed' });
+    bankingService.getTransferStatus.mockResolvedValue({
+      status: 'failed',
+      reference: 'WD-1',
+      raw: { requestSuccessful: true },
+    });
     prisma.transaction.updateMany.mockResolvedValue({ count: 1 });
     prisma.ledgerEntry.findFirst.mockResolvedValue(null);
 

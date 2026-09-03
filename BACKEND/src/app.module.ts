@@ -144,23 +144,6 @@ const defaultNodeEnv =
         OTP_EXPIRES_IN: Joi.string().allow('').optional(),
         OTP_LENGTH: Joi.string().allow('').optional(),
         OTP_DEV_CODE: Joi.string().allow('').optional(),
-        PAYSTACK_SECRET_KEY: Joi.when('NODE_ENV', {
-          is: 'production',
-          then: Joi.string().min(1).required(),
-          otherwise: Joi.string().allow('').optional(),
-        }),
-        PAYSTACK_PUBLIC_KEY: Joi.string().allow('').optional(),
-        PAYSTACK_WEBHOOK_URL: Joi.string().allow('').optional(),
-        PAYSTACK_WEBHOOK_SECRET: Joi.string().allow('').optional(),
-        PAYSTACK_DVA_PREFERRED_BANK: Joi.string().default('test-bank'),
-        FLUTTERWAVE_SECRET_KEY: Joi.when('NODE_ENV', {
-          is: 'production',
-          then: Joi.string().min(1).required(),
-          otherwise: Joi.string().allow('').optional(),
-        }),
-        FLUTTERWAVE_PUBLIC_KEY: Joi.string().allow('').optional(),
-        FLUTTERWAVE_ENCRYPTION_KEY: Joi.string().allow('').optional(),
-        FLUTTERWAVE_SECRET_HASH: Joi.string().allow('').optional(),
         BANKING_ENABLED: Joi.boolean()
           .truthy('true')
           .falsy('false')

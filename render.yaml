@@ -98,10 +98,6 @@ services:
         sync: false
       - key: MONNIFY_TEST_NIN
         sync: false
-      - key: PAYSTACK_SECRET_KEY
-        sync: false
-      - key: FLUTTERWAVE_SECRET_KEY
-        sync: false
 
   - type: keyvalue
     name: trustpay-redis

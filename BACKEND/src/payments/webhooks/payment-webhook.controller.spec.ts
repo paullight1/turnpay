@@ -3,11 +3,7 @@ import { WebhookController } from './payment-webhook.controller';
 
 describe('WebhookController', () => {
   const paymentService = {
-    verifyPaystackSignature: jest.fn(),
-    verifyFlutterwaveSignature: jest.fn(),
-    verifyFlutterwaveSecretHash: jest.fn(),
     processTransferWebhook: jest.fn(),
-    processWebhookDeposit: jest.fn(),
   };
 
   const bankingService = {
@@ -67,11 +63,11 @@ describe('WebhookController', () => {
   beforeEach(() => {
     jest.clearAllMocks();
 
-    configService.get.mockImplementation((key: string) => {
-      if (key === 'MONNIFY_WEBHOOK_SECRET') return 'webhook-secret';
-      return undefined;
+    configService.get.mockReturnValue(undefined);
+    configService.getOrThrow.mockImplementation((key: string) => {
+      if (key === 'MONNIFY_SECRET_KEY') return 'webhook-secret';
+      return 'configured-secret';
     });
-
     controller = new WebhookController(
       paymentService as any,
       webhookInbox as any,
@@ -134,6 +130,33 @@ describe('WebhookController', () => {
     ).not.toHaveBeenCalled();
   });
 
+  it('accepts documented Monnify fields and decimal strings', async () => {
+    const extendedBody = {
+      ...webhookBody,
+      eventData: {
+        ...webhookBody.eventData,
+        amountPaid: '1500.00',
+        totalPayable: '1500.00',
+        paidOn: '2026-08-28T10:30:00Z',
+        paymentMethod: 'ACCOUNT_TRANSFER',
+        customer: { name: 'Test Customer', email: 'customer@example.com' },
+        product: { type: 'RESERVED_ACCOUNT', reference: 'VA-1' },
+      },
+    };
+    const extendedRawBody = JSON.stringify(extendedBody);
+    const signature = createHmac('sha512', 'webhook-secret')
+      .update(extendedRawBody)
+      .digest('hex');
+
+    await expect(
+      controller.handleMonnifyWebhook(
+        signature,
+        { rawBody: extendedRawBody } as any,
+        extendedBody,
+      ),
+    ).resolves.toEqual({ received: true });
+  });
+
   it('rejects Monnify payloads that are missing the event type after signature verification', async () => {
     const invalidBody = {
       eventData: webhookBody.eventData,
@@ -150,5 +173,42 @@ describe('WebhookController', () => {
         invalidBody as any,
       ),
     ).rejects.toThrow('eventType must be a string');
+  });
+
+  it('rejects a signed Monnify envelope without eventData', async () => {
+    const invalidBody = { eventType: 'SUCCESSFUL_TRANSACTION' };
+    const invalidRawBody = JSON.stringify(invalidBody);
+    const invalidSignature = createHmac('sha512', 'webhook-secret')
+      .update(invalidRawBody)
+      .digest('hex');
+
+    await expect(
+      controller.handleMonnifyWebhook(
+        invalidSignature,
+        { rawBody: invalidRawBody } as any,
+        invalidBody,
+      ),
+    ).rejects.toThrow('eventData should not be null or undefined');
+    expect(webhookInbox.accept).not.toHaveBeenCalled();
+  });
+
+  it('rejects Monnify event data without a provider reference', async () => {
+    const invalidBody = {
+      eventType: 'SUCCESSFUL_TRANSACTION',
+      eventData: { paymentStatus: 'PAID', amountPaid: '1500.00' },
+    };
+    const invalidRawBody = JSON.stringify(invalidBody);
+    const invalidSignature = createHmac('sha512', 'webhook-secret')
+      .update(invalidRawBody)
+      .digest('hex');
+
+    await expect(
+      controller.handleMonnifyWebhook(
+        invalidSignature,
+        { rawBody: invalidRawBody } as any,
+        invalidBody,
+      ),
+    ).rejects.toThrow('Monnify provider reference is required');
+    expect(webhookInbox.accept).not.toHaveBeenCalled();
   });
 });

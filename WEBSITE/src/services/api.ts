@@ -522,21 +522,6 @@ export const adminUserApi = {
 };
 
 export const paymentApi = {
-  fundWallet: (
-    data: {
-      amount: number;
-      currency: string;
-      channel?: string;
-      provider?: string;
-      email?: string;
-    },
-    idempotencyKey?: string,
-  ) =>
-    apiClient.post(
-      "/api/payments/fund",
-      data,
-      withIdempotencyKey(idempotencyKey),
-    ),
   withdraw: (
     data: {
       amount: number;
