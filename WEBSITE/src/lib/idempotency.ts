@@ -3,8 +3,14 @@ export type MoneyAttemptScope =
   | "withdraw"
   | "exchange"
   | "vtu"
+  | "vtu-validate"
   | "vtu-requery"
   | "vtu-pricing"
+  | "transfer-reversal"
+  | "reversal-approve"
+  | "reversal-reject"
+  | "internal-transfer"
+  | "transaction-pin-setup"
   | "mutation";
 
 function randomUuid() {
@@ -14,7 +20,8 @@ function randomUuid() {
 
   return "10000000-1000-4000-8000-100000000000".replace(/[018]/g, (char) => {
     const randomValue = globalThis.crypto?.getRandomValues
-      ? globalThis.crypto.getRandomValues(new Uint8Array(1))[0] & (15 >> (Number(char) / 4))
+      ? globalThis.crypto.getRandomValues(new Uint8Array(1))[0] &
+        (15 >> (Number(char) / 4))
       : Math.floor(Math.random() * 16);
     return (Number(char) ^ randomValue).toString(16);
   });

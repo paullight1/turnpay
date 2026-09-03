@@ -1,5 +1,7 @@
 # Stream 4 Findings Report: VTU, KYC & Notifications
 
+> Historical findings only. VTpass and Youverify are now the sole active providers; see `DOCS/PROVIDER-SOURCE-OF-TRUTH.MD`.
+
 **Date:** 2026-05-31
 **Scope:** Phases 1, 2, 3 — Research & Audit Pass (no code changes, no external sign-ups)
 

@@ -114,7 +114,7 @@ describe('ExchangeService', () => {
 | **WalletsService** | Provision wallets (success, already exists), Get balances, Get single wallet |
 | **ExchangeService** | Create quote (valid, same currency), Execute quote (valid, expired, insufficient balance, wrong user), Upload manual receipt proof (valid, KYC failure, invalid file type/size), Submit manual receipt (valid, KYC failure, duplicate bank reference, invalid receipt proof), Admin review receipt (approve-and-credit, reject, needs more info, terminal-state retry) |
 | **BankingService** | Provision Monnify virtual account (success, KYC failure, suspended user, unsupported provider), Process Monnify webhook (valid, invalid signature, duplicate reference, amount/currency mismatch) |
-| **PaymentService** | Fund wallet (Paystack, Flutterwave), Verify payment, Webhook processing (idempotency, amount mismatch), Withdraw (success, insufficient balance, transfer failure, reversal) |
+| **PaymentService** | Monnify withdrawal success, insufficient balance, transfer failure, reconciliation, webhook idempotency, and reversal |
 | **VtuService** | Purchase (success, insufficient balance, provider failure, reversal) |
 | **OtpService** | Send OTP, Verify (valid, expired, max attempts, wrong code) |
 | **RateService** | Fetch rates (API success, API failure, fallback), Manual override, Cache expiry |

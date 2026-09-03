@@ -25,6 +25,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import DashboardLayout from "@/components/layout/dashboard-layout";
 import { RateControlCard } from "@/components/admin/rate-control";
+import { InternalTransferReversalQueue } from "@/components/admin/internal-transfer-reversal-queue";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -3255,6 +3256,7 @@ function AdminPageContent() {
           </TabsContent>
 
           <TabsContent value="finance" className="flex flex-col gap-4">
+            <InternalTransferReversalQueue />
             <div className="grid gap-4 xl:grid-cols-[1.6fr_1fr]">
               <Card>
                 <CardHeader className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">

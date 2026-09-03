@@ -132,12 +132,12 @@ class _VtuOrderDetailScreenState extends State<VtuOrderDetailScreen> {
                   ),
                 ],
               ),
-              SizedBox(height: AppSpacing.sm),
+              const SizedBox(height: AppSpacing.sm),
               Text(
                 'Track provider confirmation and refresh pending bill payments.',
                 style: AppTextStyles.bodyM,
               ),
-              SizedBox(height: AppSpacing.xl),
+              const SizedBox(height: AppSpacing.xl),
             ];
 
             if (snapshot.connectionState == ConnectionState.waiting) {
@@ -226,9 +226,9 @@ class _DashboardDetailScreenState extends State<DashboardDetailScreen> {
                   ),
                 ],
               ),
-              SizedBox(height: AppSpacing.sm),
+              const SizedBox(height: AppSpacing.sm),
               Text(config.subtitle, style: AppTextStyles.bodyM),
-              SizedBox(height: AppSpacing.xl),
+              const SizedBox(height: AppSpacing.xl),
             ];
 
             if (snapshot.connectionState == ConnectionState.waiting) {
@@ -329,7 +329,7 @@ class _DashboardProfileScreenState extends State<DashboardProfileScreen> {
                       const _ProfileThemeQuickToggle(),
                     ],
                   ),
-                  SizedBox(height: AppSpacing.xl),
+                  const SizedBox(height: AppSpacing.xl),
                   Row(
                     children: [
                       CircleAvatar(
@@ -343,7 +343,7 @@ class _DashboardProfileScreenState extends State<DashboardProfileScreen> {
                           ),
                         ),
                       ),
-                      SizedBox(width: AppSpacing.md),
+                      const SizedBox(width: AppSpacing.md),
                       Expanded(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
@@ -356,7 +356,7 @@ class _DashboardProfileScreenState extends State<DashboardProfileScreen> {
                       ),
                     ],
                   ),
-                  SizedBox(height: AppSpacing.xl),
+                  const SizedBox(height: AppSpacing.xl),
                   _ProfileActionRow(
                     icon: Icons.person_outline_rounded,
                     label: 'Account Details',
@@ -387,7 +387,7 @@ class _DashboardProfileScreenState extends State<DashboardProfileScreen> {
                     detail: 'Support options and app details',
                     onTap: () => context.push(AppRoutes.profileSupport),
                   ),
-                  SizedBox(height: AppSpacing.lg),
+                  const SizedBox(height: AppSpacing.lg),
                   Center(
                     child: TextButton(
                       onPressed: () async {
@@ -472,9 +472,9 @@ class _ProfileActionScreenState extends State<ProfileActionScreen> {
                   TpPageHeader(
                     label: config.title,
                   ),
-                  SizedBox(height: AppSpacing.sm),
+                  const SizedBox(height: AppSpacing.sm),
                   Text(config.subtitle, style: AppTextStyles.bodyM),
-                  SizedBox(height: AppSpacing.xl),
+                  const SizedBox(height: AppSpacing.xl),
                   FutureBuilder<HomeDashboardData>(
                     future: _future,
                     builder: (context, snapshot) {
@@ -578,10 +578,10 @@ class TransactionsDetailScaffold extends StatelessWidget {
               padding: const EdgeInsets.all(AppSpacing.lg),
               sliver: SliverList.list(
                 children: [
-                  TpPageHeader(
+                  const TpPageHeader(
                     label: 'My Transactions',
                   ),
-                  SizedBox(height: AppSpacing.xl),
+                  const SizedBox(height: AppSpacing.xl),
                   FutureBuilder<List<HomeTransaction>>(
                     future: future,
                     builder: (context, snapshot) {
@@ -662,9 +662,9 @@ class DashboardDetailScaffold extends StatelessWidget {
                       ),
                     ],
                   ),
-                  SizedBox(height: AppSpacing.sm),
+                  const SizedBox(height: AppSpacing.sm),
                   Text(subtitle, style: AppTextStyles.bodyM),
-                  SizedBox(height: AppSpacing.xl),
+                  const SizedBox(height: AppSpacing.xl),
                   FutureBuilder<HomeDashboardData>(
                     future: future,
                     builder: (context, snapshot) {
@@ -748,7 +748,7 @@ _DetailConfig _configFor(DashboardDetailKind kind) {
     case DashboardDetailKind.wallets:
       return const _DetailConfig(
         title: 'Wallets',
-        subtitle: 'Live balances from your TRUSTPAY backend account.',
+        subtitle: 'Live balances from your TrustPay backend account.',
       );
     case DashboardDetailKind.virtualAccount:
       return const _DetailConfig(
@@ -778,12 +778,12 @@ _DetailConfig _profileConfigFor(ProfileActionKind kind) {
     case ProfileActionKind.account:
       return const _DetailConfig(
         title: 'Account Details',
-        subtitle: 'Your saved TRUSTPAY account identity details.',
+        subtitle: 'Your saved TrustPay account identity details.',
       );
     case ProfileActionKind.appearance:
       return const _DetailConfig(
         title: 'Appearance',
-        subtitle: 'Choose how TRUSTPAY looks across your device.',
+        subtitle: 'Choose how TrustPay looks across your device.',
       );
     case ProfileActionKind.security:
       return const _DetailConfig(
@@ -821,14 +821,14 @@ class _SecurityLimitsBody extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text('Account upgrade', style: AppTextStyles.headingM),
-              SizedBox(height: AppSpacing.xs),
+              const SizedBox(height: AppSpacing.xs),
               Text(
                 verified
                     ? 'Your account is verified. Upgrade tiers unlock higher limits as they become available.'
                     : 'Complete verification to unlock withdrawals, virtual accounts, and higher limits.',
                 style: AppTextStyles.bodyM,
               ),
-              SizedBox(height: AppSpacing.md),
+              const SizedBox(height: AppSpacing.md),
               SizedBox(
                 width: double.infinity,
                 child: FilledButton.icon(
@@ -911,13 +911,13 @@ class _TierStatusCard extends StatelessWidget {
                 color: active ? AppColors.success : AppColors.warning,
               ),
             ),
-            SizedBox(width: AppSpacing.md),
+            const SizedBox(width: AppSpacing.md),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(title, style: AppTextStyles.labelM),
-                  SizedBox(height: 2),
+                  const SizedBox(height: 2),
                   Text(detail, style: AppTextStyles.bodyS),
                 ],
               ),
@@ -1259,12 +1259,12 @@ class _ProfileIdentityPanel extends StatelessWidget {
             ),
             _CompactInfoLine(label: 'Phone', value: user.phone),
             _CompactInfoLine(label: 'Email', value: user.email),
-            SizedBox(height: AppSpacing.sm),
+            const SizedBox(height: AppSpacing.sm),
             Row(
               children: [
                 Icon(Icons.lock_outline_rounded,
                     size: 16, color: AppColors.textSecondary),
-                SizedBox(width: AppSpacing.xs),
+                const SizedBox(width: AppSpacing.xs),
                 Expanded(
                   child: Text(
                     'Identity details can only be edited once.',
@@ -1283,30 +1283,30 @@ class _ProfileIdentityPanel extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text('Identity details', style: AppTextStyles.headingM),
-          SizedBox(height: AppSpacing.xs),
+          const SizedBox(height: AppSpacing.xs),
           Text(
             'You can edit these details once. Use your legal information.',
             style: AppTextStyles.bodyS,
           ),
-          SizedBox(height: AppSpacing.md),
+          const SizedBox(height: AppSpacing.md),
           _ProfileTextField(
             controller: fullNameController,
             label: 'Full name',
             enabled: !isSaving,
           ),
-          SizedBox(height: AppSpacing.sm),
+          const SizedBox(height: AppSpacing.sm),
           _ProfileTextField(
             controller: yearOfBirthController,
             label: 'Year of birth',
             enabled: !isSaving,
             keyboardType: TextInputType.number,
           ),
-          SizedBox(height: AppSpacing.sm),
+          const SizedBox(height: AppSpacing.sm),
           _ProfileCountryPicker(
             controller: countryController,
             enabled: !isSaving,
           ),
-          SizedBox(height: AppSpacing.sm),
+          const SizedBox(height: AppSpacing.sm),
           _ProfileTextField(
             controller: phoneController,
             label: 'Phone number',
@@ -1315,7 +1315,7 @@ class _ProfileIdentityPanel extends StatelessWidget {
             helperText: 'Use +234 for NG or +233 for GH.',
             keyboardType: TextInputType.phone,
           ),
-          SizedBox(height: AppSpacing.md),
+          const SizedBox(height: AppSpacing.md),
           SizedBox(
             width: double.infinity,
             child: FilledButton.icon(
@@ -1454,12 +1454,12 @@ class _DeleteAccountPanel extends StatelessWidget {
             'Delete account',
             style: AppTextStyles.headingM.copyWith(color: AppColors.error),
           ),
-          SizedBox(height: AppSpacing.xs),
+          const SizedBox(height: AppSpacing.xs),
           Text(
             'Submit an account closure request. Financial and KYC records may be retained for audit and compliance.',
             style: AppTextStyles.bodyM,
           ),
-          SizedBox(height: AppSpacing.md),
+          const SizedBox(height: AppSpacing.md),
           SizedBox(
             width: double.infinity,
             child: OutlinedButton.icon(
@@ -1505,7 +1505,7 @@ class _CompactInfoLine extends StatelessWidget {
       child: Row(
         children: [
           Expanded(child: Text(label, style: AppTextStyles.bodyM)),
-          SizedBox(width: AppSpacing.md),
+          const SizedBox(width: AppSpacing.md),
           Flexible(
             child: Text(
               value.isEmpty ? 'Not set' : value,
@@ -1554,7 +1554,7 @@ class _VirtualAccountSummaryCard extends StatelessWidget {
                   color: AppColors.primary,
                 ),
               ),
-              SizedBox(width: AppSpacing.md),
+              const SizedBox(width: AppSpacing.md),
               Expanded(
                 child: Text(
                   'Virtual account',
@@ -1564,13 +1564,13 @@ class _VirtualAccountSummaryCard extends StatelessWidget {
               if (current != null) _StatusPill(label: current.status),
             ],
           ),
-          SizedBox(height: AppSpacing.md),
+          const SizedBox(height: AppSpacing.md),
           if (current == null) ...[
             Text(
-              'Generate a provider-assigned account number for bank transfers into your TRUSTPAY wallet.',
+              'Generate a provider-assigned account number for bank transfers into your TrustPay wallet.',
               style: AppTextStyles.bodyM,
             ),
-            SizedBox(height: AppSpacing.md),
+            const SizedBox(height: AppSpacing.md),
             SizedBox(
               width: double.infinity,
               child: FilledButton.icon(
@@ -1593,7 +1593,7 @@ class _VirtualAccountSummaryCard extends StatelessWidget {
                 letterSpacing: 0.4,
               ),
             ),
-            SizedBox(height: AppSpacing.md),
+            const SizedBox(height: AppSpacing.md),
             _CompactInfoLine(label: 'Bank', value: current.bankName),
             _CompactInfoLine(label: 'Account name', value: current.accountName),
             _CompactInfoLine(label: 'Currency', value: current.currency),
@@ -1639,14 +1639,14 @@ class _TransactionVolumeSummary extends StatelessWidget {
                 ),
             ],
           ),
-          SizedBox(height: AppSpacing.xs),
+          const SizedBox(height: AppSpacing.xs),
           Text(
             transactions.isEmpty
                 ? 'No transaction volume recorded yet.'
                 : 'Calculated from backend transaction records.',
             style: AppTextStyles.bodyS,
           ),
-          SizedBox(height: AppSpacing.md),
+          const SizedBox(height: AppSpacing.md),
           if (volumes.isEmpty)
             Text('No completed transactions yet.', style: AppTextStyles.bodyM)
           else
@@ -1715,13 +1715,13 @@ class _AppearanceSettingsPanel extends ConsumerWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text('Appearance', style: AppTextStyles.headingM),
-              SizedBox(height: AppSpacing.xs),
+              const SizedBox(height: AppSpacing.xs),
               Text(
                 'Match your device automatically, or lock TrustPay to a light '
                 'or dark look.',
                 style: AppTextStyles.bodyM,
               ),
-              SizedBox(height: AppSpacing.md),
+              const SizedBox(height: AppSpacing.md),
               Container(
                 padding: const EdgeInsets.all(AppSpacing.xs),
                 decoration: BoxDecoration(
@@ -1739,7 +1739,7 @@ class _AppearanceSettingsPanel extends ConsumerWidget {
                         onTap: () => select(ThemeMode.system),
                       ),
                     ),
-                    SizedBox(width: AppSpacing.xs),
+                    const SizedBox(width: AppSpacing.xs),
                     Expanded(
                       child: _ThemeModeChip(
                         label: 'Light',
@@ -1748,7 +1748,7 @@ class _AppearanceSettingsPanel extends ConsumerWidget {
                         onTap: () => select(ThemeMode.light),
                       ),
                     ),
-                    SizedBox(width: AppSpacing.xs),
+                    const SizedBox(width: AppSpacing.xs),
                     Expanded(
                       child: _ThemeModeChip(
                         label: 'Dark',
@@ -1915,7 +1915,7 @@ class _SupportTicketPanelState extends State<_SupportTicketPanel> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Icon(Icons.privacy_tip_rounded, color: AppColors.warning),
-              SizedBox(width: AppSpacing.md),
+              const SizedBox(width: AppSpacing.md),
               Expanded(
                 child: Text(
                   'Customer care can trace wallet, payment, VTU, exchange, KYC, and withdrawal cases. Do not send OTPs, passwords, full card details, or full bank account numbers.',
@@ -1931,12 +1931,12 @@ class _SupportTicketPanelState extends State<_SupportTicketPanel> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text('Contact support', style: AppTextStyles.headingM),
-              SizedBox(height: AppSpacing.xs),
+              const SizedBox(height: AppSpacing.xs),
               Text(
                 'Chat with customer care through Tawk.to for quick account, wallet, and KYC questions.',
                 style: AppTextStyles.bodyM,
               ),
-              SizedBox(height: AppSpacing.md),
+              const SizedBox(height: AppSpacing.md),
               SizedBox(
                 width: double.infinity,
                 child: FilledButton.icon(
@@ -1953,7 +1953,7 @@ class _SupportTicketPanelState extends State<_SupportTicketPanel> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text('Open a case', style: AppTextStyles.headingM),
-              SizedBox(height: AppSpacing.md),
+              const SizedBox(height: AppSpacing.md),
               DropdownButtonFormField<String>(
                 initialValue: _category,
                 items: _categories
@@ -1977,7 +1977,7 @@ class _SupportTicketPanelState extends State<_SupportTicketPanel> {
                   color: AppColors.textPrimary,
                 ),
               ),
-              SizedBox(height: AppSpacing.md),
+              const SizedBox(height: AppSpacing.md),
               TextField(
                 controller: _referenceController,
                 enabled: !_submitting,
@@ -1988,7 +1988,7 @@ class _SupportTicketPanelState extends State<_SupportTicketPanel> {
                   'Transaction reference (optional)',
                 ),
               ),
-              SizedBox(height: AppSpacing.md),
+              const SizedBox(height: AppSpacing.md),
               TextField(
                 controller: _descriptionController,
                 enabled: !_submitting,
@@ -2000,10 +2000,10 @@ class _SupportTicketPanelState extends State<_SupportTicketPanel> {
                 decoration: _supportInputDecoration('What happened?'),
               ),
               if (_message != null) ...[
-                SizedBox(height: AppSpacing.md),
+                const SizedBox(height: AppSpacing.md),
                 Text(_message!, style: AppTextStyles.bodyS),
               ],
-              SizedBox(height: AppSpacing.md),
+              const SizedBox(height: AppSpacing.md),
               SizedBox(
                 width: double.infinity,
                 child: FilledButton.icon(
@@ -2026,7 +2026,7 @@ class _SupportTicketPanelState extends State<_SupportTicketPanel> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text('Recent cases', style: AppTextStyles.headingM),
-                    SizedBox(height: AppSpacing.sm),
+                    const SizedBox(height: AppSpacing.sm),
                     Text(
                       'Support history will appear here shortly.',
                       style: AppTextStyles.bodyM,
@@ -2042,7 +2042,7 @@ class _SupportTicketPanelState extends State<_SupportTicketPanel> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text('Cases unavailable', style: AppTextStyles.headingM),
-                    SizedBox(height: AppSpacing.sm),
+                    const SizedBox(height: AppSpacing.sm),
                     Text(
                       'Pull to refresh later or contact operations with your transaction reference.',
                       style: AppTextStyles.bodyM,
@@ -2127,7 +2127,7 @@ class _InviteFriendPanelState extends State<_InviteFriendPanel> {
 
   Future<void> _copyInvite(ReferralDashboard data) async {
     final message =
-        'Join TRUSTPAY and exchange NGN/GHS faster. Use my referral code ${data.code} to sign up.';
+        'Join TrustPay and exchange NGN/GHS faster. Use my referral code ${data.code} to sign up.';
     await Clipboard.setData(ClipboardData(text: message));
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
@@ -2174,14 +2174,14 @@ class _InviteFriendPanelState extends State<_InviteFriendPanel> {
                       color: AppColors.primary,
                     ),
                   ),
-                  SizedBox(height: AppSpacing.md),
+                  const SizedBox(height: AppSpacing.md),
                   Text('Earn NGN 100', style: AppTextStyles.headingL),
-                  SizedBox(height: AppSpacing.xs),
+                  const SizedBox(height: AppSpacing.xs),
                   Text(
-                    'Invite friends to TRUSTPAY. You get ${_money(data.rewardCurrency, data.rewardAmount)} for each eligible friend who signs up with your code.',
+                    'Invite friends to TrustPay. You get ${_money(data.rewardCurrency, data.rewardAmount)} for each eligible friend who signs up with your code.',
                     style: AppTextStyles.bodyM,
                   ),
-                  SizedBox(height: AppSpacing.md),
+                  const SizedBox(height: AppSpacing.md),
                   Container(
                     width: double.infinity,
                     padding: const EdgeInsets.symmetric(
@@ -2211,7 +2211,7 @@ class _InviteFriendPanelState extends State<_InviteFriendPanel> {
                       ],
                     ),
                   ),
-                  SizedBox(height: AppSpacing.md),
+                  const SizedBox(height: AppSpacing.md),
                   SizedBox(
                     width: double.infinity,
                     child: FilledButton.icon(
@@ -2231,14 +2231,14 @@ class _InviteFriendPanelState extends State<_InviteFriendPanel> {
                     value: '${data.invites}',
                   ),
                 ),
-                SizedBox(width: AppSpacing.sm),
+                const SizedBox(width: AppSpacing.sm),
                 Expanded(
                   child: _ReferralMetricCard(
                     label: 'Pending',
                     value: _money('NGN', data.pendingAmount),
                   ),
                 ),
-                SizedBox(width: AppSpacing.sm),
+                const SizedBox(width: AppSpacing.sm),
                 Expanded(
                   child: _ReferralMetricCard(
                     label: 'Paid',
@@ -2252,10 +2252,10 @@ class _InviteFriendPanelState extends State<_InviteFriendPanel> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text('How it works', style: AppTextStyles.headingM),
-                  SizedBox(height: AppSpacing.md),
+                  const SizedBox(height: AppSpacing.md),
                   const _ReferralStep(
                     number: '1',
-                    text: 'Copy and share your TRUSTPAY referral code.',
+                    text: 'Copy and share your TrustPay referral code.',
                   ),
                   const _ReferralStep(
                     number: '2',
@@ -2270,7 +2270,7 @@ class _InviteFriendPanelState extends State<_InviteFriendPanel> {
               ),
             ),
             Text('Referral history', style: AppTextStyles.headingM),
-            SizedBox(height: AppSpacing.sm),
+            const SizedBox(height: AppSpacing.sm),
             if (data.referrals.isEmpty)
               const _EmptyPanel(
                 icon: Icons.group_add_outlined,
@@ -2291,7 +2291,7 @@ class _InviteFriendPanelState extends State<_InviteFriendPanel> {
                           color: AppColors.primary,
                         ),
                       ),
-                      SizedBox(width: AppSpacing.md),
+                      const SizedBox(width: AppSpacing.md),
                       Expanded(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
@@ -2339,7 +2339,7 @@ class _ReferralMetricCard extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(label, style: AppTextStyles.bodyS),
-          SizedBox(height: AppSpacing.xs),
+          const SizedBox(height: AppSpacing.xs),
           FittedBox(
             fit: BoxFit.scaleDown,
             alignment: Alignment.centerLeft,
@@ -2375,7 +2375,7 @@ class _ReferralStep extends StatelessWidget {
               style: AppTextStyles.labelS.copyWith(color: AppColors.primary),
             ),
           ),
-          SizedBox(width: AppSpacing.sm),
+          const SizedBox(width: AppSpacing.sm),
           Expanded(child: Text(text, style: AppTextStyles.bodyM)),
         ],
       ),
@@ -2408,12 +2408,12 @@ class _FaqPanel extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text('FAQ', style: AppTextStyles.headingM),
-          SizedBox(height: AppSpacing.sm),
+          const SizedBox(height: AppSpacing.sm),
           for (final item in _items) ...[
             Text(item.$1, style: AppTextStyles.labelM),
-            SizedBox(height: 2),
+            const SizedBox(height: 2),
             Text(item.$2, style: AppTextStyles.bodyS),
-            if (item != _items.last) SizedBox(height: AppSpacing.md),
+            if (item != _items.last) const SizedBox(height: AppSpacing.md),
           ],
         ],
       ),
@@ -2442,14 +2442,14 @@ class _SupportTicketCard extends StatelessWidget {
               _SupportStatusPill(status: ticket.status),
             ],
           ),
-          SizedBox(height: AppSpacing.xs),
+          const SizedBox(height: AppSpacing.xs),
           Text(
             ticket.transactionReference.isEmpty
                 ? date
                 : '${ticket.transactionReference} • $date',
             style: AppTextStyles.bodyS,
           ),
-          SizedBox(height: AppSpacing.sm),
+          const SizedBox(height: AppSpacing.sm),
           Text(
             ticket.description,
             style: AppTextStyles.bodyM,
@@ -2457,7 +2457,7 @@ class _SupportTicketCard extends StatelessWidget {
             overflow: TextOverflow.ellipsis,
           ),
           if (ticket.resolution.isNotEmpty) ...[
-            SizedBox(height: AppSpacing.md),
+            const SizedBox(height: AppSpacing.md),
             Text(ticket.resolution, style: AppTextStyles.bodyS),
           ],
         ],
@@ -2593,7 +2593,7 @@ class _WalletsBody extends StatelessWidget {
         .toList();
 
     if (wallets.isEmpty) {
-      return Column(
+      return const Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           _EmptyPanel(
@@ -2614,11 +2614,11 @@ class _WalletsBody extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text('Active wallets', style: AppTextStyles.headingM),
-        SizedBox(height: AppSpacing.sm),
+        const SizedBox(height: AppSpacing.sm),
         ...wallets.map((wallet) {
           return _WalletManageCard(wallet: wallet);
         }),
-        SizedBox(height: AppSpacing.lg),
+        const SizedBox(height: AppSpacing.lg),
         _WalletAddSection(
           addableCurrencies: addableCurrencies,
           plannedCurrencies: plannedCurrencies,
@@ -2696,13 +2696,13 @@ class _WalletManageCard extends StatelessWidget {
                     ),
                   ),
                 ),
-                SizedBox(width: AppSpacing.md),
+                const SizedBox(width: AppSpacing.md),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(currency, style: AppTextStyles.headingM),
-                      SizedBox(height: AppSpacing.xs),
+                      const SizedBox(height: AppSpacing.xs),
                       Text(
                         'Available balance',
                         style: AppTextStyles.bodyS,
@@ -2740,14 +2740,14 @@ class _WalletAddSection extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text('Add currency wallet', style: AppTextStyles.headingM),
-        SizedBox(height: AppSpacing.xs),
+        const SizedBox(height: AppSpacing.xs),
         Text(
           hasAddable
               ? 'Create another supported currency wallet for this account.'
               : 'All currently supported currency wallets are already active.',
           style: AppTextStyles.bodyM,
         ),
-        SizedBox(height: AppSpacing.md),
+        const SizedBox(height: AppSpacing.md),
         if (hasAddable)
           ...addableCurrencies.map((currency) {
             return _WalletCurrencyOption(
@@ -2817,7 +2817,7 @@ class _WalletCurrencyOption extends StatelessWidget {
                     : Icons.lock_outline_rounded,
                 color: enabled ? AppColors.primary : AppColors.textHint,
               ),
-              SizedBox(width: AppSpacing.md),
+              const SizedBox(width: AppSpacing.md),
               Expanded(
                 child: Text(currency, style: AppTextStyles.labelL),
               ),
@@ -2876,9 +2876,9 @@ class _VirtualAccountBody extends StatelessWidget {
                   _StatusPill(label: account.status),
                 ],
               ),
-              SizedBox(height: AppSpacing.sm),
+              const SizedBox(height: AppSpacing.sm),
               Text(account.accountName, style: AppTextStyles.bodyM),
-              SizedBox(height: AppSpacing.xs),
+              const SizedBox(height: AppSpacing.xs),
               Text(
                 '${account.currency} â€¢ ${account.accountNumberMasked}',
                 style: AppTextStyles.bodyS,
@@ -2934,11 +2934,11 @@ class _NotificationsBodyState extends State<_NotificationsBody> {
             key: ValueKey('notification-${item.id}'),
             direction: DismissDirection.horizontal,
             onDismissed: (_) => _dismiss(item.id),
-            background: _NotificationDismissBackground(
+            background: const _NotificationDismissBackground(
               alignment: Alignment.centerLeft,
               icon: Icons.check_rounded,
             ),
-            secondaryBackground: _NotificationDismissBackground(
+            secondaryBackground: const _NotificationDismissBackground(
               alignment: Alignment.centerRight,
               icon: Icons.close_rounded,
             ),
@@ -2995,7 +2995,7 @@ class _NotificationCard extends StatelessWidget {
                   ),
                   child: Icon(item.icon, color: item.color, size: 22),
                 ),
-                SizedBox(width: AppSpacing.md),
+                const SizedBox(width: AppSpacing.md),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -3006,7 +3006,7 @@ class _NotificationCard extends StatelessWidget {
                           fontWeight: FontWeight.w900,
                         ),
                       ),
-                      SizedBox(height: 3),
+                      const SizedBox(height: 3),
                       Text(item.detail, style: AppTextStyles.bodyS),
                     ],
                   ),
@@ -3100,7 +3100,7 @@ class _VtuOrderBody extends StatelessWidget {
                       color: statusTone.foreground,
                     ),
                   ),
-                  SizedBox(width: AppSpacing.md),
+                  const SizedBox(width: AppSpacing.md),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -3121,7 +3121,7 @@ class _VtuOrderBody extends StatelessWidget {
                   _StatusPill(label: order.transactionStatus),
                 ],
               ),
-              SizedBox(height: AppSpacing.lg),
+              const SizedBox(height: AppSpacing.lg),
               _InfoRow(label: 'Reference', value: order.reference),
               _InfoRow(
                 label: 'Amount',
@@ -3135,7 +3135,7 @@ class _VtuOrderBody extends StatelessWidget {
             ],
           ),
         ),
-        SizedBox(height: AppSpacing.lg),
+        const SizedBox(height: AppSpacing.lg),
         FilledButton.icon(
           onPressed: isChecking || _isTerminal ? null : onCheckStatus,
           style: FilledButton.styleFrom(
@@ -3222,7 +3222,7 @@ class _TransactionHistoryCard extends StatelessWidget {
                   size: 20,
                 ),
               ),
-              SizedBox(width: AppSpacing.md),
+              const SizedBox(width: AppSpacing.md),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -3235,7 +3235,7 @@ class _TransactionHistoryCard extends StatelessWidget {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
-                    SizedBox(height: 4),
+                    const SizedBox(height: 4),
                     Row(
                       children: [
                         Expanded(
@@ -3251,7 +3251,7 @@ class _TransactionHistoryCard extends StatelessWidget {
                   ],
                 ),
               ),
-              SizedBox(width: AppSpacing.md),
+              const SizedBox(width: AppSpacing.md),
               Column(
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
@@ -3263,7 +3263,7 @@ class _TransactionHistoryCard extends StatelessWidget {
                       letterSpacing: 0,
                     ),
                   ),
-                  SizedBox(height: 4),
+                  const SizedBox(height: 4),
                   Text(
                     canTrackVtu ? 'Track order' : date,
                     style: AppTextStyles.bodyS,
@@ -3288,7 +3288,7 @@ class _HistoryEmptyState extends StatelessWidget {
       child: Row(
         children: [
           Icon(Icons.history_rounded, color: AppColors.textHint),
-          SizedBox(width: AppSpacing.sm),
+          const SizedBox(width: AppSpacing.sm),
           Expanded(
             child: Text(
               'No transactions yet. Completed activity will appear here.',
@@ -3384,13 +3384,13 @@ class _KycBody extends StatelessWidget {
                     : Icons.verified_user_outlined,
                 color: verified ? AppColors.success : AppColors.warning,
               ),
-              SizedBox(width: AppSpacing.md),
+              const SizedBox(width: AppSpacing.md),
               Expanded(
                 child: Text('Status: $status', style: AppTextStyles.headingM),
               ),
             ],
           ),
-          SizedBox(height: AppSpacing.md),
+          const SizedBox(height: AppSpacing.md),
           Text(
             verified
                 ? 'Your account can access withdrawals, higher limits, and virtual account provisioning.'
@@ -3415,7 +3415,7 @@ class _InfoRow extends StatelessWidget {
       child: Row(
         children: [
           Expanded(child: Text(label, style: AppTextStyles.bodyM)),
-          SizedBox(width: AppSpacing.md),
+          const SizedBox(width: AppSpacing.md),
           Flexible(
             child: Text(
               value.isEmpty ? 'Not set' : value,
@@ -3471,13 +3471,13 @@ class _ProfileActionRow extends StatelessWidget {
                   ),
                   child: Icon(icon, color: AppColors.textPrimary, size: 19),
                 ),
-                SizedBox(width: AppSpacing.md),
+                const SizedBox(width: AppSpacing.md),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(label, style: AppTextStyles.labelM),
-                      SizedBox(height: 2),
+                      const SizedBox(height: 2),
                       Text(
                         detail,
                         style: AppTextStyles.bodyS,
@@ -3487,7 +3487,7 @@ class _ProfileActionRow extends StatelessWidget {
                     ],
                   ),
                 ),
-                SizedBox(width: AppSpacing.sm),
+                const SizedBox(width: AppSpacing.sm),
                 Icon(
                   Icons.chevron_right_rounded,
                   color: AppColors.textHint,
@@ -3594,9 +3594,9 @@ class _EmptyPanel extends StatelessWidget {
                   repeat: animation != TrustPayAnimationVariant.success,
                   semanticsLabel: title,
                 ),
-          SizedBox(height: AppSpacing.md),
+          const SizedBox(height: AppSpacing.md),
           Text(title, style: AppTextStyles.headingM),
-          SizedBox(height: AppSpacing.xs),
+          const SizedBox(height: AppSpacing.xs),
           Text(detail, style: AppTextStyles.bodyM, textAlign: TextAlign.center),
         ],
       ),
@@ -3624,13 +3624,13 @@ class _LoadingPanel extends StatelessWidget {
               color: AppColors.primary,
             ),
           ),
-          SizedBox(width: AppSpacing.md),
+          const SizedBox(width: AppSpacing.md),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text('Loading details', style: AppTextStyles.headingM),
-                SizedBox(height: AppSpacing.xs),
+                const SizedBox(height: AppSpacing.xs),
                 Text(
                   'Fetching your latest account settings.',
                   style: AppTextStyles.bodyM,
@@ -3670,24 +3670,24 @@ class _ProfileSkeletonPanel extends StatelessWidget {
                 radius: 28,
                 backgroundColor: AppColors.primary.withValues(alpha: 0.14),
               ),
-              SizedBox(width: AppSpacing.md),
+              const SizedBox(width: AppSpacing.md),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     line(128, height: 16),
-                    SizedBox(height: AppSpacing.sm),
+                    const SizedBox(height: AppSpacing.sm),
                     line(190),
                   ],
                 ),
               ),
             ],
           ),
-          SizedBox(height: AppSpacing.lg),
+          const SizedBox(height: AppSpacing.lg),
           line(double.infinity),
-          SizedBox(height: AppSpacing.sm),
+          const SizedBox(height: AppSpacing.sm),
           line(double.infinity),
-          SizedBox(height: AppSpacing.sm),
+          const SizedBox(height: AppSpacing.sm),
           line(180),
         ],
       ),
@@ -3710,10 +3710,10 @@ class _ErrorPanel extends StatelessWidget {
       child: Column(
         children: [
           Icon(Icons.cloud_off_rounded, color: AppColors.primary),
-          SizedBox(height: AppSpacing.sm),
+          const SizedBox(height: AppSpacing.sm),
           Text(message,
               style: AppTextStyles.bodyM, textAlign: TextAlign.center),
-          SizedBox(height: AppSpacing.md),
+          const SizedBox(height: AppSpacing.md),
           FilledButton(
             onPressed: onRetry,
             style: FilledButton.styleFrom(backgroundColor: AppColors.primary),
@@ -3743,13 +3743,13 @@ class _UnauthorizedPanelState extends State<_UnauthorizedPanel> {
       child: Column(
         children: [
           Icon(Icons.lock_clock_rounded, color: AppColors.warning),
-          SizedBox(height: AppSpacing.sm),
+          const SizedBox(height: AppSpacing.sm),
           Text(
             'Your session needs to be refreshed before loading history.',
             style: AppTextStyles.bodyM,
             textAlign: TextAlign.center,
           ),
-          SizedBox(height: AppSpacing.md),
+          const SizedBox(height: AppSpacing.md),
           FilledButton(
             onPressed: _isRefreshing
                 ? null
@@ -3791,13 +3791,13 @@ class _SessionExpiredScreen extends StatelessWidget {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Icon(Icons.lock_outline_rounded, color: AppColors.primary),
-                  SizedBox(height: AppSpacing.md),
+                  const SizedBox(height: AppSpacing.md),
                   Text(
                     'Please log in again to continue.',
                     style: AppTextStyles.headingM,
                     textAlign: TextAlign.center,
                   ),
-                  SizedBox(height: AppSpacing.lg),
+                  const SizedBox(height: AppSpacing.lg),
                   FilledButton(
                     onPressed: onLogin,
                     style: FilledButton.styleFrom(

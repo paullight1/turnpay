@@ -37,6 +37,9 @@ function createRedisMock() {
         store.delete(key);
       }),
       isRedisAvailable: jest.fn(() => false),
+      isAvailable: jest.fn(() => false),
+      isMemoryFallbackAllowed: jest.fn(() => true),
+      assertAvailable: jest.fn(),
       getClient: jest.fn(),
     },
   };

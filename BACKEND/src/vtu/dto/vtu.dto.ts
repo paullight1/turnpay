@@ -13,8 +13,12 @@ import {
   normalizeDecimalInput,
 } from '../../common/dto/query.dto';
 
-const VTU_TYPES = ['airtime', 'data', 'cable', 'electricity'] as const;
-const VTU_SCOPES = ['local', 'international'] as const;
+export const VTU_TYPES = ['airtime', 'data', 'cable', 'electricity'] as const;
+export const VTU_METER_TYPES = ['prepaid', 'postpaid'] as const;
+export const VTU_SUBSCRIPTION_TYPES = ['change', 'renew'] as const;
+export type VtuType = (typeof VTU_TYPES)[number];
+export type VtuMeterType = (typeof VTU_METER_TYPES)[number];
+export type VtuSubscriptionType = (typeof VTU_SUBSCRIPTION_TYPES)[number];
 const VTU_PROVIDERS = [
   'mtn',
   'airtel',
@@ -36,14 +40,20 @@ const VTU_PROVIDERS = [
   'aba',
   'yedc',
 ] as const;
-const PHONE_REGEX = /^\+?[1-9]\d{1,14}$/;
+const NIGERIA_PHONE_REGEX = /^\+234[789]\d{9}$/;
 const CUSTOMER_IDENTIFIER_REGEX = /^[A-Za-z0-9-]{5,32}$/;
 
-export class GetVtuCountriesDto {
-  @IsString()
-  @IsOptional()
-  @MaxLength(64)
-  search?: string;
+export function normalizeNigeriaPhone(value: unknown) {
+  if (typeof value !== 'string') return value;
+
+  const phone = value.trim().replace(/[\s()-]/g, '');
+  if (/^0[789]\d{9}$/.test(phone)) return `+234${phone.slice(1)}`;
+  if (/^234[789]\d{9}$/.test(phone)) return `+${phone}`;
+  return phone;
+}
+
+function PhoneField() {
+  return Transform(({ value }) => normalizeNigeriaPhone(value));
 }
 
 export class GetVtuProvidersDto {
@@ -51,46 +61,6 @@ export class GetVtuProvidersDto {
   @IsOptional()
   @IsIn(VTU_TYPES)
   type?: (typeof VTU_TYPES)[number];
-
-  @IsString()
-  @IsOptional()
-  @IsIn(VTU_SCOPES)
-  scope?: (typeof VTU_SCOPES)[number];
-
-  @Transform(({ value }: { value: unknown }) =>
-    typeof value === 'string' ? value.toUpperCase() : value,
-  )
-  @IsString()
-  @IsOptional()
-  @Matches(/^[A-Z]{2}$/, {
-    message: 'countryCode must be a valid ISO 3166-1 alpha-2 code',
-  })
-  countryCode?: string;
-}
-
-export class AutoDetectReloadlyOperatorDto {
-  @IsString()
-  @IsNotEmpty()
-  @MaxLength(15)
-  @Matches(PHONE_REGEX, {
-    message: 'phone must be a valid E.164 phone number',
-  })
-  phone: string;
-
-  @Transform(({ value }: { value: unknown }) =>
-    typeof value === 'string' ? value.toUpperCase() : value,
-  )
-  @IsString()
-  @IsNotEmpty()
-  @Matches(/^[A-Z]{2}$/, {
-    message: 'countryCode must be a valid ISO 3166-1 alpha-2 code',
-  })
-  countryCode: string;
-
-  @IsString()
-  @IsNotEmpty()
-  @IsIn(['airtime', 'data'])
-  type: 'airtime' | 'data';
 }
 
 export class GetVtuPackagesDto {
@@ -115,6 +85,71 @@ export class ValidateVtuCustomerDto {
   number: string;
 }
 
+export class ValidateSmartCardDto {
+  @IsString()
+  @IsNotEmpty()
+  @IsIn(['dstv', 'gotv', 'startimes'])
+  provider: 'dstv' | 'gotv' | 'startimes';
+
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(32)
+  @Matches(CUSTOMER_IDENTIFIER_REGEX, {
+    message: 'smartCardNumber must contain only letters, numbers, or hyphen',
+  })
+  smartCardNumber: string;
+
+  @IsString()
+  @IsIn(VTU_SUBSCRIPTION_TYPES)
+  subscriptionType: VtuSubscriptionType;
+
+  @PhoneField()
+  @IsString()
+  @Matches(NIGERIA_PHONE_REGEX, {
+    message: 'contactPhone must be a valid Nigerian phone number',
+  })
+  contactPhone: string;
+}
+
+export class ValidateMeterDto {
+  @IsString()
+  @IsNotEmpty()
+  @IsIn([
+    'ikedc',
+    'ekedc',
+    'aedc',
+    'ibedc',
+    'phed',
+    'jed',
+    'kedco',
+    'kaedco',
+    'eedc',
+    'bedc',
+    'aba',
+    'yedc',
+  ])
+  provider: (typeof VTU_PROVIDERS)[number];
+
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(32)
+  @Matches(/^\d{5,32}$/, {
+    message: 'meterNumber must contain 5 to 32 digits',
+  })
+  meterNumber: string;
+
+  @IsString()
+  @IsIn(VTU_METER_TYPES)
+  meterType: VtuMeterType;
+
+  @PhoneField()
+  @IsString()
+  @Matches(NIGERIA_PHONE_REGEX, {
+    message: 'contactPhone must be a valid Nigerian phone number',
+  })
+  contactPhone: string;
+}
+
 export class VtuOrderReferenceDto {
   @IsString()
   @IsNotEmpty()
@@ -127,47 +162,30 @@ export class VtuOrderReferenceDto {
 
 export class PurchaseVtuDto {
   @IsString()
-  @IsOptional()
-  @IsIn(VTU_SCOPES)
-  scope?: (typeof VTU_SCOPES)[number];
-
-  @IsString()
   @IsIn(VTU_TYPES)
-  type: (typeof VTU_TYPES)[number];
+  type: VtuType;
 
   @IsString()
-  @ValidateIf((dto: PurchaseVtuDto) => dto.scope !== 'international')
   @IsNotEmpty()
   @IsIn(VTU_PROVIDERS)
-  provider?: (typeof VTU_PROVIDERS)[number];
+  provider: (typeof VTU_PROVIDERS)[number];
 
-  @Transform(({ value }: { value: unknown }) =>
-    typeof value === 'string' ? value.toUpperCase() : value,
-  )
-  @IsString()
-  @ValidateIf((dto: PurchaseVtuDto) => dto.scope === 'international')
-  @IsNotEmpty()
-  @Matches(/^[A-Z]{2}$/, {
-    message: 'countryCode must be a valid ISO 3166-1 alpha-2 code',
-  })
-  countryCode?: string;
-
-  @IsString()
-  @ValidateIf((dto: PurchaseVtuDto) => dto.scope === 'international')
-  @IsNotEmpty()
-  @Matches(/^\d{1,12}$/, {
-    message: 'operatorId must be a valid Reloadly operator or biller id',
-  })
-  operatorId?: string;
-
+  @PhoneField()
   @IsString()
   @ValidateIf((dto: PurchaseVtuDto) => ['airtime', 'data'].includes(dto.type))
   @IsNotEmpty()
   @MaxLength(15)
-  @Matches(PHONE_REGEX, {
-    message: 'recipientNumber must be a valid E.164 phone number',
+  @Matches(NIGERIA_PHONE_REGEX, {
+    message: 'recipientNumber must be a valid Nigerian phone number',
   })
   recipientNumber?: string;
+
+  @PhoneField()
+  @IsString()
+  @Matches(NIGERIA_PHONE_REGEX, {
+    message: 'contactPhone must be a valid Nigerian phone number',
+  })
+  contactPhone: string;
 
   @Transform(({ value }) => normalizeDecimalInput(value))
   @IsString()
@@ -179,7 +197,8 @@ export class PurchaseVtuDto {
   @IsString()
   @ValidateIf(
     (dto: PurchaseVtuDto) =>
-      dto.type === 'data' && dto.scope !== 'international',
+      dto.type === 'data' ||
+      (dto.type === 'cable' && dto.subscriptionType === 'change'),
   )
   @IsNotEmpty()
   @MaxLength(100)
@@ -195,6 +214,11 @@ export class PurchaseVtuDto {
   smartCardNumber?: string;
 
   @IsString()
+  @ValidateIf((dto: PurchaseVtuDto) => dto.type === 'cable')
+  @IsIn(VTU_SUBSCRIPTION_TYPES)
+  subscriptionType?: VtuSubscriptionType;
+
+  @IsString()
   @ValidateIf((dto: PurchaseVtuDto) => dto.type === 'electricity')
   @IsNotEmpty()
   @MaxLength(32)
@@ -202,6 +226,11 @@ export class PurchaseVtuDto {
     message: 'meterNumber must contain 5 to 32 digits',
   })
   meterNumber?: string;
+
+  @IsString()
+  @ValidateIf((dto: PurchaseVtuDto) => dto.type === 'electricity')
+  @IsIn(VTU_METER_TYPES)
+  meterType?: VtuMeterType;
 
   @IsString()
   @IsOptional()

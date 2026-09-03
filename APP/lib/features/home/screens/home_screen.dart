@@ -6,6 +6,7 @@ import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/router/app_router.dart';
+import '../../../core/state/wallet_refresh_signal.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/haptics.dart';
 import '../../../core/widgets/micro_interactions.dart';
@@ -34,6 +35,15 @@ class _HomeScreenState extends State<HomeScreen> {
   void initState() {
     super.initState();
     _dashboardFuture = widget.homeDataService.fetchDashboard();
+    // Re-fetch balances whenever a money action completes elsewhere in the
+    // app so the dashboard never shows stale figures.
+    walletRefreshSignal.addListener(_refreshDashboard);
+  }
+
+  @override
+  void dispose() {
+    walletRefreshSignal.removeListener(_refreshDashboard);
+    super.dispose();
   }
 
   void _toggleBalances() {
@@ -86,15 +96,15 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
                 children: [
                   _HomeTopBar(user: data.user),
-                  SizedBox(height: AppSpacing.md),
+                  const SizedBox(height: AppSpacing.md),
                   _BalancePanel(
                     data: data,
                     showBalances: _showBalances,
                     onToggleBalances: _toggleBalances,
                   ),
-                  SizedBox(height: AppSpacing.lg),
+                  const SizedBox(height: AppSpacing.lg),
                   const _QuickActionsGrid(),
-                  SizedBox(height: AppSpacing.lg),
+                  const SizedBox(height: AppSpacing.lg),
                   if (data.user.kycStatus.toUpperCase() == 'VERIFIED')
                     const _PromoBanner()
                   else
@@ -102,23 +112,23 @@ class _HomeScreenState extends State<HomeScreen> {
                       status: data.user.kycStatus,
                     ),
                   if (data.beneficiaries.isNotEmpty) ...[
-                    SizedBox(height: AppSpacing.lg),
+                    const SizedBox(height: AppSpacing.lg),
                     _BeneficiaryStrip(
                       beneficiaries: data.beneficiaries,
                     ),
                   ],
-                  SizedBox(height: AppSpacing.lg),
+                  const SizedBox(height: AppSpacing.lg),
                   const _SectionTitle(
                     title: 'Other wallets',
                     actionLabel: 'Manage',
                     route: AppRoutes.wallets,
                   ),
-                  SizedBox(height: AppSpacing.md),
+                  const SizedBox(height: AppSpacing.md),
                   _WalletSummaryRow(
                     wallets: data.wallets,
                     showBalances: _showBalances,
                   ),
-                  SizedBox(height: AppSpacing.lg),
+                  const SizedBox(height: AppSpacing.lg),
                   _RecentTransactionsSection(
                     transactions: data.transactions,
                   ),
@@ -165,7 +175,7 @@ class _HomeTopBar extends StatelessWidget {
             ),
           ),
         ),
-        SizedBox(width: AppSpacing.md),
+        const SizedBox(width: AppSpacing.md),
         Expanded(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -206,7 +216,7 @@ class _BalancePanel extends StatefulWidget {
   final VoidCallback onToggleBalances;
 
   const _BalancePanel({
-    // The key remains available for stable widget identity in parent rebuilds.
+    // Retained for widget identity compatibility while the panel is private.
     // ignore: unused_element_parameter
     super.key,
     required this.data,
@@ -226,8 +236,7 @@ class _BalancePanelState extends State<_BalancePanel> {
   @override
   void initState() {
     super.initState();
-    _scrollController = ScrollController()
-      ..addListener(_handleCarouselScroll);
+    _scrollController = ScrollController()..addListener(_handleCarouselScroll);
   }
 
   @override
@@ -240,10 +249,8 @@ class _BalancePanelState extends State<_BalancePanel> {
 
   void _handleCarouselScroll() {
     if (!_scrollController.hasClients || _cardExtent <= 0) return;
-    final nextPage = (_scrollController.offset / _cardExtent)
-        .round()
-        .clamp(0, 1)
-        .toInt();
+    final nextPage =
+        (_scrollController.offset / _cardExtent).round().clamp(0, 1).toInt();
     if (nextPage != _currentPage) {
       setState(() => _currentPage = nextPage);
     }
@@ -401,7 +408,8 @@ class _CurrencyBalanceCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final visibleAmount = showBalances ? _walletCardAmount(data.balance) : '******';
+    final visibleAmount =
+        showBalances ? _walletCardAmount(data.balance) : '******';
     final accountNumber = data.account?.accountNumber.trim() ?? '';
     final accountChipLabel = accountNumber.isNotEmpty
         ? _formatAccountNumber(accountNumber)
@@ -564,6 +572,7 @@ class _CurrencyBalanceCard extends StatelessWidget {
                         label: 'Send money',
                         icon: Icons.near_me_rounded,
                         onTap: onSend,
+                        isPrimary: true,
                       ),
                     ),
                     const SizedBox(width: AppSpacing.sm),
@@ -585,7 +594,8 @@ class _CurrencyBalanceCard extends StatelessWidget {
   }
 }
 
-// Retained for the next dashboard rollout; not mounted by the current layout.
+// Kept as the full-account variant while the dashboard currently renders the
+// compact balance-card account treatment.
 // ignore: unused_element
 class _VirtualAccountSection extends StatelessWidget {
   final HomeVirtualAccount? account;
@@ -837,39 +847,56 @@ class _BalanceCtaButton extends StatelessWidget {
   final String label;
   final IconData icon;
   final VoidCallback onTap;
+  final bool isPrimary;
 
   const _BalanceCtaButton({
     required this.label,
     required this.icon,
     required this.onTap,
+    this.isPrimary = false,
   });
 
   @override
   Widget build(BuildContext context) {
     return TapScale(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(12),
+      semanticLabel: label,
+      borderRadius: BorderRadius.circular(15),
       pressedScale: 0.97,
       child: Container(
-        height: 38,
+        height: 48,
         decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: 0.16),
-          borderRadius: BorderRadius.circular(12),
+          color:
+              isPrimary ? Colors.white : Colors.white.withValues(alpha: 0.13),
+          borderRadius: BorderRadius.circular(15),
           border: Border.all(
-            color: Colors.white.withValues(alpha: 0.24),
+            color: Colors.white.withValues(alpha: isPrimary ? 0.72 : 0.28),
           ),
+          boxShadow: isPrimary
+              ? [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.12),
+                    blurRadius: 12,
+                    offset: const Offset(0, 6),
+                  ),
+                ]
+              : null,
         ),
         child: Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(icon, color: Colors.white, size: 17),
-            SizedBox(width: AppSpacing.xs),
+            Icon(
+              icon,
+              color: isPrimary ? AppColors.primary : Colors.white,
+              size: 18,
+            ),
+            const SizedBox(width: AppSpacing.xs),
             Flexible(
               child: Text(
                 label,
                 style: AppTextStyles.labelS.copyWith(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w800,
+                  color: isPrimary ? AppColors.primary : Colors.white,
+                  fontWeight: FontWeight.w900,
                   letterSpacing: 0,
                 ),
                 maxLines: 1,
@@ -923,7 +950,7 @@ class _KycStatusBanner extends StatelessWidget {
                 size: 22,
               ),
             ),
-            SizedBox(width: AppSpacing.md),
+            const SizedBox(width: AppSpacing.md),
             Expanded(
               child: Text(
                 message,
@@ -933,7 +960,7 @@ class _KycStatusBanner extends StatelessWidget {
                 ),
               ),
             ),
-            SizedBox(width: AppSpacing.sm),
+            const SizedBox(width: AppSpacing.sm),
             Icon(
               Icons.chevron_right_rounded,
               color: color,
@@ -1069,24 +1096,64 @@ class _QuickActionsGrid extends StatelessWidget {
         Color(0xFFD97706),
       ),
       const _ActionItem(
-        'More',
-        Icons.grid_view_rounded,
-        AppRoutes.more,
-        Color(0xFF7C3AED),
+        'Cable TV',
+        Icons.live_tv_rounded,
+        AppRoutes.cable,
+        Color(0xFFDB2777),
       ),
     ];
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          'Top services',
-          style: AppTextStyles.headingL.copyWith(
-            color: AppColors.textPrimary,
-            fontWeight: FontWeight.w900,
-          ),
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                'Top services',
+                style: AppTextStyles.headingL.copyWith(
+                  color: AppColors.textPrimary,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+            ),
+            TapScale(
+              onTap: () => context.push(AppRoutes.more),
+              semanticLabel: 'More services',
+              borderRadius: BorderRadius.circular(AppRadius.full),
+              child: Container(
+                height: 36,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: AppSpacing.sm,
+                ),
+                decoration: BoxDecoration(
+                  color: AppColors.surfaceVariant,
+                  borderRadius: BorderRadius.circular(AppRadius.full),
+                  border: Border.all(color: AppColors.border),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      'More',
+                      style: AppTextStyles.labelS.copyWith(
+                        color: AppColors.textPrimary,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(width: 4),
+                    Icon(
+                      Icons.arrow_forward_rounded,
+                      size: 16,
+                      color: AppColors.primary,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
         ),
-        SizedBox(height: AppSpacing.md),
+        const SizedBox(height: AppSpacing.md),
         GridView.builder(
           shrinkWrap: true,
           physics: const NeverScrollableScrollPhysics(),
@@ -1095,7 +1162,7 @@ class _QuickActionsGrid extends StatelessWidget {
             crossAxisCount: 4,
             crossAxisSpacing: AppSpacing.sm,
             mainAxisSpacing: AppSpacing.sm,
-            childAspectRatio: 0.86,
+            childAspectRatio: 0.82,
           ),
           itemBuilder: (context, index) {
             final action = actions[index];
@@ -1116,45 +1183,55 @@ class _QuickActionTile extends StatelessWidget {
   Widget build(BuildContext context) {
     return TapScale(
       onTap: () => _openAction(context),
-      borderRadius: BorderRadius.circular(22),
+      semanticLabel: action.label,
+      borderRadius: BorderRadius.circular(20),
       pressedScale: 0.96,
-      child: SizedBox(
+      child: Container(
         width: double.infinity,
+        padding: const EdgeInsets.symmetric(
+          horizontal: 4,
+          vertical: AppSpacing.sm,
+        ),
+        decoration: BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: AppColors.border),
+          boxShadow: [
+            BoxShadow(
+              color: action.color.withValues(alpha: 0.07),
+              blurRadius: 16,
+              offset: const Offset(0, 8),
+            ),
+          ],
+        ),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Container(
-              width: 54,
-              height: 54,
+              width: 46,
+              height: 46,
               decoration: BoxDecoration(
-                color: action.color.withValues(alpha: 0.12),
-                borderRadius: BorderRadius.circular(20),
+                color: action.color.withValues(alpha: 0.11),
+                borderRadius: BorderRadius.circular(16),
                 border: Border.all(
-                  color: action.color.withValues(alpha: 0.24),
+                  color: action.color.withValues(alpha: 0.18),
                   width: 1,
                 ),
-                boxShadow: [
-                  BoxShadow(
-                    color: action.color.withValues(alpha: 0.10),
-                    blurRadius: 14,
-                    offset: const Offset(0, 8),
-                  ),
-                ],
               ),
               child: Icon(
                 action.icon,
                 color: action.color,
-                size: 28,
+                size: 24,
               ),
             ),
-            SizedBox(height: AppSpacing.sm),
+            const SizedBox(height: 7),
             Text(
               action.label,
               style: AppTextStyles.labelS.copyWith(
                 color: AppColors.textPrimary,
-                fontSize: 12,
-                fontWeight: FontWeight.w900,
-                height: 1.05,
+                fontSize: 11.5,
+                fontWeight: FontWeight.w800,
+                height: 1.1,
               ),
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
@@ -1201,7 +1278,7 @@ class _BeneficiaryStrip extends StatelessWidget {
             ],
           ),
         ),
-        SizedBox(height: AppSpacing.sm),
+        const SizedBox(height: AppSpacing.sm),
         SizedBox(
           height: 112,
           child: visible.isEmpty
@@ -1210,7 +1287,7 @@ class _BeneficiaryStrip extends StatelessWidget {
                   scrollDirection: Axis.horizontal,
                   physics: const BouncingScrollPhysics(),
                   itemCount: visible.length,
-                  separatorBuilder: (_, __) => SizedBox(width: AppSpacing.sm),
+                  separatorBuilder: (_, __) => const SizedBox(width: AppSpacing.sm),
                   itemBuilder: (context, index) {
                     return _BeneficiaryCard(beneficiary: visible[index]);
                   },
@@ -1253,7 +1330,7 @@ class _EmptyBeneficiaryCard extends StatelessWidget {
                 color: AppColors.primary,
               ),
             ),
-            SizedBox(width: AppSpacing.md),
+            const SizedBox(width: AppSpacing.md),
             Expanded(
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
@@ -1266,7 +1343,7 @@ class _EmptyBeneficiaryCard extends StatelessWidget {
                       fontWeight: FontWeight.w800,
                     ),
                   ),
-                  SizedBox(height: 3),
+                  const SizedBox(height: 3),
                   Text(
                     'Send once, then beneficiaries appear here.',
                     style: AppTextStyles.bodyS.copyWith(
@@ -1348,7 +1425,7 @@ class _BeneficiaryCard extends StatelessWidget {
                 ),
               ],
             ),
-            SizedBox(height: AppSpacing.sm),
+            const SizedBox(height: AppSpacing.sm),
             Text(
               label,
               style: AppTextStyles.labelS.copyWith(
@@ -1381,7 +1458,8 @@ class _WalletSummaryRow extends StatelessWidget {
       for (final wallet in wallets) wallet.currency.toUpperCase(): wallet,
     };
     final items = _supportedWallets
-        .where((template) => template.currency != 'NGN' && template.currency != 'GHS')
+        .where((template) =>
+            template.currency != 'NGN' && template.currency != 'GHS')
         .map((template) {
       final wallet = walletByCurrency[template.currency];
       final isUnlocked = template.isUnlocked;
@@ -1403,22 +1481,22 @@ class _WalletSummaryRow extends StatelessWidget {
         scrollDirection: Axis.horizontal,
         physics: const BouncingScrollPhysics(),
         itemCount: items.length,
-        separatorBuilder: (_, __) => SizedBox(width: AppSpacing.sm),
+        separatorBuilder: (_, __) => const SizedBox(width: AppSpacing.sm),
         itemBuilder: (context, index) {
           final item = items[index];
           return SizedBox(
             width: 154,
-              child: _WalletCard(
-                item: item,
-                balance: item.isUnlocked
-                    ? showBalances
-                        ? _compactMoney(item.balance)
-                        : '••••'
-                    : '****',
-              ),
-            );
-          },
-        ),
+            child: _WalletCard(
+              item: item,
+              balance: item.isUnlocked
+                  ? showBalances
+                      ? _compactMoney(item.balance)
+                      : '••••'
+                  : '****',
+            ),
+          );
+        },
+      ),
     );
   }
 }
@@ -1599,7 +1677,7 @@ class _WalletCard extends StatelessWidget {
                         child: Text(item.flag,
                             style: const TextStyle(fontSize: 16)),
                       ),
-                      SizedBox(width: AppSpacing.sm),
+                      const SizedBox(width: AppSpacing.sm),
                       Text(
                         item.currency,
                         style: AppTextStyles.labelM.copyWith(
@@ -1622,7 +1700,7 @@ class _WalletCard extends StatelessWidget {
                   Row(
                     children: [
                       Icon(item.icon, color: Colors.white, size: 14),
-                      SizedBox(width: 4),
+                      const SizedBox(width: 4),
                       Expanded(
                         child: Text(
                           item.name,
@@ -1663,7 +1741,7 @@ class _RecentTransactionsSection extends StatelessWidget {
           actionLabel: 'View more',
           route: AppRoutes.activity,
         ),
-        SizedBox(height: AppSpacing.sm),
+        const SizedBox(height: AppSpacing.sm),
         if (items.isEmpty)
           Container(
             width: double.infinity,
@@ -1678,7 +1756,7 @@ class _RecentTransactionsSection extends StatelessWidget {
             ),
             child: Column(
               children: [
-                TpIllustration(
+                const TpIllustration(
                   variant: TpIllustrationVariant.emptyTransactions,
                   size: 116,
                   semanticLabel: 'No transactions yet',
@@ -1753,7 +1831,7 @@ class _ActivityRow extends StatelessWidget {
               ),
               child: Icon(item.icon, color: item.color, size: 20),
             ),
-            SizedBox(width: AppSpacing.md),
+            const SizedBox(width: AppSpacing.md),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -1767,7 +1845,7 @@ class _ActivityRow extends StatelessWidget {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
-                  SizedBox(height: 2),
+                  const SizedBox(height: 2),
                   Text(
                     item.detail,
                     style: AppTextStyles.bodyS.copyWith(
@@ -1779,7 +1857,7 @@ class _ActivityRow extends StatelessWidget {
                 ],
               ),
             ),
-            SizedBox(width: AppSpacing.sm),
+            const SizedBox(width: AppSpacing.sm),
             Icon(
               Icons.chevron_right_rounded,
               color: AppColors.textHint,
@@ -1958,7 +2036,7 @@ class _HomeErrorState extends StatelessWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              TpIllustration(
+              const TpIllustration(
                 variant: TpIllustrationVariant.connectionLost,
                 size: 148,
                 semanticLabel: 'Dashboard could not load',

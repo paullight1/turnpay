@@ -1,24 +1,4 @@
 services:
-  postgres:
-    image: postgres:16-alpine
-    container_name: trustpay-postgres
-    restart: unless-stopped
-    expose:
-      - '5432'
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER:-trustpay}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
-      POSTGRES_DB: ${POSTGRES_DB:-trustpay_db}
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-trustpay}']
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    networks:
-      - trustpay
-
   redis:
     image: redis:7-alpine
     container_name: trustpay-redis
@@ -49,48 +29,53 @@ services:
     environment:
       NODE_ENV: production
       PORT: 3000
-      DATABASE_URL: postgresql://${POSTGRES_USER:-trustpay}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:-trustpay_db}?schema=public
+      DATABASE_URL: ${DATABASE_URL:?Supabase DATABASE_URL is required}
+      REDIS_URL: ${REDIS_URL:?REDIS_URL is required and must address the redis service}
       REDIS_HOST: redis
       REDIS_PORT: 6379
       REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
+      REDIS_ALLOW_MEMORY_FALLBACK: "false"
+      TRUST_PROXY_HOPS: "1"
       WEB_URL: ${WEB_URL}
       ADMIN_URL: ${ADMIN_URL}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?JWT_REFRESH_SECRET is required}
       SUPABASE_URL: ${SUPABASE_URL}
       SUPABASE_PUBLISHABLE_KEY: ${SUPABASE_PUBLISHABLE_KEY}
       SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY}
       SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY}
       SUPABASE_JWT_SECRET: ${SUPABASE_JWT_SECRET}
-      PAYSTACK_SECRET_KEY: ${PAYSTACK_SECRET_KEY}
-      PAYSTACK_PUBLIC_KEY: ${PAYSTACK_PUBLIC_KEY}
-      PAYSTACK_WEBHOOK_SECRET: ${PAYSTACK_WEBHOOK_SECRET}
-      FLUTTERWAVE_SECRET_KEY: ${FLUTTERWAVE_SECRET_KEY}
-      FLUTTERWAVE_PUBLIC_KEY: ${FLUTTERWAVE_PUBLIC_KEY}
-      FLUTTERWAVE_ENCRYPTION_KEY: ${FLUTTERWAVE_ENCRYPTION_KEY}
-      FLUTTERWAVE_SECRET_HASH: ${FLUTTERWAVE_SECRET_HASH}
+      KYC_PROVIDER: ninja
+      NINJA_CLIENT_KEY: ${NINJA_CLIENT_KEY:?NINJA_CLIENT_KEY is required}
+      NINJA_CLIENT_SECRET: ${NINJA_CLIENT_SECRET:?NINJA_CLIENT_SECRET is required}
+      NINJA_BASE_URL: ${NINJA_BASE_URL:-https://api.ninja.boucloud.io}
       MONNIFY_API_KEY: ${MONNIFY_API_KEY}
       MONNIFY_SECRET_KEY: ${MONNIFY_SECRET_KEY}
       MONNIFY_CONTRACT_CODE: ${MONNIFY_CONTRACT_CODE}
       MONNIFY_BASE_URL: ${MONNIFY_BASE_URL}
-      MONNIFY_WEBHOOK_SECRET: ${MONNIFY_WEBHOOK_SECRET}
       MONNIFY_WEBHOOK_URL: ${MONNIFY_WEBHOOK_URL}
       MONNIFY_EXCHANGE_COLLECTION_ACCOUNT_NUMBER: ${MONNIFY_EXCHANGE_COLLECTION_ACCOUNT_NUMBER}
-      VTU_PROVIDER: ${VTU_PROVIDER:-generic}
-      VTPASS_BASE_URL: ${VTPASS_BASE_URL}
+      VTU_PROVIDER: vtpass
+      VTU_ENABLED: ${VTU_ENABLED:-true}
+      VTU_SIMULATION_ENABLED: "false"
+      VTPASS_BASE_URL: ${VTPASS_BASE_URL:-https://vtpass.com/api}
+      VTPASS_LOW_BALANCE_THRESHOLD: ${VTPASS_LOW_BALANCE_THRESHOLD:-5000}
       VTPASS_API_KEY: ${VTPASS_API_KEY}
       VTPASS_PUBLIC_KEY: ${VTPASS_PUBLIC_KEY}
       VTPASS_SECRET_KEY: ${VTPASS_SECRET_KEY}
       VTPASS_WEBHOOK_SECRET: ${VTPASS_WEBHOOK_SECRET}
       PII_ENCRYPTION_KEY: ${PII_ENCRYPTION_KEY}
+      IDEMPOTENCY_RESPONSE_ENCRYPTION_KEY: ${IDEMPOTENCY_RESPONSE_ENCRYPTION_KEY:?IDEMPOTENCY_RESPONSE_ENCRYPTION_KEY is required}
+      IDEMPOTENCY_RESPONSE_ENCRYPTION_KEY_ID: ${IDEMPOTENCY_RESPONSE_ENCRYPTION_KEY_ID:-v1}
       BANK_ACCOUNT_ENCRYPTION_KEY: ${BANK_ACCOUNT_ENCRYPTION_KEY}
       TRANSACTION_PIN_REQUIRED: ${TRANSACTION_PIN_REQUIRED:-true}
+      INTERNAL_TRANSFERS_ENABLED: ${INTERNAL_TRANSFERS_ENABLED:-false}
     depends_on:
-      postgres:
-        condition: service_healthy
       redis:
         condition: service_healthy
     healthcheck:
       test:
-        ['CMD', 'node', '-e', "fetch('http://127.0.0.1:3000/api/health').then((res) => { if (!res.ok) process.exit(1); }).catch(() => process.exit(1))"]
+        ['CMD', 'node', '-e', "fetch('http://127.0.0.1:3000/api/health/ready').then((res) => { if (!res.ok) process.exit(1); }).catch(() => process.exit(1))"]
       interval: 30s
       timeout: 5s
       retries: 5
@@ -126,7 +111,6 @@ services:
       - trustpay
 
 volumes:
-  postgres_data:
   redis_data:
 
 networks:

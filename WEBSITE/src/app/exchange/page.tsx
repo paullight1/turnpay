@@ -87,6 +87,7 @@ export default function ExchangePage() {
               eyebrow="How exchange works"
               title="Simple, clear, and direct."
               description="TrustPay keeps the exchange path easy to understand from first message to final receipt."
+              tone="dark"
             />
             <div className="grid gap-4 sm:grid-cols-2">
               {exchangeSteps.map((step) => {

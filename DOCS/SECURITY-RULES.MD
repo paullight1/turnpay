@@ -260,13 +260,17 @@ async function deductBalance(userId: string, currency: string, amount: Decimal) 
 ### Implementation Pattern
 
 ```typescript
-@Post('webhooks/paystack')
-async handlePaystackWebhook(
-  @Headers('x-paystack-signature') signature: string,
-  @Body() payload: any,
+@Post('webhooks/monnify')
+async handleMonnifyWebhook(
+  @Headers('monnify-signature') signature: string,
+  @Req() request: RawBodyRequest<Request>,
+  @Body() payload: MonnifyWebhookDto,
 ) {
   // 1. Verify signature
-  const isValid = this.webhookService.verifyPaystackSignature(signature, payload);
+  const isValid = this.webhookService.verifyMonnifySignature(
+    signature,
+    request.rawBody,
+  );
   if (!isValid) throw new BadRequestException('Invalid signature');
 
   // 2. Check idempotency

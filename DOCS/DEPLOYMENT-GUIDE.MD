@@ -53,11 +53,26 @@ JWT_REFRESH_EXPIRES_IN=7d
 WEB_URL=https://app.trustpay.com
 ADMIN_URL=https://admin.trustpay.com
 
-# Payment Gateways
-PAYSTACK_SECRET_KEY=sk_live_xxxxx
-PAYSTACK_PUBLIC_KEY=pk_live_xxxxx
-FLUTTERWAVE_SECRET_KEY=FLWSECK_LIVE-xxxxx
-FLUTTERWAVE_PUBLIC_KEY=FLWPUBK_LIVE-xxxxx
+# Single-source providers
+BANKING_PROVIDER_PRIMARY=monnify
+BANKING_PROVIDER_FALLBACK=
+MONNIFY_BASE_URL=https://api.monnify.com
+MONNIFY_API_KEY=
+MONNIFY_SECRET_KEY=
+MONNIFY_CONTRACT_CODE=
+MONNIFY_WEBHOOK_URL=https://api.trustpay.com/api/webhooks/monnify
+
+VTU_PROVIDER=vtpass
+VTPASS_BASE_URL=https://vtpass.com/api
+VTPASS_API_KEY=
+VTPASS_PUBLIC_KEY=
+VTPASS_SECRET_KEY=
+VTPASS_WEBHOOK_SECRET=
+
+KYC_PROVIDER=ninja
+NINJA_BASE_URL=https://api.ninja.boucloud.io
+NINJA_CLIENT_KEY=
+NINJA_CLIENT_SECRET=
 
 # FX Rate API
 FX_RATE_API_URL=https://v6.exchangerate-api.com/v6/KEY/latest/GHS
@@ -261,9 +276,10 @@ https://api.trustpay.com/api/docs
 ```
 
 ### 4. Test Webhooks
-- Configure Paystack webhook URL in dashboard
-- Configure Flutterwave webhook URL in dashboard
-- Verify signature verification works
+- Configure Monnify: `https://api.trustpay.com/api/webhooks/monnify`
+- Configure VTpass: `https://api.trustpay.com/api/webhooks/vtu/vtpass`
+- Ninja direct BVN/NIN verification does not require a webhook URL.
+- Verify signatures and duplicate-event idempotency for all three providers
 
 ### 5. Create Admin User
 ```typescript

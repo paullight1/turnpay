@@ -7,20 +7,19 @@ import {
 
 export const KYC_PROVIDER_GATEWAY = Symbol('KYC_PROVIDER_GATEWAY');
 
-export type KycProviderSubmission = {
+export type KycIdentityVerificationRequest = {
   userId: string;
   documentId: string;
   type: KYCType;
   identifierMasked: string;
-};
-
-export type KycHostedSessionRequest = {
-  userId: string;
-  documentId: string;
-  reference: string;
-  type: KYCType;
   country: 'NG' | 'GH';
-  callbackUrl: string;
+  identifier: string;
+  consentAccepted: true;
+  validation?: {
+    firstName?: string;
+    lastName?: string;
+    dateOfBirth?: string;
+  };
 };
 
 export type KycProviderResult = {
@@ -32,13 +31,6 @@ export type KycProviderResult = {
   errorMessage?: string;
 };
 
-export type KycHostedSessionResult = KycProviderResult & {
-  token?: string;
-  product: string;
-  environment: 'sandbox' | 'production';
-  expiresInSeconds?: number;
-};
-
 export type KycProviderCallbackResult = KycProviderResult & {
   userId?: string;
   documentType?: KYCType;
@@ -46,17 +38,15 @@ export type KycProviderCallbackResult = KycProviderResult & {
 };
 
 export interface KycProviderGateway {
-  submitVerification(
-    submission: KycProviderSubmission,
+  readonly provider: KycVerificationProvider;
+
+  verifyIdentity(
+    request: KycIdentityVerificationRequest,
   ): Promise<KycProviderResult>;
 
-  createHostedSession(
-    request: KycHostedSessionRequest,
-  ): Promise<KycHostedSessionResult>;
-
   verifyCallbackSignature(input: {
-    timestamp?: string | number;
     signature?: string;
+    rawBody?: string;
   }): boolean;
 
   normalizeCallback(

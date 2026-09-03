@@ -18,8 +18,18 @@ import type {
   AdminVtuReconciliationResponse,
   AdminVtuRequeryResponse,
   AdminVtuStaleOrdersResponse,
+  KycDocument,
+  KycStatusOverview,
+  KycVerificationResult,
   VirtualAccount,
 } from "@/types";
+import type {
+  InternalTransferReceipt,
+  RecipientIdentifier,
+  RecipientPreview,
+  TransferCurrency,
+} from "@/lib/transfer-contract";
+export { redactApiDiagnostic } from "@/lib/api-log-redaction";
 
 const API_URL = resolveApiUrl();
 type AppSession = Session & {
@@ -258,8 +268,25 @@ export const authApi = {
       currentPassword,
       newPassword,
     }),
-  setTransactionPin: (pin: string) =>
-    apiClient.post("/api/auth/transaction-pin", { pin }),
+  setTransactionPin: (pin: string, idempotencyKey?: string) =>
+    apiClient.post(
+      "/api/auth/transaction-pin",
+      { pin },
+      withIdempotencyKey(idempotencyKey),
+    ),
+  getTransactionPinStatus: () =>
+    apiClient.get<{
+      configured: boolean;
+      pinLength: number | null;
+      resetHoldUntil: string | null;
+      locked: boolean;
+    }>("/api/auth/transaction-pin/status"),
+  verifyTransactionPin: (pin: string, idempotencyKey?: string) =>
+    apiClient.post(
+      "/api/auth/transaction-pin/verify",
+      { pin },
+      withIdempotencyKey(idempotencyKey),
+    ),
   sessions: () => apiClient.get("/api/auth/sessions"),
   revokeSession: (sessionId: string) =>
     apiClient.delete(`/api/auth/sessions/${sessionId}`),
@@ -273,6 +300,30 @@ export const userApi = {
 
 export const walletApi = {
   getBalances: () => apiClient.get("/api/wallets"),
+};
+
+export const transferApi = {
+  previewRecipient: (recipient: RecipientIdentifier) =>
+    apiClient.post<RecipientPreview>(
+      "/api/transfers/recipient/preview",
+      recipient,
+    ),
+  sendInternal: (
+    data: RecipientIdentifier & {
+      amount: string;
+      currency: TransferCurrency;
+      note?: string;
+      transactionPin: string;
+    },
+    idempotencyKey: string,
+  ) =>
+    apiClient.post<InternalTransferReceipt>(
+      "/api/transfers/internal",
+      data,
+      withIdempotencyKey(idempotencyKey),
+    ),
+  getByReference: (reference: string) =>
+    apiClient.get(`/api/transfers/internal/${encodeURIComponent(reference)}`),
 };
 
 export const bankingApi = {
@@ -301,17 +352,23 @@ export const bankingApi = {
 };
 
 export const kycApi = {
-  createDocumentUploadUrl: (data: {
-    fileName: string;
-    contentType: string;
-    fileSize: number;
-  }) => apiClient.post("/api/kyc/document-upload-url", data),
-  submit: (data: {
-    type: string;
-    idNumber: string;
-    documentObjectKey: string;
-  }) => apiClient.post("/api/kyc/submit", data),
-  getDocuments: () => apiClient.get("/api/kyc/documents"),
+  getStatus: () => apiClient.get<KycStatusOverview>("/api/kyc/status"),
+  verifyIdentity: (
+    data: {
+      country: "NG";
+      type: "BVN" | "NIN";
+      idNumber: string;
+      dateOfBirth: string;
+      consentAccepted: true;
+    },
+    idempotencyKey: string,
+  ) =>
+    apiClient.post<KycVerificationResult>(
+      "/api/kyc/verify",
+      data,
+      withIdempotencyKey(idempotencyKey),
+    ),
+  getDocuments: () => apiClient.get<KycDocument[]>("/api/kyc/documents"),
 };
 
 export const exchangeApi = {
@@ -521,6 +578,63 @@ export const adminUserApi = {
     ),
 };
 
+export type AdminInternalTransferReversal = {
+  id: string;
+  originalAttemptId: string;
+  originalTransferReference: string;
+  reversalReference?: string | null;
+  status: "PENDING_APPROVAL" | "COMPLETED" | "REJECTED" | "BLOCKED";
+  amount: string | number;
+  currency: "NGN" | "GHS";
+  senderUserId: string;
+  recipientUserId: string;
+  requesterAdminId: string;
+  approverAdminId?: string | null;
+  reviewerAdminId?: string | null;
+  requestReason: string;
+  reviewReason?: string | null;
+  requestedAt: string;
+  completedAt?: string | null;
+  blockedAt?: string | null;
+};
+
+export const adminInternalTransferReversalApi = {
+  list: () =>
+    apiClient.get<AdminInternalTransferReversal[]>(
+      "/api/admin/transfers/internal/reversals",
+    ),
+  request: (
+    reference: string,
+    data: { reason: string },
+    idempotencyKey: string,
+  ) =>
+    apiClient.post<AdminInternalTransferReversal>(
+      `/api/admin/transfers/internal/${encodeURIComponent(reference)}/reversals`,
+      data,
+      withIdempotencyKey(idempotencyKey),
+    ),
+  approve: (
+    reversalId: string,
+    data: { reason: string },
+    idempotencyKey: string,
+  ) =>
+    apiClient.post<AdminInternalTransferReversal>(
+      `/api/admin/transfers/internal/reversals/${encodeURIComponent(reversalId)}/approve`,
+      data,
+      withIdempotencyKey(idempotencyKey),
+    ),
+  reject: (
+    reversalId: string,
+    data: { reason: string },
+    idempotencyKey: string,
+  ) =>
+    apiClient.post<AdminInternalTransferReversal>(
+      `/api/admin/transfers/internal/reversals/${encodeURIComponent(reversalId)}/reject`,
+      data,
+      withIdempotencyKey(idempotencyKey),
+    ),
+};
+
 export const paymentApi = {
   withdraw: (
     data: {
@@ -547,14 +661,9 @@ export const paymentApi = {
 };
 
 export const vtuApi = {
-  getProviders: (
-    type?: string,
-    options?: { scope?: string; countryCode?: string },
-  ) => {
+  getProviders: (type?: string) => {
     const params = new URLSearchParams();
     if (type) params.set("type", type);
-    if (options?.scope) params.set("scope", options.scope);
-    if (options?.countryCode) params.set("countryCode", options.countryCode);
     const query = params.toString();
     return apiClient.get(`/api/vtu/providers${query ? `?${query}` : ""}`);
   },
@@ -563,15 +672,15 @@ export const vtuApi = {
   purchase: (
     data: {
       type: string;
-      provider?: string;
-      scope?: string;
-      countryCode?: string;
-      operatorId?: string;
+      provider: string;
+      contactPhone: string;
       recipientNumber?: string;
-      amount: number;
+      amount: string;
       packageId?: string;
       smartCardNumber?: string;
+      subscriptionType?: "change" | "renew";
       meterNumber?: string;
+      meterType?: "prepaid" | "postpaid";
       transactionPin?: string;
     },
     idempotencyKey?: string,
@@ -589,13 +698,33 @@ export const vtuApi = {
       {},
       withIdempotencyKey(idempotencyKey),
     ),
-  validateSmartCard: (provider: string, number: string) =>
+  validateSmartCard: (
+    data: {
+      provider: string;
+      smartCardNumber: string;
+      subscriptionType: "change" | "renew";
+      contactPhone: string;
+    },
+    idempotencyKey?: string,
+  ) =>
     apiClient.post(
-      `/api/vtu/validate/smartcard?provider=${encodeURIComponent(provider)}&number=${encodeURIComponent(number)}`,
+      "/api/vtu/validate/smartcard",
+      data,
+      withIdempotencyKey(idempotencyKey),
     ),
-  validateMeter: (provider: string, number: string) =>
+  validateMeter: (
+    data: {
+      provider: string;
+      meterNumber: string;
+      meterType: "prepaid" | "postpaid";
+      contactPhone: string;
+    },
+    idempotencyKey?: string,
+  ) =>
     apiClient.post(
-      `/api/vtu/validate/meter?provider=${encodeURIComponent(provider)}&number=${encodeURIComponent(number)}`,
+      "/api/vtu/validate/meter",
+      data,
+      withIdempotencyKey(idempotencyKey),
     ),
 };
 

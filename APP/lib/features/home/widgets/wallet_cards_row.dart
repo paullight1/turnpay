@@ -27,9 +27,9 @@ class WalletCardsRow extends StatelessWidget {
             ),
           ],
         ),
-        SizedBox(height: AppSpacing.sm),
+        const SizedBox(height: AppSpacing.sm),
         SizedBox(
-          height: 112,
+          height: 120,
           child: ListView(
             scrollDirection: Axis.horizontal,
             clipBehavior: Clip.none,
@@ -39,7 +39,7 @@ class WalletCardsRow extends StatelessWidget {
                 onTap: () {},
                 child: Container(
                   width: 64,
-                  height: 112,
+                  height: 120,
                   margin: const EdgeInsets.only(right: AppSpacing.sm),
                   decoration: BoxDecoration(
                     color: AppColors.surfaceVariant,
@@ -71,7 +71,7 @@ class WalletCardsRow extends StatelessWidget {
                 lastFour: '4269',
               ),
 
-              SizedBox(width: AppSpacing.sm),
+              const SizedBox(width: AppSpacing.sm),
 
               // â”€â”€ NGN Wallet Card â”€â”€
               _WalletCard(
@@ -87,7 +87,7 @@ class WalletCardsRow extends StatelessWidget {
                 lastFour: '4258',
               ),
 
-              SizedBox(width: AppSpacing.lg),
+              const SizedBox(width: AppSpacing.lg),
             ],
           ),
         ),
@@ -119,8 +119,8 @@ class _WalletCard extends StatelessWidget {
     final formatted = _formatBalance(balance, currency);
 
     return Container(
-      width: 192,
-      height: 112,
+      width: 200,
+      height: 120,
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(AppRadius.lg),
         gradient: LinearGradient(
@@ -164,7 +164,7 @@ class _WalletCard extends StatelessWidget {
                         shape: BoxShape.circle,
                       ),
                     ),
-                    SizedBox(width: 4),
+                    const SizedBox(width: 4),
                     Text(
                       'Active',
                       style: AppTextStyles.caption.copyWith(

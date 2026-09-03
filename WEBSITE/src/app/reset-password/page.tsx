@@ -17,6 +17,7 @@ import { Eye, EyeOff, Loader2 } from "lucide-react";
 import { createClient } from "@/lib/supabase";
 import { useAuth } from "@/lib/auth-provider";
 import { getErrorMessage } from "@/lib/errors";
+import { useHydrated } from "@/lib/use-hydrated";
 
 function ResetPasswordContent() {
   const [password, setPassword] = useState("");
@@ -26,6 +27,7 @@ function ResetPasswordContent() {
   const [recoveryError, setRecoveryError] = useState<string | null>(null);
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const isHydrated = useHydrated();
   const router = useRouter();
   const searchParams = useSearchParams();
   const recoveryCode = searchParams.get("code");
@@ -39,7 +41,8 @@ function ResetPasswordContent() {
         const supabase = createClient();
 
         if (recoveryCode) {
-          const { error } = await supabase.auth.exchangeCodeForSession(recoveryCode);
+          const { error } =
+            await supabase.auth.exchangeCodeForSession(recoveryCode);
           if (error) throw error;
         }
 
@@ -110,28 +113,33 @@ function ResetPasswordContent() {
       title="Set a stronger password for your account."
       subtitle="Choose a password that protects wallet access, KYC details, transaction history, and account recovery."
     >
-        <CardHeader className="text-center">
-          <CardTitle className="text-3xl font-semibold">
-            Set a new password
-          </CardTitle>
-          <CardDescription>
-            Choose a strong password for your TrustPay account.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          {recoveryError ? (
-            <div className="space-y-4 text-center">
-              <p className="text-sm text-destructive">{recoveryError}</p>
-              <Button
-                type="button"
-                className="w-full"
-                onClick={() => router.push("/forgot-password")}
-              >
-                Request a new link
-              </Button>
-            </div>
-          ) : (
-            <form onSubmit={handleSubmit} className="flex flex-col gap-4" aria-busy={isLoading}>
+      <CardHeader className="text-center">
+        <CardTitle className="text-3xl font-semibold">
+          Set a new password
+        </CardTitle>
+        <CardDescription>
+          Choose a strong password for your TrustPay account.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        {recoveryError ? (
+          <div className="space-y-4 text-center">
+            <p className="text-sm text-destructive">{recoveryError}</p>
+            <Button
+              type="button"
+              className="w-full"
+              onClick={() => router.push("/forgot-password")}
+            >
+              Request a new link
+            </Button>
+          </div>
+        ) : (
+          <form
+            onSubmit={handleSubmit}
+            className="flex flex-col gap-4"
+            aria-busy={isLoading}
+          >
+            <fieldset disabled={!isHydrated || isLoading} className="contents">
               <div className="flex flex-col gap-2">
                 <Label htmlFor="password">New Password</Label>
                 <div className="relative">
@@ -151,10 +159,16 @@ function ResetPasswordContent() {
                     variant="ghost"
                     size="icon-sm"
                     className="absolute right-1 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                    aria-label={showPassword ? "Hide password" : "Show password"}
+                    aria-label={
+                      showPassword ? "Hide password" : "Show password"
+                    }
                     onClick={() => setShowPassword((current) => !current)}
                   >
-                    {showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+                    {showPassword ? (
+                      <EyeOff className="size-4" />
+                    ) : (
+                      <Eye className="size-4" />
+                    )}
                   </Button>
                 </div>
               </div>
@@ -169,7 +183,9 @@ function ResetPasswordContent() {
                     value={confirmPassword}
                     onChange={(e) => setConfirmPassword(e.target.value)}
                     required
-                    aria-invalid={confirmPassword.length > 0 && confirmPassword !== password}
+                    aria-invalid={
+                      confirmPassword.length > 0 && confirmPassword !== password
+                    }
                     className="pr-10"
                   />
                   <Button
@@ -177,14 +193,28 @@ function ResetPasswordContent() {
                     variant="ghost"
                     size="icon-sm"
                     className="absolute right-1 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                    aria-label={showConfirmPassword ? "Hide confirmation password" : "Show confirmation password"}
-                    onClick={() => setShowConfirmPassword((current) => !current)}
+                    aria-label={
+                      showConfirmPassword
+                        ? "Hide confirmation password"
+                        : "Show confirmation password"
+                    }
+                    onClick={() =>
+                      setShowConfirmPassword((current) => !current)
+                    }
                   >
-                    {showConfirmPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+                    {showConfirmPassword ? (
+                      <EyeOff className="size-4" />
+                    ) : (
+                      <Eye className="size-4" />
+                    )}
                   </Button>
                 </div>
-                <p className={`text-xs ${confirmPassword && confirmPassword === password ? "text-emerald-300" : "text-muted-foreground"}`}>
-                  {confirmPassword && confirmPassword === password ? "Passwords match" : "Use the same password twice"}
+                <p
+                  className={`text-xs ${confirmPassword && confirmPassword === password ? "text-emerald-300" : "text-muted-foreground"}`}
+                >
+                  {confirmPassword && confirmPassword === password
+                    ? "Passwords match"
+                    : "Use the same password twice"}
                 </p>
               </div>
               <Button
@@ -192,12 +222,15 @@ function ResetPasswordContent() {
                 disabled={isLoading || !isRecoveryReady}
                 className="w-full"
               >
-                {isLoading && <Loader2 aria-hidden="true" className="size-4 animate-spin" />}
+                {isLoading && (
+                  <Loader2 aria-hidden="true" className="size-4 animate-spin" />
+                )}
                 {isLoading ? "Resetting..." : "Reset Password"}
               </Button>
-            </form>
-          )}
-        </CardContent>
+            </fieldset>
+          </form>
+        )}
+      </CardContent>
     </AuthShell>
   );
 }

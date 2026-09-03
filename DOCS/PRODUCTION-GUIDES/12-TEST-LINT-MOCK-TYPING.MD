@@ -19,7 +19,7 @@ Recommended helpers:
 
 - `createPrismaMock()` returning a typed subset of `PrismaService`
 - `createLoggerMock()` returning a typed subset of `PinoLogger`
-- `createProviderMock()` helpers for Paystack, Flutterwave, VTU, and Supabase providers
+- `createProviderMock()` helpers for Monnify, VTpass, Youverify, and Supabase providers
 - `mockResolvedValueOnce` wrappers typed to the method return value
 
 ## Rollout plan

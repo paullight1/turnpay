@@ -1,5 +1,7 @@
 # VTPass VTU Design
 
+> Archived design record. `DOCS/PROVIDER-SOURCE-OF-TRUTH.MD` supersedes future-adapter suggestions; VTpass is the only active VTU provider.
+
 Date: 2026-05-21
 
 ## Goal

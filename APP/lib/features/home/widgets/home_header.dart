@@ -1,4 +1,4 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import '../../../core/theme/app_theme.dart';
 
 /// Header row: "Welcome Back! / Hi, [Name]." + notification bell with badge.
@@ -30,7 +30,7 @@ class HomeHeader extends StatelessWidget {
                   fontWeight: FontWeight.w400,
                 ),
               ),
-              SizedBox(height: 2),
+              const SizedBox(height: 2),
               Text(
                 'Hi, $userName.',
                 style: AppTextStyles.headingXL.copyWith(
@@ -74,7 +74,7 @@ class HomeHeader extends StatelessWidget {
                   child: Center(
                     child: Text(
                       notificationCount > 9 ? '9+' : '$notificationCount',
-                      style: TextStyle(
+                      style: const TextStyle(
                         fontSize: 9,
                         fontWeight: FontWeight.w700,
                         color: Colors.white,

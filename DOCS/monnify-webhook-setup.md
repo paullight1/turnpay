@@ -25,10 +25,9 @@ https://trustpay.ng/api/webhooks/monnify
 1. Log into [Monnify Dashboard](https://app.monnify.com)
 2. Navigate to **Settings → API Keys & Webhooks**
 3. Under **Webhook URL**, enter the appropriate URL above
-4. Set **Webhook Secret** (generate a strong random string — store in `MONNIFY_WEBHOOK_SECRET` env var)
-5. Click **Save**
-6. Monnify will send a **test webhook** to verify the URL is reachable
-7. Check the backend logs for the test event and confirm it returns HTTP 200
+4. Click **Save**
+5. Monnify will send a **test webhook** to verify the URL is reachable
+6. Check the backend logs for the test event and confirm it returns HTTP 200
 
 ---
 
@@ -40,15 +39,15 @@ https://trustpay.ng/api/webhooks/monnify
 ### Headers
 | Header | Description |
 |---|---|
-| `monnify-signature` | HMAC-SHA512 hex digest of the raw request body, signed with the webhook secret |
+| `monnify-signature` | HMAC-SHA512 hex digest of the raw request body, signed with the Monnify API secret key |
 
 ### Signature Validation Algorithm
 ```
-expected = HMAC-SHA512(webhookSecret, rawRequestBody).digest('hex')
+expected = HMAC-SHA512(MONNIFY_SECRET_KEY, rawRequestBody).digest('hex')
 compare using timingSafeEqual(expected, receivedSignature)
 ```
 
-- Falls back to `MONNIFY_SECRET_KEY` if `MONNIFY_WEBHOOK_SECRET` is not set
+- Uses the same `MONNIFY_SECRET_KEY` issued with the Monnify API credentials
 - Uses constant-time comparison to prevent timing attacks
 - Returns `400 Bad Request` on signature mismatch (before any processing)
 
@@ -61,10 +60,9 @@ compare using timingSafeEqual(expected, receivedSignature)
 | Other events | — | Logged and acknowledged (HTTP 200), no processing |
 
 ### Idempotency
-- **Webhook re-delivery protection:** The `providerReference` (Monnify `transactionReference`) combined with the `eventType` is used as a unique key in `provider_events` table
+- **Webhook re-delivery protection:** exact payload replays are deduplicated by provider, event type, reference, and payload hash in the webhook inbox
 - Monnify may re-send webhooks; the backend MUST handle duplicate deliveries without double-crediting
-- The `ProviderEvent` table enforces `@@unique([provider, providerReference, eventType])` — duplicate inserts are rejected at the DB level
-- `BankingService.processVirtualAccountDeposit` checks for existing `ProviderEvent` before crediting
+- Later status changes for the same provider reference may be ingested, while the wallet/ledger transaction remains the final exactly-once credit boundary
 
 ### Webhook Logging (Implemented)
 Every received Monnify webhook creates a `WebhookLog` entry in the database:
@@ -84,10 +82,10 @@ After registering the webhook URL in Monnify sandbox, use the "Send Test Webhook
 
 ### Option 2: Simulate via curl
 ```bash
-# Generate signature (requires webhook secret)
+# Generate signature with the Monnify API secret key
 RAW_BODY='{"eventType":"SUCCESSFUL_TRANSACTION","eventData":{"transactionReference":"TXN-123","paymentReference":"PAY-456","amountPaid":5000,"totalPayable":5000,"currency":"NGN","paymentStatus":"PAID","destinationAccountInformation":{"accountNumber":"9922334455","accountName":"Test User","bankCode":"035","bankName":"Wema Bank"}}}'
 
-SIGNATURE=$(echo -n "$RAW_BODY" | openssl dgst -sha512 -hmac "$MONNIFY_WEBHOOK_SECRET" -hex | awk '{print $2}')
+SIGNATURE=$(echo -n "$RAW_BODY" | openssl dgst -sha512 -hmac "$MONNIFY_SECRET_KEY" -hex | awk '{print $2}')
 
 curl -X POST http://localhost:3001/api/webhooks/monnify \
   -H "Content-Type: application/json" \
@@ -107,7 +105,7 @@ cd BACKEND && npm run test:e2e -- banking-webhook-funding
 
 - Always validate the HMAC-SHA512 signature **before** processing any webhook
 - Use constant-time comparison (`timingSafeEqual`) — never string equality for signatures
-- Store the webhook secret in environment variables, never in code
+- Store `MONNIFY_SECRET_KEY` in the deployment secret manager, never in code or logs
 - Monnify's IP whitelist feature should be enabled in production
 - Webhook payloads are logged for debugging; ensure PII/PCI redaction if needed
 

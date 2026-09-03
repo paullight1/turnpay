@@ -109,13 +109,13 @@
 | 26 | `VIRTUAL_ACCOUNTS_ENABLED` | 📋 CONFIG | 🔄 BOTH | `true` / `false` |
 | 27 | `BANKING_SANDBOX_MODE` | 📋 CONFIG | 🔄 BOTH | `false` in PROD, `true` in STAGING |
 | 28 | `BANKING_PROVIDER_PRIMARY` | 📋 CONFIG | 🔄 BOTH | `monnify` |
-| 29 | `BANKING_PROVIDER_FALLBACK` | 📋 CONFIG | 🔄 BOTH | Optional fallback provider |
+| 29 | `BANKING_PROVIDER_FALLBACK` | 📋 CONFIG | 🔄 BOTH | Must remain empty; Monnify is the only provider |
 | 30 | `SUPPORTED_BANKING_CURRENCIES` | 📋 CONFIG | 🔄 BOTH | `NGN` |
 | 31 | `MONNIFY_API_KEY` | 🚨 CRITICAL | 🔄 BOTH | From Monnify dashboard |
 | 32 | `MONNIFY_SECRET_KEY` | 🚨 CRITICAL | 🔄 BOTH | From Monnify dashboard |
 | 33 | `MONNIFY_CONTRACT_CODE` | 🚨 CRITICAL | 🔄 BOTH | Virtual account contract code |
 | 34 | `MONNIFY_BASE_URL` | 📋 CONFIG | 🔄 BOTH | Sandbox or live API URL |
-| 35 | `MONNIFY_WEBHOOK_SECRET` | 🚨 CRITICAL | 🔄 BOTH | Webhook HMAC secret |
+| 35 | Monnify webhook signing | 📋 CONFIG | 🔄 BOTH | Uses `MONNIFY_SECRET_KEY`; no separate secret |
 | 36 | `MONNIFY_EXCHANGE_COLLECTION_ACCOUNT_NUMBER` | 📋 CONFIG | 🅿️ PROD | Manual exchange receipt account |
 | 37 | `MONNIFY_SANDBOX_TEST_KYC_BYPASS` | 📋 CONFIG | 🧪 STAGING | `true` in sandbox only |
 | 38 | `MONNIFY_TEST_BVN` | 📋 CONFIG | 🧪 STAGING | Sandbox test BVN |
@@ -125,24 +125,15 @@
 
 ---
 
-### Section 8: Payments — Paystack (3 vars)
+### Section 8: KYC — Youverify (5 vars)
 
 | # | Variable | Classification | Environment | Notes |
 |---|---|---|---|---|
-| 42 | `PAYSTACK_SECRET_KEY` | 🚨 CRITICAL | 🔄 BOTH | `sk_live_...` in prod |
-| 43 | `PAYSTACK_PUBLIC_KEY` | 🔒 SENSITIVE | 🔄 BOTH | `pk_live_...` in prod |
-| 44 | `PAYSTACK_WEBHOOK_SECRET` | 🚨 CRITICAL | 🔄 BOTH | Webhook HMAC secret |
-
----
-
-### Section 9: Payments — Flutterwave (4 vars)
-
-| # | Variable | Classification | Environment | Notes |
-|---|---|---|---|---|
-| 45 | `FLUTTERWAVE_SECRET_KEY` | 🚨 CRITICAL | 🔄 BOTH | `FLWSECK_...` |
-| 46 | `FLUTTERWAVE_PUBLIC_KEY` | 🔒 SENSITIVE | 🔄 BOTH | `FLWPUBK_...` |
-| 47 | `FLUTTERWAVE_ENCRYPTION_KEY` | 🚨 CRITICAL | 🔄 BOTH | Payload encryption |
-| 48 | `FLUTTERWAVE_SECRET_HASH` | 🚨 CRITICAL | 🔄 BOTH | Webhook verification |
+| 42 | `KYC_PROVIDER` | 📋 CONFIG | 🔄 BOTH | Must be `youverify` |
+| 43 | `YOUVERIFY_API_KEY` | 🚨 CRITICAL | 🔄 BOTH | Server-side API token |
+| 44 | `YOUVERIFY_BASE_URL` | 📋 CONFIG | 🔄 BOTH | Live URL in production |
+| 45 | `YOUVERIFY_WEBHOOK_URL` | 📋 CONFIG | 🔄 BOTH | Public HTTPS callback |
+| 46 | `YOUVERIFY_WEBHOOK_SECRET` | 🚨 CRITICAL | 🔄 BOTH | HTTPS signing key |
 
 ---
 
@@ -152,11 +143,12 @@
 |---|---|---|---|---|
 | 49 | `VTU_ENABLED` | 📋 CONFIG | 🔄 BOTH | Feature flag |
 | 50 | `VTU_PROVIDER` | 📋 CONFIG | 🔄 BOTH | `vtpass` |
-| 51 | `VTPASS_BASE_URL` | 📋 CONFIG | 🔄 BOTH | `https://api-service.vtpass.com` in prod |
+| 51 | `VTPASS_BASE_URL` | 📋 CONFIG | 🔄 BOTH | `https://vtpass.com/api` in prod |
 | 52 | `VTPASS_API_KEY` | 🚨 CRITICAL | 🔄 BOTH | VTPass API key |
 | 53 | `VTPASS_PUBLIC_KEY` | 🔒 SENSITIVE | 🔄 BOTH | VTPass public key |
 | 54 | `VTPASS_SECRET_KEY` | 🚨 CRITICAL | 🔄 BOTH | VTPass secret key |
 | 55 | `VTPASS_LOW_BALANCE_THRESHOLD` | 📋 CONFIG | 🔄 BOTH | Alert at NGN 5000 |
+| 56 | `VTPASS_WEBHOOK_SECRET` | 🚨 CRITICAL | 🔄 BOTH | Internal gateway HMAC key; minimum 16 characters |
 
 ---
 
@@ -235,9 +227,7 @@ openssl rand -base64 48 | tr -d '/+' | head -c 64  # PostgreSQL password
 openssl rand -base64 32                              # Redis AUTH token
 
 # Webhook Secrets
-openssl rand -base64 32   # MONNIFY_WEBHOOK_SECRET
-openssl rand -base64 32   # PAYSTACK_WEBHOOK_SECRET
-openssl rand -base64 32   # FLUTTERWAVE_SECRET_HASH
+openssl rand -base64 32   # YOUVERIFY_WEBHOOK_SECRET (then configure the same value in Youverify)
 ```
 
 ---

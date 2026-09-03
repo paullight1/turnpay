@@ -5,7 +5,6 @@ import {
   Headers,
   HttpCode,
   Post,
-  Query,
   Req,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -13,23 +12,21 @@ import { Throttle } from '@nestjs/throttler';
 import { createHmac, timingSafeEqual } from 'crypto';
 import { PinoLogger } from 'nestjs-pino';
 import type { RawBodyRequest } from '../common/types/request-context';
-import { VtuService } from './vtu.service';
+import { IsIn, IsObject } from 'class-validator';
+import { VtuWebhookInboxService } from './vtu-webhook-inbox.service';
 
-type VtpassWebhookPayload = Record<string, unknown>;
+export class VtpassWebhookDto {
+  @IsIn(['transaction-update'])
+  type!: 'transaction-update';
 
-type VtpassWebhookEvent = {
-  eventType: string;
-  providerRequestId: string;
-  providerReference?: string;
-  status: string;
-  message?: string;
-  rawPayload: Record<string, unknown>;
-};
+  @IsObject()
+  data!: Record<string, unknown>;
+}
 
 @Controller('webhooks/vtu')
 export class VtpassWebhookController {
   constructor(
-    private readonly vtuService: VtuService,
+    private readonly inbox: VtuWebhookInboxService,
     private readonly configService: ConfigService,
     private readonly logger: PinoLogger,
   ) {
@@ -40,36 +37,17 @@ export class VtpassWebhookController {
   @HttpCode(200)
   @Throttle({ default: { limit: 100, ttl: 60000 } })
   async handleVtpassWebhook(
-    @Headers('x-vtpass-signature') vtpassSignature: string | undefined,
-    @Headers('x-webhook-signature') webhookSignature: string | undefined,
-    @Headers('x-signature') genericSignature: string | undefined,
-    @Headers('x-vtpass-webhook-secret') secretHeader: string | undefined,
-    @Query('token') token: string | undefined,
+    @Headers('x-trustpay-vtpass-signature') signature: string | undefined,
     @Req() req: RawBodyRequest,
-    @Body() body: VtpassWebhookPayload,
+    @Body() body: VtpassWebhookDto,
   ) {
     this.verifyWebhook({
       rawBody: req.rawBody,
-      receivedSignature:
-        vtpassSignature || webhookSignature || genericSignature,
-      receivedSecret: secretHeader || token,
+      receivedSignature: signature,
     });
 
     const event = this.normalizeEvent(body);
-    await this.vtuService.recordVtpassWebhookEvent(event);
-
-    void this.vtuService.processVtpassWebhookEvent(event).catch((error) => {
-      this.logger.error(
-        {
-          providerRequestId: event.providerRequestId,
-          providerReference: event.providerReference,
-          eventType: event.eventType,
-          errorMessage:
-            error instanceof Error ? error.message : 'Unknown webhook error',
-        },
-        'VTpass webhook background processing failed',
-      );
-    });
+    await this.inbox.record(event);
 
     this.logger.info(
       {
@@ -87,7 +65,6 @@ export class VtpassWebhookController {
   private verifyWebhook(input: {
     rawBody: string | undefined;
     receivedSignature: string | undefined;
-    receivedSecret: string | undefined;
   }) {
     const secret = this.configService.get<string>('VTPASS_WEBHOOK_SECRET');
     if (!secret) {
@@ -95,14 +72,6 @@ export class VtpassWebhookController {
       throw new BadRequestException(
         'Webhook signature secret is not configured',
       );
-    }
-
-    if (input.receivedSecret) {
-      if (!this.timingSafeCompare(secret, input.receivedSecret)) {
-        this.logger.warn('Invalid VTpass webhook shared secret');
-        throw new BadRequestException('Invalid webhook secret');
-      }
-      return;
     }
 
     if (!input.receivedSignature) {
@@ -131,31 +100,23 @@ export class VtpassWebhookController {
     }
   }
 
-  private normalizeEvent(body: VtpassWebhookPayload): VtpassWebhookEvent {
-    const data = this.objectValue(body.data) || body;
+  private normalizeEvent(body: VtpassWebhookDto) {
+    const data = this.objectValue(body.data) || {};
     const content = this.objectValue(data.content);
     const transaction = this.objectValue(content?.transactions) || data;
-    const eventType = this.stringValue(
-      body.type || body.eventType || body.event,
-    )
-      .trim()
-      .slice(0, 100);
+    const eventType = body.type;
     const providerRequestId = this.stringValue(
-      data.requestId || data.request_id || body.requestId || body.request_id,
+      data.requestId || data.request_id,
     ).trim();
     const providerReference = this.stringValue(
-      transaction.transactionId ||
-        transaction.id ||
-        data.transactionId ||
-        body.transactionId,
+      transaction.transactionId || transaction.id || data.transactionId,
     ).trim();
-    const status = this.stringValue(
-      transaction.status || data.status || body.status,
-    )
+    const status = this.stringValue(transaction.status || data.status)
       .trim()
       .toLowerCase();
 
-    if (!eventType || !providerRequestId || !status) {
+    const normalizedStatus = this.normalizeStatus(status);
+    if (!providerRequestId || !providerReference || !normalizedStatus) {
       throw new BadRequestException('Invalid VTpass webhook payload');
     }
 
@@ -163,15 +124,35 @@ export class VtpassWebhookController {
       eventType,
       providerRequestId,
       providerReference: providerReference || undefined,
-      status,
+      status: normalizedStatus,
       message:
-        this.stringValue(
-          data.response_description || data.message || body.message,
-        )
+        this.stringValue(data.response_description || data.message)
           .trim()
           .slice(0, 500) || undefined,
-      rawPayload: body,
+      code: this.stringValue(data.code).trim().slice(0, 20) || undefined,
     };
+  }
+
+  private normalizeStatus(status: string) {
+    if (['reversed', 'refunded'].includes(status)) return 'reversed' as const;
+    if (
+      ['delivered', 'success', 'successful', 'completed', 'complete'].includes(
+        status,
+      )
+    ) {
+      return 'success' as const;
+    }
+    if (['failed', 'failure', 'rejected', 'cancelled'].includes(status)) {
+      return 'failed' as const;
+    }
+    if (
+      ['pending', 'processing', 'initiated', 'queued', 'unknown'].includes(
+        status,
+      )
+    ) {
+      return 'pending' as const;
+    }
+    return undefined;
   }
 
   private objectValue(value: unknown): Record<string, unknown> | undefined {

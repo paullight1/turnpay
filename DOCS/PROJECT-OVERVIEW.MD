@@ -49,7 +49,7 @@ TRUSTPAY/
 | Web/Admin | Next.js 16 + shadcn/ui + TanStack Query |
 | Backend | NestJS + Prisma + PostgreSQL + Redis |
 | Auth | JWT (15m access / 7d refresh) + OTP |
-| Payments | Monnify for NGN virtual accounts; Paystack/Flutterwave provider code present but not the active virtual-account path |
+| Payments | Monnify only for NGN virtual accounts, deposits, bank resolution, and withdrawals |
 
 ---
 
@@ -60,7 +60,7 @@ TRUSTPAY/
 | Service | Purpose | Integration Status |
 |---------|---------|-------------------|
 | **Monnify** | NGN virtual accounts, deposit webhooks, exchange deposit verification | ✅ Code implemented; KYB, credentials, webhook dashboard setup, and sandbox/live validation still required |
-| **VTU Aggregator** (VTpass / Reloadly / approved provider) | Airtime, data, cable TV, electricity APIs | 📦 Providers coded; live provider credentials and market-by-market validation still required |
+| **VTU Aggregator** (VTpass) | Airtime, data, cable TV, electricity APIs | 📦 Live credentials and service validation still required |
 | **FX Rate API or Admin Rate Ops** | GHS ⇄ NGN rates and quote control | 📦 Rate service/admin paths present; production source and approval workflow still required |
 | **SMS Provider** (Twilio / Africa's Talking or Supabase-supported OTP provider) | OTP delivery for phone verification | 📦 OTP service/auth flow present; production provider config required |
 | **KYC Provider** (NIBSS/NIMC/approved vendor) | Identity verification beyond manual review | 🟡 Manual review gateway present; approved provider onboarding still required |
@@ -196,12 +196,12 @@ MONNIFY_BASE_URL="https://sandbox.monnify.com"
 MONNIFY_API_KEY="xxx"
 MONNIFY_SECRET_KEY="xxx"
 MONNIFY_CONTRACT_CODE="xxx"
-MONNIFY_WEBHOOK_SECRET="xxx"
 MONNIFY_EXCHANGE_COLLECTION_ACCOUNT_NUMBER="xxx"
 
 # Optional payment providers if enabled later
-FLUTTERWAVE_SECRET_KEY=""
-PAYSTACK_SECRET_KEY=""
+MONNIFY_API_KEY=""
+YOUVERIFY_API_KEY=""
+VTPASS_API_KEY=""
 
 # VTU Provider
 VTU_API_KEY="xxx"
@@ -238,7 +238,7 @@ API_URL="http://localhost:3000"
     ▼              ▼              ▼
 ┌────────┐   ┌──────────┐   ┌──────────────┐
 │ Redis  │   │PostgreSQL│   │External APIs │
-│(Cache) │   │  (Data)  │   │Flutterwave/  │
+│(Cache) │   │  (Data)  │   │Monnify       │
 └────────┘   └──────────┘   │VTU/FX/SMS    │
                             └──────────────┘
 ```

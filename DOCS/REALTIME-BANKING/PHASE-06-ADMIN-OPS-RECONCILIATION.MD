@@ -1,5 +1,7 @@
 # Phase 06: Admin Operations And Reconciliation
 
+> Archived provider plan. Monnify-only banking/payment instructions in `DOCS/PROVIDER-SOURCE-OF-TRUTH.MD` supersede provider references below.
+
 ## Goal
 
 Give operations staff the panels, confirmations, and reconciliation tools needed to safely manage banking activity.

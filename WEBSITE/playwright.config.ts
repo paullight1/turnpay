@@ -1,10 +1,17 @@
 import { defineConfig, devices } from '@playwright/test';
+import { randomUUID } from 'node:crypto';
 
 const chromiumExecutablePath =
   process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH;
 const firefoxExecutablePath = process.env.PLAYWRIGHT_FIREFOX_EXECUTABLE_PATH;
 const webkitExecutablePath = process.env.PLAYWRIGHT_WEBKIT_EXECUTABLE_PATH;
 const externalServerUrl = process.env.PLAYWRIGHT_EXTERNAL_SERVER_URL;
+const localE2EAuthToken = externalServerUrl
+  ? undefined
+  : process.env.TRUSTPAY_E2E_AUTH_BYPASS_TOKEN || randomUUID();
+if (localE2EAuthToken) {
+  process.env.TRUSTPAY_E2E_AUTH_BYPASS_TOKEN = localE2EAuthToken;
+}
 
 function withExecutablePath(
   use: Record<string, unknown>,
@@ -37,6 +44,13 @@ export default defineConfig({
     : 'html',
   use: {
     baseURL: externalServerUrl || 'http://127.0.0.1:3001',
+    ...(localE2EAuthToken
+      ? {
+          extraHTTPHeaders: {
+            'x-trustpay-e2e-auth': localE2EAuthToken,
+          },
+        }
+      : {}),
     trace: 'on-first-retry',
     screenshot: 'only-on-failure',
   },

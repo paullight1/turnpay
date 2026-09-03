@@ -1,43 +1,44 @@
 "use client";
 
 import { useRef, useState } from "react";
+import Link from "next/link";
+import { useQuery } from "@tanstack/react-query";
+import {
+  BadgeCheck,
+  Clock3,
+  MapPin,
+  ShieldCheck,
+  TriangleAlert,
+} from "lucide-react";
+import { toast } from "sonner";
 import DashboardLayout from "@/components/layout/dashboard-layout";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Badge } from "@/components/ui/badge";
-import { toast } from "sonner";
-import { kycApi } from "@/services/api";
-import { useQuery } from "@tanstack/react-query";
+import { Skeleton } from "@/components/ui/skeleton";
 import { getErrorMessage } from "@/lib/errors";
 import { maskKycId } from "@/lib/privacy";
-import { createClient } from "@/lib/supabase";
-import { useAuth } from "@/lib/auth-provider";
-import type { KycDocument } from "@/types";
+import { cn } from "@/lib/utils";
+import { kycApi } from "@/services/api";
+import type { KycDocument, KycStatusOverview } from "@/types";
 
-const kycTypes = [
-  { value: "BVN", label: "BVN (Bank Verification Number)" },
-  { value: "NIN", label: "NIN (National Identity Number)" },
-  { value: "PASSPORT", label: "International Passport" },
-  { value: "DRIVERS_LICENSE", label: "Driver's License" },
-  { value: "VOTERS_CARD", label: "Voter's Card" },
-];
+type IdentityType = "BVN" | "NIN";
 
-const allowedDocumentTypes = [
-  "image/jpeg",
-  "image/png",
-  "image/webp",
-  "application/pdf",
-];
-const maxDocumentSize = 8 * 1024 * 1024;
-
-const statusColors: Record<string, "secondary" | "default" | "destructive" | "outline"> = {
+const statusVariants: Record<
+  string,
+  "secondary" | "default" | "destructive" | "outline"
+> = {
   PENDING: "secondary",
-  SUBMITTED: "default",
+  SUBMITTED: "secondary",
   VERIFIED: "default",
-  APPROVED: "default",
   REJECTED: "destructive",
   FAILED: "destructive",
   REVIEW_REQUIRED: "outline",
@@ -47,273 +48,437 @@ function humanize(value?: string | number | null) {
   if (value === undefined || value === null || value === "") return "Not set";
   return String(value)
     .replace(/_/g, " ")
-    .replace(/\b\w/g, (char) => char.toUpperCase());
+    .replace(/\b\w/g, (character) => character.toUpperCase());
 }
 
 function formatTier(value?: string | number | null) {
-  if (value === undefined || value === null || value === "") return "Tier 0";
-  const tier = String(value).replace(/^TIER[_\s-]?/i, "");
+  const tier = String(value ?? "0").replace(/^TIER[_\s-]?/i, "");
   return `Tier ${tier}`;
 }
 
-function latestDocument(documents?: KycDocument[]) {
-  return documents?.[0];
+function tierRank(value?: string | number | null) {
+  const parsed = Number(String(value ?? "0").replace(/\D/g, ""));
+  return Number.isFinite(parsed) ? parsed : 0;
 }
 
-function reviewRoute(document?: KycDocument) {
-  if (!document) return "Start with BVN or NIN and upload a matching document.";
+function verifiedTypes(documents: KycDocument[]) {
+  return new Set(
+    documents
+      .filter((document) => document.status === "VERIFIED")
+      .map((document) => document.type),
+  );
+}
 
-  const providerStatus =
-    document.verificationStatus ?? document.providerStatus ?? document.status;
-  const needsManualReview =
-    document.manualReviewRequired || document.requiresManualReview || document.manualReviewStatus;
+function suggestedIdentityType(documents: KycDocument[]): IdentityType {
+  const verified = verifiedTypes(documents);
+  if (verified.has("BVN") && !verified.has("NIN")) return "NIN";
+  return "BVN";
+}
 
-  if (document.status === "VERIFIED") return "Verification complete. Your account limits now follow the approved tier.";
-  if (document.status === "REJECTED") return "Review the rejection note and submit updated identity details.";
-  if (needsManualReview) return `Provider check is ${humanize(providerStatus)}. Manual review is ${humanize(document.manualReviewStatus ?? "pending")}.`;
-  return `Provider check is ${humanize(providerStatus)}. We will update your tier after review.`;
+function nextStep(documents: KycDocument[], tier?: string | number) {
+  if (tierRank(tier) >= 2) {
+    return "Your identity checks are complete for transfers and withdrawals.";
+  }
+  const verified = verifiedTypes(documents);
+  if (verified.has("BVN")) return "Verify your NIN to reach Tier 2.";
+  if (verified.has("NIN")) return "Verify your BVN to reach Tier 2.";
+  return "Start with either one. You will need both BVN and NIN for Tier 2.";
+}
+
+function VerificationState({ overview }: { overview: KycStatusOverview }) {
+  const status = overview.latestVerification?.status;
+
+  if (tierRank(overview.kycTier) >= 2) {
+    return (
+      <div className="flex gap-3 rounded-xl border border-emerald-500/25 bg-emerald-500/8 p-4">
+        <BadgeCheck
+          aria-hidden="true"
+          className="mt-0.5 size-5 shrink-0 text-emerald-600 dark:text-emerald-400"
+        />
+        <div>
+          <p className="font-medium">Identity verification complete</p>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Your BVN and NIN checks are complete. You do not need to submit
+            anything else here.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  if (status === "REVIEW_REQUIRED") {
+    return (
+      <div className="flex gap-3 rounded-xl border border-amber-500/30 bg-amber-500/8 p-4">
+        <Clock3
+          aria-hidden="true"
+          className="mt-0.5 size-5 shrink-0 text-amber-600 dark:text-amber-400"
+        />
+        <div>
+          <p className="font-medium">
+            Your identity check needs a manual review.
+          </p>
+          <p className="mt-1 text-sm text-muted-foreground">
+            You can retry if any detail was entered incorrectly. Otherwise, we
+            will update this page after review.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  if (status === "REJECTED") {
+    return (
+      <div className="flex gap-3 rounded-xl border border-destructive/30 bg-destructive/5 p-4">
+        <TriangleAlert
+          aria-hidden="true"
+          className="mt-0.5 size-5 shrink-0 text-destructive"
+        />
+        <div>
+          <p className="font-medium">
+            We could not match those identity details.
+          </p>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Check the number, name on your TRUSTPAY profile, and date of birth,
+            then try again.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  if (status === "FAILED") {
+    return (
+      <div className="flex gap-3 rounded-xl border border-destructive/30 bg-destructive/5 p-4">
+        <TriangleAlert
+          aria-hidden="true"
+          className="mt-0.5 size-5 shrink-0 text-destructive"
+        />
+        <div>
+          <p className="font-medium">
+            The identity service could not complete your check.
+          </p>
+          <p className="mt-1 text-sm text-muted-foreground">
+            No verification was completed. Please wait a moment and try again.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  return null;
 }
 
 export default function KycPage() {
-  const { profile } = useAuth();
-  const [type, setType] = useState("");
+  const [selectedType, setSelectedType] = useState<IdentityType | null>(null);
   const [idNumber, setIdNumber] = useState("");
-  const [documentFile, setDocumentFile] = useState<File | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
+  const [dateOfBirth, setDateOfBirth] = useState("");
+  const [consentAccepted, setConsentAccepted] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const inFlightRef = useRef(false);
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const {
-    data: kycDocs,
-    isLoading: isDocsLoading,
-    isError: isDocsError,
+    data: overview,
+    isLoading,
+    isError,
     refetch,
   } = useQuery({
-    queryKey: ["kyc-documents"],
-    queryFn: async () => {
-      const res = await kycApi.getDocuments();
-      return res.data as KycDocument[];
-    },
+    queryKey: ["kyc-status"],
+    queryFn: async () => (await kycApi.getStatus()).data,
   });
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const documents = overview?.documents ?? [];
+  const effectiveType = selectedType ?? suggestedIdentityType(documents);
+  const isTierTwo = tierRank(overview?.kycTier) >= 2;
+  const today = new Date().toISOString().slice(0, 10);
 
-    if (inFlightRef.current) return;
+  const handleIdentityTypeChange = (value: IdentityType) => {
+    setSelectedType(value);
+    setIdNumber("");
+  };
 
-    if (!type || !idNumber || !documentFile) {
-      toast.error("Please fill in all fields");
+  const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (inFlightRef.current || isTierTwo) return;
+    if (!/^\d{11}$/.test(idNumber)) {
+      toast.error(`Enter the 11-digit ${effectiveType}`);
       return;
     }
-
-    if (!allowedDocumentTypes.includes(documentFile.type)) {
-      toast.error("Upload a JPG, PNG, WEBP, or PDF document");
+    if (!dateOfBirth || dateOfBirth > today) {
+      toast.error("Enter a valid date of birth");
       return;
     }
-
-    if (documentFile.size > maxDocumentSize) {
-      toast.error("Document must be 8MB or smaller");
+    if (!consentAccepted) {
+      toast.error("Confirm consent before verification");
       return;
     }
 
     inFlightRef.current = true;
-    setIsLoading(true);
+    setIsSubmitting(true);
     try {
-      const uploadUrlResponse = await kycApi.createDocumentUploadUrl({
-        fileName: documentFile.name,
-        contentType: documentFile.type,
-        fileSize: documentFile.size,
-      });
-      const upload = uploadUrlResponse.data as {
-        bucket: string;
-        objectKey: string;
-        token: string;
-      };
-
-      const supabase = createClient();
-      const { error: uploadError } = await supabase.storage
-        .from(upload.bucket)
-        .uploadToSignedUrl(upload.objectKey, upload.token, documentFile, {
-          contentType: documentFile.type,
-        });
-
-      if (uploadError) {
-        throw uploadError;
-      }
-
-      await kycApi.submit({
-        type,
-        idNumber,
-        documentObjectKey: upload.objectKey,
-      });
-      toast.success("KYC document submitted successfully");
-      setType("");
+      await kycApi.verifyIdentity(
+        {
+          country: "NG",
+          type: effectiveType,
+          idNumber,
+          dateOfBirth,
+          consentAccepted: true,
+        },
+        crypto.randomUUID(),
+      );
+      toast.success("Identity check complete");
       setIdNumber("");
-      setDocumentFile(null);
-      if (fileInputRef.current) fileInputRef.current.value = "";
-      refetch();
+      setDateOfBirth("");
+      setConsentAccepted(false);
+      setSelectedType(null);
+      await refetch();
     } catch (error: unknown) {
-      toast.error(getErrorMessage(error, "Failed to submit KYC"));
+      toast.error(getErrorMessage(error, "Identity verification failed"));
     } finally {
       inFlightRef.current = false;
-      setIsLoading(false);
+      setIsSubmitting(false);
     }
   };
 
-  const currentDocument = latestDocument(kycDocs);
-  const currentStatus = profile?.kycStatus ?? currentDocument?.status ?? "PENDING";
-  const currentTier = profile?.kycTier ?? currentDocument?.kycTier;
-
   return (
     <DashboardLayout>
-      <div className="mx-auto flex max-w-3xl flex-col gap-6">
-        <div>
-          <h1 className="text-3xl font-bold">KYC Verification</h1>
-          <p className="text-muted-foreground mt-1">
-            Confirm your current tier and submit identity details for review.
+      <main className="mx-auto flex w-full max-w-3xl flex-col gap-5">
+        <header className="max-w-xl">
+          <p className="mb-2 text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
+            Account security
           </p>
-        </div>
+          <h1 className="text-2xl font-semibold tracking-tight">
+            Identity verification
+          </h1>
+          <p className="mt-1.5 text-sm leading-6 text-muted-foreground">
+            Verify your Nigerian identity details. No document upload is
+            required.
+          </p>
+        </header>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Account verification</CardTitle>
-            <CardDescription>
-              Your wallet limits follow the tier and status shown here.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="grid gap-4 text-sm md:grid-cols-3">
+        {isLoading ? (
+          <section aria-label="Loading identity status" className="space-y-3">
+            <Skeleton className="h-24 w-full rounded-xl" />
+            <Skeleton className="h-80 w-full rounded-xl" />
+          </section>
+        ) : null}
+
+        {isError ? (
+          <div
+            role="alert"
+            className="flex items-center justify-between gap-3 rounded-xl border border-destructive/30 p-4 text-sm"
+          >
             <div>
-              <p className="text-muted-foreground">Status</p>
-              <Badge variant={statusColors[currentStatus] || "secondary"} className="mt-1">
-                {humanize(currentStatus)}
-              </Badge>
+              <p className="font-medium">We could not load your KYC status.</p>
+              <p className="mt-1 text-muted-foreground">
+                Check your connection and try again.
+              </p>
             </div>
-            <div>
-              <p className="text-muted-foreground">KYC tier</p>
-              <p className="mt-1 font-medium">{formatTier(currentTier)}</p>
-            </div>
-            <div>
-              <p className="text-muted-foreground">Review path</p>
-              <p className="mt-1 font-medium">{reviewRoute(currentDocument)}</p>
-            </div>
-          </CardContent>
-        </Card>
+            <Button variant="outline" size="sm" onClick={() => refetch()}>
+              Retry
+            </Button>
+          </div>
+        ) : null}
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Submit Document</CardTitle>
-            <CardDescription>
-              BVN and NIN are preferred for faster provider checks. Upload a matching document for manual review when needed.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-              <div className="flex flex-col gap-2">
-                <Label>ID Type</Label>
-                <Select value={type} onValueChange={setType}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select ID type" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {kycTypes.map((t) => (
-                      <SelectItem key={t.value} value={t.value}>
-                        {t.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="flex flex-col gap-2">
-                <Label>ID Number</Label>
-                <Input
-                  placeholder="Enter your ID number"
-                  value={idNumber}
-                  onChange={(e) => setIdNumber(e.target.value)}
-                  required
-                />
-              </div>
-
-              <div className="flex flex-col gap-2">
-                <Label>Identity document</Label>
-                <Input
-                  ref={fileInputRef}
-                  name="identityDocument"
-                  type="file"
-                  accept={allowedDocumentTypes.join(",")}
-                  onChange={(e) =>
-                    setDocumentFile(e.target.files?.[0] ?? null)
-                  }
-                  required
-                />
-                <p className="text-xs text-muted-foreground">
-                  JPG, PNG, WEBP, or PDF. Maximum 8MB.
+        {overview && !isError ? (
+          <>
+            <section className="grid gap-4 rounded-xl border bg-card p-4 text-sm sm:grid-cols-[1fr_auto_auto] sm:items-center">
+              <div>
+                <p className="text-muted-foreground">Next step</p>
+                <p className="mt-1 font-medium">
+                  {nextStep(documents, overview.kycTier)}
                 </p>
               </div>
-
-              <Button type="submit" disabled={isLoading}>
-                {isLoading ? "Submitting..." : "Submit for Verification"}
-              </Button>
-            </form>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>Submitted Documents</CardTitle>
-            <CardDescription>
-              Sensitive identifiers stay masked. Storage keys and provider references are not shown.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="flex flex-col gap-3">
-            {isDocsLoading ? (
-              <p className="text-sm text-muted-foreground">Loading submitted documents...</p>
-            ) : isDocsError ? (
-              <div className="flex flex-col gap-3 rounded-lg border p-4 text-sm">
-                <p className="text-muted-foreground">Unable to load submitted documents.</p>
-                <Button variant="outline" size="sm" className="w-fit" onClick={() => refetch()}>
-                  Retry
-                </Button>
+              <div className="flex items-center gap-2 sm:border-l sm:pl-4">
+                <MapPin
+                  aria-hidden="true"
+                  className="size-4 text-muted-foreground"
+                />
+                <span>Nigeria</span>
               </div>
-            ) : kycDocs && kycDocs.length > 0 ? (
-              kycDocs.map((doc) => (
-                <div
-                  key={doc.id}
-                  className="grid gap-3 rounded-lg border p-3 text-sm md:grid-cols-[1fr_auto]"
-                >
-                  <div>
-                    <p className="font-medium">
-                      {kycTypes.find((t) => t.value === doc.type)?.label ?? humanize(doc.type)}
-                    </p>
-                    <p className="text-muted-foreground">{maskKycId(doc.idNumber)}</p>
-                    {(doc.providerStatus || doc.verificationStatus || doc.manualReviewStatus) && (
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        Provider {humanize(doc.verificationStatus ?? doc.providerStatus)}
-                        {(doc.manualReviewRequired ||
-                          doc.requiresManualReview ||
-                          doc.manualReviewStatus) &&
-                          `; manual review ${humanize(doc.manualReviewStatus ?? "pending")}`}
+              <div className="flex items-center gap-2 sm:border-l sm:pl-4">
+                <span className="text-muted-foreground">Access</span>
+                <Badge variant="secondary">
+                  {formatTier(overview.kycTier)}
+                </Badge>
+              </div>
+            </section>
+
+            <VerificationState overview={overview} />
+
+            {!isTierTwo ? (
+              <Card>
+                <CardHeader className="border-b pb-4">
+                  <CardTitle>Verify an identity</CardTitle>
+                  <CardDescription>
+                    Choose the identity record you want to check.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <form
+                    className="space-y-5"
+                    onSubmit={handleSubmit}
+                    aria-busy={isSubmitting}
+                  >
+                    <fieldset className="space-y-2">
+                      <legend className="text-sm font-medium">
+                        Identity type
+                      </legend>
+                      <div className="grid grid-cols-2 gap-2">
+                        {(["BVN", "NIN"] as const).map((identityType) => (
+                          <button
+                            key={identityType}
+                            type="button"
+                            aria-pressed={effectiveType === identityType}
+                            onClick={() =>
+                              handleIdentityTypeChange(identityType)
+                            }
+                            className={cn(
+                              "h-10 rounded-lg border text-sm font-medium outline-none transition-colors focus-visible:ring-3 focus-visible:ring-ring/50",
+                              effectiveType === identityType
+                                ? "border-primary bg-primary/10 text-foreground"
+                                : "border-input bg-background text-muted-foreground hover:bg-muted hover:text-foreground",
+                            )}
+                          >
+                            {identityType}
+                          </button>
+                        ))}
+                      </div>
+                    </fieldset>
+
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <div className="space-y-2">
+                        <Label htmlFor="kyc-id-number">Identity number</Label>
+                        <Input
+                          id="kyc-id-number"
+                          value={idNumber}
+                          onChange={(event) =>
+                            setIdNumber(
+                              event.target.value
+                                .replace(/\D/g, "")
+                                .slice(0, 11),
+                            )
+                          }
+                          placeholder={`11-digit ${effectiveType}`}
+                          inputMode="numeric"
+                          pattern="[0-9]{11}"
+                          minLength={11}
+                          maxLength={11}
+                          autoComplete="off"
+                          spellCheck={false}
+                          required
+                        />
+                        <p className="text-xs text-muted-foreground">
+                          Enter digits only.
+                        </p>
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label htmlFor="kyc-date-of-birth">Date of birth</Label>
+                        <Input
+                          id="kyc-date-of-birth"
+                          type="date"
+                          value={dateOfBirth}
+                          max={today}
+                          onChange={(event) =>
+                            setDateOfBirth(event.target.value)
+                          }
+                          required
+                        />
+                        <p className="text-xs text-muted-foreground">
+                          It must match the identity record.
+                        </p>
+                      </div>
+                    </div>
+
+                    <label className="flex cursor-pointer items-start gap-3 rounded-lg border bg-muted/30 p-3 text-sm leading-5">
+                      <input
+                        className="mt-0.5 size-4 shrink-0 accent-primary"
+                        type="checkbox"
+                        checked={consentAccepted}
+                        onChange={(event) =>
+                          setConsentAccepted(event.target.checked)
+                        }
+                      />
+                      <span>
+                        I agree that my identity details will be shared securely
+                        with Ninja for this verification. See our{" "}
+                        <Link
+                          className="underline underline-offset-2"
+                          href="/legal#privacy"
+                        >
+                          privacy notice
+                        </Link>
+                        .
+                      </span>
+                    </label>
+
+                    <div className="flex flex-col gap-3 border-t pt-4 sm:flex-row sm:items-center sm:justify-between">
+                      <p className="flex items-center gap-2 text-xs text-muted-foreground">
+                        <ShieldCheck aria-hidden="true" className="size-4" />
+                        Your full identity number is never shown in history.
                       </p>
-                    )}
-                  </div>
-                  <div className="flex items-start justify-between gap-2 md:justify-end">
-                    <Badge variant={statusColors[doc.status] || "secondary"}>
-                      {humanize(doc.status)}
-                    </Badge>
-                    {doc.kycTier !== undefined && doc.kycTier !== null && (
-                      <Badge variant="outline">{formatTier(doc.kycTier)}</Badge>
-                    )}
-                  </div>
+                      <Button type="submit" disabled={isSubmitting}>
+                        {isSubmitting
+                          ? "Verifying…"
+                          : `Verify ${effectiveType}`}
+                      </Button>
+                    </div>
+                  </form>
+                </CardContent>
+              </Card>
+            ) : null}
+
+            <section aria-labelledby="verification-history-title">
+              <div className="mb-2 flex items-center justify-between">
+                <h2
+                  id="verification-history-title"
+                  className="text-sm font-medium"
+                >
+                  Verification history
+                </h2>
+                <span className="text-xs text-muted-foreground">
+                  Identifiers are masked
+                </span>
+              </div>
+              {documents.length ? (
+                <div className="divide-y rounded-xl border bg-card">
+                  {documents.map((document) => (
+                    <div
+                      key={document.id}
+                      className="flex items-center justify-between gap-4 p-4 text-sm"
+                    >
+                      <div>
+                        <p className="font-medium">{humanize(document.type)}</p>
+                        <p className="mt-0.5 font-mono text-xs text-muted-foreground">
+                          {maskKycId(document.idNumber)}
+                        </p>
+                      </div>
+                      <Badge
+                        variant={statusVariants[document.status] ?? "secondary"}
+                      >
+                        {humanize(document.status)}
+                      </Badge>
+                    </div>
+                  ))}
                 </div>
-              ))
-            ) : (
-              <p className="rounded-lg border p-4 text-sm text-muted-foreground">
-                No identity documents submitted yet.
-              </p>
-            )}
-          </CardContent>
-        </Card>
-      </div>
+              ) : (
+                <div className="rounded-xl border border-dashed p-7 text-center">
+                  <ShieldCheck
+                    aria-hidden="true"
+                    className="mx-auto size-5 text-muted-foreground"
+                  />
+                  <p className="mt-3 text-sm font-medium">
+                    No identity checks yet.
+                  </p>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    Choose BVN or NIN above to begin.
+                  </p>
+                </div>
+              )}
+            </section>
+          </>
+        ) : null}
+      </main>
     </DashboardLayout>
   );
 }

@@ -44,24 +44,11 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Profile'), findsWidgets);
-
-    await tester.scrollUntilVisible(
-      find.text('Account Details'),
-      300,
-      scrollable: find.descendant(
-        of: find.byType(ListView).first,
-        matching: find.byType(Scrollable),
-      ).first,
-    );
     expect(find.text('Account Details'), findsWidgets);
-
     await tester.scrollUntilVisible(
       find.text('Help & Support'),
       300,
-      scrollable: find.descendant(
-        of: find.byType(ListView).first,
-        matching: find.byType(Scrollable),
-      ).first,
+      scrollable: find.byType(Scrollable).last,
     );
     expect(find.text('Help & Support'), findsWidgets);
   });

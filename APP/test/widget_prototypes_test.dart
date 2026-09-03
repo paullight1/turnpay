@@ -71,8 +71,7 @@ void main() {
                 body: WalletBalanceCard(
                   balanceGHS: 17298.92,
                   visible: visible,
-                  onToggleVisibility: () =>
-                      setState(() => visible = !visible),
+                  onToggleVisibility: () => setState(() => visible = !visible),
                 ),
               );
             },
@@ -142,21 +141,11 @@ void main() {
 
     await tester.pumpAndSettle();
 
-    final contentScroll = find.descendant(
-      of: find.byType(ListView).first,
-      matching: find.byType(Scrollable),
-    ).first;
     expect(find.text('Recipients'), findsOneWidget);
     expect(find.textContaining('First Bank'), findsOneWidget);
-
-    await tester.scrollUntilVisible(
-      find.text('Recent transactions'),
-      300,
-      scrollable: contentScroll,
-    );
     expect(find.text('Recent transactions'), findsOneWidget);
-
     expect(find.text('Fund'), findsWidgets);
+    expect(find.text('DEP-001'), findsOneWidget);
     expect(find.text('See all'), findsOneWidget);
   });
 }

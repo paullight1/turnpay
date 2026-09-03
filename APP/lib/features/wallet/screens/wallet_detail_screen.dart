@@ -106,7 +106,7 @@ class _WalletDetailScreenState extends State<WalletDetailScreen> {
                             currency: wallet.currency,
                             balance: wallet.balance,
                           ),
-                          SizedBox(height: AppSpacing.lg),
+                          const SizedBox(height: AppSpacing.lg),
 
                           // Action buttons
                           Row(
@@ -119,7 +119,7 @@ class _WalletDetailScreenState extends State<WalletDetailScreen> {
                                   onTap: () => context.push(AppRoutes.send),
                                 ),
                               ),
-                              SizedBox(width: AppSpacing.sm),
+                              const SizedBox(width: AppSpacing.sm),
                               Expanded(
                                 child: _ActionButton(
                                   icon: Icons.qr_code_2_rounded,
@@ -132,14 +132,14 @@ class _WalletDetailScreenState extends State<WalletDetailScreen> {
                               ),
                             ],
                           ),
-                          SizedBox(height: AppSpacing.lg),
+                          const SizedBox(height: AppSpacing.lg),
 
                           // Virtual account section
                           _VirtualAccountSection(
                             currency: wallet.currency,
                             walletService: widget.walletService,
                           ),
-                          SizedBox(height: AppSpacing.xl),
+                          const SizedBox(height: AppSpacing.xl),
 
                           // Transaction history header
                           Row(
@@ -164,7 +164,7 @@ class _WalletDetailScreenState extends State<WalletDetailScreen> {
                               ),
                             ],
                           ),
-                          SizedBox(height: AppSpacing.md),
+                          const SizedBox(height: AppSpacing.md),
                         ],
                       ),
                     ),
@@ -184,18 +184,18 @@ class _WalletDetailScreenState extends State<WalletDetailScreen> {
                             ),
                             child: Column(
                               children: [
-                                TpIllustration(
+                                const TpIllustration(
                                   variant:
                                       TpIllustrationVariant.emptyTransactions,
                                   size: 128,
                                   semanticLabel: 'No transactions yet',
                                 ),
-                                SizedBox(height: AppSpacing.sm),
+                                const SizedBox(height: AppSpacing.sm),
                                 Text(
                                   'No transactions yet',
                                   style: AppTextStyles.labelM,
                                 ),
-                                SizedBox(height: AppSpacing.xs),
+                                const SizedBox(height: AppSpacing.xs),
                                 Text(
                                   'Your transactions will appear here',
                                   style: AppTextStyles.bodyS,
@@ -213,7 +213,7 @@ class _WalletDetailScreenState extends State<WalletDetailScreen> {
                         sliver: SliverList.separated(
                           itemCount: deposits.length,
                           separatorBuilder: (_, __) =>
-                              SizedBox(height: AppSpacing.sm),
+                              const SizedBox(height: AppSpacing.sm),
                           itemBuilder: (context, index) {
                             final deposit = deposits[index];
                             return _TransactionRow(
@@ -390,7 +390,7 @@ class _ActionButton extends StatelessWidget {
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Icon(icon, color: color, size: 22),
-            SizedBox(height: AppSpacing.xs),
+            const SizedBox(height: AppSpacing.xs),
             Text(
               label,
               style: AppTextStyles.labelS.copyWith(
@@ -460,14 +460,14 @@ class _VirtualAccountSectionState extends State<_VirtualAccountSection> {
                   color: AppColors.textHint,
                   size: 22,
                 ),
-                SizedBox(width: AppSpacing.md),
+                const SizedBox(width: AppSpacing.md),
                 Expanded(
                   child: Text(
                     'No virtual account yet — provision one to receive bank transfers',
                     style: AppTextStyles.bodyS,
                   ),
                 ),
-                SizedBox(width: AppSpacing.sm),
+                const SizedBox(width: AppSpacing.sm),
                 TapScale(
                   onTap: () => context.push(AppRoutes.virtualAccount),
                   borderRadius: BorderRadius.circular(AppRadius.full),
@@ -516,7 +516,7 @@ class _ActiveVirtualAccountCard extends StatelessWidget {
                   shape: BoxShape.circle,
                 ),
               ),
-              SizedBox(width: AppSpacing.sm),
+              const SizedBox(width: AppSpacing.sm),
               Text(
                 'Virtual Account — Active',
                 style: AppTextStyles.labelM.copyWith(
@@ -525,12 +525,12 @@ class _ActiveVirtualAccountCard extends StatelessWidget {
               ),
             ],
           ),
-          SizedBox(height: AppSpacing.md),
+          const SizedBox(height: AppSpacing.md),
           _AccountDetailRow(
             label: 'Bank',
             value: account.bankName,
           ),
-          SizedBox(height: AppSpacing.sm),
+          const SizedBox(height: AppSpacing.sm),
           _AccountDetailRow(
             label: 'Account Number',
             value: account.accountNumberMasked,
@@ -542,8 +542,13 @@ class _ActiveVirtualAccountCard extends StatelessWidget {
               ),
               tooltip: 'Copy account number',
               onPressed: () {
+                final fullNumber = account.accountNumber.trim();
+                final copyValue = fullNumber.isNotEmpty
+                    ? fullNumber
+                    : account.accountNumberMasked.trim();
+                if (copyValue.isEmpty) return;
                 Clipboard.setData(
-                  ClipboardData(text: account.accountNumber),
+                  ClipboardData(text: copyValue),
                 );
                 showTpSnackbar(
                   context,
@@ -553,7 +558,7 @@ class _ActiveVirtualAccountCard extends StatelessWidget {
               },
             ),
           ),
-          SizedBox(height: AppSpacing.sm),
+          const SizedBox(height: AppSpacing.sm),
           _AccountDetailRow(
             label: 'Account Name',
             value: account.accountName,
@@ -673,7 +678,7 @@ class _TransactionRow extends StatelessWidget {
               ),
               child: Icon(_icon, color: _statusColor, size: 20),
             ),
-            SizedBox(width: AppSpacing.md),
+            const SizedBox(width: AppSpacing.md),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -682,7 +687,7 @@ class _TransactionRow extends StatelessWidget {
                     _typeLabel(type),
                     style: AppTextStyles.labelM,
                   ),
-                  SizedBox(height: 2),
+                  const SizedBox(height: 2),
                   Text(
                     dateFormatted,
                     style: AppTextStyles.bodyS,
@@ -699,7 +704,7 @@ class _TransactionRow extends StatelessWidget {
                     fontWeight: FontWeight.w700,
                   ),
                 ),
-                SizedBox(height: 2),
+                const SizedBox(height: 2),
                 Container(
                   padding: const EdgeInsets.symmetric(
                     horizontal: 8,
@@ -768,7 +773,7 @@ class _WalletDetailLoadingState extends StatelessWidget {
           height: 160,
           borderRadius: BorderRadius.circular(AppRadius.md),
         ),
-        SizedBox(height: AppSpacing.lg),
+        const SizedBox(height: AppSpacing.lg),
         Row(
           children: [
             Expanded(
@@ -778,7 +783,7 @@ class _WalletDetailLoadingState extends StatelessWidget {
                 borderRadius: BorderRadius.circular(AppRadius.sm),
               ),
             ),
-            SizedBox(width: AppSpacing.sm),
+            const SizedBox(width: AppSpacing.sm),
             Expanded(
               child: ShimmerBlock(
                 width: double.infinity,
@@ -788,13 +793,13 @@ class _WalletDetailLoadingState extends StatelessWidget {
             ),
           ],
         ),
-        SizedBox(height: AppSpacing.lg),
+        const SizedBox(height: AppSpacing.lg),
         ShimmerBlock(
           width: double.infinity,
           height: 80,
           borderRadius: BorderRadius.circular(AppRadius.sm),
         ),
-        SizedBox(height: AppSpacing.xl),
+        const SizedBox(height: AppSpacing.xl),
         ...List.generate(5, (_) {
           return Padding(
             padding: const EdgeInsets.only(bottom: AppSpacing.sm),
@@ -826,12 +831,12 @@ class _WalletDetailErrorState extends StatelessWidget {
             color: AppColors.primary,
             size: 48,
           ),
-          SizedBox(height: AppSpacing.md),
+          const SizedBox(height: AppSpacing.md),
           Text(
             'Could not load wallet',
             style: AppTextStyles.labelM,
           ),
-          SizedBox(height: AppSpacing.lg),
+          const SizedBox(height: AppSpacing.lg),
           FilledButton(
             onPressed: onRetry,
             child: const Text('Retry'),

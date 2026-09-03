@@ -1,5 +1,7 @@
 # Phase 01 Go/No-Go Decision Record
 
+> Historical decision record. Current provider go/no-go criteria apply to Monnify only; see `DOCS/PROVIDER-SOURCE-OF-TRUTH.MD`.
+
 ## Decision
 
 Phase 1 is ready for sandbox implementation only after all checklist items below are complete.

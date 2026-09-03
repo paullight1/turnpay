@@ -97,11 +97,11 @@ class _LoginScreenState extends State<LoginScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 // ── Top bar ──
-                Row(
+                const Row(
                   children: [
                     TpBackButton(),
-                    const Spacer(),
-                    const AuthHelpButton(),
+                    Spacer(),
+                    AuthHelpButton(),
                   ],
                 ),
                 const SizedBox(height: AppSpacing.xxl),

@@ -19,6 +19,7 @@
     "test:cov": "jest --coverage",
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
     "test:e2e": "jest --config ./test/jest-e2e.json",
+    "test:financial:e2e": "jest --config ./test/jest-financial-e2e.json --runInBand",
     "seed": "npx ts-node prisma/seed.ts",
     "seed:vtu-pricing": "npx ts-node scripts/seed-vtu-pricing.ts",
     "db:migrate": "npx prisma migrate dev",
@@ -58,7 +59,6 @@
     "prisma": "^6.19.3",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",
-    "smile-identity-core": "^3.1.0",
     "swagger-ui-express": "^5.0.1",
     "uuid": "^11.1.0",
     "zod": "^4.4.3"

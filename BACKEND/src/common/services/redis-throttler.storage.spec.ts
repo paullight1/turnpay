@@ -15,6 +15,7 @@ describe('RedisThrottlerStorage', () => {
     evalError?: Error;
   }) => ({
     isAvailable: jest.fn(() => available),
+    isRedisAvailable: jest.fn(() => available),
     isMemoryFallbackAllowed: jest.fn(() => memoryAllowed),
     getClient: jest.fn(() => ({
       eval: evalError

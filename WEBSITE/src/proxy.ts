@@ -108,12 +108,27 @@ export async function proxy(request: NextRequest) {
   );
 
   const isAuthRoute = AUTH_ROUTES.includes(pathname);
+  const localE2EAuthToken = process.env.TRUSTPAY_E2E_AUTH_BYPASS_TOKEN;
+  const hasLocalE2EAuth = Boolean(
+    process.env.NODE_ENV !== "production" &&
+      localE2EAuthToken &&
+      (request.headers.get("x-trustpay-e2e-auth") === localE2EAuthToken ||
+        request.cookies.get("trustpay.e2e-auth")?.value ===
+          localE2EAuthToken),
+  );
 
   const redirectToLogin = () => {
     const url = new URL("/login", request.url);
     url.searchParams.set("callbackUrl", pathname);
     return NextResponse.redirect(url);
   };
+
+  // Browser mocks cannot intercept this server-side guard's backend request.
+  // A random token shared only with the local Playwright child process keeps
+  // authenticated E2E tests realistic without weakening production or admin.
+  if (isProtected && hasLocalE2EAuth) {
+    return response;
+  }
 
   // Candidate bearer token for backend verification. Prefer a Supabase-
   // validated session when Supabase is configured; otherwise use the local

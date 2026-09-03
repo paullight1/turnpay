@@ -233,6 +233,24 @@ export class AdminAuditLogsQueryDto extends LimitQueryDto {
   @IsOptional()
   @IsDateString()
   to?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  reference?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(128)
+  requestId?: string;
+
+  @IsOptional()
+  @IsUUID()
+  userId?: string;
+
+  @IsOptional()
+  @IsIn(['PENDING_APPROVAL', 'COMPLETED', 'REJECTED', 'BLOCKED'])
+  reversalState?: 'PENDING_APPROVAL' | 'COMPLETED' | 'REJECTED' | 'BLOCKED';
 }
 
 const ADMIN_VTU_SERVICE_TYPES = [

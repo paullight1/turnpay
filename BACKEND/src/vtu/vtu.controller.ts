@@ -11,12 +11,11 @@ import { VtuService } from './vtu.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import {
-  AutoDetectReloadlyOperatorDto,
-  GetVtuCountriesDto,
   GetVtuPackagesDto,
   GetVtuProvidersDto,
   PurchaseVtuDto,
-  ValidateVtuCustomerDto,
+  ValidateMeterDto,
+  ValidateSmartCardDto,
   VtuOrderReferenceDto,
 } from './dto/vtu.dto';
 import { Throttle } from '@nestjs/throttler';
@@ -28,22 +27,7 @@ export class VtuController {
 
   @Get('providers')
   async getProviders(@Query() query: GetVtuProvidersDto) {
-    return this.vtuService.getProviders(
-      query.type,
-      query.scope,
-      query.countryCode,
-    );
-  }
-
-  @Get('countries')
-  async getCountries(@Query() query: GetVtuCountriesDto) {
-    return this.vtuService.getCountries(query.search);
-  }
-
-  @Get('operators/auto-detect')
-  @Throttle({ default: { limit: 10, ttl: 60000 } })
-  async autoDetectOperator(@Query() query: AutoDetectReloadlyOperatorDto) {
-    return this.vtuService.autoDetectReloadlyOperator(query);
+    return this.vtuService.getProviders(query.type);
   }
 
   @Get('packages')
@@ -53,14 +37,14 @@ export class VtuController {
 
   @Post('validate/smartcard')
   @Throttle({ default: { limit: 10, ttl: 60000 } })
-  async validateSmartCard(@Query() query: ValidateVtuCustomerDto) {
-    return this.vtuService.validateSmartCard(query.provider, query.number);
+  async validateSmartCard(@Body() dto: ValidateSmartCardDto) {
+    return this.vtuService.validateSmartCard(dto);
   }
 
   @Post('validate/meter')
   @Throttle({ default: { limit: 10, ttl: 60000 } })
-  async validateMeter(@Query() query: ValidateVtuCustomerDto) {
-    return this.vtuService.validateMeter(query.provider, query.number);
+  async validateMeter(@Body() dto: ValidateMeterDto) {
+    return this.vtuService.validateMeter(dto);
   }
 
   @Post('purchase')

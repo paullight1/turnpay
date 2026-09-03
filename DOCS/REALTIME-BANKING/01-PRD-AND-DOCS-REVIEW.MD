@@ -1,5 +1,7 @@
 # PRD And Existing Docs Review
 
+> Historical review. Provider comparisons below are not implementation guidance; Monnify is the sole active banking/payment provider.
+
 ## Review Result
 
 The banking PRD is directionally solid for a wallet-first fintech phase. It matches the current TRUSTPAY architecture: NestJS, Prisma, PostgreSQL, Redis, wallets, transactions, KYC, payments, webhooks, and admin.
@@ -64,4 +66,3 @@ Mono/Okra:
 - Add operational runbooks before provider sandbox testing.
 - Add incident response checklist before live provider credentials.
 - Add user-facing copy guide for account names, virtual accounts, pending transfers, failed withdrawals, and reversals.
-

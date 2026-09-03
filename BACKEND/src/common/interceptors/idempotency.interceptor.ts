@@ -6,6 +6,7 @@ import {
   BadRequestException,
   ConflictException,
   HttpException,
+  InternalServerErrorException,
 } from '@nestjs/common';
 import { Observable, of } from 'rxjs';
 import { lastValueFrom } from 'rxjs';
@@ -15,6 +16,10 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { PinoLogger } from 'nestjs-pino';
 import { Prisma } from '@prisma/client';
 import { AuthenticatedRequest } from '../types/request-context';
+import {
+  IdempotencyEncryptionContext,
+  IdempotencyResponseCryptoService,
+} from '../services/idempotency-response-crypto.service';
 
 const IDEMPOTENCY_TTL = 86400; // 24 hours
 const IDEMPOTENCY_LOCK_TTL = 30;
@@ -23,12 +28,47 @@ const IDEMPOTENCY_LOCK_TTL = 30;
 // this lease elapses a retry may atomically take over the stale record.
 const IDEMPOTENCY_IN_PROGRESS_LEASE = 120; // 2 minutes
 
+type AuthIdempotencyPolicy = 'STANDARD' | 'ENCRYPTED';
+
+export const AUTH_MUTATION_IDEMPOTENCY_POLICIES: Readonly<
+  Record<string, AuthIdempotencyPolicy>
+> = {
+  'POST /api/auth/register': 'ENCRYPTED',
+  'POST /api/auth/login': 'ENCRYPTED',
+  'POST /api/auth/refresh': 'ENCRYPTED',
+  'POST /api/auth/bootstrap': 'STANDARD',
+  'POST /api/auth/logout': 'STANDARD',
+  'POST /api/auth/change-password': 'STANDARD',
+  'POST /api/auth/otp/send': 'STANDARD',
+  'POST /api/auth/otp/verify': 'STANDARD',
+  'POST /api/auth/forgot-password': 'STANDARD',
+  'POST /api/auth/resend-confirmation': 'STANDARD',
+  'POST /api/auth/transaction-pin': 'STANDARD',
+  'POST /api/auth/transaction-pin/verify': 'STANDARD',
+  'PATCH /api/auth/transaction-pin': 'STANDARD',
+};
+
+export function getAuthMutationIdempotencyPolicy(
+  method: string,
+  path: string,
+): AuthIdempotencyPolicy | null {
+  const exact = AUTH_MUTATION_IDEMPOTENCY_POLICIES[`${method} ${path}`];
+  if (exact) return exact;
+
+  if (method === 'DELETE' && /^\/api\/auth\/sessions\/[^/]+$/.test(path)) {
+    return 'STANDARD';
+  }
+
+  return null;
+}
+
 @Injectable()
 export class IdempotencyInterceptor implements NestInterceptor {
   constructor(
     private readonly redis: RedisService,
     private readonly prisma: PrismaService,
     private readonly logger: PinoLogger,
+    private readonly responseCrypto?: IdempotencyResponseCryptoService,
   ) {}
 
   async intercept(
@@ -39,10 +79,16 @@ export class IdempotencyInterceptor implements NestInterceptor {
     const method = request.method.toUpperCase();
     const path = request.originalUrl || request.url || '';
     const normalizedPath = path.split('?')[0];
+    const isMutation = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method);
+    const authPolicy = getAuthMutationIdempotencyPolicy(method, normalizedPath);
+    if (isMutation && normalizedPath.startsWith('/api/auth') && !authPolicy) {
+      throw new InternalServerErrorException(
+        'Auth mutation route has no idempotency policy',
+      );
+    }
     const shouldProcess =
-      ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method) &&
+      isMutation &&
       !normalizedPath.startsWith('/api/webhooks') &&
-      !normalizedPath.startsWith('/api/auth') &&
       !this.isIdempotencyExemptRoute(normalizedPath);
 
     if (!shouldProcess) {
@@ -58,13 +104,20 @@ export class IdempotencyInterceptor implements NestInterceptor {
     }
 
     const userId = request.user?.userId || 'anonymous';
+    const keyDigest = createHash('sha256').update(idempotencyKey).digest('hex');
     const requestHash = this.hashRequestBody(request.body);
     const scope = `${userId}:${method}:${normalizedPath}`;
+    const encryptionContext: IdempotencyEncryptionContext = {
+      route: normalizedPath,
+      scope,
+      keyDigest,
+    };
+    const encryptResponse = authPolicy === 'ENCRYPTED';
     const expiresAt = new Date(Date.now() + IDEMPOTENCY_TTL * 1000);
-    const cacheKey = `idempotency:${scope}:${idempotencyKey}`;
+    const cacheKey = `idempotency:${scope}:${keyDigest}`;
     const lockKey = `${cacheKey}:lock`;
 
-    const existing = await this.redis.get(cacheKey);
+    const existing = encryptResponse ? null : await this.redis.get(cacheKey);
     if (existing) {
       const cached = this.parseJson(existing);
       if (this.isCachedIdempotencyResponse(cached)) {
@@ -82,14 +135,14 @@ export class IdempotencyInterceptor implements NestInterceptor {
         }
 
         this.logger.info(
-          { idempotencyKey },
+          { idempotencyKeyDigest: keyDigest.slice(0, 12) },
           'Idempotency key matched, returning cached response',
         );
         return of(cached.response);
       }
 
       this.logger.info(
-        { idempotencyKey },
+        { idempotencyKeyDigest: keyDigest.slice(0, 12) },
         'Idempotency key matched, returning cached response',
       );
       return of(cached);
@@ -99,7 +152,7 @@ export class IdempotencyInterceptor implements NestInterceptor {
       where: {
         scope_key: {
           scope,
-          key: idempotencyKey,
+          key: keyDigest,
         },
       },
     });
@@ -108,7 +161,12 @@ export class IdempotencyInterceptor implements NestInterceptor {
     let useRedisLock = false;
 
     if (existingRecord) {
-      const resolved = this.resolveExistingRecord(existingRecord, requestHash);
+      const resolved = this.resolveExistingRecord(
+        existingRecord,
+        requestHash,
+        encryptResponse,
+        encryptionContext,
+      );
       if (resolved) {
         return resolved;
       }
@@ -146,7 +204,7 @@ export class IdempotencyInterceptor implements NestInterceptor {
 
       const record = await this.createInProgressRecord({
         scope,
-        key: idempotencyKey,
+        key: keyDigest,
         method,
         path: normalizedPath,
         requestHash,
@@ -166,15 +224,31 @@ export class IdempotencyInterceptor implements NestInterceptor {
       // "already in progress" ConflictException.
       const responseJson =
         response === undefined ? Prisma.JsonNull : this.toJsonValue(response);
+      const completionData: Prisma.IdempotencyRecordUpdateInput =
+        encryptResponse
+          ? {
+              status: 'COMPLETED',
+              response: Prisma.DbNull,
+              ...this.encryptSensitiveResponse(
+                response ?? null,
+                encryptionContext,
+              ),
+              expiresAt,
+            }
+          : {
+              status: 'COMPLETED',
+              response: responseJson,
+              responseCiphertext: null,
+              responseIv: null,
+              responseTag: null,
+              encryptionKeyId: null,
+              expiresAt,
+            };
       await this.prisma.idempotencyRecord.update({
         where: { id: recordId },
-        data: {
-          status: 'COMPLETED',
-          response: responseJson,
-          expiresAt,
-        },
+        data: completionData,
       });
-      if (this.redis.isAvailable()) {
+      if (!encryptResponse && this.redis.isAvailable()) {
         await this.redis.set(
           cacheKey,
           JSON.stringify({
@@ -220,7 +294,7 @@ export class IdempotencyInterceptor implements NestInterceptor {
           expiresAt,
         },
       });
-      if (this.redis.isAvailable()) {
+      if (!encryptResponse && this.redis.isAvailable()) {
         await this.redis.set(
           cacheKey,
           JSON.stringify({
@@ -244,7 +318,8 @@ export class IdempotencyInterceptor implements NestInterceptor {
     return (
       path === '/api/payments/banks/resolve' ||
       path === '/api/banking/banks/resolve' ||
-      path === '/api/transfers/recipient/preview'
+      path === '/api/transfers/recipient/preview' ||
+      path === '/api/transfers/internal'
     );
   }
 
@@ -289,8 +364,14 @@ export class IdempotencyInterceptor implements NestInterceptor {
       httpStatus?: number | null;
       errorResponse?: unknown;
       updatedAt?: Date | null;
+      responseCiphertext?: string | null;
+      responseIv?: string | null;
+      responseTag?: string | null;
+      encryptionKeyId?: string | null;
     },
     requestHash: string,
+    encrypted: boolean,
+    encryptionContext: IdempotencyEncryptionContext,
   ): Observable<unknown> | null {
     if (record.requestHash !== requestHash) {
       throw new ConflictException(
@@ -299,6 +380,35 @@ export class IdempotencyInterceptor implements NestInterceptor {
     }
 
     if (record.status === 'COMPLETED') {
+      if (encrypted) {
+        if (
+          !record.responseCiphertext ||
+          !record.responseIv ||
+          !record.responseTag ||
+          !record.encryptionKeyId
+        ) {
+          throw new InternalServerErrorException(
+            'Encrypted idempotency replay is unavailable',
+          );
+        }
+        if (!this.responseCrypto) {
+          throw new InternalServerErrorException(
+            'Idempotency response encryption service is unavailable',
+          );
+        }
+
+        return of(
+          this.responseCrypto.decrypt(
+            {
+              responseCiphertext: record.responseCiphertext,
+              responseIv: record.responseIv,
+              responseTag: record.responseTag,
+              encryptionKeyId: record.encryptionKeyId,
+            },
+            encryptionContext,
+          ),
+        );
+      }
       return of(record.response);
     }
 
@@ -319,6 +429,19 @@ export class IdempotencyInterceptor implements NestInterceptor {
     }
 
     return null;
+  }
+
+  private encryptSensitiveResponse(
+    response: unknown,
+    context: IdempotencyEncryptionContext,
+  ) {
+    if (!this.responseCrypto) {
+      throw new InternalServerErrorException(
+        'Idempotency response encryption service is unavailable',
+      );
+    }
+
+    return this.responseCrypto.encrypt(response, context);
   }
 
   private async createInProgressRecord(data: {

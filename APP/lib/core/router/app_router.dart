@@ -46,6 +46,7 @@ class AppRoutes {
   static const exchangeSettlement = '/exchange/settlement';
   static const airtime = '/airtime';
   static const data = '/data';
+  static const cable = '/cable';
   static const electricity = '/electricity';
   static const bills = electricity;
   static const wallets = '/wallets';
@@ -208,10 +209,16 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       ),
       GoRoute(
         path: AppRoutes.withdraw,
-        pageBuilder: (context, state) => _slideTransition(
-          state,
-          const MoneyActionScreen(kind: MoneyActionKind.withdraw),
-        ),
+        pageBuilder: (context, state) {
+          final prefill = state.extra as WithdrawPrefill?;
+          return _slideTransition(
+            state,
+            MoneyActionScreen(
+              kind: MoneyActionKind.withdraw,
+              withdrawPrefill: prefill,
+            ),
+          );
+        },
       ),
       GoRoute(
         path: AppRoutes.withdrawAuthorize,
@@ -277,6 +284,13 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         pageBuilder: (context, state) => _slideTransition(
           state,
           const MoneyActionScreen(kind: MoneyActionKind.data),
+        ),
+      ),
+      GoRoute(
+        path: AppRoutes.cable,
+        pageBuilder: (context, state) => _slideTransition(
+          state,
+          const MoneyActionScreen(kind: MoneyActionKind.cable),
         ),
       ),
       GoRoute(

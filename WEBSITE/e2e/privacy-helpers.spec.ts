@@ -8,6 +8,7 @@ import {
   redactTransactionMetadata,
 } from "../src/lib/privacy";
 import { createMoneyAttemptIdempotencyKey } from "../src/lib/idempotency";
+import { redactApiDiagnostic } from "../src/services/api";
 
 test.describe("privacy helpers", () => {
   test("masks identity and contact fields without exposing full values", () => {
@@ -19,7 +20,7 @@ test.describe("privacy helpers", () => {
 
   test("allowlists transaction metadata and masks sensitive account fields", () => {
     const rows = redactTransactionMetadata({
-      provider: "Paystack",
+      provider: "Monnify",
       accountNumber: "0123456789",
       recipientNumber: "08012345678",
       bvn: "12345678901",
@@ -28,7 +29,7 @@ test.describe("privacy helpers", () => {
     });
 
     expect(rows).toEqual([
-      { label: "Provider", value: "Paystack" },
+      { label: "Provider", value: "Monnify" },
       { label: "Account number", value: "01****6789" },
       { label: "Recipient", value: "080****5678" },
     ]);
@@ -41,5 +42,40 @@ test.describe("privacy helpers", () => {
     expect(first).toMatch(/^withdraw:[0-9a-f-]{36}$/);
     expect(second).toMatch(/^withdraw:[0-9a-f-]{36}$/);
     expect(first).not.toBe(second);
+  });
+
+  test("redacts PIN endpoint bodies and both retry-header spellings", () => {
+    const diagnostic = redactApiDiagnostic({
+      path: "/api/auth/transaction-pin/verify",
+      headers: {
+        Authorization: "Bearer raw-token",
+        "Idempotency-Key": "raw-retry-key",
+        "X-Idempotency-Key": "raw-legacy-retry-key",
+        "X-Request-ID": "request-1",
+      },
+      body: { pin: "2468", otp: "112233" },
+    });
+
+    expect(diagnostic).toEqual({
+      path: "/api/auth/transaction-pin/verify",
+      headers: {
+        Authorization: "<redacted>",
+        "Idempotency-Key": "<redacted>",
+        "X-Idempotency-Key": "<redacted>",
+        "X-Request-ID": "request-1",
+      },
+      body: "<omitted:sensitive-endpoint>",
+    });
+    expect(JSON.stringify(diagnostic)).not.toContain("raw-retry-key");
+    expect(JSON.stringify(diagnostic)).not.toContain("2468");
+  });
+
+  test("PIN status diagnostics keep state but redact PIN-derived fields", () => {
+    expect(
+      redactApiDiagnostic({
+        path: "/api/public/status",
+        body: { configured: true, pinLength: 4, locked: false },
+      }).body,
+    ).toEqual({ configured: true, pinLength: "<redacted>", locked: false });
   });
 });

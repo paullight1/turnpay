@@ -231,22 +231,22 @@
 @keyframes trustpay-hero-copy {
   0% {
     opacity: 0;
-    transform: translateX(42px);
-    filter: blur(8px);
+    transform: translateX(28px);
+    filter: blur(6px);
   }
 
-  5%,
-  28% {
+  4%,
+  29% {
     opacity: 1;
     transform: translateX(0);
     filter: blur(0);
   }
 
-  34%,
+  36%,
   100% {
     opacity: 0;
-    transform: translateX(-42px);
-    filter: blur(8px);
+    transform: translateX(-28px);
+    filter: blur(6px);
   }
 }
 
@@ -304,6 +304,8 @@
 
 .trustpay-hero-copy {
   animation-name: trustpay-hero-copy;
+  text-wrap: balance;
+  will-change: opacity, transform, filter;
 }
 
 .trustpay-hero-context {

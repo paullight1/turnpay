@@ -85,6 +85,14 @@ jobs:
         env:
           DATABASE_URL: postgresql://trustpay:trustpay_secret@localhost:5432/trustpay_test?schema=public
 
+      - name: Create and migrate isolated financial test database
+        run: PGPASSWORD=trustpay_secret psql -h localhost -U trustpay -d postgres -c "CREATE DATABASE trustpay_financial_test_ci"
+
+      - name: Deploy migrations to isolated financial test database
+        run: npm run db:deploy
+        env:
+          DATABASE_URL: postgresql://trustpay:trustpay_secret@localhost:5432/trustpay_financial_test_ci?schema=public
+
       - name: Create disposable restore-drill database
         run: PGPASSWORD=trustpay_secret psql -h localhost -U trustpay -d postgres -c "CREATE DATABASE trustpay_restore"
 
@@ -103,11 +111,11 @@ jobs:
           BANKING_ENABLED: "true"
           VIRTUAL_ACCOUNTS_ENABLED: "true"
           WITHDRAWALS_ENABLED: "true"
+          INTERNAL_TRANSFERS_ENABLED: "false"
           MONNIFY_API_KEY: monnify-api-key
           MONNIFY_SECRET_KEY: monnify-secret-key
           MONNIFY_CONTRACT_CODE: contract-code
           MONNIFY_BASE_URL: https://monnify-live.example.com
-          MONNIFY_WEBHOOK_SECRET: monnify-webhook-secret
           MONNIFY_WEBHOOK_URL: https://api.trustpay.example.com/api/webhooks/monnify
           MONNIFY_EXCHANGE_COLLECTION_ACCOUNT_NUMBER: 1234567890
           VTU_PROVIDER: vtpass
@@ -144,6 +152,15 @@ jobs:
           MONNIFY_EXCHANGE_COLLECTION_ACCOUNT_NUMBER: "0000000000"
           WEB_URL: http://localhost:3001
           ADMIN_URL: http://localhost:3002
+
+      - name: Run financial and fault-injection E2E tests
+        run: npm run test:financial:e2e
+        env:
+          FINANCIAL_TEST_DATABASE_URL: postgresql://trustpay:trustpay_secret@localhost:5432/trustpay_financial_test_ci?schema=public
+          FINANCIAL_TEST_REDIS_URL: redis://localhost:6379
+          NODE_ENV: staging
+          REDIS_ALLOW_MEMORY_FALLBACK: "false"
+          TRANSACTION_PIN_REQUIRED: "true"
 
       - name: Build
         run: npm run build
@@ -256,9 +273,22 @@ jobs:
       - name: Run tests
         run: flutter test
 
+      - name: Build Flutter web release
+        run: flutter build web --release
+
+      - name: Run internal transfer integration certification
+        run: flutter test test/internal_transfer_flow_integration_test.dart
+
   docker:
     needs:
-      [manifest-safety, backend-test, backend-security, website-test, website-security, flutter-test]
+      [
+        manifest-safety,
+        backend-test,
+        backend-security,
+        website-test,
+        website-security,
+        flutter-test,
+      ]
     runs-on: ubuntu-latest
     # Render and Vercel deploy directly from Git. Docker Hub publishing is an
     # optional release channel and must be explicitly enabled after its

@@ -1,74 +1,114 @@
-# Production Guide: VTU
+# Production Guide: VTpass VTU
 
-## Scope
+Last reviewed: 2026-09-03
 
-Use this guide for airtime, data, cable, and electricity purchases through a VTU aggregator. TRUSTPAY should use VTpass first for Nigeria-focused VTU and bills, then add Reloadly later for global airtime/data and rewards. Local tests cannot prove live provider inventory, telco settlement, biller validation, or reversal timing.
+## Supported scope
 
-## Required Env Vars
+VTpass is TRUSTPAY's only VTU provider. Nigeria (`NG`, `NGN`) is the only
+enabled market for airtime, data, cable TV, and prepaid/postpaid electricity.
+Ghana, Kenya, South Africa, the United States, and the United Kingdom must stay
+visible but disabled as `Coming soon` until a separately approved rollout.
+
+## Required production configuration
 
 ```env
+VTU_ENABLED=true
 VTU_PROVIDER=vtpass
-VTPASS_BASE_URL=https://sandbox.vtpass.com/api
+VTU_SIMULATION_ENABLED=false
+VTPASS_BASE_URL=https://vtpass.com/api
 VTPASS_API_KEY=
 VTPASS_PUBLIC_KEY=
 VTPASS_SECRET_KEY=
-RELOADLY_ENABLED=false
-RELOADLY_AUTH_URL=https://auth.reloadly.com/oauth/token
-RELOADLY_TOPUPS_BASE_URL=https://topups-sandbox.reloadly.com
-RELOADLY_AUDIENCE=https://topups-sandbox.reloadly.com
-RELOADLY_UTILITIES_BASE_URL=https://utilities-sandbox.reloadly.com
-RELOADLY_UTILITIES_AUDIENCE=https://utilities-sandbox.reloadly.com
-RELOADLY_CLIENT_ID=
-RELOADLY_CLIENT_SECRET=
-RELOADLY_SENDER_COUNTRY_CODE=NG
-RELOADLY_WEBHOOK_SECRET=
-RELOADLY_WEBHOOK_URL=https://api.yourdomain.com/api/webhooks/vtu/reloadly
-BANKING_ENABLED=false
-DATABASE_URL=
-REDIS_HOST=
-REDIS_PORT=6379
-REDIS_PASSWORD=
+VTPASS_WEBHOOK_SECRET=
+VTPASS_LOW_BALANCE_THRESHOLD=5000
+PII_ENCRYPTION_KEY=
 ```
 
-## Sandbox Steps
+Never copy live credentials into source control, client applications, logs, or
+test fixtures. Production validation rejects simulation mode, missing
+credentials, weak callback secrets, and any VTpass base URL other than the
+live endpoint above.
 
-1. Configure VTpass sandbox credentials.
-2. Load providers and packages from the VTU API.
-3. Purchase airtime with `Idempotency-Key`.
-4. Confirm wallet debit happens before provider call and reversal happens once on provider failure.
-5. Test data, cable, and electricity validation where sandbox supports it.
-6. Trigger provider timeout, failed purchase, invalid package, invalid customer, and duplicate request cases.
-7. Confirm support can see provider reference and masked customer target.
-8. Register the Reloadly sandbox webhook URL and confirm signed duplicate callbacks are idempotent.
-9. Confirm Reloadly Utility Payments billers load for Ghana electricity before enabling the UI.
+## Callback trust boundary
 
-## Live Steps
+The public TRUSTPAY endpoint is:
 
-1. Approve live VTpass contract, pricing, biller list, settlement terms, and support SLA.
-2. Configure live `VTPASS_BASE_URL`, `VTPASS_API_KEY`, `VTPASS_PUBLIC_KEY`, and `VTPASS_SECRET_KEY`.
-3. Set feature availability by KYC tier, currency, provider, and service type.
-4. Execute one low-value airtime transaction on a controlled phone number.
-5. Reconcile provider dashboard, TRUSTPAY transaction, ledger debit, reversal status if applicable, and user receipt.
-6. Gradually enable data, cable, and electricity after individual live smoke tests.
-7. Configure Reloadly live webhooks with `RELOADLY_WEBHOOK_SECRET` before enabling international airtime/data.
-8. Configure live Reloadly Utilities URLs/audience before enabling Ghana electricity.
+```text
+POST /api/webhooks/vtu/vtpass
+```
 
-## Verification Checklist
+VTpass's published transaction-update callback format does not document a
+native signature. Do not expose the TRUSTPAY endpoint directly as the VTpass
+dashboard callback. Route callbacks through a controlled gateway that:
 
-- [ ] Purchase route requires auth guard, DTO validation, and `Idempotency-Key`.
-- [ ] Amount and provider package are server-verified.
-- [ ] Wallet debit uses Decimal and a Prisma transaction.
-- [ ] Provider failure reverses wallet debit exactly once.
-- [ ] Provider timeout does not produce duplicate purchase on retry.
-- [ ] Reloadly callbacks are signature-verified and logged idempotently.
-- [ ] Circuit breaker behavior is configured for provider outage.
-- [ ] User target identifiers are masked in logs and admin views.
-- [ ] Support can distinguish pending, successful, failed, and reversed states.
+1. accepts traffic only from the provider controls approved by operations;
+2. validates the upstream request using the controls available at deployment;
+3. forwards the exact JSON body without mutation; and
+4. adds `x-trustpay-vtpass-signature`, an HMAC-SHA256 of the raw body using
+   `VTPASS_WEBHOOK_SECRET`.
 
-## Launch Blockers
+The backend rejects unsigned, query-token, malformed, and unknown-status
+callbacks. It durably records a redacted event before returning success, then
+processes it asynchronously with idempotent retries. Never log or expose raw
+callback bodies.
 
-- Live VTU provider credentials or contract are missing.
-- Provider package list cannot be refreshed or cached safely.
-- Reversal can credit more than once.
-- Timeout handling can create duplicate purchases.
-- Biller support and refund process are not documented.
+## Sandbox certification matrix
+
+Use `https://sandbox.vtpass.com/api` only in a non-production environment with
+dedicated sandbox credentials. Record request ID, provider transaction ID,
+local transaction/order IDs, wallet before/after, ledger entries, provider
+state, and customer-visible receipt for each case.
+
+| Product | Required scenarios |
+| --- | --- |
+| Airtime | success, pending then requery success, provider failure/reversal, timeout/unknown |
+| Data | variation list, valid package purchase, stale/tampered price rejection, pending/requery |
+| Cable | customer verification, change package, renew using verified renewal amount, mismatch rejection |
+| Electricity | prepaid verification/purchase/token receipt, postpaid verification/purchase, invalid meter/type |
+| Cross-cutting | duplicate idempotency key, changed body with same key, duplicate callback, late callback, low balance |
+
+For every successful case, confirm one `VTU_PURCHASE` debit. For each failed or
+reversed case, confirm at most one `VTU_REVERSAL` credit and a non-negative
+wallet. A pending or unknown result must never be shown as delivered.
+
+## Activation and rollout
+
+1. Apply migration `035_vtpass_vtu_production_completion` and run Prisma
+   validation/generation.
+2. Run backend unit/build checks, the disposable financial suite, website VTU
+   browser coverage, Flutter tests/analyzer, and production manifest checks.
+3. Complete every sandbox matrix row and save redacted evidence.
+4. Configure the trusted callback gateway and prove duplicate and delayed
+   callback delivery.
+5. Fund the VTpass wallet, set the low-balance threshold, and assign an alert
+   owner.
+6. Enable VTU for internal accounts, execute one low-value transaction per
+   product/mode, and reconcile immediately.
+7. Expand gradually while monitoring error rate, pending age, callback retry
+   queue, reversals, provider balance, and ledger drift.
+
+## Incident recovery and rollback
+
+- Disable new purchases with `VTU_ENABLED=false`; do not delete orders or
+  ledger rows.
+- Keep the scheduled requery and callback workers running so already-debited
+  pending orders can reach a terminal state.
+- Never resubmit `/pay` for an ambiguous request. Requery by the original
+  provider request ID.
+- Use the audited admin requery action with a written reason for exceptional
+  recovery.
+- Reconcile provider charge, commission, customer fee, margin, debit, and any
+  reversal before closing an incident.
+- Re-enable only after the cause is fixed, callback retries are clear, no
+  wallet/ledger drift exists, and a controlled smoke test passes.
+
+## Launch blockers
+
+- Sandbox/live credentials or the trusted callback gateway are unavailable.
+- Any retry can duplicate a provider purchase or wallet debit.
+- Any failure can miss or duplicate a reversal.
+- A late callback can regress a terminal order.
+- Package, renewal, or customer verification amounts are accepted from the
+  client without server/provider confirmation.
+- Purchased codes, secrets, full targets, or raw provider bodies appear in
+  logs or admin responses.

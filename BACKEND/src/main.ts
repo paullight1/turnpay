@@ -11,6 +11,7 @@ import { NativeLogger } from 'nestjs-pino';
 import { AppModule } from './app.module';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 import { IdempotencyInterceptor } from './common/interceptors/idempotency.interceptor';
+import { rejectUntrustedForwardedFor } from './common/security/trusted-proxy';
 import type { RawBodyRequest } from './common/types/request-context';
 
 if (process.env.SENTRY_DSN) {
@@ -31,11 +32,15 @@ async function bootstrap() {
   const logger = app.get(NativeLogger);
   app.useLogger(logger);
 
-  // Trust the single reverse-proxy hop (Render/most PaaS) so req.ip reflects
-  // the real client via X-Forwarded-For. Required for per-IP rate limiting to
-  // target individual clients instead of the shared proxy address.
+  // Trust only the explicitly configured number of infrastructure proxy hops.
+  // Reject longer caller-supplied chains before Express derives req.ip.
   const expressApp = app.getHttpAdapter().getInstance() as Application;
-  expressApp.set('trust proxy', 1);
+  const trustedProxyHops = Number(process.env.TRUST_PROXY_HOPS ?? 0);
+  expressApp.set(
+    'trust proxy',
+    trustedProxyHops === 0 ? false : trustedProxyHops,
+  );
+  app.use(rejectUntrustedForwardedFor(trustedProxyHops));
 
   app.use(
     helmet({

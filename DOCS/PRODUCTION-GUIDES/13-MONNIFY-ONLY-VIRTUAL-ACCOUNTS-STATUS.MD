@@ -12,7 +12,7 @@ TRUSTPAY uses Monnify only for Nigerian NGN virtual accounts. Nomba and Paystack
 - Monnify reserved-account creation requires verified KYC and a non-suspended user.
 - Monnify deposits are processed through `ProviderEvent`, `Transaction`, and `LedgerEntry`.
 - Duplicate Monnify webhook references do not double-credit wallets.
-- Webhook signature verification uses the raw request body and `MONNIFY_WEBHOOK_SECRET`.
+- Webhook signature verification uses the raw request body and `MONNIFY_SECRET_KEY`.
 - The admin finance page now exposes Monnify funding health, failed provider events, virtual accounts, users, exchange transactions, and the NGN to GHS exchange deposit queue.
 - Monnify can verify NGN inflow for exchange deposits. Matched exchange deposits are routed to admin review and do not auto-credit NGN or GHS.
 
@@ -46,7 +46,6 @@ MONNIFY_BASE_URL=https://sandbox.monnify.com
 MONNIFY_API_KEY=
 MONNIFY_SECRET_KEY=
 MONNIFY_CONTRACT_CODE=
-MONNIFY_WEBHOOK_SECRET=
 MONNIFY_EXCHANGE_COLLECTION_ACCOUNT_NUMBER=
 MONNIFY_GET_ALL_AVAILABLE_BANKS=true
 MONNIFY_RESTRICT_PAYMENT_SOURCE=false

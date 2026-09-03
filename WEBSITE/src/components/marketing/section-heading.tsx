@@ -6,6 +6,7 @@ type SectionHeadingProps = {
   title: string;
   description: string;
   align?: "left" | "center";
+  tone?: "light" | "dark";
   className?: string;
 };
 
@@ -14,8 +15,11 @@ export function SectionHeading({
   title,
   description,
   align = "left",
+  tone = "light",
   className,
 }: SectionHeadingProps) {
+  const isDark = tone === "dark";
+
   return (
     <div
       className={cn(
@@ -24,13 +28,30 @@ export function SectionHeading({
         className
       )}
     >
-      <Badge variant="secondary" className="w-fit border-white/10 bg-white/[0.06] text-red-200">
+      <Badge
+        variant="secondary"
+        className={
+          isDark
+            ? "w-fit border-white/10 bg-white/[0.06] text-red-200"
+            : "w-fit border-red-100 bg-red-50 text-red-700"
+        }
+      >
         {eyebrow}
       </Badge>
-      <h2 className="text-3xl font-semibold leading-tight text-balance md:text-5xl">
+      <h2
+        className={cn(
+          "text-3xl font-semibold leading-tight text-balance md:text-5xl",
+          isDark ? "text-white" : "text-foreground",
+        )}
+      >
         {title}
       </h2>
-      <p className="text-base leading-7 text-muted-foreground md:text-lg">
+      <p
+        className={cn(
+          "text-base leading-7 md:text-lg",
+          isDark ? "text-white/65" : "text-muted-foreground",
+        )}
+      >
         {description}
       </p>
     </div>

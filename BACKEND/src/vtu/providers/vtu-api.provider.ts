@@ -8,6 +8,15 @@ import { ConfigService } from '@nestjs/config';
 import { PinoLogger } from 'nestjs-pino';
 import { firstValueFrom } from 'rxjs';
 import { VtuProviderHealth } from './provider-health.types';
+import { CircuitBreakerService } from '../../common/services/circuit-breaker.service';
+import { Decimal } from '@prisma/client/runtime/library';
+import type {
+  NormalizedVtuStatus,
+  VtuPackage,
+  VtuProviderPurchase,
+  VtuProviderResult,
+} from './vtpass.types';
+import type { VtuMeterType } from '../dto/vtu.dto';
 
 export interface VtuProvider {
   id: string;
@@ -16,23 +25,9 @@ export interface VtuProvider {
   isActive: boolean;
 }
 
-export interface VtuPackage {
-  id: string;
-  name: string;
-  price: number;
-  validity: string;
-}
-
-export interface VtuProviderResult {
-  reference: string;
-  status: string;
-  message: string;
-  providerRequestId?: string;
-  rawResponse?: Record<string, unknown>;
-}
+export type { VtuPackage, VtuProviderResult } from './vtpass.types';
 
 type VtuServiceType = 'airtime' | 'data' | 'cable' | 'electricity';
-type VtuProviderMode = 'generic' | 'vtpass';
 
 interface VtpassServiceDefinition {
   id: string;
@@ -58,8 +53,11 @@ interface VtpassResponse {
     transactions?: {
       status?: string;
       transactionId?: string;
+      total_amount?: string | number;
+      commission?: string | number;
     };
   };
+  purchased_code?: string;
 }
 
 interface VtpassBalanceResponse {
@@ -81,6 +79,7 @@ interface VtpassMerchantVerifyResponse {
     Meter_Number?: string;
     Customer_Type?: string;
     Can_Vend?: string;
+    Renewal_Amount?: string | number;
   };
 }
 
@@ -238,7 +237,7 @@ const VTPASS_SERVICES: VtpassServiceDefinition[] = [
 
 @Injectable()
 export class VtuApiProvider {
-  private readonly providerMode: VtuProviderMode;
+  private static readonly CIRCUIT = 'vtpass';
   private readonly baseUrl: string;
   private readonly apiKey: string;
   private readonly publicKey: string;
@@ -248,45 +247,21 @@ export class VtuApiProvider {
     private readonly httpService: HttpService,
     private readonly configService: ConfigService,
     private readonly logger: PinoLogger,
+    private readonly circuitBreaker: CircuitBreakerService,
   ) {
-    this.providerMode =
-      this.configService.get<string>('VTU_PROVIDER') === 'vtpass'
-        ? 'vtpass'
-        : 'generic';
-    this.baseUrl =
-      this.configService.get<string>('VTPASS_BASE_URL') ||
-      this.configService.get<string>('VTU_API_URL') ||
-      '';
-    this.apiKey =
-      this.configService.get<string>('VTPASS_API_KEY') ||
-      this.configService.get<string>('VTU_API_KEY') ||
-      '';
+    this.baseUrl = this.configService.get<string>('VTPASS_BASE_URL') || '';
+    this.apiKey = this.configService.get<string>('VTPASS_API_KEY') || '';
     this.publicKey = this.configService.get<string>('VTPASS_PUBLIC_KEY') || '';
     this.secretKey = this.configService.get<string>('VTPASS_SECRET_KEY') || '';
     this.logger.setContext(VtuApiProvider.name);
 
     if (
       this.configService.get<string>('NODE_ENV') === 'production' &&
-      this.providerMode === 'vtpass' &&
+      this.isEnabled() &&
       (!this.baseUrl || !this.apiKey || !this.publicKey || !this.secretKey)
     ) {
       throw new Error('VTpass provider credentials are not configured');
     }
-
-    if (
-      this.configService.get<string>('NODE_ENV') === 'production' &&
-      this.providerMode === 'generic' &&
-      (!this.baseUrl || !this.apiKey)
-    ) {
-      throw new Error('VTU provider credentials are not configured');
-    }
-  }
-
-  private get genericHeaders() {
-    return {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${this.apiKey}`,
-    };
   }
 
   private get vtpassGetHeaders() {
@@ -305,31 +280,12 @@ export class VtuApiProvider {
     };
   }
 
-  async getProviders(type?: string): Promise<VtuProvider[]> {
-    if (this.providerMode === 'vtpass') {
-      return this.getVtpassProviders(type);
-    }
-
-    if (!this.baseUrl) {
-      return this.getFallbackProviders(type);
-    }
-
-    try {
-      const response = await firstValueFrom(
-        this.httpService.get<{ providers: VtuProvider[] }>(
-          `${this.baseUrl}/providers`,
-          { headers: this.genericHeaders, params: type ? { type } : undefined },
-        ),
-      );
-      return response.data.providers;
-    } catch {
-      this.logger.warn('VTU API unavailable, using fallback providers');
-      return this.getFallbackProviders(type);
-    }
+  getProviders(type?: string): Promise<VtuProvider[]> {
+    return Promise.resolve(this.getVtpassProviders(type));
   }
 
   getProviderName() {
-    return this.providerMode === 'vtpass' ? 'VTPASS' : 'GENERIC';
+    return 'VTPASS';
   }
 
   async getVtpassHealth(): Promise<VtuProviderHealth> {
@@ -341,11 +297,7 @@ export class VtuApiProvider {
       secretKey: Boolean(this.secretKey),
     };
     const configured = Object.values(requiredCredentials).every(Boolean);
-    const enabled = this.providerMode === 'vtpass';
-
-    if (!enabled) {
-      warnings.push('VTpass is not the active local VTU provider.');
-    }
+    const enabled = this.isEnabled();
 
     for (const [name, isConfigured] of Object.entries(requiredCredentials)) {
       if (!isConfigured) {
@@ -366,10 +318,13 @@ export class VtuApiProvider {
     }
 
     try {
-      const response = await firstValueFrom(
-        this.httpService.get<VtpassBalanceResponse>(`${this.baseUrl}/balance`, {
-          headers: this.vtpassGetHeaders,
-        }),
+      const response = await this.executeProviderRequest(() =>
+        firstValueFrom(
+          this.httpService.get<VtpassBalanceResponse>(
+            `${this.baseUrl}/balance`,
+            { headers: this.vtpassGetHeaders },
+          ),
+        ),
       );
       const balance = this.parseNumericAmount(response.data.contents?.balance);
 
@@ -432,156 +387,64 @@ export class VtuApiProvider {
   }
 
   async getPackages(provider: string): Promise<VtuPackage[]> {
-    if (this.providerMode === 'vtpass') {
-      return this.getVtpassPackages(provider);
-    }
-
-    if (!this.baseUrl) {
-      return this.getFallbackPackages(provider);
-    }
-
-    try {
-      const response = await firstValueFrom(
-        this.httpService.get<{ packages: VtuPackage[] }>(
-          `${this.baseUrl}/packages`,
-          { headers: this.genericHeaders, params: { provider } },
-        ),
-      );
-      return response.data.packages;
-    } catch {
-      this.logger.warn('VTU API unavailable, using fallback packages');
-      return this.getFallbackPackages(provider);
-    }
+    return this.getVtpassPackages(provider);
   }
 
-  async purchase(params: {
-    type: string;
-    provider: string;
-    recipientNumber?: string;
-    amount: number;
-    reference: string;
-    packageId?: string;
-    smartCardNumber?: string;
-    meterNumber?: string;
-    providerRequestId?: string;
-  }): Promise<VtuProviderResult> {
-    if (this.providerMode === 'vtpass') {
-      return this.purchaseViaVtpass(params);
-    }
-
-    if (!this.baseUrl) {
-      return this.simulatePurchase(params);
-    }
-
-    const payload = {
-      type: params.type,
-      provider: params.provider,
-      phone_number: params.recipientNumber,
-      amount: params.amount,
-      package_id: params.packageId,
-      smart_card_number: params.smartCardNumber,
-      meter_number: params.meterNumber,
-      reference: params.reference,
-      provider_request_id: params.providerRequestId,
-    };
-
-    try {
-      const response = await firstValueFrom(
-        this.httpService.post<{
-          reference: string;
-          status: string;
-          message: string;
-        }>(`${this.baseUrl}/purchase`, payload, {
-          headers: this.genericHeaders,
-        }),
-      );
-
-      return response.data;
-    } catch (error) {
-      this.logger.error(
-        this.safeProviderError(error),
-        'VTU purchase request failed with unknown provider result',
-      );
-      throw new Error('VTU provider result unknown');
-    }
+  async purchase(params: VtuProviderPurchase): Promise<VtuProviderResult> {
+    return this.purchaseViaVtpass(params);
   }
 
   async validateSmartCard(
     provider: string,
     smartCardNumber: string,
-  ): Promise<{ name: string; status: string }> {
+  ): Promise<{ name: string; status: string; renewalAmount?: string }> {
     if (!this.baseUrl) {
-      return { name: 'Test User', status: 'active' };
+      this.assertSimulationEnabled();
+      return { name: 'Test User', status: 'active', renewalAmount: '6500.00' };
     }
 
-    if (this.providerMode === 'vtpass') {
-      const service = this.findVtpassService(provider, ['cable']);
-      if (!service) {
-        throw new BadRequestException('Unsupported VTpass cable service');
-      }
-
-      const content = await this.vtpassMerchantVerify({
-        serviceID: service.serviceID,
-        billersCode: smartCardNumber,
-      });
-
-      return {
-        name: content.Customer_Name || 'Unknown customer',
-        status: (content.Status || 'active').toLowerCase(),
-      };
+    const service = this.findVtpassService(provider, ['cable']);
+    if (!service) {
+      throw new BadRequestException('Unsupported VTpass cable service');
     }
 
-    const response = await firstValueFrom(
-      this.httpService.get<{ name: string; status: string }>(
-        `${this.baseUrl}/validate`,
-        {
-          headers: this.genericHeaders,
-          params: { provider, number: smartCardNumber },
-        },
-      ),
-    );
+    const content = await this.vtpassMerchantVerify({
+      serviceID: service.serviceID,
+      billersCode: smartCardNumber,
+    });
 
-    return response.data;
+    return {
+      name: content.Customer_Name || 'Unknown customer',
+      status: (content.Status || 'active').toLowerCase(),
+      renewalAmount: this.optionalMoney(content.Renewal_Amount),
+    };
   }
 
   async validateMeter(
     provider: string,
     meterNumber: string,
+    meterType: VtuMeterType = 'prepaid',
   ): Promise<{ name: string; address: string }> {
     if (!this.baseUrl) {
+      this.assertSimulationEnabled();
       return { name: 'Test Customer', address: 'Test Address' };
     }
 
-    if (this.providerMode === 'vtpass') {
-      const service = this.findVtpassService(provider, ['electricity']);
-      if (!service) {
-        throw new BadRequestException('Unsupported VTpass electricity service');
-      }
-
-      const content = await this.vtpassMerchantVerify({
-        serviceID: service.serviceID,
-        billersCode: meterNumber,
-        // Purchase payloads are prepaid-only today; keep verification aligned.
-        type: 'prepaid',
-      });
-
-      return {
-        name: content.Customer_Name || 'Unknown customer',
-        address: content.Address || '',
-      };
+    const service = this.findVtpassService(provider, ['electricity']);
+    if (!service) {
+      throw new BadRequestException('Unsupported VTpass electricity service');
     }
 
-    const response = await firstValueFrom(
-      this.httpService.get<{ name: string; address: string }>(
-        `${this.baseUrl}/validate-meter`,
-        {
-          headers: this.genericHeaders,
-          params: { provider, number: meterNumber },
-        },
-      ),
-    );
+    const content = await this.vtpassMerchantVerify({
+      serviceID: service.serviceID,
+      billersCode: meterNumber,
+      type: meterType,
+    });
 
-    return response.data;
+    return {
+      name: content.Customer_Name || 'Unknown customer',
+      address: content.Address || '',
+    };
   }
 
   private async vtpassMerchantVerify(payload: {
@@ -591,11 +454,13 @@ export class VtuApiProvider {
   }) {
     let response: VtpassMerchantVerifyResponse;
     try {
-      const httpResponse = await firstValueFrom(
-        this.httpService.post<VtpassMerchantVerifyResponse>(
-          `${this.baseUrl}/merchant-verify`,
-          payload,
-          { headers: this.vtpassPostHeaders },
+      const httpResponse = await this.executeProviderRequest(() =>
+        firstValueFrom(
+          this.httpService.post<VtpassMerchantVerifyResponse>(
+            `${this.baseUrl}/merchant-verify`,
+            payload,
+            { headers: this.vtpassPostHeaders },
+          ),
         ),
       );
       response = httpResponse.data;
@@ -619,98 +484,124 @@ export class VtuApiProvider {
     return content;
   }
 
-  private getFallbackProviders(type?: string): VtuProvider[] {
-    const networkProviders: VtuProvider[] = [
-      { id: 'mtn', name: 'MTN', type: 'airtime', isActive: true },
-      { id: 'airtel', name: 'Airtel', type: 'airtime', isActive: true },
-      { id: 'glo', name: 'Glo', type: 'airtime', isActive: true },
-      { id: '9mobile', name: '9mobile', type: 'airtime', isActive: true },
-    ];
-    const dataProviders: VtuProvider[] = networkProviders.map((provider) => ({
-      ...provider,
-      type: 'data',
-    }));
-    const billProviders: VtuProvider[] = [
-      { id: 'dstv', name: 'DStv', type: 'cable', isActive: true },
-      { id: 'gotv', name: 'GOtv', type: 'cable', isActive: true },
-      { id: 'startimes', name: 'StarTimes', type: 'cable', isActive: true },
-      {
-        id: 'ikedc',
-        name: 'Ikeja Electric',
-        type: 'electricity',
-        isActive: true,
-      },
-      {
-        id: 'ekedc',
-        name: 'Eko Electric',
-        type: 'electricity',
-        isActive: true,
-      },
-      {
-        id: 'aedc',
-        name: 'Abuja Electric',
-        type: 'electricity',
-        isActive: true,
-      },
-      {
-        id: 'ibedc',
-        name: 'Ibadan Electric',
-        type: 'electricity',
-        isActive: true,
-      },
-      {
-        id: 'phed',
-        name: 'Port Harcourt Electric',
-        type: 'electricity',
-        isActive: true,
-      },
-    ];
-    const allProviders: VtuProvider[] = [
-      ...networkProviders,
-      ...dataProviders,
-      ...billProviders,
-    ];
-
-    if (type) {
-      return allProviders.filter((p) => p.type === type);
-    }
-
-    return allProviders;
-  }
-
   private getFallbackPackages(provider: string): VtuPackage[] {
     const packages: Record<string, VtuPackage[]> = {
       mtn: [
-        { id: 'mtn-500mb', name: '500MB', price: 150, validity: '30 days' },
-        { id: 'mtn-1gb', name: '1GB', price: 300, validity: '30 days' },
-        { id: 'mtn-2gb', name: '2GB', price: 500, validity: '30 days' },
-        { id: 'mtn-5gb', name: '5GB', price: 1200, validity: '30 days' },
+        {
+          id: 'mtn-500mb',
+          name: '500MB',
+          price: '150.00',
+          validity: '30 days',
+          serviceType: 'data',
+        },
+        {
+          id: 'mtn-1gb',
+          name: '1GB',
+          price: '300.00',
+          validity: '30 days',
+          serviceType: 'data',
+        },
+        {
+          id: 'mtn-2gb',
+          name: '2GB',
+          price: '500.00',
+          validity: '30 days',
+          serviceType: 'data',
+        },
+        {
+          id: 'mtn-5gb',
+          name: '5GB',
+          price: '1200.00',
+          validity: '30 days',
+          serviceType: 'data',
+        },
       ],
       airtel: [
-        { id: 'airtel-500mb', name: '500MB', price: 150, validity: '30 days' },
-        { id: 'airtel-1gb', name: '1GB', price: 300, validity: '30 days' },
-        { id: 'airtel-2gb', name: '2GB', price: 500, validity: '30 days' },
+        {
+          id: 'airtel-500mb',
+          name: '500MB',
+          price: '150.00',
+          validity: '30 days',
+          serviceType: 'data',
+        },
+        {
+          id: 'airtel-1gb',
+          name: '1GB',
+          price: '300.00',
+          validity: '30 days',
+          serviceType: 'data',
+        },
+        {
+          id: 'airtel-2gb',
+          name: '2GB',
+          price: '500.00',
+          validity: '30 days',
+          serviceType: 'data',
+        },
       ],
       glo: [
-        { id: 'glo-1gb', name: '1GB', price: 250, validity: '30 days' },
-        { id: 'glo-2gb', name: '2GB', price: 500, validity: '30 days' },
+        {
+          id: 'glo-1gb',
+          name: '1GB',
+          price: '250.00',
+          validity: '30 days',
+          serviceType: 'data',
+        },
+        {
+          id: 'glo-2gb',
+          name: '2GB',
+          price: '500.00',
+          validity: '30 days',
+          serviceType: 'data',
+        },
       ],
       '9mobile': [
-        { id: 'eti-500', name: '500MB', price: 500, validity: '30 days' },
-        { id: 'eti-1000', name: '1.5GB', price: 1000, validity: '30 days' },
+        {
+          id: 'eti-500',
+          name: '500MB',
+          price: '500.00',
+          validity: '30 days',
+          serviceType: 'data',
+        },
+        {
+          id: 'eti-1000',
+          name: '1.5GB',
+          price: '1000.00',
+          validity: '30 days',
+          serviceType: 'data',
+        },
       ],
       dstv: [
-        { id: 'dstv-jolli', name: 'Jolli', price: 6500, validity: '30 days' },
+        {
+          id: 'dstv-jolli',
+          name: 'Jolli',
+          price: '6500.00',
+          validity: '30 days',
+          serviceType: 'cable',
+        },
         {
           id: 'dstv-premium',
           name: 'Premium',
-          price: 29500,
+          price: '29500.00',
           validity: '30 days',
+          serviceType: 'cable',
         },
       ],
       gotv: [
-        { id: 'gotv-jinja', name: 'Jinja', price: 3100, validity: '30 days' },
-        { id: 'gotv-max', name: 'Max', price: 9300, validity: '30 days' },
+        {
+          id: 'gotv-jinja',
+          name: 'Jinja',
+          price: '3100.00',
+          validity: '30 days',
+          serviceType: 'cable',
+        },
+        {
+          id: 'gotv-max',
+          name: 'Max',
+          price: '9300.00',
+          validity: '30 days',
+          serviceType: 'cable',
+        },
       ],
     };
 
@@ -730,6 +621,7 @@ export class VtuApiProvider {
 
   private async getVtpassPackages(provider: string): Promise<VtuPackage[]> {
     if (!this.baseUrl) {
+      this.assertSimulationEnabled();
       return this.getFallbackPackages(provider);
     }
 
@@ -739,13 +631,15 @@ export class VtuApiProvider {
     }
 
     try {
-      const response = await firstValueFrom(
-        this.httpService.get<VtpassResponse>(
-          `${this.baseUrl}/service-variations`,
-          {
-            headers: this.vtpassGetHeaders,
-            params: { serviceID: service.serviceID },
-          },
+      const response = await this.executeProviderRequest(() =>
+        firstValueFrom(
+          this.httpService.get<VtpassResponse>(
+            `${this.baseUrl}/service-variations`,
+            {
+              headers: this.vtpassGetHeaders,
+              params: { serviceID: service.serviceID },
+            },
+          ),
         ),
       );
       const variations =
@@ -756,36 +650,31 @@ export class VtuApiProvider {
         .map((variation) => ({
           id: variation.variation_code as string,
           name: variation.name || variation.variation_code || 'VTU package',
-          price: Number(variation.variation_amount || 0),
+          price: this.requiredMoney(variation.variation_amount),
           validity: this.extractValidity(variation.name),
+          serviceType: service.type as 'data' | 'cable',
         }))
-        .filter((variation) => Number.isFinite(variation.price));
-    } catch {
+        .filter((variation) => new Decimal(variation.price).greaterThan(0));
+    } catch (error) {
       this.logger.warn(
-        'VTpass variations unavailable, using fallback packages',
+        this.safeProviderError(error),
+        'VTpass variations unavailable',
       );
-      return this.getFallbackPackages(provider);
+      throw new ServiceUnavailableException(
+        'VTpass packages are temporarily unavailable',
+      );
     }
   }
 
-  private async purchaseViaVtpass(params: {
-    type: string;
-    provider: string;
-    recipientNumber?: string;
-    amount: number;
-    reference: string;
-    packageId?: string;
-    smartCardNumber?: string;
-    meterNumber?: string;
-    providerRequestId?: string;
-  }): Promise<VtuProviderResult> {
+  private async purchaseViaVtpass(
+    params: VtuProviderPurchase,
+  ): Promise<VtuProviderResult> {
     if (!this.baseUrl) {
+      this.assertSimulationEnabled();
       return this.simulatePurchase(params);
     }
 
-    const service = this.findVtpassService(params.provider, [
-      params.type as VtuServiceType,
-    ]);
+    const service = this.findVtpassService(params.provider, [params.type]);
     if (!service) {
       throw new BadRequestException('Unsupported VTpass service');
     }
@@ -796,10 +685,14 @@ export class VtuApiProvider {
     const payload = this.buildVtpassPurchasePayload(params, service, requestId);
 
     try {
-      const response = await firstValueFrom(
-        this.httpService.post<VtpassResponse>(`${this.baseUrl}/pay`, payload, {
-          headers: this.vtpassPostHeaders,
-        }),
+      const response = await this.executeProviderRequest(() =>
+        firstValueFrom(
+          this.httpService.post<VtpassResponse>(
+            `${this.baseUrl}/pay`,
+            payload,
+            { headers: this.vtpassPostHeaders },
+          ),
+        ),
       );
       return this.mapVtpassPurchaseResponse(response.data, requestId);
     } catch (error) {
@@ -812,14 +705,7 @@ export class VtuApiProvider {
   }
 
   private buildVtpassPurchasePayload(
-    params: {
-      type: string;
-      recipientNumber?: string;
-      amount: number;
-      packageId?: string;
-      smartCardNumber?: string;
-      meterNumber?: string;
-    },
+    params: VtuProviderPurchase,
     service: VtpassServiceDefinition,
     requestId: string,
   ) {
@@ -827,8 +713,8 @@ export class VtuApiProvider {
       return {
         request_id: requestId,
         serviceID: service.serviceID,
-        amount: params.amount,
-        phone: params.recipientNumber,
+        amount: this.requiredMoney(params.amount),
+        phone: this.toVtpassPhone(params.recipientNumber),
       };
     }
 
@@ -836,67 +722,85 @@ export class VtuApiProvider {
       return {
         request_id: requestId,
         serviceID: service.serviceID,
-        billersCode: params.recipientNumber,
+        billersCode: this.toVtpassPhone(params.recipientNumber),
         variation_code: params.packageId,
-        amount: params.amount,
-        phone: params.recipientNumber,
+        amount: this.requiredMoney(params.amount),
+        phone: this.toVtpassPhone(params.contactPhone),
       };
     }
 
     if (params.type === 'cable') {
-      return {
+      const payload: Record<string, unknown> = {
         request_id: requestId,
         serviceID: service.serviceID,
         billersCode: params.smartCardNumber,
-        variation_code: params.packageId,
-        amount: params.amount,
-        phone: params.recipientNumber,
-        subscription_type: 'change',
+        amount: this.requiredMoney(params.amount),
+        phone: this.toVtpassPhone(params.contactPhone),
+        subscription_type: params.subscriptionType,
       };
+      if (params.subscriptionType === 'change') {
+        payload.variation_code = params.packageId;
+      }
+      return payload;
     }
 
     return {
       request_id: requestId,
       serviceID: service.serviceID,
       billersCode: params.meterNumber,
-      variation_code: 'prepaid',
-      amount: params.amount,
-      phone: params.recipientNumber,
+      variation_code: params.meterType,
+      amount: this.requiredMoney(params.amount),
+      phone: this.toVtpassPhone(params.contactPhone),
     };
   }
 
   private mapVtpassPurchaseResponse(data: VtpassResponse, requestId: string) {
+    const transaction = data.content?.transactions;
+    const providerTransactionId =
+      transaction?.transactionId || data.requestId || requestId;
+    const safeResponse = {
+      code: data.code,
+      responseDescription: data.response_description,
+      requestId: data.requestId || requestId,
+      providerTransactionId,
+      providerStatus: transaction?.status,
+      providerCost: this.optionalMoney(transaction?.total_amount),
+      providerCommission: this.optionalMoney(transaction?.commission),
+    };
     return {
-      reference:
-        data.content?.transactions?.transactionId ||
-        data.requestId ||
-        requestId,
+      reference: providerTransactionId,
+      providerTransactionId,
       status: this.normalizeVtpassStatus(data),
       message:
         data.response_description ||
         data.content?.transactions?.status ||
         'VTpass transaction submitted',
       providerRequestId: requestId,
-      rawResponse: data as unknown as Record<string, unknown>,
+      providerCost: this.optionalMoney(transaction?.total_amount),
+      providerCommission: this.optionalMoney(transaction?.commission),
+      purchasedCode:
+        typeof data.purchased_code === 'string' && data.purchased_code.trim()
+          ? data.purchased_code.trim()
+          : undefined,
+      safeResponse,
+      rawResponse: safeResponse,
     };
   }
 
   async requery(providerRequestId: string): Promise<VtuProviderResult> {
-    if (this.providerMode !== 'vtpass' || !this.baseUrl) {
-      return {
-        reference: providerRequestId,
-        status: 'pending',
-        message: 'VTU requery simulated',
-        providerRequestId,
-      };
+    if (!this.baseUrl) {
+      this.assertSimulationEnabled();
+      return this.simulateResult(providerRequestId, 'VTU requery simulated');
     }
 
     try {
-      const response = await firstValueFrom(
-        this.httpService.post<VtpassResponse>(
-          `${this.baseUrl}/requery`,
-          { request_id: providerRequestId },
-          { headers: this.vtpassPostHeaders },
+      const response = await this.executeProviderRequest(() =>
+        firstValueFrom(
+          this.httpService.post<VtpassResponse>(
+            `${this.baseUrl}/requery`,
+            { request_id: providerRequestId },
+            { headers: this.vtpassPostHeaders },
+          ),
         ),
       );
       return this.mapVtpassPurchaseResponse(response.data, providerRequestId);
@@ -909,7 +813,7 @@ export class VtuApiProvider {
     }
   }
 
-  private normalizeVtpassStatus(data: VtpassResponse) {
+  private normalizeVtpassStatus(data: VtpassResponse): NormalizedVtuStatus {
     const status = data.content?.transactions?.status?.toLowerCase();
     const code = data.code;
     const description = data.response_description?.toLowerCase() || '';
@@ -934,7 +838,9 @@ export class VtuApiProvider {
         status,
       )
     ) {
-      return 'failed';
+      return status === 'reversed' || status === 'refunded'
+        ? 'reversed'
+        : 'failed';
     }
 
     if (code === '099') {
@@ -959,10 +865,6 @@ export class VtuApiProvider {
   }
 
   createProviderRequestId(reference: string, date = new Date()) {
-    if (this.providerMode !== 'vtpass') {
-      return reference;
-    }
-
     const parts = new Intl.DateTimeFormat('en-GB', {
       timeZone: 'Africa/Lagos',
       year: 'numeric',
@@ -994,18 +896,93 @@ export class VtuApiProvider {
     return match?.[1] || 'Provider defined';
   }
 
-  private simulatePurchase(params: {
-    type: string;
-    provider: string;
-    recipientNumber?: string;
-    amount: number;
-    reference: string;
-  }): { reference: string; status: string; message: string } {
+  private simulatePurchase(params: VtuProviderPurchase): VtuProviderResult {
+    return this.simulateResult(
+      params.providerRequestId || params.reference,
+      `${params.type} purchase simulated successfully`,
+      'success',
+    );
+  }
+
+  private simulateResult(
+    reference: string,
+    message: string,
+    status: NormalizedVtuStatus = 'pending',
+  ): VtuProviderResult {
+    const safeResponse = { simulated: true, providerStatus: status };
     return {
-      reference: params.reference,
-      status: 'success',
-      message: `${params.type} purchase simulated successfully`,
+      reference,
+      providerRequestId: reference,
+      providerTransactionId: reference,
+      status,
+      message,
+      safeResponse,
+      rawResponse: safeResponse,
     };
+  }
+
+  private assertSimulationEnabled() {
+    const environment = this.configService.get<string>('NODE_ENV');
+    const configured = this.configService.get<unknown>(
+      'VTU_SIMULATION_ENABLED',
+    );
+    const enabled = configured === true || configured === 'true';
+    if (!enabled || !['development', 'test'].includes(environment || '')) {
+      throw new ServiceUnavailableException('VTpass is not configured');
+    }
+  }
+
+  private toVtpassPhone(value?: string) {
+    if (!value) return undefined;
+    return value.replace(/^\+234/, '0');
+  }
+
+  private requiredMoney(value: unknown) {
+    if (typeof value !== 'string' && typeof value !== 'number') {
+      throw new BadRequestException('Invalid VTpass monetary value');
+    }
+
+    const normalizedValue = typeof value === 'string' ? value.trim() : value;
+    if (normalizedValue === '') {
+      throw new BadRequestException('Invalid VTpass monetary value');
+    }
+
+    let amount: Decimal;
+    try {
+      amount = new Decimal(normalizedValue);
+    } catch {
+      throw new BadRequestException('Invalid VTpass monetary value');
+    }
+    if (!amount.isFinite() || amount.isNegative()) {
+      throw new BadRequestException('Invalid VTpass monetary value');
+    }
+    return amount.toFixed(2);
+  }
+
+  private optionalMoney(value: unknown) {
+    if (value === undefined || value === null || value === '') return undefined;
+    try {
+      return this.requiredMoney(value);
+    } catch {
+      return undefined;
+    }
+  }
+
+  private async executeProviderRequest<T>(request: () => Promise<T>) {
+    if (!(await this.circuitBreaker.canExecute(VtuApiProvider.CIRCUIT))) {
+      throw new ServiceUnavailableException(
+        'VTpass is temporarily unavailable. Try again shortly.',
+      );
+    }
+
+    try {
+      const result = await request();
+      await this.circuitBreaker.recordSuccess(VtuApiProvider.CIRCUIT);
+      return result;
+    } catch (error) {
+      await this.circuitBreaker.recordFailure(VtuApiProvider.CIRCUIT);
+      throw error;
+    }
   }
 
   private parseNumericAmount(value: unknown): number | null {
@@ -1024,6 +1001,11 @@ export class VtuApiProvider {
     return Number.isFinite(configured) && configured >= 0
       ? configured
       : fallback;
+  }
+
+  private isEnabled() {
+    const value = this.configService.get<unknown>('VTU_ENABLED');
+    return value !== false && value !== 'false';
   }
 
   private safeProviderError(error: unknown) {

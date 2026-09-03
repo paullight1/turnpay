@@ -1,5 +1,7 @@
 # Phase 01 Provider Readiness Checklist
 
+> Archived comparison checklist. Use the Monnify-only production guides and `DOCS/PROVIDER-SOURCE-OF-TRUTH.MD`.
+
 ## Purpose
 
 Confirm provider feasibility before TRUSTPAY builds virtual account, deposit, or withdrawal functionality.

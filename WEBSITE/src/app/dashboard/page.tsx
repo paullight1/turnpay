@@ -225,7 +225,7 @@ export default function DashboardPage() {
   const { user, profile } = useAuth();
   const router = useRouter();
   const moneyGate = getMoneyActionGate(profile);
-  const sendHref = moneyGate?.actionHref ?? "/dashboard/withdraw";
+  const sendHref = moneyGate?.actionHref ?? "/dashboard/send";
   const receiveHref = moneyGate?.actionHref ?? "/dashboard/fund";
 
   const {

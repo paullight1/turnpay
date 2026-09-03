@@ -33,6 +33,7 @@ import {
   ShieldCheck,
   LogOut,
   Smartphone,
+  Send,
   UserRound,
   type LucideIcon,
 } from "lucide-react";
@@ -46,7 +47,8 @@ type NavItem = {
 const navItems: NavItem[] = [
   { label: "Dashboard", href: "/dashboard", icon: BarChart3 },
   { label: "Fund", href: "/dashboard/fund", icon: Banknote },
-  { label: "Withdraw", href: "/dashboard/withdraw", icon: Landmark },
+  { label: "Send", href: "/dashboard/send", icon: Send },
+  { label: "Withdraw to bank", href: "/dashboard/withdraw", icon: Landmark },
   { label: "Exchange", href: "/dashboard/exchange", icon: ArrowLeftRight },
   { label: "VTU", href: "/dashboard/vtu", icon: Smartphone },
   {

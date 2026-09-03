@@ -254,10 +254,12 @@ test.describe("TrustPay Profile", () => {
     });
   });
 
-  test("should render profile details and active sessions", async ({ page }) => {
+  test("should render profile details and active sessions", async ({
+    page,
+    isMobile,
+  }) => {
     await expect(page.getByRole("heading", { name: /^Profile$/i })).toBeVisible();
     await expect(page.getByRole("button", { name: /Toggle color theme/i })).toBeVisible();
-    const isMobile = (page.viewportSize()?.width ?? 1280) < 768;
     if (isMobile) {
       await page.getByRole("button", { name: /Open menu/i }).click();
     }

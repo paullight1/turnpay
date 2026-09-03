@@ -85,22 +85,22 @@ class _TransactionDetailScreenState extends State<TransactionDetailScreen> {
                     children: [
                       // Amount hero
                       _AmountHero(detail: detail),
-                      SizedBox(height: AppSpacing.lg),
+                      const SizedBox(height: AppSpacing.lg),
 
                       // Basic info card
                       _InfoCard(detail: detail),
-                      SizedBox(height: AppSpacing.md),
+                      const SizedBox(height: AppSpacing.md),
 
                       // Fee breakdown
                       _FeeBreakdown(detail: detail),
-                      SizedBox(height: AppSpacing.md),
+                      const SizedBox(height: AppSpacing.md),
 
                       // Ledger entries
                       if (detail.ledgerEntries.isNotEmpty) ...[
                         _LedgerEntriesCard(
                           entries: detail.ledgerEntries,
                         ),
-                        SizedBox(height: AppSpacing.md),
+                        const SizedBox(height: AppSpacing.md),
                       ],
 
                       // Transfer attempts (provider events)
@@ -108,7 +108,7 @@ class _TransactionDetailScreenState extends State<TransactionDetailScreen> {
                         _TransferAttemptsCard(
                           attempts: detail.transferAttempts,
                         ),
-                        SizedBox(height: AppSpacing.md),
+                        const SizedBox(height: AppSpacing.md),
                       ],
 
                       // Exchange receipt
@@ -116,7 +116,7 @@ class _TransactionDetailScreenState extends State<TransactionDetailScreen> {
                         _ExchangeReceiptCard(
                           receipt: detail.exchangeReceipt!,
                         ),
-                        SizedBox(height: AppSpacing.md),
+                        const SizedBox(height: AppSpacing.md),
                       ],
 
                       // Exchange payout
@@ -124,13 +124,13 @@ class _TransactionDetailScreenState extends State<TransactionDetailScreen> {
                         _ExchangePayoutCard(
                           payout: detail.exchangePayout!,
                         ),
-                        SizedBox(height: AppSpacing.md),
+                        const SizedBox(height: AppSpacing.md),
                       ],
 
                       // VTU order
                       if (detail.vtuOrder != null) ...[
                         _VtuOrderCard(order: detail.vtuOrder!),
-                        SizedBox(height: AppSpacing.md),
+                        const SizedBox(height: AppSpacing.md),
                       ],
 
                       // Status action (retry for failed)
@@ -189,7 +189,7 @@ class _AmountHero extends StatelessWidget {
             ),
             child: Icon(typeIcon, color: statusColor, size: 28),
           ),
-          SizedBox(height: AppSpacing.md),
+          const SizedBox(height: AppSpacing.md),
           Text(
             '$symbol$formatted',
             style: AppTextStyles.displayMedium.copyWith(
@@ -197,7 +197,7 @@ class _AmountHero extends StatelessWidget {
               fontWeight: FontWeight.w800,
             ),
           ),
-          SizedBox(height: AppSpacing.sm),
+          const SizedBox(height: AppSpacing.sm),
           Container(
             padding: const EdgeInsets.symmetric(
               horizontal: 12,
@@ -215,7 +215,7 @@ class _AmountHero extends StatelessWidget {
               ),
             ),
           ),
-          SizedBox(height: AppSpacing.sm),
+          const SizedBox(height: AppSpacing.sm),
           Text(
             _typeLabel(detail.type),
             style: AppTextStyles.bodyM,
@@ -299,16 +299,16 @@ class _InfoCard extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text('Details', style: AppTextStyles.labelM),
-          SizedBox(height: AppSpacing.md),
+          const SizedBox(height: AppSpacing.md),
           _DetailRow(label: 'Reference', value: detail.reference),
-          SizedBox(height: AppSpacing.sm),
+          const SizedBox(height: AppSpacing.sm),
           _DetailRow(label: 'Type', value: _capitalize(detail.type)),
-          SizedBox(height: AppSpacing.sm),
+          const SizedBox(height: AppSpacing.sm),
           _DetailRow(
             label: 'Currency',
             value: detail.currency,
           ),
-          SizedBox(height: AppSpacing.sm),
+          const SizedBox(height: AppSpacing.sm),
           _DetailRow(
             label: 'Date',
             value: detail.createdAt != null
@@ -318,7 +318,7 @@ class _InfoCard extends StatelessWidget {
           ),
           if (detail.updatedAt != null &&
               detail.updatedAt != detail.createdAt) ...[
-            SizedBox(height: AppSpacing.sm),
+            const SizedBox(height: AppSpacing.sm),
             _DetailRow(
               label: 'Last updated',
               value: DateFormat('MMM d, yyyy – HH:mm')
@@ -387,12 +387,12 @@ class _FeeBreakdown extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text('Amount Breakdown', style: AppTextStyles.labelM),
-          SizedBox(height: AppSpacing.md),
+          const SizedBox(height: AppSpacing.md),
           _DetailRow(
             label: 'Amount',
             value: '$symbol${NumberFormat('#,##0.00').format(detail.amount)}',
           ),
-          SizedBox(height: AppSpacing.sm),
+          const SizedBox(height: AppSpacing.sm),
           _DetailRow(
             label: 'Fee',
             value: feeFormatted == '0.00' ? 'Free' : '$symbol$feeFormatted',
@@ -432,11 +432,11 @@ class _LedgerEntriesCard extends StatelessWidget {
                 color: AppColors.textSecondary,
                 size: 18,
               ),
-              SizedBox(width: AppSpacing.sm),
+              const SizedBox(width: AppSpacing.sm),
               Text('Ledger Entries', style: AppTextStyles.labelM),
             ],
           ),
-          SizedBox(height: AppSpacing.md),
+          const SizedBox(height: AppSpacing.md),
           ...entries.map((entry) {
             final isDebit = entry.direction.toUpperCase() == 'DEBIT';
             final entryColor = isDebit ? AppColors.error : AppColors.success;
@@ -470,7 +470,7 @@ class _LedgerEntriesCard extends StatelessWidget {
                         size: 16,
                       ),
                     ),
-                    SizedBox(width: AppSpacing.sm),
+                    const SizedBox(width: AppSpacing.sm),
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -479,7 +479,7 @@ class _LedgerEntriesCard extends StatelessWidget {
                             entry.source,
                             style: AppTextStyles.labelS,
                           ),
-                          SizedBox(height: 2),
+                          const SizedBox(height: 2),
                           Text(
                             'Balance: $symbol${NumberFormat('#,##0.00').format(entry.balanceBefore)} → $symbol${NumberFormat('#,##0.00').format(entry.balanceAfter)}',
                             style: AppTextStyles.caption,
@@ -529,14 +529,14 @@ class _TransferAttemptsCard extends StatelessWidget {
                 color: AppColors.textSecondary,
                 size: 18,
               ),
-              SizedBox(width: AppSpacing.sm),
+              const SizedBox(width: AppSpacing.sm),
               Text(
                 'Provider Events',
                 style: AppTextStyles.labelM,
               ),
             ],
           ),
-          SizedBox(height: AppSpacing.md),
+          const SizedBox(height: AppSpacing.md),
           ...attempts.map((attempt) {
             return Padding(
               padding: const EdgeInsets.only(bottom: AppSpacing.sm),
@@ -577,41 +577,41 @@ class _ExchangeReceiptCard extends StatelessWidget {
                 color: AppColors.textSecondary,
                 size: 18,
               ),
-              SizedBox(width: AppSpacing.sm),
+              const SizedBox(width: AppSpacing.sm),
               Text('Exchange Receipt', style: AppTextStyles.labelM),
             ],
           ),
-          SizedBox(height: AppSpacing.md),
+          const SizedBox(height: AppSpacing.md),
           _DetailRow(
             label: 'Status',
             value: receipt.status,
           ),
-          SizedBox(height: AppSpacing.sm),
+          const SizedBox(height: AppSpacing.sm),
           _DetailRow(
             label: 'Rate',
             value: NumberFormat('#,##0.0000').format(receipt.rate),
           ),
-          SizedBox(height: AppSpacing.sm),
+          const SizedBox(height: AppSpacing.sm),
           _DetailRow(
             label: 'Sender',
             value: receipt.senderName,
           ),
           if (receipt.senderBankName != null &&
               receipt.senderBankName!.isNotEmpty) ...[
-            SizedBox(height: AppSpacing.sm),
+            const SizedBox(height: AppSpacing.sm),
             _DetailRow(
               label: 'Bank',
               value: receipt.senderBankName!,
             ),
           ],
-          SizedBox(height: AppSpacing.sm),
+          const SizedBox(height: AppSpacing.sm),
           _DetailRow(
             label: 'Expected',
             value:
                 '${receipt.targetCurrency} ${NumberFormat('#,##0.00').format(receipt.expectedCreditAmount)}',
           ),
           if (receipt.creditedAt != null) ...[
-            SizedBox(height: AppSpacing.sm),
+            const SizedBox(height: AppSpacing.sm),
             _DetailRow(
               label: 'Credited',
               value: DateFormat('MMM d, HH:mm').format(
@@ -649,30 +649,30 @@ class _ExchangePayoutCard extends StatelessWidget {
                 color: AppColors.textSecondary,
                 size: 18,
               ),
-              SizedBox(width: AppSpacing.sm),
+              const SizedBox(width: AppSpacing.sm),
               Text(
                 'Exchange Payout',
                 style: AppTextStyles.labelM,
               ),
             ],
           ),
-          SizedBox(height: AppSpacing.md),
+          const SizedBox(height: AppSpacing.md),
           _DetailRow(
             label: 'Status',
             value: payout.status,
           ),
-          SizedBox(height: AppSpacing.sm),
+          const SizedBox(height: AppSpacing.sm),
           _DetailRow(
             label: 'To Bank',
             value: payout.destinationBankName,
           ),
-          SizedBox(height: AppSpacing.sm),
+          const SizedBox(height: AppSpacing.sm),
           _DetailRow(
             label: 'Account',
             value:
                 '*****${payout.destinationAccountNumber.substring(payout.destinationAccountNumber.length - 4)}',
           ),
-          SizedBox(height: AppSpacing.sm),
+          const SizedBox(height: AppSpacing.sm),
           _DetailRow(
             label: 'To Send',
             value:
@@ -708,28 +708,28 @@ class _VtuOrderCard extends StatelessWidget {
                 color: AppColors.textSecondary,
                 size: 18,
               ),
-              SizedBox(width: AppSpacing.sm),
+              const SizedBox(width: AppSpacing.sm),
               Text('VTU Order', style: AppTextStyles.labelM),
             ],
           ),
-          SizedBox(height: AppSpacing.md),
+          const SizedBox(height: AppSpacing.md),
           _DetailRow(
             label: 'Service',
             value: _serviceLabel(order.serviceType),
           ),
-          SizedBox(height: AppSpacing.sm),
+          const SizedBox(height: AppSpacing.sm),
           _DetailRow(
             label: 'Provider',
             value: order.provider,
           ),
           if (order.targetMasked != null && order.targetMasked!.isNotEmpty) ...[
-            SizedBox(height: AppSpacing.sm),
+            const SizedBox(height: AppSpacing.sm),
             _DetailRow(
               label: 'Target',
               value: order.targetMasked!,
             ),
           ],
-          SizedBox(height: AppSpacing.sm),
+          const SizedBox(height: AppSpacing.sm),
           _DetailRow(
             label: 'Status',
             value: order.status,
@@ -797,7 +797,7 @@ class _RetryAction extends StatelessWidget {
                   color: AppColors.primary,
                   size: 20,
                 ),
-                SizedBox(width: AppSpacing.sm),
+                const SizedBox(width: AppSpacing.sm),
                 Text(
                   'Retry Transaction',
                   style: AppTextStyles.labelM.copyWith(
@@ -831,7 +831,7 @@ class _MetadataCard extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text('Provider Metadata', style: AppTextStyles.labelM),
-          SizedBox(height: AppSpacing.md),
+          const SizedBox(height: AppSpacing.md),
           ...metadata.entries
               .where((e) => e.value != null && e.key != 'rawPayload')
               .map((entry) {
@@ -899,19 +899,19 @@ class _DetailLoadingState extends StatelessWidget {
           height: 200,
           borderRadius: BorderRadius.circular(AppRadius.md),
         ),
-        SizedBox(height: AppSpacing.lg),
+        const SizedBox(height: AppSpacing.lg),
         ShimmerBlock(
           width: double.infinity,
           height: 160,
           borderRadius: BorderRadius.circular(AppRadius.sm),
         ),
-        SizedBox(height: AppSpacing.md),
+        const SizedBox(height: AppSpacing.md),
         ShimmerBlock(
           width: double.infinity,
           height: 120,
           borderRadius: BorderRadius.circular(AppRadius.sm),
         ),
-        SizedBox(height: AppSpacing.md),
+        const SizedBox(height: AppSpacing.md),
         ShimmerBlock(
           width: double.infinity,
           height: 140,
@@ -938,12 +938,12 @@ class _DetailErrorState extends StatelessWidget {
             color: AppColors.error,
             size: 48,
           ),
-          SizedBox(height: AppSpacing.md),
+          const SizedBox(height: AppSpacing.md),
           Text(
             'Could not load transaction',
             style: AppTextStyles.labelM,
           ),
-          SizedBox(height: AppSpacing.lg),
+          const SizedBox(height: AppSpacing.lg),
           FilledButton(
             onPressed: onRetry,
             child: const Text('Retry'),

@@ -17,6 +17,7 @@ import { WalletsService } from '../wallets/wallets.service';
 import { OtpService } from '../otp/otp.service';
 import { LoginDto, RegisterDto, ResetTransactionPinDto } from './dto/auth.dto';
 import { PinoLogger } from 'nestjs-pino';
+import type { RequestAuditContext } from '../common/services/request-audit-context';
 import { TransactionPinService } from '../common/services/transaction-pin.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { ReferralsService } from '../referrals/referrals.service';
@@ -186,12 +187,6 @@ export class AuthService {
   async login(loginDto: LoginDto, context: SessionContext = {}) {
     const email = this.normalizeEmail(loginDto.email);
     const localUser = await this.usersService.findByEmail(email);
-    const lockoutExpired =
-      localUser?.lockedUntil && localUser.lockedUntil <= new Date();
-    const currentFailedAttempts = lockoutExpired
-      ? 0
-      : (localUser?.failedAttempts ?? 0);
-
     if (localUser?.lockedUntil && localUser.lockedUntil > new Date()) {
       this.logger.warn(
         { userId: localUser.id, event: 'login_blocked_locked_account' },
@@ -237,7 +232,7 @@ export class AuthService {
 
     if (error) {
       if (localUser) {
-        await this.recordFailedLogin(localUser.id, currentFailedAttempts);
+        await this.recordFailedLogin(localUser.id);
       }
       throw new UnauthorizedException(LOGIN_FAILURE_MESSAGE);
     }
@@ -273,7 +268,7 @@ export class AuthService {
       }
 
       if (localUser) {
-        await this.recordFailedLogin(localUser.id, currentFailedAttempts);
+        await this.recordFailedLogin(localUser.id);
       }
       throw new UnauthorizedException(LOGIN_FAILURE_MESSAGE);
     }
@@ -529,7 +524,11 @@ export class AuthService {
     return { success: true, message: CONFIRMATION_RESPONSE_MESSAGE };
   }
 
-  async setupTransactionPin(userId: string, pin: string) {
+  async setupTransactionPin(
+    userId: string,
+    pin: string,
+    auditContext?: RequestAuditContext,
+  ) {
     const created = await this.transactionPin.setInitialPin(userId, pin);
     if (!created) {
       throw new ConflictException('Transaction PIN is already set');
@@ -540,7 +539,12 @@ export class AuthService {
         action: 'transaction_pin_setup',
         targetType: 'USER',
         targetId: userId,
-        metadata: { actorUserId: userId },
+        metadata: {
+          actorUserId: userId,
+          requestId: auditContext?.requestId,
+          ipAddress: auditContext?.ipAddress,
+          userAgent: auditContext?.userAgent,
+        },
       },
     });
 
@@ -552,7 +556,20 @@ export class AuthService {
     return { success: true, message: 'Transaction PIN saved' };
   }
 
-  async resetTransactionPin(userId: string, dto: ResetTransactionPinDto) {
+  getTransactionPinStatus(userId: string) {
+    return this.transactionPin.getStatus(userId);
+  }
+
+  async verifyTransactionPin(userId: string, pin: string) {
+    await this.transactionPin.verifyPin(userId, pin);
+    return { verified: true };
+  }
+
+  async resetTransactionPin(
+    userId: string,
+    dto: ResetTransactionPinDto,
+    auditContext?: RequestAuditContext,
+  ) {
     if (!dto.currentPin && !dto.otp) {
       throw new BadRequestException('Current PIN or OTP is required');
     }
@@ -585,6 +602,9 @@ export class AuthService {
           actorUserId: userId,
           verificationMethod,
           holdUntil,
+          requestId: auditContext?.requestId,
+          ipAddress: auditContext?.ipAddress,
+          userAgent: auditContext?.userAgent,
         },
       },
     });
@@ -615,28 +635,39 @@ export class AuthService {
     }
   }
 
-  private async recordFailedLogin(
-    userId: string,
-    currentFailedAttempts: number,
-  ) {
-    const failedAttempts = currentFailedAttempts + 1;
-    const lockedUntil =
-      failedAttempts >= MAX_FAILED_LOGIN_ATTEMPTS
-        ? new Date(Date.now() + LOCKOUT_MS)
-        : undefined;
+  private async recordFailedLogin(userId: string) {
+    const result = await this.prisma.$transaction(async (tx) => {
+      const now = new Date();
+      await tx.user.updateMany({
+        where: { id: userId, lockedUntil: { lte: now } },
+        data: { failedAttempts: 0, lockedUntil: null },
+      });
 
-    await this.prisma.user.update({
-      where: { id: userId },
-      data: {
-        failedAttempts,
-        lockedUntil: lockedUntil || null,
-      },
+      const updated = await tx.user.update({
+        where: { id: userId },
+        data: { failedAttempts: { increment: 1 } },
+        select: { failedAttempts: true },
+      });
+      const lockedUntil =
+        updated.failedAttempts >= MAX_FAILED_LOGIN_ATTEMPTS
+          ? new Date(Date.now() + LOCKOUT_MS)
+          : null;
+
+      if (lockedUntil) {
+        await tx.user.update({
+          where: { id: userId },
+          data: { lockedUntil },
+        });
+      }
+
+      return { failedAttempts: updated.failedAttempts, lockedUntil };
     });
 
     this.logger.warn(
       {
         userId,
-        event: lockedUntil ? 'login_lockout_started' : 'login_failed',
+        event: result.lockedUntil ? 'login_lockout_started' : 'login_failed',
+        failedAttempts: result.failedAttempts,
       },
       'Login failure recorded',
     );

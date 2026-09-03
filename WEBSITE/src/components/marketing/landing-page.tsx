@@ -224,7 +224,7 @@ function HeroSection() {
           <div
             key={slide.title}
             className="trustpay-hero-bg absolute inset-0"
-            style={{ animationDelay: `${index * 5}s` }}
+            style={{ animationDelay: `${index * 5 - 0.6}s` }}
           >
             <Image
               src={slide.image}
@@ -236,18 +236,18 @@ function HeroSection() {
             />
           </div>
         ))}
-        <div className="absolute inset-0 bg-gradient-to-r from-black/88 via-black/66 to-black/30" />
-        <div className="absolute inset-0 bg-gradient-to-t from-black/58 via-transparent to-black/20" />
+        <div className="absolute inset-0 bg-gradient-to-r from-black/92 via-black/68 to-black/32" />
+        <div className="absolute inset-0 bg-gradient-to-t from-black/64 via-transparent to-black/24" />
       </div>
 
-      <div className="mx-auto flex min-h-[84svh] max-w-7xl items-center px-4 pb-12 pt-24 sm:px-6 sm:pt-28 lg:min-h-[88svh] lg:px-8">
-        <div className="grid w-full items-center gap-10 lg:grid-cols-[minmax(0,1fr)_380px]">
+      <div className="mx-auto flex min-h-[84svh] max-w-7xl items-center px-4 pb-12 pt-24 sm:px-6 sm:pb-16 sm:pt-28 lg:min-h-[88svh] lg:px-8 xl:py-28">
+        <div className="grid w-full items-center xl:grid-cols-[minmax(0,1fr)_22rem] xl:gap-16">
           <div className="max-w-4xl">
-            <div className="inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/10 px-4 py-1.5 text-sm text-white/90 backdrop-blur-sm">
-              <span className="rounded-full bg-red-600 px-2.5 py-0.5 text-xs font-bold text-white">
+            <div className="inline-flex max-w-full items-center gap-2 rounded-full border border-white/20 bg-white/10 px-3 py-1.5 text-[0.72rem] font-medium text-white/90 backdrop-blur-md sm:px-4 sm:text-sm">
+              <span className="shrink-0 rounded-full bg-red-600 px-2.5 py-0.5 text-xs font-bold text-white">
                 Live
               </span>
-              Nigeria and Ghana money corridor
+              <span>Nigeria and Ghana money corridor</span>
             </div>
 
             <h1 className="sr-only">
@@ -257,28 +257,28 @@ function HeroSection() {
 
             <div
               aria-hidden="true"
-              className="relative mt-8 min-h-[11rem] overflow-hidden sm:min-h-[13.5rem] md:min-h-[15rem] lg:min-h-[16.5rem]"
+              className="relative mt-7 min-h-[13.5rem] overflow-hidden sm:min-h-[15rem] md:min-h-[16rem] lg:min-h-[15.5rem] xl:min-h-[16.5rem]"
             >
               {heroSlides.map((slide, index) => (
                 <p
                   key={slide.title}
-                  className="trustpay-hero-copy absolute inset-x-0 top-0 max-w-4xl text-4xl font-bold leading-[1.03] text-white sm:text-6xl md:text-7xl lg:text-8xl"
-                  style={{ animationDelay: `${index * 5}s` }}
+                  className="trustpay-hero-copy absolute inset-x-0 top-0 max-w-4xl text-[clamp(2.65rem,12vw,3.5rem)] font-bold leading-[0.98] tracking-[-0.045em] text-white sm:text-[4.25rem] md:text-[4.75rem] lg:text-[5rem] xl:text-[5.5rem]"
+                  style={{ animationDelay: `${index * 5 - 0.6}s` }}
                 >
                   {slide.title}
                 </p>
               ))}
             </div>
 
-            <p className="mt-6 max-w-2xl text-base leading-7 text-gray-200 md:text-lg">
+            <p className="mt-4 max-w-2xl text-base leading-7 text-white/76 sm:mt-5 sm:text-lg sm:leading-8">
               Get competitive exchange rates, fast transactions, and secure
               transfers between Nigeria and Ghana.
             </p>
 
-            <div className="mt-10 flex flex-wrap items-center gap-4">
+            <div className="mt-7 flex flex-col items-stretch gap-3 sm:mt-8 sm:flex-row sm:items-center sm:gap-4">
               <Button
                 asChild
-                className="h-12 rounded-full bg-red-600 px-7 text-base text-white shadow-lg shadow-red-600/30 transition-all hover:bg-red-700 hover:shadow-xl hover:shadow-red-600/40"
+                className="h-13 w-full rounded-full bg-red-600 px-7 text-base font-semibold text-white shadow-lg shadow-red-600/30 transition-all hover:bg-red-700 hover:shadow-xl hover:shadow-red-600/40 sm:w-auto"
               >
                 <a href="https://wa.me/233555507240?text=Hello%20TrustPay%2C%20I%20want%20to%20get%20started." target="_blank" rel="noreferrer">
                   Get Started Free
@@ -288,7 +288,7 @@ function HeroSection() {
               <Button
                 asChild
                 variant="outline"
-                className="h-12 rounded-full border-white/25 bg-white/10 px-7 text-base text-white backdrop-blur-sm transition-all hover:bg-white/20"
+                className="h-13 w-full rounded-full border-white/30 bg-white/10 px-7 text-base font-semibold text-white backdrop-blur-sm transition-all hover:bg-white/20 hover:text-white sm:w-auto"
               >
                 <Link href="/exchange">
                   View Rates
@@ -298,7 +298,7 @@ function HeroSection() {
 
           </div>
 
-          <div className="hidden border-l border-white/15 pl-6 text-white lg:block">
+          <div className="hidden border-l border-white/15 pl-7 text-white xl:block">
             <div className="flex items-center justify-between border-b border-white/10 pb-4">
               <div>
                 <p className="text-xs uppercase tracking-[0.12em] text-white/50">
@@ -315,7 +315,7 @@ function HeroSection() {
                 <div
                   key={slide.context}
                   className="trustpay-hero-context border-b border-white/10 pb-4"
-                  style={{ animationDelay: `${index * 5}s` }}
+                  style={{ animationDelay: `${index * 5 - 0.6}s` }}
                 >
                   <p className="text-sm font-semibold">{slide.context}</p>
                   <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-white/10">

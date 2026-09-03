@@ -10,8 +10,25 @@ import '../../../core/widgets/tp_page_header.dart';
 import '../../../services/auth_service.dart';
 import '../../../services/transaction_security_service.dart';
 
+class _TransactionSecuritySnapshot {
+  final TransactionSecurityConfig device;
+  final TransactionPinServerStatus server;
+
+  const _TransactionSecuritySnapshot({
+    required this.device,
+    required this.server,
+  });
+}
+
 class TransactionSecurityScreen extends StatefulWidget {
-  const TransactionSecurityScreen({super.key});
+  final TransactionSecurityService? securityService;
+  final AuthService? authService;
+
+  const TransactionSecurityScreen({
+    super.key,
+    this.securityService,
+    this.authService,
+  });
 
   @override
   State<TransactionSecurityScreen> createState() =>
@@ -19,30 +36,116 @@ class TransactionSecurityScreen extends StatefulWidget {
 }
 
 class _TransactionSecurityScreenState extends State<TransactionSecurityScreen> {
-  final _securityService = TransactionSecurityService();
-  late Future<TransactionSecurityConfig> _future;
+  late final TransactionSecurityService _securityService;
+  late final AuthService _authService;
+  late Future<_TransactionSecuritySnapshot> _future;
 
   @override
   void initState() {
     super.initState();
-    _future = _securityService.getConfig();
+    _securityService = widget.securityService ?? TransactionSecurityService();
+    _authService = widget.authService ?? AuthService();
+    _future = _loadSecurityState();
+  }
+
+  Future<_TransactionSecuritySnapshot> _loadSecurityState() async {
+    final values = await Future.wait<dynamic>([
+      _securityService.getConfig(),
+      _authService.getTransactionPinStatus(),
+    ]);
+    return _TransactionSecuritySnapshot(
+      device: values[0] as TransactionSecurityConfig,
+      server: values[1] as TransactionPinServerStatus,
+    );
   }
 
   void _reload() {
     setState(() {
-      _future = _securityService.getConfig();
+      _future = _loadSecurityState();
     });
   }
 
   Future<void> _openPinSetup() async {
-    final saved = await Navigator.of(context).push<bool>(
+    final state = await _future;
+    if (!mounted) return;
+    final entryMode = TransactionPinServerPolicy.entryMode(
+      serverConfigured: state.server.configured,
+    );
+    var screenMode = PinScreenMode.create;
+    if (entryMode == TransactionPinServerEntryMode.verifyExisting) {
+      final selected = await showModalBottomSheet<PinScreenMode>(
+        context: context,
+        backgroundColor: AppColors.surface,
+        showDragHandle: true,
+        builder: (context) => SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(
+              AppSpacing.lg,
+              AppSpacing.sm,
+              AppSpacing.lg,
+              AppSpacing.lg,
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text('Manage transaction PIN', style: AppTextStyles.headingM),
+                const SizedBox(height: AppSpacing.sm),
+                Text(
+                  'Verify this device or replace the PIN after confirming your current one.',
+                  style: AppTextStyles.bodyM,
+                ),
+                const SizedBox(height: AppSpacing.md),
+                FilledButton.icon(
+                  onPressed: () =>
+                      Navigator.of(context).pop(PinScreenMode.verify),
+                  icon: const Icon(Icons.verified_user_outlined),
+                  label: const Text('Verify on this device'),
+                ),
+                const SizedBox(height: AppSpacing.sm),
+                OutlinedButton.icon(
+                  onPressed: () =>
+                      Navigator.of(context).pop(PinScreenMode.reset),
+                  icon: const Icon(Icons.password_rounded),
+                  label: const Text('Reset transaction PIN'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+      if (selected == null || !mounted) return;
+      screenMode = selected;
+    }
+
+    final result = await Navigator.of(context).push<Object?>(
       MaterialPageRoute(
-        builder: (_) => TransactionPinScreen.create(),
+        builder: (_) => switch (screenMode) {
+          PinScreenMode.verify => TransactionPinScreen.verify(
+              pinLength: state.server.pinLength ?? state.device.pinLength,
+              allowBiometric: state.device.shouldOfferBiometrics,
+              biometricLabel: state.device.biometricLabel,
+              title: 'Verify transaction PIN',
+              subtitle:
+                  'Confirm the PIN already configured on your TrustPay account.',
+              securityService: _securityService,
+              authService: _authService,
+            ),
+          PinScreenMode.reset => TransactionPinScreen.reset(
+              pinLength: state.server.pinLength ?? state.device.pinLength,
+              securityService: _securityService,
+              authService: _authService,
+            ),
+          PinScreenMode.create => TransactionPinScreen.create(
+              securityService: _securityService,
+              authService: _authService,
+            ),
+        },
         fullscreenDialog: true,
       ),
     );
 
-    if (saved == true) {
+    if (result != null && result != false) {
       _reload();
     }
   }
@@ -62,7 +165,7 @@ class _TransactionSecurityScreenState extends State<TransactionSecurityScreen> {
 
     if (enabled) {
       final approved = await _securityService.authenticateBiometric(
-        reason: 'Enable ${config.biometricLabel} for TRUSTPAY transactions',
+        reason: 'Enable ${config.biometricLabel} for TrustPay transactions',
       );
       if (!approved) {
         _showToast('${config.biometricLabel} setup was not completed.');
@@ -97,7 +200,7 @@ class _TransactionSecurityScreenState extends State<TransactionSecurityScreen> {
     return Scaffold(
       backgroundColor: AppColors.background,
       body: SafeArea(
-        child: FutureBuilder<TransactionSecurityConfig>(
+        child: FutureBuilder<_TransactionSecuritySnapshot>(
           future: _future,
           builder: (context, snapshot) {
             return CustomScrollView(
@@ -151,19 +254,21 @@ class _TransactionSecurityScreenState extends State<TransactionSecurityScreen> {
                       else
                         Builder(
                           builder: (context) {
-                            final config = snapshot.requireData;
+                            final state = snapshot.requireData;
+                            final config = state.device;
+                            final server = state.server;
 
                             return Column(
                               children: [
                                 _SecurityActionPanel(
-                                  title: config.hasPin
-                                      ? 'Update transaction PIN'
+                                  title: server.configured
+                                      ? 'Manage transaction PIN'
                                       : 'Create transaction PIN',
-                                  detail: config.hasPin
-                                      ? 'Your PIN is required before sensitive wallet actions.'
+                                  detail: server.configured
+                                      ? 'Verify this device or reset your server PIN using the current PIN.'
                                       : 'Set the PIN used for money action approvals.',
                                   icon: Icons.password_rounded,
-                                  cta: config.hasPin
+                                  cta: server.configured
                                       ? 'Change PIN'
                                       : 'Create PIN',
                                   onTap: _openPinSetup,
@@ -177,7 +282,8 @@ class _TransactionSecurityScreenState extends State<TransactionSecurityScreen> {
                                   icon: _biometricIcon(config),
                                   value: config.biometricEnabled &&
                                       config.hasBiometric,
-                                  enabled: config.hasBiometric,
+                                  enabled:
+                                      server.configured && config.hasBiometric,
                                   onChanged: (value) =>
                                       _toggleBiometric(config, value),
                                 ),
@@ -211,6 +317,8 @@ class TransactionPinScreen extends StatefulWidget {
   final String biometricLabel;
   final String title;
   final String subtitle;
+  final TransactionSecurityService? securityService;
+  final AuthService? authService;
 
   const TransactionPinScreen._({
     required this.mode,
@@ -219,16 +327,23 @@ class TransactionPinScreen extends StatefulWidget {
     required this.biometricLabel,
     required this.title,
     required this.subtitle,
+    this.securityService,
+    this.authService,
   });
 
-  factory TransactionPinScreen.create() {
-    return const TransactionPinScreen._(
+  factory TransactionPinScreen.create({
+    TransactionSecurityService? securityService,
+    AuthService? authService,
+  }) {
+    return TransactionPinScreen._(
       mode: PinScreenMode.create,
       initialPinLength: 4,
       allowBiometric: false,
       biometricLabel: 'Biometric approval',
       title: 'Create transaction PIN',
       subtitle: 'Set the code that will be required for money action requests.',
+      securityService: securityService,
+      authService: authService,
     );
   }
 
@@ -238,6 +353,8 @@ class TransactionPinScreen extends StatefulWidget {
     required String biometricLabel,
     required String title,
     required String subtitle,
+    TransactionSecurityService? securityService,
+    AuthService? authService,
   }) {
     return TransactionPinScreen._(
       mode: PinScreenMode.verify,
@@ -246,6 +363,25 @@ class TransactionPinScreen extends StatefulWidget {
       biometricLabel: biometricLabel,
       title: title,
       subtitle: subtitle,
+      securityService: securityService,
+      authService: authService,
+    );
+  }
+
+  factory TransactionPinScreen.reset({
+    required int pinLength,
+    TransactionSecurityService? securityService,
+    AuthService? authService,
+  }) {
+    return TransactionPinScreen._(
+      mode: PinScreenMode.reset,
+      initialPinLength: pinLength,
+      allowBiometric: false,
+      biometricLabel: 'Biometric approval',
+      title: 'Verify current PIN',
+      subtitle: 'Enter your current server PIN before choosing a new one.',
+      securityService: securityService,
+      authService: authService,
     );
   }
 
@@ -254,16 +390,20 @@ class TransactionPinScreen extends StatefulWidget {
 }
 
 class _TransactionPinScreenState extends State<TransactionPinScreen> {
-  final _securityService = TransactionSecurityService();
-  final _authService = AuthService();
+  late final TransactionSecurityService _securityService;
+  late final AuthService _authService;
   final StringBuffer _buffer = StringBuffer();
   String? _firstPin;
+  String? _currentPin;
   String? _error;
   late int _pinLength;
+  bool _verifyExistingServerPin = false;
 
   @override
   void initState() {
     super.initState();
+    _securityService = widget.securityService ?? TransactionSecurityService();
+    _authService = widget.authService ?? AuthService();
     _pinLength = widget.initialPinLength;
   }
 
@@ -300,8 +440,15 @@ class _TransactionPinScreenState extends State<TransactionPinScreen> {
 
   Future<void> _completeStep() async {
     final pin = _buffer.toString();
+    if (widget.mode == PinScreenMode.reset) {
+      await _completeResetStep(pin);
+      return;
+    }
 
-    if (widget.mode == PinScreenMode.create) {
+    final isCreateMode =
+        widget.mode == PinScreenMode.create && !_verifyExistingServerPin;
+
+    if (isCreateMode) {
       if (_firstPin == null) {
         setState(() {
           _firstPin = pin;
@@ -324,9 +471,26 @@ class _TransactionPinScreenState extends State<TransactionPinScreen> {
         await _securityService.savePin(pin, pinLength: _pinLength);
       } catch (error) {
         if (isTransactionPinAlreadySetError(error)) {
-          await _securityService.savePin(pin, pinLength: _pinLength);
-          if (!mounted) return;
-          Navigator.of(context).pop(true);
+          try {
+            final status = await _authService.getTransactionPinStatus();
+            if (!mounted) return;
+            setState(() {
+              _verifyExistingServerPin = status.configured;
+              _pinLength = status.pinLength ?? _pinLength;
+              _buffer.clear();
+              _firstPin = null;
+              _error = status.configured
+                  ? 'A server PIN already exists. Enter that PIN to verify this device.'
+                  : 'PIN state changed. Try setup again.';
+            });
+          } catch (_) {
+            if (!mounted) return;
+            setState(() {
+              _buffer.clear();
+              _firstPin = null;
+              _error = 'Could not refresh transaction PIN status.';
+            });
+          }
           return;
         }
 
@@ -345,33 +509,117 @@ class _TransactionPinScreenState extends State<TransactionPinScreen> {
       return;
     }
 
-    final result = await _securityService.verifyPinWithLockout(pin);
-    if (!mounted) return;
-
-    if (result.approved) {
+    try {
+      await _authService.verifyTransactionPin(pin);
+      await _securityService.saveVerifiedDevicePin(pin);
+      if (!mounted) return;
       Navigator.of(context).pop(pin);
+      return;
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _buffer.clear();
+        _error = authErrorMessage(error, 'Could not verify transaction PIN.');
+      });
+    }
+  }
+
+  Future<void> _completeResetStep(String pin) async {
+    final step = TransactionPinResetPolicy.step(
+      currentPin: _currentPin,
+      replacementPin: _firstPin,
+    );
+
+    if (step == TransactionPinResetStep.verifyCurrent) {
+      try {
+        await _authService.verifyTransactionPin(pin);
+        if (!mounted) return;
+        setState(() {
+          _currentPin = pin;
+          _buffer.clear();
+        });
+      } catch (error) {
+        if (!mounted) return;
+        setState(() {
+          _buffer.clear();
+          _error = authErrorMessage(error, 'Could not verify current PIN.');
+        });
+      }
       return;
     }
 
-    final lockoutMessage = result.lockedUntil == null
-        ? null
-        : 'Too many incorrect attempts. Try again after ${TimeOfDay.fromDateTime(result.lockedUntil!.toLocal()).format(context)}.';
-    setState(() {
-      _buffer.clear();
-      _error = lockoutMessage ?? 'Incorrect PIN. Try again.';
-    });
+    if (step == TransactionPinResetStep.enterReplacement) {
+      final validation = TransactionPinResetPolicy.validateReplacement(
+        currentPin: _currentPin!,
+        replacementPin: pin,
+      );
+      if (validation != null) {
+        setState(() {
+          _buffer.clear();
+          _error = validation;
+        });
+        return;
+      }
+      setState(() {
+        _firstPin = pin;
+        _buffer.clear();
+      });
+      return;
+    }
+
+    final validation = TransactionPinResetPolicy.validateConfirmation(
+      replacementPin: _firstPin!,
+      confirmationPin: pin,
+    );
+    if (validation != null) {
+      setState(() {
+        _buffer.clear();
+        _error = validation;
+      });
+      return;
+    }
+
+    try {
+      await _authService.resetTransactionPin(
+        currentPin: _currentPin!,
+        newPin: pin,
+      );
+      await _securityService.saveVerifiedDevicePin(pin);
+      if (!mounted) return;
+      Navigator.of(context).pop(true);
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _buffer.clear();
+        _error = authErrorMessage(error, 'Could not reset transaction PIN.');
+      });
+    }
   }
 
   Future<void> _useBiometric() async {
     final pin = await _securityService.unlockPinWithBiometric(
-      reason: 'Approve this TRUSTPAY transaction with ${widget.biometricLabel}',
+      reason: 'Approve this TrustPay transaction with ${widget.biometricLabel}',
     );
 
     if (!mounted) return;
 
     if (pin != null) {
-      Navigator.of(context).pop(pin);
-      return;
+      try {
+        await _authService.verifyTransactionPin(pin);
+        if (!mounted) return;
+        Navigator.of(context).pop(pin);
+        return;
+      } catch (error) {
+        await _securityService.clearEphemeralTransactionApproval();
+        if (!mounted) return;
+        setState(() {
+          _error = authErrorMessage(
+            error,
+            'Cached PIN is no longer valid. Enter your current PIN.',
+          );
+        });
+        return;
+      }
     }
 
     setState(() {
@@ -381,16 +629,40 @@ class _TransactionPinScreenState extends State<TransactionPinScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final isCreateConfirm =
-        widget.mode == PinScreenMode.create && _firstPin != null;
-    final currentTitle = widget.mode == PinScreenMode.create
-        ? (isCreateConfirm ? 'Confirm your PIN' : widget.title)
-        : widget.title;
-    final currentSubtitle = widget.mode == PinScreenMode.create
-        ? (isCreateConfirm
-            ? 'Enter the same code again to confirm it.'
-            : widget.subtitle)
-        : widget.subtitle;
+    final isCreateConfirm = widget.mode == PinScreenMode.create &&
+        !_verifyExistingServerPin &&
+        _firstPin != null;
+    final resetStep = TransactionPinResetPolicy.step(
+      currentPin: _currentPin,
+      replacementPin: _firstPin,
+    );
+    final currentTitle = widget.mode == PinScreenMode.reset
+        ? switch (resetStep) {
+            TransactionPinResetStep.verifyCurrent => 'Verify current PIN',
+            TransactionPinResetStep.enterReplacement => 'Choose a new PIN',
+            TransactionPinResetStep.confirmReplacement => 'Confirm new PIN',
+          }
+        : widget.mode == PinScreenMode.create && !_verifyExistingServerPin
+            ? (isCreateConfirm ? 'Confirm your PIN' : widget.title)
+            : _verifyExistingServerPin
+                ? 'Verify existing PIN'
+                : widget.title;
+    final currentSubtitle = widget.mode == PinScreenMode.reset
+        ? switch (resetStep) {
+            TransactionPinResetStep.verifyCurrent =>
+              'Enter your current server PIN before choosing a new one.',
+            TransactionPinResetStep.enterReplacement =>
+              'Choose a different $_pinLength-digit PIN.',
+            TransactionPinResetStep.confirmReplacement =>
+              'Enter the new PIN again to confirm it.',
+          }
+        : widget.mode == PinScreenMode.create && !_verifyExistingServerPin
+            ? (isCreateConfirm
+                ? 'Enter the same code again to confirm it.'
+                : widget.subtitle)
+            : _verifyExistingServerPin
+                ? 'Enter the PIN already configured on your TrustPay account.'
+                : widget.subtitle;
 
     return Scaffold(
       backgroundColor: AppColors.background,
@@ -544,7 +816,7 @@ String? _extractDioMessage(dynamic data) {
   return null;
 }
 
-enum PinScreenMode { create, verify }
+enum PinScreenMode { create, verify, reset }
 
 class _SecurityActionPanel extends StatelessWidget {
   final String title;
@@ -583,14 +855,23 @@ class _SecurityActionPanel extends StatelessWidget {
           const SizedBox(height: AppSpacing.sm),
           Text(detail, style: AppTextStyles.bodyM),
           const SizedBox(height: AppSpacing.md),
-          FilledButton(
-            onPressed: onTap,
-            style: FilledButton.styleFrom(
-              minimumSize: const Size(double.infinity, 50),
-              backgroundColor: AppColors.primary,
-              foregroundColor: Colors.white,
+          Semantics(
+            container: true,
+            button: true,
+            enabled: true,
+            label: cta,
+            onTap: onTap,
+            child: ExcludeSemantics(
+              child: FilledButton(
+                onPressed: onTap,
+                style: FilledButton.styleFrom(
+                  minimumSize: const Size(double.infinity, 50),
+                  backgroundColor: AppColors.primary,
+                  foregroundColor: Colors.white,
+                ),
+                child: Text(cta),
+              ),
             ),
-            child: Text(cta),
           ),
         ],
       ),
@@ -647,10 +928,24 @@ class _BiometricTogglePanel extends StatelessWidget {
             ),
           ),
           const SizedBox(width: AppSpacing.sm),
-          Switch(
-            value: enabled ? value : false,
-            onChanged: enabled ? onChanged : null,
-            activeThumbColor: AppColors.primary,
+          Semantics(
+            container: true,
+            label: '$title transaction approval',
+            value: enabled ? (value ? 'On' : 'Off') : 'Unavailable',
+            enabled: enabled,
+            toggled: enabled && value,
+            onTap: enabled ? () => onChanged(!value) : null,
+            child: ExcludeSemantics(
+              child: SizedBox(
+                width: 48,
+                height: 48,
+                child: Switch(
+                  value: enabled ? value : false,
+                  onChanged: enabled ? onChanged : null,
+                  activeThumbColor: AppColors.primary,
+                ),
+              ),
+            ),
           ),
         ],
       ),

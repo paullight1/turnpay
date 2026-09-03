@@ -1,10 +1,99 @@
 import { test, expect } from '@playwright/test';
 
 test.describe('TrustPay Landing Page', () => {
+  test('keeps a headline visible through every hero slide handoff', async ({ page }) => {
+    await page.goto('/');
+
+    const minimumHeadlineOpacity = await page.evaluate(() => {
+      const headlines = Array.from(
+        document.querySelectorAll<HTMLElement>('.trustpay-hero-copy'),
+      );
+      const animations = document
+        .getAnimations()
+        .filter(
+          (animation) =>
+            animation instanceof CSSAnimation &&
+            animation.animationName === 'trustpay-hero-copy',
+        );
+
+      animations.forEach((animation) => animation.pause());
+
+      return [0, 5_000, 10_000].reduce((minimumOpacity, handoffTime) => {
+        animations.forEach((animation) => {
+          animation.currentTime = handoffTime;
+        });
+
+        const visibleOpacity = Math.max(
+          ...headlines.map((headline) =>
+            Number.parseFloat(getComputedStyle(headline).opacity),
+          ),
+        );
+
+        return Math.min(minimumOpacity, visibleOpacity);
+      }, 1);
+    });
+
+    expect(minimumHeadlineOpacity).toBeGreaterThanOrEqual(0.98);
+  });
+
+  test('stacks full-width hero actions on narrow mobile screens', async ({ page }) => {
+    await page.setViewportSize({ width: 375, height: 812 });
+    await page.goto('/');
+
+    const primaryAction = page.getByRole('link', { name: /Get Started Free/i });
+    const secondaryAction = page.getByRole('link', { name: /View Rates/i });
+    const [primaryBox, secondaryBox] = await Promise.all([
+      primaryAction.boundingBox(),
+      secondaryAction.boundingBox(),
+    ]);
+
+    expect(primaryBox).not.toBeNull();
+    expect(secondaryBox).not.toBeNull();
+    expect(primaryBox!.width).toBeGreaterThanOrEqual(340);
+    expect(secondaryBox!.width).toBeGreaterThanOrEqual(340);
+    expect(secondaryBox!.y).toBeGreaterThan(primaryBox!.y + primaryBox!.height);
+  });
+
+  test('keeps legal copy readable on light page surfaces', async ({ page }) => {
+    await page.goto('/legal');
+
+    const lightSurfaceCopy = [
+      page.getByText('Clear information, clear rules.'),
+      page.locator('#privacy').getByText('Privacy', { exact: true }),
+      page.getByText('Information we collect', { exact: true }),
+      page.getByRole('heading', { name: 'Need help with a policy or transaction?' }),
+      page.getByRole('link', { name: 'Terms of Use' }).first(),
+      page.getByRole('link', { name: 'Contact Support' }),
+    ];
+
+    const contrastRatios = await Promise.all(
+      lightSurfaceCopy.map((locator) =>
+        locator.evaluate((element) => {
+          const channels = getComputedStyle(element)
+            .color.match(/[\d.]+/g)!
+            .slice(0, 3)
+            .map(Number)
+            .map((channel) => channel / 255)
+            .map((channel) =>
+              channel <= 0.04045
+                ? channel / 12.92
+                : ((channel + 0.055) / 1.055) ** 2.4,
+            );
+          const luminance =
+            0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2];
+
+          return 1.05 / (luminance + 0.05);
+        }),
+      ),
+    );
+
+    expect(Math.min(...contrastRatios)).toBeGreaterThanOrEqual(4.5);
+  });
+
   test('should load homepage', async ({ page }) => {
     await page.goto('/');
     await expect(page).toHaveTitle(/TrustPay/i);
-    await expect(page.locator('a[href="/"]').first()).toBeVisible();
+    await expect(page.getByRole('link', { name: /TrustPay home/i })).toBeVisible();
     if ((page.viewportSize()?.width ?? 1280) < 768) {
       await page.locator('summary[aria-label="Open menu"]').click();
       await expect(

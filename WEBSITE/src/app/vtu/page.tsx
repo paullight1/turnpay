@@ -77,6 +77,7 @@ export default function VtuPage() {
               eyebrow="VTU services"
               title="The bills users pay often."
               description="The flow should stay simple: choose a service, enter the phone or bill detail, review the amount, then track the result."
+              tone="dark"
             />
             <div className="grid gap-4 sm:grid-cols-2">
               {vtuServices.map((service) => {

@@ -31,7 +31,7 @@
   - [ ] `BANK_ACCOUNT_ENCRYPTION_KEY` — 256-bit
   - [ ] `DATABASE_URL` — production managed PostgreSQL
   - [ ] `REDIS_URL` — production managed Redis (auth + TLS)
-  - [ ] All provider API keys (Monnify, Paystack, Flutterwave, VTPass)
+  - [ ] All provider API keys (Monnify, VTpass, Youverify)
   - [ ] Supabase production keys
   - [ ] Sentry DSN
 
@@ -121,22 +121,21 @@ fly secrets set MONNIFY_API_KEY="MK_PROD_..."
 fly secrets set MONNIFY_SECRET_KEY="MS_PROD_..."
 fly secrets set MONNIFY_CONTRACT_CODE="..."
 fly secrets set MONNIFY_BASE_URL="https://api.monnify.com"
-fly secrets set MONNIFY_WEBHOOK_SECRET="whsec_..."
-
-fly secrets set PAYSTACK_SECRET_KEY="sk_live_..."
-fly secrets set PAYSTACK_PUBLIC_KEY="pk_live_..."
-fly secrets set PAYSTACK_WEBHOOK_SECRET="whsec_..."
-
-fly secrets set FLUTTERWAVE_SECRET_KEY="FLWSECK_..."
-fly secrets set FLUTTERWAVE_PUBLIC_KEY="FLWPUBK_..."
-fly secrets set FLUTTERWAVE_ENCRYPTION_KEY="..."
-fly secrets set FLUTTERWAVE_SECRET_HASH="..."
+fly secrets set MONNIFY_WEBHOOK_URL="https://api.trustpay.example/api/webhooks/monnify"
 
 # VTU Provider
 fly secrets set VTPASS_API_KEY="..."
 fly secrets set VTPASS_PUBLIC_KEY="..."
 fly secrets set VTPASS_SECRET_KEY="..."
-fly secrets set VTPASS_BASE_URL="https://api-service.vtpass.com"
+fly secrets set VTPASS_BASE_URL="https://vtpass.com/api"
+fly secrets set VTPASS_WEBHOOK_SECRET="..."
+
+# KYC Provider
+fly secrets set KYC_PROVIDER="youverify"
+fly secrets set YOUVERIFY_API_KEY="..."
+fly secrets set YOUVERIFY_BASE_URL="https://api.youverify.co"
+fly secrets set YOUVERIFY_WEBHOOK_URL="https://api.trustpay.example/api/webhooks/kyc/youverify"
+fly secrets set YOUVERIFY_WEBHOOK_SECRET="..."
 
 # Feature Flags
 fly secrets set BANKING_ENABLED="true"
@@ -286,11 +285,8 @@ All env vars required by the backend. See `DOCS/PRODUCTION-GUIDES/17-SECRET-INVE
 | `SUPABASE_SERVICE_ROLE_KEY` | ✅ Yes | `fly secrets` | Supabase service role |
 | `SUPABASE_JWT_SECRET` | No | `fly secrets` | Supabase JWT secret |
 | `MONNIFY_*` (6 vars) | ✅ Yes | `fly secrets` | Monnify production keys |
-| `PAYSTACK_SECRET_KEY` | ✅ Yes | `fly secrets` | Paystack production key |
-| `PAYSTACK_PUBLIC_KEY` | No | `fly secrets` | Paystack public key |
-| `PAYSTACK_WEBHOOK_SECRET` | No | `fly secrets` | Webhook verification |
-| `FLUTTERWAVE_*` (4 vars) | ✅ Yes | `fly secrets` | Flutterwave production keys |
 | `VTPASS_*` (4 vars) | No | `fly secrets` | VTU provider keys |
+| `YOUVERIFY_*` (4 required vars) | ✅ Yes | `fly secrets` | KYC API and webhook configuration |
 | `SENTRY_DSN` | No | `fly secrets` | Error tracking |
 | `BANKING_ENABLED` | No | `fly secrets` | Feature flag |
 | `BANKING_SANDBOX_MODE` | No | `fly secrets` | Must be `false` in prod |

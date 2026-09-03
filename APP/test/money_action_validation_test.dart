@@ -36,5 +36,25 @@ void main() {
 
       expect(error, 'Choose a bank and enter a valid 10-digit account number.');
     });
+
+    test('accepts a transfer note of exactly 120 Unicode code points', () {
+      final error = MoneyActionFormValidator.validateFields(
+        kind: MoneyActionKind.send,
+        recipient: 'recipient@example.com',
+        note: List.filled(120, '💚').join(),
+      );
+
+      expect(error, isNull);
+    });
+
+    test('rejects a transfer note of 121 Unicode code points', () {
+      final error = MoneyActionFormValidator.validateFields(
+        kind: MoneyActionKind.send,
+        recipient: 'recipient@example.com',
+        note: List.filled(121, '💚').join(),
+      );
+
+      expect(error, 'Keep the note to 120 characters or fewer.');
+    });
   });
 }

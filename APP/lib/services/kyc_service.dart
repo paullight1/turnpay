@@ -1,5 +1,4 @@
 import 'package:dio/dio.dart';
-import 'package:flutter/foundation.dart';
 
 import 'api_client.dart';
 
@@ -24,7 +23,7 @@ class KycService {
 
     return KycOverview.fromJson(
       {
-        'provider': 'SMILE_ID',
+        'provider': 'NINJA',
         'kycStatus': _asString(userMap['kycStatus'], fallback: 'PENDING'),
         'kycTier': _asString(userMap['kycTier'], fallback: 'TIER_0'),
         'documents': documents.map((document) => document.toJson()).toList(),
@@ -32,8 +31,11 @@ class KycService {
     );
   }
 
-  Future<SmileKycSession> createSmileSession({
+  Future<KycVerificationResult> verifyIdentity({
     required String idempotencyKey,
+    required String idNumber,
+    required String dateOfBirth,
+    required bool consentAccepted,
     String country = 'NG',
     String type = 'BVN',
   }) async {
@@ -41,15 +43,17 @@ class KycService {
     final request = {
       'country': country,
       'type': type,
-      'consentAccepted': true,
+      'idNumber': idNumber,
+      'dateOfBirth': dateOfBirth,
+      'consentAccepted': consentAccepted,
     };
 
     final response = await _apiClient.client.post<dynamic>(
-      '/api/kyc/smile-id/session',
+      '/api/kyc/verify',
       data: request,
       options: options,
     );
-    return SmileKycSession.fromJson(_asMap(response.data));
+    return KycVerificationResult.fromJson(_asMap(response.data));
   }
 
   Future<List<KycDocumentSummary>> _fetchDocuments() async {
@@ -106,11 +110,11 @@ class KycOverview {
     return KycOverview(
       status: _normalizedStatus(
         _firstString([
+          latest['status'],
           json['status'],
           json['kycStatus'],
           user['kycStatus'],
           kyc['status'],
-          latest['status'],
         ], fallback: 'PENDING'),
       ),
       tier: _normalizedTier(
@@ -127,7 +131,7 @@ class KycOverview {
           json['provider'],
           latest['provider'],
           kyc['provider'],
-        ], fallback: 'SMILE_ID'),
+        ], fallback: 'NINJA'),
       ),
       reference: _firstString([
         json['reference'],
@@ -156,7 +160,10 @@ class KycOverview {
 
   bool get isVerified => status == 'VERIFIED';
   bool get isRejected => status == 'REJECTED' || status == 'FAILED';
-  bool get isSubmitted => status == 'SUBMITTED' || status == 'PENDING_REVIEW';
+  bool get isSubmitted =>
+      status == 'SUBMITTED' ||
+      status == 'PENDING_REVIEW' ||
+      status == 'REVIEW_REQUIRED';
 
   String get displayStatus {
     switch (status) {
@@ -182,7 +189,7 @@ class KycOverview {
   String get primaryActionLabel {
     if (isVerified) return 'Refresh status';
     if (isSubmitted) return 'Continue verification';
-    if (isRejected) return 'Try again with Smile ID';
+    if (isRejected) return 'Try again';
     return 'Start verification';
   }
 }
@@ -219,105 +226,33 @@ class KycDocumentSummary {
   }
 }
 
-class SmileKycSession {
-  final String id;
+class KycVerificationResult {
+  final String status;
+  final String provider;
   final String reference;
-  final Uri? verificationUri;
-  final bool hasSdkToken;
-  final String token;
-  final String product;
-  final String environment;
-  final String callbackUrl;
 
-  const SmileKycSession({
-    required this.id,
+  const KycVerificationResult({
+    required this.status,
+    required this.provider,
     required this.reference,
-    required this.verificationUri,
-    required this.hasSdkToken,
-    required this.token,
-    required this.product,
-    required this.environment,
-    required this.callbackUrl,
   });
 
-  factory SmileKycSession.fromJson(Map<String, dynamic> json) {
-    final session = _asMap(json['session']);
-    final source = session.isEmpty ? json : session;
-    final document = _asMap(json['document']);
-    final token = _firstString([
-      source['token'],
-      source['sdkToken'],
-      source['clientToken'],
-      source['accessToken'],
-      json['token'],
-    ]);
-    final product = _firstString([
-      source['product'],
-      json['product'],
-    ], fallback: 'biometric_kyc');
-    final environment = _firstString([
-      source['environment'],
-      json['environment'],
-    ], fallback: 'sandbox');
-    final callbackUrl = _firstString([
-      source['callbackUrl'],
-      source['callbackURL'],
-      json['callbackUrl'],
-      json['callbackURL'],
-    ]);
-    return SmileKycSession(
-      id: _firstString([
-        source['id'],
-        source['sessionId'],
-        document['id'],
-        json['id'],
-      ]),
+  factory KycVerificationResult.fromJson(Map<String, dynamic> json) {
+    return KycVerificationResult(
+      status: _normalizedStatus(
+        _firstString(
+          [json['verificationStatus'], json['status']],
+          fallback: 'PENDING',
+        ),
+      ),
+      provider: _displayProvider(
+        _firstString([json['provider']], fallback: 'NINJA'),
+      ),
       reference: _firstString([
-        source['reference'],
-        source['providerReference'],
-        source['jobId'],
-        source['job_id'],
         json['reference'],
       ]),
-      verificationUri: _readUri(source) ??
-          _readUri(json) ??
-          _buildSmileLauncherUri(
-            token: token,
-            product: product,
-            environment: environment,
-            callbackUrl: callbackUrl,
-          ),
-      hasSdkToken: token.isNotEmpty,
-      token: token,
-      product: product,
-      environment: environment,
-      callbackUrl: callbackUrl,
     );
   }
-
-  bool get canOpen => verificationUri != null;
-}
-
-Uri? _buildSmileLauncherUri({
-  required String token,
-  required String product,
-  required String environment,
-  required String callbackUrl,
-}) {
-  if (!kIsWeb || token.isEmpty || callbackUrl.isEmpty) return null;
-
-  final base = Uri.base.resolve('/smile-id.html');
-  final fragment = Uri(
-    queryParameters: {
-      'token': token,
-      'product': product,
-      'environment':
-          environment.toLowerCase() == 'production' ? 'production' : 'sandbox',
-      'callback_url': callbackUrl,
-    },
-  ).query;
-
-  return base.replace(fragment: fragment);
 }
 
 String _firstString(List<dynamic> values, {String fallback = ''}) {
@@ -388,7 +323,8 @@ String _normalizedTier(String value) {
 
 String _displayProvider(String value) {
   final normalized = value.trim().toUpperCase().replaceAll('-', '_');
-  if (normalized == 'SMILE' || normalized == 'SMILE_ID') return 'Smile ID';
+  if (normalized == 'NINJA') return 'Ninja';
+  if (normalized == 'YOUVERIFY') return 'Youverify';
   if (normalized == 'MANUAL_REVIEW') return 'Manual review';
   return value.replaceAll('_', ' ');
 }

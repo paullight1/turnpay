@@ -21,13 +21,13 @@ This checklist reflects the current codebase after the Monnify-only virtual-acco
 - [x] Wallet ledger service for append-only balance movement records.
 - [x] Internal transfers with transaction PIN support.
 - [x] Withdrawal initiation, beneficiary storage, bank resolution/listing, transfer attempts, and admin verification endpoints.
-- [x] Paystack and Flutterwave provider code and webhook controllers remain present, but they are not the active virtual-account direction.
-- [x] VTU provider abstraction with generic, VTpass, and Reloadly paths, Reloadly signed webhook controller, order requery, reversals, and admin VTU operations.
+- [x] Monnify is the only payment, virtual-account, deposit-webhook, bank-resolution, and withdrawal provider.
+- [x] VTpass is the only VTU provider, with signed webhook handling, order requery, reversals, and admin operations.
 - [x] Admin operations API for users, stats, transactions, virtual accounts, provider events, pending transfers, reconciliation, VTU health, stale VTU orders, VTU pricing, support, KYC, audit logs, and exchange receipt review.
 - [x] Next.js website/admin with auth, dashboard, wallet detail screen, Monnify account funding screen, exchange screen, KYC, withdraw, VTU, transactions, support, profile, admin finance, admin KYC, admin support, and admin VTU pages.
 - [x] Dashboard wallet cards now expose `Send Money` and `Receive Money`, and click through to wallet detail/history screens.
 - [x] Flutter app shell, auth screens, dashboard/home, money actions, VTU service client, transaction security service, biometrics/PIN support, profile, analytics, and transactions screens.
-- [x] Focused backend unit coverage for wallets, ledger, idempotency, auth, KYC, banking, beneficiaries, exchange, payments, support, transfers, VTU, Reloadly webhook/provider, reconciliation, and admin service.
+- [x] Focused backend unit coverage for wallets, ledger, idempotency, auth, Youverify KYC, Monnify banking, beneficiaries, exchange, payments, support, transfers, VTpass, reconciliation, and admin service.
 - [x] Web lint/build currently passes with placeholder environment values.
 
 ### Verified Recently
@@ -41,7 +41,7 @@ This checklist reflects the current codebase after the Monnify-only virtual-acco
 
 - [x] Use Monnify only for Nigerian NGN virtual accounts.
 - [x] Do not activate Nomba.
-- [x] Do not activate Paystack dedicated virtual accounts unless a later product decision reverses this.
+- [x] Enforce Monnify as the only banking and payment provider.
 - [x] Admin review remains required before a Monnify-verified exchange deposit credits a user's GHS wallet.
 - [x] One provider inflow must never credit both NGN wallet funding and GHS exchange settlement.
 
@@ -66,7 +66,7 @@ These must be completed before real-money launch.
 - [ ] Complete Monnify KYB and obtain sandbox/live credentials.
 - [ ] Register public HTTPS webhook URLs:
   - [ ] `POST /api/webhooks/monnify`
-  - [ ] Reloadly/VTU webhook only if Reloadly launches.
+  - [ ] Verify VTpass webhook delivery in the target environment.
 - [ ] Run Monnify sandbox reserved-account creation with a verified Tier 2 user.
 - [ ] Run Monnify sandbox wallet funding:
   - [ ] low-value transfer succeeds.
@@ -139,18 +139,20 @@ These must be completed before real-money launch.
 
 ## P2 Provider And Feature Expansion
 
-- [ ] Decide whether Paystack/Flutterwave remain only card/payment-link providers or should be disabled until needed.
-- [ ] If Paystack/Flutterwave stay enabled:
+- [x] Remove the legacy payment-link providers and their webhook/config paths.
+- [ ] For Monnify production activation:
   - [ ] complete sandbox webhook replay tests.
   - [ ] confirm settlement account, transfer permission, and reversal behavior.
-  - [ ] update docs to describe their exact production scope.
+  - [ ] confirm production callback URLs and live credentials.
 - [ ] Complete VTU launch readiness:
-  - [ ] select live VTU provider per market.
+  - [x] use VTpass as the single VTU provider.
+  - [x] complete Nigeria airtime/data/cable/electricity backend, web, mobile, callback inbox, requery, reversal, receipt, and admin flows.
+  - [x] keep Ghana, Kenya, South Africa, US, and UK disabled as `Coming soon`.
   - [ ] configure credentials.
   - [ ] run low-value airtime/data/electricity/cable sandbox tests.
   - [ ] verify provider refund/requery paths.
-- [ ] Select Ghana bill-pay provider for ECG/NEDCo or keep Ghana utility payments marked coming soon.
-- [ ] Replace manual KYC provider with approved NIBSS/NIMC/identity provider after compliance onboarding.
+- [x] Keep unsupported VTpass markets marked unavailable until product scope changes.
+- [x] Use the direct Youverify API as the single KYC provider.
 - [ ] Add live FX-rate provider or admin-controlled rate operations with change approval.
 
 ## P2 Infrastructure And Release
@@ -175,4 +177,3 @@ These must be completed before real-money launch.
 - Monnify status: `DOCS/PRODUCTION-GUIDES/13-MONNIFY-ONLY-VIRTUAL-ACCOUNTS-STATUS.MD`
 - Manual exchange flow: `DOCS/PRODUCTION-GUIDES/14-MANUAL-EXCHANGE-RECEIPT-FLOW.MD`
 - Testing guide: `DOCS/TESTING-GUIDE.MD`
-

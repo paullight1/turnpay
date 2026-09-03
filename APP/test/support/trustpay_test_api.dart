@@ -13,6 +13,7 @@ import 'package:trustpay_app/services/wallet_service.dart';
 class TrustPayTestBundle {
   final Dio dio;
   final ApiClient apiClient;
+  final FakeTrustPayApiAdapter adapter;
   final HomeDataService homeDataService;
   final WalletService walletService;
   final AuthService authService;
@@ -20,6 +21,7 @@ class TrustPayTestBundle {
   const TrustPayTestBundle({
     required this.dio,
     required this.apiClient,
+    required this.adapter,
     required this.homeDataService,
     required this.walletService,
     required this.authService,
@@ -32,35 +34,39 @@ TrustPayTestBundle buildTrustPayTestBundle({
   bool includeTransactions = true,
   bool includeDeposits = true,
   bool includeReferralRewards = true,
+  bool transactionPinConfigured = true,
+  int internalTransferFailuresBeforeSuccess = 0,
 }) {
+  final adapter = FakeTrustPayApiAdapter(
+    kycStatus: kycStatus,
+    refreshSucceeds: refreshSucceeds,
+    includeTransactions: includeTransactions,
+    includeDeposits: includeDeposits,
+    includeReferralRewards: includeReferralRewards,
+    transactionPinConfigured: transactionPinConfigured,
+    internalTransferFailuresBeforeSuccess:
+        internalTransferFailuresBeforeSuccess,
+  );
   final dio = Dio(
     BaseOptions(
       baseUrl: FakeTrustPayApiAdapter.mockBaseUrl,
       headers: const {'Content-Type': 'application/json'},
     ),
-  )..httpClientAdapter = FakeTrustPayApiAdapter(
-      kycStatus: kycStatus,
-      refreshSucceeds: refreshSucceeds,
-      includeTransactions: includeTransactions,
-      includeDeposits: includeDeposits,
-      includeReferralRewards: includeReferralRewards,
-    );
+  )..httpClientAdapter = adapter;
 
   final apiClient = ApiClient(dio: dio);
 
   return TrustPayTestBundle(
     dio: dio,
     apiClient: apiClient,
+    adapter: adapter,
     homeDataService: HomeDataService(apiClient: apiClient),
     walletService: WalletService(apiClient: apiClient),
     authService: AuthService(apiClient: apiClient),
   );
 }
 
-void setMockSecureStorage({
-  String? accessToken,
-  String? refreshToken,
-}) {
+void setMockSecureStorage({String? accessToken, String? refreshToken}) {
   FlutterSecureStorage.setMockInitialValues({});
   FlutterSecureStorage.setMockInitialValues({
     if (accessToken != null) 'trustpay_access_token': accessToken,
@@ -77,6 +83,10 @@ class FakeTrustPayApiAdapter implements HttpClientAdapter {
   final bool includeTransactions;
   final bool includeDeposits;
   final bool includeReferralRewards;
+  bool transactionPinConfigured;
+  int internalTransferFailuresBeforeSuccess;
+  final List<String> internalTransferIdempotencyKeys = [];
+  final List<Uri> requestedUris = [];
 
   FakeTrustPayApiAdapter({
     required this.kycStatus,
@@ -84,6 +94,8 @@ class FakeTrustPayApiAdapter implements HttpClientAdapter {
     required this.includeTransactions,
     required this.includeDeposits,
     required this.includeReferralRewards,
+    this.transactionPinConfigured = true,
+    this.internalTransferFailuresBeforeSuccess = 0,
   });
 
   @override
@@ -92,6 +104,7 @@ class FakeTrustPayApiAdapter implements HttpClientAdapter {
     Stream<Uint8List>? requestStream,
     Future<void>? cancelFuture,
   ) async {
+    requestedUris.add(options.uri);
     final path = options.uri.path;
     final method = options.method.toUpperCase();
 
@@ -109,10 +122,7 @@ class FakeTrustPayApiAdapter implements HttpClientAdapter {
 
     if (method == 'POST' && path == '/api/auth/refresh') {
       if (!refreshSucceeds) {
-        return _jsonResponse(
-          {'message': 'Session expired'},
-          statusCode: 401,
-        );
+        return _jsonResponse({'message': 'Session expired'}, statusCode: 401);
       }
       return _jsonResponse({
         'session': {
@@ -125,7 +135,9 @@ class FakeTrustPayApiAdapter implements HttpClientAdapter {
     if (method == 'GET' && path == '/api/transactions') {
       final isDepositsQuery = options.queryParameters['type'] == 'FUND';
       final transactions = isDepositsQuery
-          ? (includeDeposits ? _depositTransactions() : <Map<String, dynamic>>[])
+          ? (includeDeposits
+              ? _depositTransactions()
+              : <Map<String, dynamic>>[])
           : (includeTransactions
               ? _homeTransactions()
               : <Map<String, dynamic>>[]);
@@ -134,7 +146,8 @@ class FakeTrustPayApiAdapter implements HttpClientAdapter {
         'transactions': transactions,
         'total': transactions.length,
         'page': 1,
-        'limit': int.tryParse('${options.queryParameters['limit'] ?? 20}') ?? 20,
+        'limit':
+            int.tryParse('${options.queryParameters['limit'] ?? 20}') ?? 20,
         'totalPages': transactions.isEmpty ? 0 : 1,
       });
     }
@@ -161,6 +174,65 @@ class FakeTrustPayApiAdapter implements HttpClientAdapter {
 
     if (method == 'POST' && path == '/api/banking/accounts/provision') {
       return _jsonResponse(_virtualAccounts().first);
+    }
+
+    if (method == 'POST' && path == '/api/transfers/recipient/preview') {
+      return _jsonResponse({
+        'found': true,
+        'displayName': 'Tolu A.',
+        'maskedIdentifier': 't***@example.com',
+        'avatarInitials': 'TA',
+      });
+    }
+
+    if (method == 'GET' && path == '/api/auth/transaction-pin/status') {
+      return _jsonResponse({
+        'configured': transactionPinConfigured,
+        'pinLength': transactionPinConfigured ? 4 : null,
+        'resetHoldUntil': null,
+        'locked': false,
+      });
+    }
+
+    if (method == 'POST' && path == '/api/auth/transaction-pin') {
+      transactionPinConfigured = true;
+      return _jsonResponse({'success': true});
+    }
+
+    if (method == 'POST' && path == '/api/auth/transaction-pin/verify') {
+      final data = Map<String, dynamic>.from(options.data as Map);
+      if (data['pin'] != '2468') {
+        return _jsonResponse({
+          'message': 'Invalid transaction PIN',
+        }, statusCode: 403);
+      }
+      return _jsonResponse({'success': true});
+    }
+
+    if (method == 'POST' && path == '/api/transfers/internal') {
+      final idempotencyKey =
+          '${options.headers['Idempotency-Key'] ?? options.headers['idempotency-key'] ?? ''}';
+      internalTransferIdempotencyKeys.add(idempotencyKey);
+      if (internalTransferFailuresBeforeSuccess > 0) {
+        internalTransferFailuresBeforeSuccess--;
+        return _jsonResponse({
+          'message': 'Distributed controls unavailable',
+        }, statusCode: 503);
+      }
+      final data = Map<String, dynamic>.from(options.data as Map);
+      return _jsonResponse({
+        'reference': 'IT-INTEGRATION-001',
+        'status': 'SUCCESS',
+        'amount': '${data['amount']}',
+        'currency': '${data['currency']}',
+        'senderTransactionReference': 'IT-INTEGRATION-001-OUT',
+        'senderBalanceAfter': '974.50',
+        'recipient': {
+          'maskedIdentifier': 't***@example.com',
+          'avatarInitials': 'TA',
+        },
+        'createdAt': '2026-09-01T12:00:00.000Z',
+      });
     }
 
     if (method == 'GET' && path == '/api/support/tickets') {
@@ -191,19 +263,15 @@ class FakeTrustPayApiAdapter implements HttpClientAdapter {
       });
     }
 
-    return _jsonResponse(
-      {'message': 'Unexpected ${options.method} $path'},
-      statusCode: 404,
-    );
+    return _jsonResponse({
+      'message': 'Unexpected ${options.method} $path',
+    }, statusCode: 404);
   }
 
   @override
   void close({bool force = false}) {}
 
-  ResponseBody _jsonResponse(
-    Object body, {
-    int statusCode = 200,
-  }) {
+  ResponseBody _jsonResponse(Object body, {int statusCode = 200}) {
     return ResponseBody.fromString(
       jsonEncode(body),
       statusCode,
@@ -332,7 +400,7 @@ class FakeTrustPayApiAdapter implements HttpClientAdapter {
         'accountNumberMasked': '******1234',
         'bankCode': '011',
         'currency': 'NGN',
-        'provider': 'paystack',
+        'provider': 'monnify',
         'createdAt': '2026-06-22T08:00:00.000Z',
       },
     ];
@@ -341,10 +409,7 @@ class FakeTrustPayApiAdapter implements HttpClientAdapter {
   Map<String, dynamic> _referralDashboard(bool includeRewards) {
     return {
       'code': 'TRUST-AB12',
-      'reward': {
-        'amount': 100.0,
-        'currency': 'NGN',
-      },
+      'reward': {'amount': 100.0, 'currency': 'NGN'},
       'summary': {
         'invites': 3,
         'pending': includeRewards ? 100.0 : 0.0,

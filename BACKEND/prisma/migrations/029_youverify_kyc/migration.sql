@@ -1,0 +1,1 @@
+ALTER TYPE "KycVerificationProvider" ADD VALUE IF NOT EXISTS 'YOUVERIFY';

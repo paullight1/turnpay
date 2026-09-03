@@ -7,6 +7,10 @@ import { ThrottlerStorage, ThrottlerStorageService } from '@nestjs/throttler';
 import type { ThrottlerStorageRecord } from '@nestjs/throttler/dist/throttler-storage-record.interface';
 import { RedisService } from '../../redis/redis.service';
 
+// Atomically bumps the hit counter and manages the block key so every app
+// instance shares one rate-limit view. KEYS[1] = hit counter, KEYS[2] = block
+// marker; ARGV = ttlMs, limit, blockDurationMs. PTTL/PEXPIRE keep everything
+// in milliseconds to match the guard's inputs.
 const INCREMENT_SCRIPT = `
 local totalHits = redis.call("INCR", KEYS[1])
 local timeToExpire = redis.call("PTTL", KEYS[1])
@@ -30,6 +34,9 @@ return { totalHits, timeToExpire, isBlocked, timeToBlockExpire }
 export class RedisThrottlerStorage
   implements ThrottlerStorage, OnApplicationShutdown
 {
+  // Local storage is a deliberate development/test mode, never a deployed
+  // failover. Per-process failover would let users evade limits by changing
+  // application instances.
   private readonly memoryFallback = new ThrottlerStorageService();
 
   constructor(private readonly redisService: RedisService) {}
@@ -75,6 +82,7 @@ export class RedisThrottlerStorage
 
       return {
         totalHits: result[0],
+        // The guard expects seconds (it feeds Retry-After); Redis PTTL is ms.
         timeToExpire: Math.max(0, Math.ceil(result[1] / 1000)),
         isBlocked: result[2] === 1,
         timeToBlockExpire: Math.max(0, Math.ceil(result[3] / 1000)),

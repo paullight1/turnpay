@@ -8,7 +8,7 @@ export interface ProviderBalanceHealth {
 }
 
 export interface VtuProviderHealth {
-  id: 'vtpass' | 'reloadly';
+  id: 'vtpass';
   name: string;
   configured: boolean;
   enabled: boolean;

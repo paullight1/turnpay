@@ -26,11 +26,13 @@ const SUPABASE_ORIGIN = resolveHttpOrigin(
 );
 const TAWK_HTTPS = "https://*.tawk.to https://embed.tawk.to https://va.tawk.to";
 const TAWK_WSS = "wss://*.tawk.to";
+const DEV_SCRIPT_POLICY =
+  process.env.NODE_ENV === "production" ? "" : " 'unsafe-eval'";
 // Dev-only origins so local API/Supabase/HMR still work outside production.
 const DEV_ORIGINS =
   process.env.NODE_ENV === "production"
     ? ""
-    : "http://localhost:* http://127.0.0.1:* http://[::1]:* ws://localhost:* ws://127.0.0.1:*";
+    : "http://localhost:* http://127.0.0.1:* ws://localhost:* ws://127.0.0.1:*";
 
 const CONTENT_SECURITY_POLICY = [
   "default-src 'self'",
@@ -40,10 +42,10 @@ const CONTENT_SECURITY_POLICY = [
   "form-action 'self'",
   "img-src 'self' data: https:",
   "font-src 'self' data:",
-  "style-src 'self' 'unsafe-inline'",
+  "style-src 'self' 'unsafe-inline' https://*.tawk.to",
   // TODO(launch): replace 'unsafe-inline' scripts with a per-request nonce.
-  // 'unsafe-eval' has been removed; the Tawk widget host is explicitly allowed.
-  `script-src 'self' 'unsafe-inline' https://embed.tawk.to https://*.tawk.to`,
+  // Webpack development builds require unsafe-eval. Production never receives it.
+  `script-src 'self' 'unsafe-inline'${DEV_SCRIPT_POLICY} https://embed.tawk.to https://*.tawk.to`,
   `connect-src 'self' ${API_ORIGIN} ${SUPABASE_ORIGIN} https://*.supabase.co ${TAWK_HTTPS} ${TAWK_WSS} ${DEV_ORIGINS}`
     .replace(/\s+/g, " ")
     .trim(),

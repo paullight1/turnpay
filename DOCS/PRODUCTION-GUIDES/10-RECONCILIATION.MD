@@ -11,10 +11,10 @@ RECONCILIATION_CRON=0 */1 * * *
 WEBHOOK_QUEUE_NAME=banking-webhooks
 DLQ_NAME=banking-dead-letter
 ADMIN_REVIEW_WEBHOOK_ALERT_CHANNEL=
-PAYSTACK_SECRET_KEY=
-FLUTTERWAVE_SECRET_KEY=
-VTU_API_URL=
-VTU_API_KEY=
+MONNIFY_API_KEY=
+MONNIFY_SECRET_KEY=
+VTPASS_API_KEY=
+VTPASS_SECRET_KEY=
 FX_RATE_API_URL=
 FX_RATE_API_KEY=
 ```
@@ -30,7 +30,7 @@ FX_RATE_API_KEY=
 
 ## Live Steps
 
-1. Obtain provider report access for Paystack, Flutterwave, VTU, and FX sources where applicable.
+1. Obtain provider report access for Monnify, VTpass, Youverify, and the FX source where applicable.
 2. Define daily cutoff time, timezone, owner, and sign-off process.
 3. Run reconciliation after the first live transaction before broader launch.
 4. Compare provider totals, wallet ledger totals, transaction statuses, fees, reversals, and settlements.

@@ -177,6 +177,11 @@ export default function AdminKycPage() {
     setReviewDocumentUrl(null);
     setReviewReason("");
     setPendingReviewStatus(null);
+    if (doc.reviewSource !== "DOCUMENT") {
+      setLoadingDocumentId(null);
+      return;
+    }
+
     setLoadingDocumentId(doc.id);
 
     try {
@@ -378,19 +383,74 @@ export default function AdminKycPage() {
               </div>
 
               <div>
-                <p className="text-muted-foreground text-sm mb-2">Document</p>
-                {reviewDocumentUrl ? (
+                <p className="mb-2 text-sm text-muted-foreground">
+                  Review evidence
+                </p>
+                {selectedDoc.reviewSource === "DOCUMENT" && reviewDocumentUrl ? (
                   <a
                     href={reviewDocumentUrl}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="text-primary hover:underline"
                   >
-                    View Document →
+                    View secure document →
                   </a>
+                ) : selectedDoc.reviewSource === "PROVIDER" && selectedDoc.reviewEvidence ? (
+                  <dl className="grid gap-3 rounded-lg border p-4 text-sm sm:grid-cols-2">
+                    <div>
+                      <dt className="text-muted-foreground">Provider</dt>
+                      <dd className="font-medium">
+                        {humanize(selectedDoc.reviewEvidence.provider)}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className="text-muted-foreground">Provider result</dt>
+                      <dd className="font-medium">
+                        {humanize(
+                          selectedDoc.reviewEvidence.providerStatus ??
+                            selectedDoc.reviewEvidence.status,
+                        )}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className="text-muted-foreground">Identity found</dt>
+                      <dd className="font-medium">
+                        {selectedDoc.reviewEvidence.dataValidation === true
+                          ? "Yes"
+                          : selectedDoc.reviewEvidence.dataValidation === false
+                            ? "No"
+                            : "Not reported"}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className="text-muted-foreground">All validations passed</dt>
+                      <dd className="font-medium">
+                        {selectedDoc.reviewEvidence.allValidationPassed === true
+                          ? "Yes"
+                          : selectedDoc.reviewEvidence.allValidationPassed === false
+                            ? "No"
+                            : "Not reported"}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className="text-muted-foreground">Country</dt>
+                      <dd className="font-medium">
+                        {selectedDoc.reviewEvidence.country ?? "Not reported"}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className="text-muted-foreground">Masked identifier</dt>
+                      <dd className="font-mono">
+                        {selectedDoc.reviewEvidence.identifierMasked ??
+                          maskKycId(selectedDoc.idNumber)}
+                      </dd>
+                    </div>
+                  </dl>
                 ) : (
                   <p className="text-sm text-muted-foreground">
-                    Preparing secure document link...
+                    {selectedDoc.reviewSource === "DOCUMENT"
+                      ? "Preparing secure document link..."
+                      : "No review evidence is available."}
                   </p>
                 )}
               </div>

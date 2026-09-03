@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:dio/dio.dart';
@@ -6,6 +8,7 @@ import 'package:intl/intl.dart';
 import 'package:uuid/uuid.dart';
 
 import '../../../core/router/app_router.dart';
+import '../../../core/state/wallet_refresh_signal.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/widgets/tp_page_header.dart';
 import '../../../core/widgets/tp_snackbar.dart';
@@ -44,6 +47,65 @@ class WithdrawalCompletionDetails {
   });
 }
 
+const _terminalWithdrawalStatuses = {'SUCCESS', 'FAILED', 'REVERSED'};
+
+WithdrawalCompletionDetails _completionDetailsFromWithdrawal(
+  Map<String, dynamic> withdrawal, {
+  String? overrideMessage,
+  String? overrideStatus,
+}) {
+  final metadata = _asMap(withdrawal['metadata']);
+  final attempts = _asList(withdrawal['transferAttempts']);
+  final latestAttempt = attempts.isNotEmpty ? _asMap(attempts.first) : {};
+  final attemptMetadata = _asMap(latestAttempt['metadata']);
+  final status =
+      overrideStatus ?? _asString(withdrawal['status'], fallback: 'PENDING');
+  final amount = _asString(withdrawal['amount'], fallback: '0.00');
+  final currency = _asString(withdrawal['currency'], fallback: 'NGN');
+  final bankName = _asString(
+    attemptMetadata['bankName'],
+    fallback: _asString(metadata['bankName'], fallback: 'Bank'),
+  );
+  final accountName = _asString(
+    attemptMetadata['accountName'],
+    fallback: _asString(metadata['accountName'], fallback: 'Account'),
+  );
+  final accountNumberMasked = _asString(
+    attemptMetadata['accountNumberMasked'],
+    fallback: _asString(
+      metadata['accountNumberMasked'],
+      fallback: '******',
+    ),
+  );
+  final providerStatus = _asString(
+    latestAttempt['providerStatus'],
+    fallback: status,
+  );
+  final providerReference = _asString(
+    latestAttempt['providerReference'],
+    fallback: _asString(
+      metadata['providerTransactionReference'],
+      fallback: _asString(withdrawal['reference']),
+    ),
+  );
+
+  return WithdrawalCompletionDetails(
+    reference: _asString(withdrawal['reference']),
+    status: status,
+    message: overrideMessage ?? _asString(withdrawal['message'], fallback: ''),
+    amount: amount,
+    currency: currency,
+    bankName: bankName,
+    accountName: accountName,
+    accountNumberMasked: accountNumberMasked,
+    providerStatus: providerStatus,
+    providerReference: providerReference,
+    createdAt: _asDateTime(withdrawal['createdAt']),
+    updatedAt: _asDateTime(withdrawal['updatedAt']),
+    providerCreatedAt: _asDateTime(latestAttempt['createdAt']),
+  );
+}
+
 class WithdrawalAuthorizationScreen extends StatefulWidget {
   final String reference;
 
@@ -67,6 +129,9 @@ class _WithdrawalAuthorizationScreenState
   bool _isSubmitting = false;
   bool _isResending = false;
   List<String> _otpRecipients = const [];
+  Timer? _statusPollTimer;
+  int _statusPollAttempts = 0;
+  Map<String, dynamic>? _polledWithdrawal;
 
   @override
   void initState() {
@@ -76,12 +141,58 @@ class _WithdrawalAuthorizationScreenState
 
   @override
   void dispose() {
+    _statusPollTimer?.cancel();
     _codeController.dispose();
     super.dispose();
   }
 
   void _loadWithdrawal() {
-    _withdrawalFuture = _fetchWithdrawal();
+    _statusPollTimer?.cancel();
+    _statusPollAttempts = 0;
+    _polledWithdrawal = null;
+    _withdrawalFuture = _fetchWithdrawal().then((withdrawal) {
+      if (mounted) {
+        _scheduleStatusPoll(withdrawal);
+      }
+      return withdrawal;
+    });
+  }
+
+  /// Mirrors the VTU order auto-check: a bounded background poll (4 attempts,
+  /// 4s then 7s apart) that keeps this screen fresh while the withdrawal is
+  /// still awaiting authorization, without removing pull-to-refresh.
+  void _scheduleStatusPoll(Map<String, dynamic> withdrawal) {
+    _statusPollTimer?.cancel();
+    if (_statusPollAttempts >= 4) return;
+
+    final status =
+        _asString(withdrawal['status'], fallback: 'PENDING').toUpperCase();
+    if (_terminalWithdrawalStatuses.contains(status)) return;
+
+    // Once authorization is no longer pending the inline completion view
+    // takes over with its own status polling.
+    final providerStatus = _asString(
+      _latestProviderStatus(withdrawal),
+      fallback: 'PENDING_AUTHORIZATION',
+    );
+    if (providerStatus != 'PENDING_AUTHORIZATION') return;
+
+    final delay = Duration(seconds: _statusPollAttempts == 0 ? 4 : 7);
+    _statusPollTimer = Timer(delay, () async {
+      if (!mounted) return;
+      _statusPollAttempts++;
+      try {
+        final refreshed = await _fetchWithdrawal();
+        if (!mounted) return;
+        setState(() => _polledWithdrawal = refreshed);
+        _scheduleStatusPoll(refreshed);
+      } catch (_) {
+        // Background refresh only; pull-to-refresh stays available.
+        if (mounted) {
+          _scheduleStatusPoll(withdrawal);
+        }
+      }
+    });
   }
 
   Future<Map<String, dynamic>> _fetchWithdrawal() async {
@@ -90,64 +201,6 @@ class _WithdrawalAuthorizationScreenState
     );
 
     return Map<String, dynamic>.from(response.data as Map);
-  }
-
-  WithdrawalCompletionDetails _completionDetails(
-    Map<String, dynamic> withdrawal, {
-    String? overrideMessage,
-    String? overrideStatus,
-  }) {
-    final metadata = _asMap(withdrawal['metadata']);
-    final attempts = _asList(withdrawal['transferAttempts']);
-    final latestAttempt = attempts.isNotEmpty ? _asMap(attempts.first) : {};
-    final attemptMetadata = _asMap(latestAttempt['metadata']);
-    final status =
-        overrideStatus ?? _asString(withdrawal['status'], fallback: 'PENDING');
-    final amount = _asString(withdrawal['amount'], fallback: '0.00');
-    final currency = _asString(withdrawal['currency'], fallback: 'NGN');
-    final bankName = _asString(
-      attemptMetadata['bankName'],
-      fallback: _asString(metadata['bankName'], fallback: 'Bank'),
-    );
-    final accountName = _asString(
-      attemptMetadata['accountName'],
-      fallback: _asString(metadata['accountName'], fallback: 'Account'),
-    );
-    final accountNumberMasked = _asString(
-      attemptMetadata['accountNumberMasked'],
-      fallback: _asString(
-        metadata['accountNumberMasked'],
-        fallback: '******',
-      ),
-    );
-    final providerStatus = _asString(
-      latestAttempt['providerStatus'],
-      fallback: status,
-    );
-    final providerReference = _asString(
-      latestAttempt['providerReference'],
-      fallback: _asString(
-        metadata['providerTransactionReference'],
-        fallback: _asString(withdrawal['reference']),
-      ),
-    );
-
-    return WithdrawalCompletionDetails(
-      reference: _asString(withdrawal['reference']),
-      status: status,
-      message:
-          overrideMessage ?? _asString(withdrawal['message'], fallback: ''),
-      amount: amount,
-      currency: currency,
-      bankName: bankName,
-      accountName: accountName,
-      accountNumberMasked: accountNumberMasked,
-      providerStatus: providerStatus,
-      providerReference: providerReference,
-      createdAt: _asDateTime(withdrawal['createdAt']),
-      updatedAt: _asDateTime(withdrawal['updatedAt']),
-      providerCreatedAt: _asDateTime(latestAttempt['createdAt']),
-    );
   }
 
   Future<void> _authorizeWithdrawal(Map<String, dynamic> withdrawal) async {
@@ -175,7 +228,7 @@ class _WithdrawalAuthorizationScreenState
       );
 
       final data = Map<String, dynamic>.from(response.data as Map);
-      final details = _completionDetails(
+      final details = _completionDetailsFromWithdrawal(
         withdrawal,
         overrideMessage: _asString(
           data['message'],
@@ -260,7 +313,7 @@ class _WithdrawalAuthorizationScreenState
         if (snapshot.connectionState == ConnectionState.waiting) {
           return Scaffold(
             backgroundColor: AppColors.background,
-            body: Center(
+            body: const Center(
               child: CircularProgressIndicator(),
             ),
           );
@@ -290,8 +343,8 @@ class _WithdrawalAuthorizationScreenState
           );
         }
 
-        final withdrawal = snapshot.data!;
-        final details = _completionDetails(withdrawal);
+        final withdrawal = _polledWithdrawal ?? snapshot.data!;
+        final details = _completionDetailsFromWithdrawal(withdrawal);
         final providerStatus = _asString(
           _latestProviderStatus(withdrawal),
           fallback: 'PENDING_AUTHORIZATION',
@@ -338,12 +391,12 @@ class _WithdrawalAuthorizationScreenState
                     children: [
                       _SummaryCard(
                           details: details, providerStatus: providerStatus),
-                      SizedBox(height: AppSpacing.lg),
+                      const SizedBox(height: AppSpacing.lg),
                       Text(
                         'Enter the authorization code sent to your email to finish this withdrawal.',
                         style: AppTextStyles.bodyL,
                       ),
-                      SizedBox(height: AppSpacing.md),
+                      const SizedBox(height: AppSpacing.md),
                       TextField(
                         controller: _codeController,
                         keyboardType: TextInputType.number,
@@ -371,13 +424,13 @@ class _WithdrawalAuthorizationScreenState
                           ),
                         ),
                       ),
-                      SizedBox(height: AppSpacing.md),
+                      const SizedBox(height: AppSpacing.md),
                       if (_otpRecipients.isNotEmpty) ...[
                         _InfoPanel(
                           text:
                               'Authorization code sent to ${_formatRecipients(_otpRecipients)}. Check that inbox before authorizing.',
                         ),
-                        SizedBox(height: AppSpacing.md),
+                        const SizedBox(height: AppSpacing.md),
                       ],
                       _WithdrawalActions(
                         isSubmitting: _isSubmitting,
@@ -385,7 +438,7 @@ class _WithdrawalAuthorizationScreenState
                         onResend: () => _resendCode(withdrawal),
                         onAuthorize: () => _authorizeWithdrawal(withdrawal),
                       ),
-                      SizedBox(height: AppSpacing.lg),
+                      const SizedBox(height: AppSpacing.lg),
                       const _InfoPanel(
                         text:
                             'Keep this code private. If the transfer is approved, we will take you to a success screen immediately.',
@@ -409,13 +462,96 @@ class _WithdrawalAuthorizationScreenState
   }
 }
 
-class WithdrawalCompletionScreen extends StatelessWidget {
+class WithdrawalCompletionScreen extends StatefulWidget {
   final WithdrawalCompletionDetails? details;
 
   const WithdrawalCompletionScreen({super.key, this.details});
 
   @override
+  State<WithdrawalCompletionScreen> createState() =>
+      _WithdrawalCompletionScreenState();
+}
+
+class _WithdrawalCompletionScreenState
+    extends State<WithdrawalCompletionScreen> {
+  final _apiClient = ApiClient();
+  WithdrawalCompletionDetails? _details;
+  Timer? _statusPollTimer;
+  int _statusPollAttempts = 0;
+  bool _hasBumpedWalletRefresh = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _adoptDetails(widget.details);
+  }
+
+  @override
+  void didUpdateWidget(covariant WithdrawalCompletionScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!identical(oldWidget.details, widget.details)) {
+      _adoptDetails(widget.details);
+    }
+  }
+
+  @override
+  void dispose() {
+    _statusPollTimer?.cancel();
+    super.dispose();
+  }
+
+  void _adoptDetails(WithdrawalCompletionDetails? details) {
+    _details = details;
+    if (details != null && details.status.toUpperCase() == 'SUCCESS') {
+      _bumpWalletRefreshOnce();
+    }
+    _scheduleStatusPoll();
+  }
+
+  void _bumpWalletRefreshOnce() {
+    if (_hasBumpedWalletRefresh) return;
+    _hasBumpedWalletRefresh = true;
+    walletRefreshSignal.bump();
+  }
+
+  /// Bounded background poll (mirrors the VTU order auto-check) so a
+  /// processing withdrawal resolves on screen without a manual refresh.
+  void _scheduleStatusPoll() {
+    _statusPollTimer?.cancel();
+    final details = _details;
+    if (details == null ||
+        details.reference.isEmpty ||
+        _statusPollAttempts >= 4 ||
+        _terminalWithdrawalStatuses.contains(details.status.toUpperCase())) {
+      return;
+    }
+
+    final delay = Duration(seconds: _statusPollAttempts == 0 ? 4 : 7);
+    _statusPollTimer = Timer(delay, () async {
+      final reference = _details?.reference;
+      if (!mounted || reference == null || reference.isEmpty) return;
+      _statusPollAttempts++;
+      try {
+        final response = await _apiClient.client.get(
+          '/api/payments/withdrawals/${Uri.encodeComponent(reference)}',
+        );
+        if (!mounted) return;
+        final withdrawal = Map<String, dynamic>.from(response.data as Map);
+        final refreshed = _completionDetailsFromWithdrawal(withdrawal);
+        setState(() => _details = refreshed);
+        if (refreshed.status.toUpperCase() == 'SUCCESS') {
+          _bumpWalletRefreshOnce();
+        }
+      } catch (_) {
+        // Background refresh only; the user can still navigate away.
+      }
+      _scheduleStatusPoll();
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final details = _details;
     final status = details?.status.toUpperCase() ?? 'PENDING';
     final isSuccess = status == 'SUCCESS';
     final isFailed = status == 'FAILED' || status == 'REVERSED';
@@ -470,7 +606,7 @@ class WithdrawalCompletionScreen extends StatelessWidget {
                           ? AppColors.success.withValues(alpha: 0.18)
                           : isFailed
                               ? AppColors.error.withValues(alpha: 0.18)
-                          : AppColors.warning.withValues(alpha: 0.18),
+                              : AppColors.warning.withValues(alpha: 0.18),
                     ),
                     boxShadow: [
                       BoxShadow(
@@ -508,7 +644,7 @@ class WithdrawalCompletionScreen extends StatelessWidget {
                           size: 42,
                         ),
                       ),
-                      SizedBox(height: AppSpacing.md),
+                      const SizedBox(height: AppSpacing.md),
                       Text(
                         title,
                         style: AppTextStyles.headingL.copyWith(
@@ -516,7 +652,7 @@ class WithdrawalCompletionScreen extends StatelessWidget {
                         ),
                         textAlign: TextAlign.center,
                       ),
-                      SizedBox(height: AppSpacing.xs),
+                      const SizedBox(height: AppSpacing.xs),
                       Text(
                         subtitle,
                         style: AppTextStyles.bodyM.copyWith(
@@ -525,38 +661,38 @@ class WithdrawalCompletionScreen extends StatelessWidget {
                         textAlign: TextAlign.center,
                       ),
                       if (details != null) ...[
-                        SizedBox(height: AppSpacing.lg),
+                        const SizedBox(height: AppSpacing.lg),
                         _StatusLine(
                           label: 'Reference',
-                          value: details!.reference,
+                          value: details.reference,
                         ),
-                        SizedBox(height: AppSpacing.sm),
+                        const SizedBox(height: AppSpacing.sm),
                         _StatusLine(
                           label: 'Amount',
                           value:
-                              '${details!.currency} ${NumberFormat('#,##0.00').format(double.tryParse(details!.amount) ?? 0)}',
+                              '${details.currency} ${NumberFormat('#,##0.00').format(double.tryParse(details.amount) ?? 0)}',
                         ),
-                        SizedBox(height: AppSpacing.sm),
+                        const SizedBox(height: AppSpacing.sm),
                         _StatusLine(
                           label: 'Bank',
-                          value: details!.bankName,
+                          value: details.bankName,
                         ),
-                        SizedBox(height: AppSpacing.sm),
+                        const SizedBox(height: AppSpacing.sm),
                         _StatusLine(
                           label: 'Account',
                           value:
-                              '${details!.accountName} • ${details!.accountNumberMasked}',
+                              '${details.accountName} • ${details.accountNumberMasked}',
                         ),
                       ],
                     ],
                   ),
                 ),
-                SizedBox(height: AppSpacing.lg),
+                const SizedBox(height: AppSpacing.lg),
                 _CompletionActions(
                   onViewReceipt: () {
                     if (details == null) return;
                     context.push(
-                      AppRoutes.withdrawReceiptFor(details!.reference),
+                      AppRoutes.withdrawReceiptFor(details.reference),
                       extra: details,
                     );
                   },
@@ -611,7 +747,7 @@ class _SummaryCard extends StatelessWidget {
                   color: AppColors.primary,
                 ),
               ),
-              SizedBox(width: AppSpacing.md),
+              const SizedBox(width: AppSpacing.md),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -622,7 +758,7 @@ class _SummaryCard extends StatelessWidget {
                         fontWeight: FontWeight.w900,
                       ),
                     ),
-                    SizedBox(height: 2),
+                    const SizedBox(height: 2),
                     Text(
                       providerStatus.replaceAll('_', ' '),
                       style: AppTextStyles.bodyS.copyWith(
@@ -634,16 +770,16 @@ class _SummaryCard extends StatelessWidget {
               ),
             ],
           ),
-          SizedBox(height: AppSpacing.md),
+          const SizedBox(height: AppSpacing.md),
           _StatusLine(label: 'Reference', value: details.reference),
-          SizedBox(height: AppSpacing.sm),
+          const SizedBox(height: AppSpacing.sm),
           _StatusLine(
             label: 'Amount',
             value: '${details.currency} $amount',
           ),
-          SizedBox(height: AppSpacing.sm),
+          const SizedBox(height: AppSpacing.sm),
           _StatusLine(label: 'Account', value: details.accountName),
-          SizedBox(height: AppSpacing.sm),
+          const SizedBox(height: AppSpacing.sm),
           _StatusLine(
             label: 'Masked',
             value: details.accountNumberMasked,
@@ -781,7 +917,7 @@ class _WithdrawalActions extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               resendButton,
-              SizedBox(height: AppSpacing.sm),
+              const SizedBox(height: AppSpacing.sm),
               authorizeButton,
             ],
           );
@@ -790,7 +926,7 @@ class _WithdrawalActions extends StatelessWidget {
         return Row(
           children: [
             Expanded(child: resendButton),
-            SizedBox(width: AppSpacing.sm),
+            const SizedBox(width: AppSpacing.sm),
             Expanded(child: authorizeButton),
           ],
         );
@@ -847,7 +983,7 @@ class _CompletionActions extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               receiptButton,
-              SizedBox(height: AppSpacing.sm),
+              const SizedBox(height: AppSpacing.sm),
               homeButton,
             ],
           );
@@ -856,7 +992,7 @@ class _CompletionActions extends StatelessWidget {
         return Row(
           children: [
             Expanded(child: receiptButton),
-            SizedBox(width: AppSpacing.sm),
+            const SizedBox(width: AppSpacing.sm),
             Expanded(child: homeButton),
           ],
         );
@@ -883,13 +1019,13 @@ class _WithdrawalErrorState extends StatelessWidget {
               color: AppColors.error,
               size: 48,
             ),
-            SizedBox(height: AppSpacing.md),
+            const SizedBox(height: AppSpacing.md),
             Text(
               'Could not load this withdrawal',
               style: AppTextStyles.labelL,
               textAlign: TextAlign.center,
             ),
-            SizedBox(height: AppSpacing.xs),
+            const SizedBox(height: AppSpacing.xs),
             Text(
               'Refresh the page and try again.',
               style: AppTextStyles.bodyM.copyWith(
@@ -897,7 +1033,7 @@ class _WithdrawalErrorState extends StatelessWidget {
               ),
               textAlign: TextAlign.center,
             ),
-            SizedBox(height: AppSpacing.lg),
+            const SizedBox(height: AppSpacing.lg),
             FilledButton(
               onPressed: onRetry,
               child: const Text('Retry'),

@@ -1,4 +1,4 @@
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, ConflictException } from '@nestjs/common';
 import { KycService } from './kyc.service';
 
 describe('KycService', () => {
@@ -47,6 +47,7 @@ describe('KycService', () => {
 
   const logger = {
     info: jest.fn(),
+    warn: jest.fn(),
   };
 
   const supabase = {
@@ -55,16 +56,24 @@ describe('KycService', () => {
   };
 
   const kycProviderGateway = {
-    submitVerification: jest.fn(),
-    createHostedSession: jest.fn(),
+    provider: 'YOUVERIFY',
+    verifyIdentity: jest.fn(),
+  };
+  const youverifyProvider = {
+    provider: 'YOUVERIFY',
+    verifyIdentity: jest.fn(),
     verifyCallbackSignature: jest.fn(),
     normalizeCallback: jest.fn(),
+  };
+  const kycWebhookInbox = {
+    accept: jest.fn(),
   };
 
   let service: KycService;
 
   beforeEach(() => {
     jest.clearAllMocks();
+    kycProviderGateway.provider = 'YOUVERIFY';
     prisma.$transaction.mockImplementation(async (input: unknown) => {
       if (typeof input === 'function') {
         return input(prisma);
@@ -79,42 +88,32 @@ describe('KycService', () => {
     supabase.createSignedReadUrl.mockResolvedValue(
       'https://storage.example/read/sign/kyc-1',
     );
-    kycProviderGateway.submitVerification.mockResolvedValue({
-      provider: 'MANUAL_REVIEW',
-      status: 'REVIEW_REQUIRED',
-      reference: 'manual-kyc-1',
-      checks: {
-        documentType: 'BVN',
-        identifierMasked: '*******8901',
-        manualReviewRequired: true,
-      },
-      responseHash: 'response-hash',
-    });
-    kycProviderGateway.createHostedSession.mockResolvedValue({
-      provider: 'SMILE_ID',
-      status: 'PENDING',
-      reference: 'kyc-session-1',
+    kycProviderGateway.verifyIdentity.mockResolvedValue({
+      provider: 'YOUVERIFY',
+      status: 'VERIFIED',
+      reference: 'youverify-verification-1',
       checks: {
         country: 'NG',
         documentType: 'BVN',
-        hostedCapture: true,
+        providerStatus: 'found',
+        identifierMasked: '*******8901',
       },
-      responseHash: 'smile-session-hash',
-      product: 'biometric_kyc',
-      environment: 'sandbox',
-      token: 'smile-web-token',
-      expiresInSeconds: 900,
+      responseHash: 'youverify-response-hash',
     });
-    kycProviderGateway.verifyCallbackSignature.mockReturnValue(true);
-    kycProviderGateway.normalizeCallback.mockReturnValue({
-      provider: 'SMILE_ID',
+    youverifyProvider.verifyCallbackSignature.mockReturnValue(true);
+    youverifyProvider.normalizeCallback.mockReturnValue({
+      provider: 'YOUVERIFY',
       status: 'VERIFIED',
-      reference: 'kyc-session-1',
+      reference: 'youverify-verification-1',
       checks: {
-        resultCode: '1020',
-        resultText: 'Exact Match',
+        providerStatus: 'found',
+        allValidationPassed: true,
       },
-      responseHash: 'smile-callback-hash',
+      responseHash: 'youverify-callback-hash',
+    });
+    kycWebhookInbox.accept.mockResolvedValue({
+      eventId: 'kyc-webhook-event-1',
+      duplicate: false,
     });
     prisma.user.findUnique.mockResolvedValue({
       kycStatus: 'PENDING',
@@ -125,7 +124,9 @@ describe('KycService', () => {
       config as any,
       logger as any,
       supabase as any,
-      kycProviderGateway,
+      kycProviderGateway as any,
+      youverifyProvider as any,
+      kycWebhookInbox as any,
     );
   });
 
@@ -145,102 +146,45 @@ describe('KycService', () => {
     );
   });
 
-  it('encrypts submitted BVN values and returns only a masked identifier', async () => {
+  it('verifies a consented identity through Youverify and promotes the KYC tier transactionally', async () => {
     prisma.kycDocument.findFirst.mockResolvedValue(null);
+    prisma.user.findUnique.mockResolvedValue({
+      fullName: 'Ada Okafor',
+      kycStatus: 'PENDING',
+      kycTier: 'TIER_0',
+    });
     prisma.kycDocument.create.mockImplementation(async ({ data }) => ({
-      id: 'kyc-1',
+      id: data.id,
       ...data,
-      createdAt: new Date('2026-05-21T00:00:00.000Z'),
-      updatedAt: new Date('2026-05-21T00:00:00.000Z'),
+      createdAt: new Date('2026-09-01T00:00:00.000Z'),
+      updatedAt: new Date('2026-09-01T00:00:00.000Z'),
     }));
-    prisma.user.update.mockResolvedValue({});
-
-    const result = await service.submitKyc('user-1', {
-      type: 'BVN',
-      idNumber: '12345678901',
-      documentObjectKey: 'kyc/user-1/kyc-1.pdf',
-    });
-
-    const createdArgs = prisma.kycDocument.create.mock.calls[0][0];
-    expect(createdArgs.data.idNumber).toMatch(/^enc:v1:/);
-    expect(createdArgs.data.idNumber).not.toContain('12345678901');
-    expect(kycProviderGateway.submitVerification).toHaveBeenCalledWith(
-      expect.objectContaining({
-        userId: 'user-1',
-        type: 'BVN',
-        identifierMasked: '*******8901',
-      }),
-    );
-    expect(prisma.kycVerification.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({
-        userId: 'user-1',
-        documentId: expect.any(String),
-        provider: 'MANUAL_REVIEW',
-        status: 'REVIEW_REQUIRED',
-        checks: expect.objectContaining({
-          identifierMasked: '*******8901',
-        }),
-        responseHash: 'response-hash',
-      }),
-    });
-    expect(result.idNumber).toBe('*******8901');
-    expect(result).not.toHaveProperty('documentUrl');
-  });
-
-  it('rejects incorrectly shaped BVN submissions', async () => {
-    await expect(
-      service.submitKyc('user-1', {
-        type: 'BVN',
-        idNumber: '12345',
-        documentObjectKey: 'kyc/user-1/kyc-1.pdf',
-      }),
-    ).rejects.toBeInstanceOf(BadRequestException);
-
-    expect(prisma.kycDocument.create).not.toHaveBeenCalled();
-  });
-
-  it('rejects document object keys outside the current user scope', async () => {
-    await expect(
-      service.submitKyc('user-1', {
-        type: 'NIN',
-        idNumber: '12345678901',
-        documentObjectKey: 'kyc/user-2/kyc-1.pdf',
-      }),
-    ).rejects.toBeInstanceOf(BadRequestException);
-  });
-
-  it('creates Smile ID hosted sessions without storing local ID numbers', async () => {
-    config.get.mockImplementation((key: string) => {
-      if (key === 'PII_ENCRYPTION_KEY') {
-        return 'test-pii-key-with-enough-entropy';
-      }
-      if (key === 'SMILE_ID_CALLBACK_URL') {
-        return 'https://api.example.com/api/webhooks/kyc/smile-id';
-      }
-      return undefined;
-    });
-    prisma.kycDocument.findFirst.mockResolvedValue(null);
-    prisma.kycDocument.create.mockImplementation(async ({ data }) => ({
-      id: 'kyc-1',
-      ...data,
-      createdAt: new Date('2026-06-10T00:00:00.000Z'),
-      updatedAt: new Date('2026-06-10T00:00:00.000Z'),
-    }));
+    prisma.kycDocument.findMany.mockResolvedValue([{ type: 'BVN' }]);
+    prisma.kycVerification.create.mockResolvedValue({});
     prisma.user.update.mockResolvedValue({});
     prisma.auditLog.create.mockResolvedValue({});
 
-    const result = await service.createSmileIdSession('user-1', {
+    const result = await service.verifyWithYouverify('user-1', {
       country: 'NG',
       type: 'BVN',
+      idNumber: '12345678901',
+      dateOfBirth: '1990-01-02',
       consentAccepted: true,
     });
 
-    expect(kycProviderGateway.createHostedSession).toHaveBeenCalledWith(
+    expect(kycProviderGateway.verifyIdentity).toHaveBeenCalledWith(
       expect.objectContaining({
         userId: 'user-1',
-        type: 'BVN',
         country: 'NG',
-        callbackUrl: 'https://api.example.com/api/webhooks/kyc/smile-id',
+        type: 'BVN',
+        identifier: '12345678901',
+        identifierMasked: '*******8901',
+        consentAccepted: true,
+        validation: {
+          firstName: 'Ada',
+          lastName: 'Okafor',
+          dateOfBirth: '1990-01-02',
+        },
       }),
     );
     expect(prisma.kycDocument.create).toHaveBeenCalledWith({
@@ -248,87 +192,390 @@ describe('KycService', () => {
         userId: 'user-1',
         type: 'BVN',
         documentUrl: null,
-        idNumber: null,
-        status: 'SUBMITTED',
+        idNumber: expect.stringMatching(/^enc:v1:/),
+        status: 'PENDING',
       }),
     });
-    expect(result.token).toBe('smile-web-token');
-    expect(result.document.idNumber).toBeNull();
+    expect(prisma.kycVerification.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        provider: 'YOUVERIFY',
+        status: 'PENDING',
+        reference: expect.stringMatching(/^pending:/),
+        consentRecordedAt: expect.any(Date),
+        consentVersion: 'youverify-subject-consent-v1',
+        consentSource: 'WEB_OR_MOBILE',
+      }),
+    });
+    expect(prisma.kycVerification.update).toHaveBeenCalledWith({
+      where: { id: expect.any(String) },
+      data: expect.objectContaining({
+        status: 'VERIFIED',
+        reference: 'youverify-verification-1',
+        responseHash: 'youverify-response-hash',
+      }),
+    });
+    expect(prisma.kycDocument.create.mock.invocationCallOrder[0]).toBeLessThan(
+      kycProviderGateway.verifyIdentity.mock.invocationCallOrder[0],
+    );
+    expect(prisma.user.update).toHaveBeenCalledWith({
+      where: { id: 'user-1' },
+      data: { kycStatus: 'VERIFIED', kycTier: 'TIER_1' },
+    });
     expect(prisma.auditLog.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
-        action: 'KYC_SMILE_SESSION_CREATED',
-        reference: 'kyc-session-1',
+        action: 'KYC_PROVIDER_RESULT',
+        reference: 'youverify-verification-1',
+      }),
+    });
+    expect(result).toEqual(
+      expect.objectContaining({
+        provider: 'YOUVERIFY',
+        verificationStatus: 'VERIFIED',
+        reference: 'youverify-verification-1',
+        idNumber: '*******8901',
+        kycTier: 'TIER_1',
+      }),
+    );
+  });
+
+  it('reserves the configured provider and forwards date of birth without persisting it', async () => {
+    kycProviderGateway.provider = 'NINJA';
+    kycProviderGateway.verifyIdentity.mockResolvedValueOnce({
+      provider: 'NINJA',
+      status: 'VERIFIED',
+      reference: 'ninja-verification-1',
+      checks: {
+        country: 'NG',
+        documentType: 'NIN',
+        providerStatus: 'found',
+        identifierMasked: '*******8901',
+      },
+      responseHash: 'ninja-response-hash',
+    });
+    prisma.user.findUnique.mockResolvedValue({
+      fullName: 'Ada Okafor',
+      kycStatus: 'PENDING',
+      kycTier: 'TIER_0',
+    });
+    prisma.kycDocument.create.mockImplementation(async ({ data }) => ({
+      id: data.id,
+      ...data,
+      createdAt: new Date('2026-09-01T00:00:00.000Z'),
+      updatedAt: new Date('2026-09-01T00:00:00.000Z'),
+    }));
+    prisma.kycDocument.findMany.mockResolvedValue([{ type: 'NIN' }]);
+    prisma.kycVerification.create.mockResolvedValue({});
+    prisma.kycVerification.update.mockResolvedValue({});
+    prisma.user.update.mockResolvedValue({});
+    prisma.auditLog.create.mockResolvedValue({});
+
+    await service.verifyWithYouverify('user-1', {
+      country: 'NG',
+      type: 'NIN',
+      idNumber: '12345678901',
+      dateOfBirth: '1990-01-02',
+      consentAccepted: true,
+    } as any);
+
+    expect(prisma.kycVerification.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ provider: 'NINJA' }),
+    });
+    expect(kycProviderGateway.verifyIdentity).toHaveBeenCalledWith(
+      expect.objectContaining({
+        validation: expect.objectContaining({
+          firstName: 'Ada',
+          lastName: 'Okafor',
+          dateOfBirth: '1990-01-02',
+        }),
+      }),
+    );
+    expect(
+      JSON.stringify(prisma.kycVerification.create.mock.calls),
+    ).not.toContain('1990-01-02');
+  });
+
+  it('releases a reserved KYC attempt when Youverify is unavailable', async () => {
+    prisma.user.findUnique.mockResolvedValue({
+      fullName: 'Ada Okafor',
+      kycStatus: 'PENDING',
+      kycTier: 'TIER_0',
+    });
+    prisma.kycDocument.create.mockImplementation(async ({ data }) => ({
+      id: data.id,
+      ...data,
+      createdAt: new Date('2026-09-01T00:00:00.000Z'),
+      updatedAt: new Date('2026-09-01T00:00:00.000Z'),
+    }));
+    prisma.kycVerification.create.mockImplementation(async ({ data }) => ({
+      id: 'verification-reserved',
+      ...data,
+    }));
+    prisma.kycDocument.update.mockResolvedValue({});
+    prisma.kycVerification.update.mockResolvedValue({});
+    prisma.auditLog.create.mockResolvedValue({});
+    kycProviderGateway.verifyIdentity.mockRejectedValue(
+      new Error('provider unavailable'),
+    );
+
+    await expect(
+      service.verifyWithYouverify('user-1', {
+        country: 'NG',
+        type: 'BVN',
+        idNumber: '12345678901',
+        dateOfBirth: '1990-01-02',
+        consentAccepted: true,
+      }),
+    ).rejects.toThrow('provider unavailable');
+
+    expect(prisma.kycDocument.update).toHaveBeenCalledWith({
+      where: { id: expect.any(String) },
+      data: expect.objectContaining({
+        status: 'REJECTED',
+        rejectionNote: 'Identity verification is temporarily unavailable',
+      }),
+    });
+    const reservedVerificationId =
+      prisma.kycVerification.create.mock.calls[0][0].data.id;
+    expect(prisma.kycVerification.update).toHaveBeenCalledWith({
+      where: { id: reservedVerificationId },
+      data: expect.objectContaining({
+        status: 'FAILED',
+        errorMessage: 'Identity verification is temporarily unavailable',
+      }),
+    });
+    expect(prisma.auditLog.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        action: 'KYC_PROVIDER_FAILURE',
       }),
     });
   });
 
-  it('processes signed Smile ID callbacks and promotes Ghana Card to tier 2', async () => {
-    const callbackTime = new Date().toISOString();
+  it('returns a conflict when an active attempt already exists for the identity type', async () => {
+    prisma.user.findUnique.mockResolvedValue({
+      fullName: 'Ada Okafor',
+      kycStatus: 'PENDING',
+      kycTier: 'TIER_0',
+    });
+    prisma.kycDocument.create.mockRejectedValue(
+      Object.assign(new Error('duplicate active attempt'), { code: 'P2002' }),
+    );
+
+    await expect(
+      service.verifyWithYouverify('user-1', {
+        country: 'NG',
+        type: 'BVN',
+        idNumber: '12345678901',
+        dateOfBirth: '1990-01-02',
+        consentAccepted: true,
+      }),
+    ).rejects.toBeInstanceOf(ConflictException);
+
+    expect(kycProviderGateway.verifyIdentity).not.toHaveBeenCalled();
+  });
+
+  it('rejects unsupported country and identity-type pairs before persistence', async () => {
+    prisma.kycDocument.create.mockResolvedValue({
+      id: 'should-not-be-created',
+      userId: 'user-1',
+      type: 'BVN',
+      documentUrl: null,
+      idNumber: null,
+      status: 'PENDING',
+    });
+
+    await expect(
+      service.verifyWithYouverify('user-1', {
+        country: 'GH',
+        type: 'BVN',
+        idNumber: '12345678901',
+        dateOfBirth: '1990-01-02',
+        consentAccepted: true,
+      }),
+    ).rejects.toThrow(
+      'Identity type is not supported for the selected country',
+    );
+
+    expect(prisma.kycDocument.create).not.toHaveBeenCalled();
+    expect(kycProviderGateway.verifyIdentity).not.toHaveBeenCalled();
+  });
+
+  it('rejects a future date of birth before persistence or a provider call', async () => {
+    kycProviderGateway.provider = 'NINJA';
+
+    await expect(
+      service.verifyIdentity('user-1', {
+        country: 'NG',
+        type: 'BVN',
+        idNumber: '12345678901',
+        dateOfBirth: '2999-01-01',
+        consentAccepted: true,
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+
+    expect(prisma.user.findUnique).not.toHaveBeenCalled();
+    expect(prisma.kycDocument.create).not.toHaveBeenCalled();
+    expect(kycProviderGateway.verifyIdentity).not.toHaveBeenCalled();
+  });
+
+  it('requires both legal names before reserving a Ninja attempt', async () => {
+    kycProviderGateway.provider = 'NINJA';
+    prisma.user.findUnique.mockResolvedValue({
+      fullName: 'Ada',
+      kycStatus: 'PENDING',
+      kycTier: 'TIER_0',
+    });
+
+    await expect(
+      service.verifyIdentity('user-1', {
+        country: 'NG',
+        type: 'NIN',
+        idNumber: '12345678901',
+        dateOfBirth: '1990-01-02',
+        consentAccepted: true,
+      }),
+    ).rejects.toThrow(
+      'Complete your legal first and last name before identity verification',
+    );
+
+    expect(prisma.kycDocument.create).not.toHaveBeenCalled();
+    expect(prisma.kycVerification.create).not.toHaveBeenCalled();
+    expect(kycProviderGateway.verifyIdentity).not.toHaveBeenCalled();
+  });
+
+  it('durably accepts a signed Youverify webhook without applying it inline', async () => {
+    youverifyProvider.verifyCallbackSignature.mockReturnValue(true);
+    youverifyProvider.normalizeCallback.mockReturnValue({
+      provider: 'YOUVERIFY',
+      status: 'VERIFIED',
+      reference: 'youverify-verification-1',
+      checks: {
+        providerStatus: 'found',
+        allValidationPassed: true,
+      },
+      responseHash: 'youverify-callback-hash',
+    });
+    kycWebhookInbox.accept.mockResolvedValue({
+      eventId: 'kyc-webhook-event-1',
+      duplicate: true,
+    });
+
+    const result = await service.processYouverifyCallback({
+      body: {
+        event: 'identity.completed',
+        apiVersion: 'v2',
+        data: { id: 'youverify-verification-1', status: 'found' },
+      },
+      rawBody:
+        '{"event":"identity.completed","apiVersion":"v2","data":{"id":"youverify-verification-1","status":"found"}}',
+      signatureHeader: 'signed-payload',
+    });
+
+    expect(youverifyProvider.verifyCallbackSignature).toHaveBeenCalledWith({
+      rawBody: expect.any(String),
+      signature: 'signed-payload',
+    });
+    expect(result).toEqual({
+      received: true,
+      duplicate: true,
+      eventId: 'kyc-webhook-event-1',
+    });
+    expect(kycWebhookInbox.accept).toHaveBeenCalledWith({
+      eventType: 'identity.completed',
+      result: expect.objectContaining({
+        reference: 'youverify-verification-1',
+      }),
+    });
+    expect(prisma.kycVerification.findUnique).not.toHaveBeenCalled();
+    expect(prisma.kycVerification.update).not.toHaveBeenCalled();
+    expect(prisma.auditLog.create).not.toHaveBeenCalled();
+  });
+
+  it('allows a verified callback to recover a prior transient failed result', async () => {
     prisma.kycVerification.findUnique.mockResolvedValue({
       id: 'verification-1',
       userId: 'user-1',
       documentId: 'kyc-1',
-      provider: 'SMILE_ID',
-      status: 'PENDING',
-      reference: 'kyc-session-1',
-      responseHash: 'old-hash',
+      provider: 'YOUVERIFY',
+      status: 'FAILED',
+      reference: 'youverify-verification-1',
+      responseHash: 'failed-response-hash',
       document: {
         id: 'kyc-1',
-        type: 'GHANA_CARD',
+        type: 'NIN',
         user: {
           kycStatus: 'SUBMITTED',
-          kycTier: 'TIER_0',
+          kycTier: 'TIER_1',
         },
       },
     });
-    prisma.kycVerification.update.mockResolvedValue({});
-    prisma.kycDocument.findMany.mockResolvedValue([{ type: 'GHANA_CARD' }]);
-    prisma.kycDocument.update.mockResolvedValue({
-      id: 'kyc-1',
-      status: 'VERIFIED',
-    });
+    prisma.kycVerification.updateMany.mockResolvedValue({ count: 1 });
+    prisma.kycDocument.update.mockResolvedValue({ status: 'VERIFIED' });
+    prisma.kycDocument.findMany.mockResolvedValue([
+      { type: 'BVN' },
+      { type: 'NIN' },
+    ]);
     prisma.user.update.mockResolvedValue({});
     prisma.auditLog.create.mockResolvedValue({});
 
-    const result = await service.processSmileIdCallback({
-      body: {
-        signature: 'signature',
-        timestamp: callbackTime,
-        result: {
-          PartnerParams: {
-            user_id: 'user-1',
-            job_id: 'kyc-session-1',
-          },
-          ResultCode: '1020',
-          ResultText: 'Exact Match',
-        },
-      },
+    const result = await service.applyYouverifyCallback({
+      provider: 'YOUVERIFY',
+      status: 'VERIFIED',
+      reference: 'youverify-verification-1',
+      checks: { providerStatus: 'found', allValidationPassed: true },
+      responseHash: 'verified-response-hash',
+      documentType: 'NIN',
+      country: 'NG',
     });
 
-    expect(kycProviderGateway.verifyCallbackSignature).toHaveBeenCalledWith({
-      signature: 'signature',
-      timestamp: callbackTime,
-    });
-    expect(prisma.kycVerification.update).toHaveBeenCalledWith({
-      where: { id: 'verification-1' },
-      data: expect.objectContaining({
-        status: 'VERIFIED',
-        responseHash: 'smile-callback-hash',
-      }),
-    });
-    expect(prisma.user.update).toHaveBeenCalledWith({
-      where: { id: 'user-1' },
-      data: { kycStatus: 'VERIFIED', kycTier: 'TIER_2' },
-    });
     expect(result).toEqual(
-      expect.objectContaining({
-        received: true,
-        duplicate: false,
-        status: 'VERIFIED',
-        kycStatus: 'VERIFIED',
-        kycTier: 'TIER_2',
-      }),
+      expect.objectContaining({ status: 'VERIFIED', kycTier: 'TIER_2' }),
     );
+    expect(prisma.kycVerification.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: 'verification-1',
+        status: { notIn: ['VERIFIED', 'REJECTED'] },
+      },
+      data: expect.objectContaining({ status: 'VERIFIED' }),
+    });
+  });
+
+  it('does not overwrite a terminal result won by a concurrent callback', async () => {
+    prisma.kycVerification.findUnique
+      .mockResolvedValueOnce({
+        id: 'verification-1',
+        userId: 'user-1',
+        documentId: 'kyc-1',
+        provider: 'YOUVERIFY',
+        status: 'FAILED',
+        reference: 'youverify-verification-1',
+        responseHash: 'failed-response-hash',
+        document: {
+          id: 'kyc-1',
+          type: 'NIN',
+          user: { kycStatus: 'SUBMITTED', kycTier: 'TIER_1' },
+        },
+      })
+      .mockResolvedValueOnce({ status: 'VERIFIED' });
+    prisma.kycVerification.updateMany.mockResolvedValue({ count: 0 });
+
+    const result = await service.applyYouverifyCallback({
+      provider: 'YOUVERIFY',
+      status: 'REJECTED',
+      reference: 'youverify-verification-1',
+      checks: { providerStatus: 'rejected' },
+      responseHash: 'rejected-response-hash',
+      documentType: 'NIN',
+      country: 'NG',
+    });
+
+    expect(result).toEqual({
+      duplicate: false,
+      ignored: true,
+      status: 'VERIFIED',
+    });
+    expect(prisma.kycDocument.update).not.toHaveBeenCalled();
+    expect(prisma.user.update).not.toHaveBeenCalled();
+    expect(prisma.auditLog.create).not.toHaveBeenCalled();
   });
 
   it('audits admin document access when creating a signed review URL', async () => {
@@ -360,6 +607,64 @@ describe('KycService', () => {
         targetId: 'kyc-1',
       }),
     });
+  });
+
+  it('returns whitelisted provider evidence for admin review without raw PII', async () => {
+    prisma.kycDocument.findMany.mockResolvedValue([
+      {
+        id: 'kyc-provider-1',
+        userId: 'user-1',
+        type: 'NIN',
+        idNumber: '12345678901',
+        documentUrl: null,
+        status: 'SUBMITTED',
+        createdAt: new Date('2026-09-01T00:00:00.000Z'),
+        user: {
+          id: 'user-1',
+          email: 'ada@example.com',
+          phone: '+2348012345678',
+          kycStatus: 'SUBMITTED',
+          kycTier: 'TIER_1',
+        },
+        verifications: [
+          {
+            provider: 'YOUVERIFY',
+            status: 'REVIEW_REQUIRED',
+            checks: {
+              providerStatus: 'found',
+              allValidationPassed: false,
+              dataValidation: true,
+              country: 'NG',
+              providerType: 'nin',
+              identifierMasked: '*******8901',
+              idNumber: '12345678901',
+              image: 'data:image/jpeg;base64,sensitive',
+            },
+          },
+        ],
+      },
+    ]);
+    prisma.kycDocument.count.mockResolvedValue(1);
+
+    const result = await service.getAllPendingKyc(1, 20);
+
+    expect(result.documents[0]).toEqual(
+      expect.objectContaining({
+        reviewSource: 'PROVIDER',
+        reviewEvidence: {
+          provider: 'YOUVERIFY',
+          status: 'REVIEW_REQUIRED',
+          providerStatus: 'found',
+          allValidationPassed: false,
+          dataValidation: true,
+          country: 'NG',
+          providerType: 'nin',
+          identifierMasked: '*******8901',
+        },
+      }),
+    );
+    expect(JSON.stringify(result)).not.toContain('12345678901');
+    expect(JSON.stringify(result)).not.toContain('base64');
   });
 
   it('audits admin KYC review decisions without raw identifiers', async () => {
@@ -485,6 +790,48 @@ describe('KycService', () => {
 
     expect(prisma.user.update).toHaveBeenCalledWith({
       where: { id: 'user-1' },
+      data: { kycStatus: 'VERIFIED', kycTier: 'TIER_2' },
+    });
+  });
+
+  it('promotes a Ghana user with verified passport and voter card to tier 2', async () => {
+    prisma.kycDocument.findUnique.mockResolvedValue({
+      id: 'kyc-gh-2',
+      userId: 'user-gh',
+      type: 'VOTERS_CARD',
+      idNumber: 'GHA-12345',
+      status: 'SUBMITTED',
+      rejectionNote: null,
+      reviewedBy: null,
+      reviewedAt: null,
+      user: { id: 'user-gh', kycTier: 'TIER_1' },
+    });
+    prisma.kycDocument.update.mockResolvedValue({
+      id: 'kyc-gh-2',
+      userId: 'user-gh',
+      type: 'VOTERS_CARD',
+      idNumber: 'GHA-12345',
+      status: 'VERIFIED',
+      rejectionNote: 'Voter card matched profile',
+      reviewedBy: 'admin-1',
+      reviewedAt: new Date('2026-09-02T00:00:00.000Z'),
+    });
+    prisma.kycDocument.findMany.mockResolvedValue([
+      { type: 'PASSPORT' },
+      { type: 'VOTERS_CARD' },
+    ]);
+    prisma.kycVerification.updateMany.mockResolvedValue({ count: 1 });
+    prisma.user.update.mockResolvedValue({});
+    prisma.auditLog.create.mockResolvedValue({});
+
+    await service.reviewKyc(
+      'kyc-gh-2',
+      { status: 'VERIFIED', rejectionNote: 'Voter card matched profile' },
+      'admin-1',
+    );
+
+    expect(prisma.user.update).toHaveBeenCalledWith({
+      where: { id: 'user-gh' },
       data: { kycStatus: 'VERIFIED', kycTier: 'TIER_2' },
     });
   });

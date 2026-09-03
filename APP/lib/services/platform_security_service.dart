@@ -1,12 +1,12 @@
-/// Repository-contained gate for launch-time mobile hardening that still
-/// depends on platform adapters or operator-managed trust material.
-///
-/// This file intentionally does NOT invent certificate pins, root-detection
-/// heuristics, or provider secrets. Production enforcement should be wired only
-/// after the app has:
-/// 1. A platform HTTP adapter that can bind to SPKI/certificate pins.
-/// 2. A vetted Android/iOS device-integrity implementation.
-/// 3. An operational rotation runbook for replacing pins without downtime.
+// Repository-contained gate for launch-time mobile hardening that still
+// depends on platform adapters or operator-managed trust material.
+//
+// This file intentionally does NOT invent certificate pins, root-detection
+// heuristics, or provider secrets. Production enforcement should be wired only
+// after the app has:
+// 1. A platform HTTP adapter that can bind to SPKI/certificate pins.
+// 2. A vetted Android/iOS device-integrity implementation.
+// 3. An operational rotation runbook for replacing pins without downtime.
 
 enum DeviceIntegrityRisk {
   unavailable,

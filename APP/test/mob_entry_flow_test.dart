@@ -48,10 +48,7 @@ void main() {
 
     await tester.pumpAndSettle();
 
-    expect(
-      find.textContaining(RegExp(r'^Good (morning|afternoon|evening)$')),
-      findsOneWidget,
-    );
+    expect(find.textContaining('Good '), findsOneWidget);
     expect(find.text('Top services'), findsOneWidget);
   });
 

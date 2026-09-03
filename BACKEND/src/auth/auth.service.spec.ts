@@ -50,6 +50,7 @@ describe('AuthService Supabase integration', () => {
     setInitialPin: jest.fn(),
     verifyPin: jest.fn(),
     setResetHold: jest.fn(),
+    getStatus: jest.fn(),
   };
 
   const referrals = {
@@ -60,6 +61,7 @@ describe('AuthService Supabase integration', () => {
   const prisma = {
     user: {
       update: jest.fn(),
+      updateMany: jest.fn(),
     },
     refreshToken: {
       create: jest.fn(),
@@ -102,12 +104,18 @@ describe('AuthService Supabase integration', () => {
 
     prisma.$transaction.mockImplementation(async (callback) =>
       callback({
+        user: {
+          update: prisma.user.update,
+          updateMany: prisma.user.updateMany,
+        },
         refreshToken: {
           create: prisma.refreshToken.create,
           update: prisma.refreshToken.update,
         },
       }),
     );
+    prisma.user.update.mockResolvedValue({ failedAttempts: 1 });
+    prisma.user.updateMany.mockResolvedValue({ count: 0 });
   });
 
   it('registers users with public Supabase auth and stores role in app metadata', async () => {
@@ -214,9 +222,42 @@ describe('AuthService Supabase integration', () => {
       service.login({ email: 'ada@example.com', password: 'WrongPassword1' }),
     ).rejects.toThrow('Unable to sign in with those credentials');
 
+    expect(prisma.user.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: 'user-1',
+        lockedUntil: { lte: expect.any(Date) },
+      },
+      data: { failedAttempts: 0, lockedUntil: null },
+    });
     expect(prisma.user.update).toHaveBeenCalledWith({
       where: { id: 'user-1' },
-      data: { failedAttempts: 1, lockedUntil: null },
+      data: { failedAttempts: { increment: 1 } },
+      select: { failedAttempts: true },
+    });
+  });
+
+  it('locks the account when an atomic failed-login increment reaches the threshold', async () => {
+    users.findByEmail.mockResolvedValue({
+      id: 'user-1',
+      email: 'ada@example.com',
+      failedAttempts: 4,
+      lockedUntil: null,
+    });
+    prisma.user.update
+      .mockResolvedValueOnce({ failedAttempts: 5 })
+      .mockResolvedValueOnce({ id: 'user-1' });
+    supabase.authClient.auth.signInWithPassword.mockResolvedValue({
+      data: {},
+      error: { message: 'Invalid login credentials' },
+    });
+
+    await expect(
+      service.login({ email: 'ada@example.com', password: 'WrongPassword1' }),
+    ).rejects.toThrow('Unable to sign in with those credentials');
+
+    expect(prisma.user.update).toHaveBeenNthCalledWith(2, {
+      where: { id: 'user-1' },
+      data: { lockedUntil: expect.any(Date) },
     });
   });
 
@@ -379,6 +420,26 @@ describe('AuthService Supabase integration', () => {
         targetId: 'user-1',
       }),
     });
+  });
+
+  it('returns server-authoritative transaction PIN status and verifies the existing PIN', async () => {
+    transactionPin.getStatus.mockResolvedValue({
+      configured: true,
+      pinLength: 4,
+      resetHoldUntil: null,
+      locked: false,
+    });
+
+    await expect(service.getTransactionPinStatus('user-1')).resolves.toEqual({
+      configured: true,
+      pinLength: 4,
+      resetHoldUntil: null,
+      locked: false,
+    });
+    await expect(
+      service.verifyTransactionPin('user-1', '1234'),
+    ).resolves.toEqual({ verified: true });
+    expect(transactionPin.verifyPin).toHaveBeenCalledWith('user-1', '1234');
   });
 
   it('rejects transaction PIN setup when PIN already exists', async () => {

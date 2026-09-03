@@ -459,6 +459,52 @@ class TpTransactionResultView extends StatefulWidget {
     this.secondaryAction,
   });
 
+  /// Presents this result as a full-screen route and completes when dismissed.
+  /// Supplies a default "Done" action that pops the route, so a call site only
+  /// needs the outcome data. Keeps all presentation concerns in this widget so
+  /// screens stay thin.
+  static Future<void> present(
+    BuildContext context, {
+    required TpTxStatus status,
+    required String title,
+    required String message,
+    String? amount,
+    List<TpDetailRow> details = const [],
+    String primaryLabel = 'Done',
+    VoidCallback? onPrimary,
+    String? secondaryLabel,
+    VoidCallback? onSecondary,
+  }) {
+    return Navigator.of(context, rootNavigator: true).push<void>(
+      MaterialPageRoute<void>(
+        fullscreenDialog: true,
+        builder: (routeContext) {
+          return Scaffold(
+            backgroundColor: AppColors.background,
+            body: TpTransactionResultView(
+              status: status,
+              title: title,
+              message: message,
+              amount: amount,
+              details: details,
+              primaryAction: ElevatedButton(
+                onPressed: onPrimary ?? () => Navigator.of(routeContext).pop(),
+                child: Text(primaryLabel),
+              ),
+              secondaryAction: secondaryLabel == null
+                  ? null
+                  : OutlinedButton(
+                      onPressed: onSecondary ??
+                          () => Navigator.of(routeContext).pop(),
+                      child: Text(secondaryLabel),
+                    ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
   @override
   State<TpTransactionResultView> createState() =>
       _TpTransactionResultViewState();
