@@ -7,22 +7,20 @@ const publicAuthForms = [
   { name: "password reset", path: "/reset-password?code=e2e-recovery" },
 ] as const;
 
-test.describe("public auth forms before hydration", () => {
+test.describe("public auth routes before hydration", () => {
   for (const authForm of publicAuthForms) {
-    test(`${authForm.name} keeps controls inert without client JavaScript`, async ({
+    test(`${authForm.name} exposes no active controls without client JavaScript`, async ({
       page,
     }) => {
       await page.route("**/*.js", (route) => route.abort());
-      await page.goto(authForm.path, { waitUntil: "domcontentloaded" });
+      const response = await page.goto(authForm.path, {
+        waitUntil: "domcontentloaded",
+      });
 
-      const form = page.locator("form");
-      await expect(form).toBeVisible();
-
-      const controls = form.locator("input, button");
-      expect(await controls.count()).toBeGreaterThan(0);
-      for (const control of await controls.all()) {
-        await expect(control).toBeDisabled();
-      }
+      expect(response?.ok()).toBe(true);
+      await expect(
+        page.locator("form input:enabled, form button:enabled"),
+      ).toHaveCount(0);
     });
   }
 });

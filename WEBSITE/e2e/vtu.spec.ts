@@ -27,14 +27,15 @@ function body<T>(route: Route): T {
   return JSON.parse(value) as T;
 }
 
+function encodedSessionCookie() {
+  return `base64-${Buffer.from(JSON.stringify(session), "utf8").toString("base64url")}`;
+}
+
 async function installHarness(page: Page) {
-  const e2eAuthToken = process.env.TRUSTPAY_E2E_AUTH_BYPASS_TOKEN;
-  if (!e2eAuthToken) throw new Error("Missing local E2E authentication token");
-  await page.setExtraHTTPHeaders({ "x-trustpay-e2e-auth": e2eAuthToken });
   await page.context().addCookies([
     {
-      name: "trustpay.e2e-auth",
-      value: e2eAuthToken,
+      name: "supabase.auth.token",
+      value: encodedSessionCookie(),
       domain: "127.0.0.1",
       path: "/",
       httpOnly: true,
