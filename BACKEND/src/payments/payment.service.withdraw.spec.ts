@@ -39,11 +39,6 @@ describe('PaymentService withdrawals', () => {
   const wallets = {
     getWallet: jest.fn(),
   };
-  const users = {};
-  const paystack = {
-    createTransferRecipient: jest.fn(),
-    initiateTransfer: jest.fn(),
-  };
   const monnifyBanks = {
     listBanks: jest.fn(),
     resolveBankAccount: jest.fn(),
@@ -52,7 +47,6 @@ describe('PaymentService withdrawals', () => {
     resendTransferOtp: jest.fn(),
     getTransferStatus: jest.fn(),
   };
-  const flutterwave = {};
   const config = {
     get: jest.fn((key: string) =>
       key === 'BANK_ACCOUNT_ENCRYPTION_KEY'
@@ -68,7 +62,6 @@ describe('PaymentService withdrawals', () => {
     warn: jest.fn(),
     error: jest.fn(),
   };
-  const http = {};
   const ledger = {
     debitWallet: jest.fn(),
     creditWallet: jest.fn(),
@@ -84,13 +77,9 @@ describe('PaymentService withdrawals', () => {
     service = new PaymentService(
       prisma,
       wallets as any,
-      users as any,
-      paystack as any,
-      flutterwave as any,
       monnifyBanks as any,
       config as any,
       logger as any,
-      http as any,
       ledger as any,
       transactionPin as any,
     );

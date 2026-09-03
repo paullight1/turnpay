@@ -17,10 +17,8 @@ import type { RawBodyRequest } from '../../common/types/request-context';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../prisma/prisma.service';
 import {
-  FlutterwaveWebhookDto,
   MonnifyWebhookDto,
   PaymentWebhookInboxDto,
-  PaystackWebhookDto,
 } from './dto/payment-webhook.dto';
 import { WebhookInboxService } from './webhook-inbox.service';
 
@@ -33,102 +31,6 @@ export class WebhookController {
     private readonly logger: PinoLogger,
     private readonly prisma: PrismaService,
   ) {}
-
-  @Post('paystack')
-  @Throttle({ default: { limit: 100, ttl: 60000 } })
-  async handlePaystackWebhook(
-    @Headers('x-paystack-signature') signature: string,
-    @Req() req: RawBodyRequest,
-    @Body() body: unknown,
-  ) {
-    const rawBody = req.rawBody;
-
-    if (!signature) {
-      this.logger.warn('Missing Paystack webhook signature');
-      throw new BadRequestException('Missing signature header');
-    }
-
-    if (!rawBody) {
-      this.logger.warn('Missing raw body for Paystack webhook');
-      throw new BadRequestException('Missing request body');
-    }
-
-    const isValid = this.paymentService.verifyPaystackSignature(
-      rawBody,
-      signature,
-    );
-
-    if (!isValid) {
-      this.logger.warn('Invalid Paystack webhook signature');
-      throw new BadRequestException('Invalid signature');
-    }
-
-    const payload = this.validateBody(PaystackWebhookDto, body);
-
-    this.logger.info(
-      { event: payload.event, reference: payload.data.reference },
-      'Paystack webhook received',
-    );
-
-    await this.acceptWebhookEvent({
-      provider: 'PAYSTACK',
-      eventType: payload.event,
-      providerReference: payload.data.reference,
-      payload: body as Record<string, unknown>,
-    });
-
-    return { received: true };
-  }
-
-  @Post('flutterwave')
-  @Throttle({ default: { limit: 100, ttl: 60000 } })
-  async handleFlutterwaveWebhook(
-    @Headers('verif-hash') verifHash: string,
-    @Headers('flw-signature') flwSignature: string,
-    @Req() req: RawBodyRequest,
-    @Body() body: unknown,
-  ) {
-    const rawBody = req.rawBody;
-
-    if (flwSignature && rawBody) {
-      const isValid = this.paymentService.verifyFlutterwaveSignature(
-        rawBody,
-        flwSignature,
-      );
-
-      if (!isValid) {
-        this.logger.warn('Invalid Flutterwave webhook signature');
-        throw new BadRequestException('Invalid signature');
-      }
-    } else if (verifHash) {
-      const isValid =
-        this.paymentService.verifyFlutterwaveSecretHash(verifHash);
-
-      if (!isValid) {
-        this.logger.warn('Invalid Flutterwave webhook secret hash');
-        throw new BadRequestException('Invalid signature');
-      }
-    } else {
-      throw new BadRequestException('Missing webhook verification headers');
-    }
-
-    const payload = this.validateBody(FlutterwaveWebhookDto, body);
-
-    this.logger.info(
-      { event: payload.event, tx_ref: payload.data.tx_ref },
-      'Flutterwave webhook received',
-    );
-
-    const transferReference = payload.data.reference || payload.data.tx_ref;
-    await this.acceptWebhookEvent({
-      provider: 'FLUTTERWAVE',
-      eventType: payload.event,
-      providerReference: transferReference,
-      payload: body as Record<string, unknown>,
-    });
-
-    return { received: true };
-  }
 
   @Post('monnify')
   @Throttle({ default: { limit: 100, ttl: 60000 } })
@@ -150,42 +52,39 @@ export class WebhookController {
     }
 
     if (
-      !this.verifyHmacHex(
-        'sha512',
-        rawBody,
-        signature,
-        'MONNIFY_WEBHOOK_SECRET',
-      )
+      !this.verifyHmacHex('sha512', rawBody, signature, 'MONNIFY_SECRET_KEY')
     ) {
       this.logger.warn('Invalid Monnify webhook signature');
       throw new BadRequestException('Invalid signature');
     }
 
-    const payload = this.validateBody(MonnifyWebhookDto, body);
+    const payload = this.validateProviderBody(MonnifyWebhookDto, body);
     const eventType = payload.eventType;
     const data = payload.eventData;
     const providerReference =
       data?.transactionReference || data?.paymentReference;
+
+    if (!providerReference) {
+      throw new BadRequestException('Monnify provider reference is required');
+    }
 
     this.logger.info(
       { event: eventType, reference: providerReference },
       'Monnify webhook received',
     );
 
-    if (providerReference) {
-      await this.acceptWebhookEvent({
-        provider: 'MONNIFY',
-        eventType,
-        providerReference,
-        payload: body as Record<string, unknown>,
-      });
-    }
+    await this.acceptWebhookEvent({
+      provider: 'MONNIFY',
+      eventType,
+      providerReference,
+      payload: body as Record<string, unknown>,
+    });
 
     return { received: true };
   }
 
   private async acceptWebhookEvent(body: {
-    provider: 'PAYSTACK' | 'FLUTTERWAVE' | 'MONNIFY';
+    provider: 'MONNIFY';
     eventType: string;
     providerReference: string;
     payload: Record<string, unknown>;
@@ -232,11 +131,7 @@ export class WebhookController {
     receivedSignature: string,
     secretEnvName: string,
   ) {
-    const secret =
-      this.configService.get<string>(secretEnvName) ||
-      (secretEnvName === 'MONNIFY_WEBHOOK_SECRET'
-        ? this.configService.getOrThrow<string>('MONNIFY_SECRET_KEY')
-        : this.configService.getOrThrow<string>(secretEnvName));
+    const secret = this.configService.getOrThrow<string>(secretEnvName);
     const expected = createHmac(algorithm, secret)
       .update(rawBody)
       .digest('hex');
@@ -263,6 +158,28 @@ export class WebhookController {
     const errors = validateSync(instance, {
       whitelist: true,
       forbidNonWhitelisted: true,
+    });
+
+    if (errors.length > 0) {
+      throw new BadRequestException(this.extractValidationMessage(errors[0]));
+    }
+
+    return instance;
+  }
+
+  /**
+   * Provider payloads are versioned outside TRUSTPAY and legitimately gain new
+   * fields over time. Signatures establish authenticity; DTO validation below
+   * then validates and extracts only the fields our financial logic consumes.
+   */
+  private validateProviderBody<T extends object>(
+    dtoClass: new () => T,
+    body: unknown,
+  ): T {
+    const instance = plainToInstance(dtoClass, body);
+    const errors = validateSync(instance, {
+      whitelist: true,
+      forbidNonWhitelisted: false,
     });
 
     if (errors.length > 0) {

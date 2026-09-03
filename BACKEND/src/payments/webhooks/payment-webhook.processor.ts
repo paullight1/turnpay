@@ -83,97 +83,11 @@ export class PaymentWebhookProcessorService {
 
   private async routeEvent(event: InboxEventRecord) {
     switch (event.provider) {
-      case 'PAYSTACK':
-        return this.processPaystackEvent(event);
-      case 'FLUTTERWAVE':
-        return this.processFlutterwaveEvent(event);
       case 'MONNIFY':
         return this.processMonnifyEvent(event);
       default:
         return { ignored: true, reason: 'Unsupported provider' };
     }
-  }
-
-  private async processPaystackEvent(event: InboxEventRecord) {
-    const payload = this.asRecord(event.payload);
-    const data = this.getRecord(payload, 'data');
-    const eventType = this.getString(payload, 'event');
-    const reference = this.getString(data, 'reference');
-
-    if (!reference) {
-      return { ignored: true, reason: 'Missing paystack reference' };
-    }
-
-    if (eventType?.startsWith('transfer.')) {
-      await this.paymentService.processTransferWebhook({
-        provider: 'paystack',
-        eventType,
-        providerReference: reference,
-        providerStatus: this.getString(data, 'status') || 'PENDING',
-        rawPayload: payload,
-      });
-
-      return { routed: 'transfer' };
-    }
-
-    const amount = this.getNumber(data, 'amount');
-    if (eventType === 'charge.success' && amount !== null) {
-      await this.paymentService.processWebhookDeposit({
-        provider: 'paystack',
-        eventType,
-        reference,
-        status: this.getString(data, 'status') || 'PENDING',
-        amount: new Decimal(amount).div(100),
-        currency: this.getString(data, 'currency') || 'NGN',
-        rawPayload: payload,
-      });
-
-      return { routed: 'deposit' };
-    }
-
-    return { ignored: true, reason: 'Unhandled paystack event' };
-  }
-
-  private async processFlutterwaveEvent(event: InboxEventRecord) {
-    const payload = this.asRecord(event.payload);
-    const data = this.getRecord(payload, 'data');
-    const eventType = this.getString(payload, 'event');
-    const transferReference =
-      this.getString(data, 'reference') || this.getString(data, 'tx_ref');
-
-    if (!transferReference) {
-      return { ignored: true, reason: 'Missing flutterwave reference' };
-    }
-
-    if (eventType?.startsWith('transfer')) {
-      await this.paymentService.processTransferWebhook({
-        provider: 'flutterwave',
-        eventType,
-        providerReference: transferReference,
-        providerStatus: this.getString(data, 'status') || 'PENDING',
-        rawPayload: payload,
-      });
-
-      return { routed: 'transfer' };
-    }
-
-    const txRef = this.getString(data, 'tx_ref');
-    const amount = this.getNumber(data, 'amount');
-    if (eventType === 'charge.completed' && txRef && amount !== null) {
-      await this.paymentService.processWebhookDeposit({
-        provider: 'flutterwave',
-        eventType,
-        reference: txRef,
-        status: this.getString(data, 'status') || 'PENDING',
-        amount,
-        currency: this.getString(data, 'currency') || 'NGN',
-        rawPayload: payload,
-      });
-
-      return { routed: 'deposit' };
-    }
-
-    return { ignored: true, reason: 'Unhandled flutterwave event' };
   }
 
   private async processMonnifyEvent(event: InboxEventRecord) {
@@ -290,7 +204,16 @@ export class PaymentWebhookProcessorService {
     key: string,
   ): number | null {
     const value = record[key];
-    return typeof value === 'number' ? value : null;
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return value;
+    }
+
+    if (typeof value === 'string' && /^\d+(?:\.\d+)?$/.test(value)) {
+      const parsed = Number(value);
+      return Number.isFinite(parsed) ? parsed : null;
+    }
+
+    return null;
   }
 
   private toOptionalDecimal(

@@ -12,37 +12,7 @@ import {
 } from '../../common/dto/query.dto';
 
 const SUPPORTED_CURRENCIES = ['NGN', 'GHS'] as const;
-const PAYMENT_CHANNELS = ['card', 'bank', 'ussd', 'mobile_money'] as const;
-const PAYMENT_PROVIDERS = ['paystack', 'flutterwave'] as const;
 const WITHDRAWAL_PROVIDERS = ['monnify'] as const;
-
-export class FundWalletDto {
-  @Transform(({ value }) => normalizeDecimalInput(value))
-  @IsString()
-  @Matches(MONEY_AMOUNT_PATTERN, {
-    message: 'amount must be a positive decimal with at most 2 decimal places',
-  })
-  amount: string;
-
-  @IsString()
-  @IsIn(SUPPORTED_CURRENCIES)
-  currency: (typeof SUPPORTED_CURRENCIES)[number];
-
-  @IsOptional()
-  @IsString()
-  @IsIn(PAYMENT_CHANNELS)
-  channel?: (typeof PAYMENT_CHANNELS)[number];
-
-  @IsOptional()
-  @IsString()
-  @IsIn(PAYMENT_PROVIDERS)
-  provider?: (typeof PAYMENT_PROVIDERS)[number];
-
-  @IsOptional()
-  @IsString()
-  @MaxLength(254)
-  email?: string;
-}
 
 export class WithdrawDto {
   @Transform(({ value }) => normalizeDecimalInput(value))

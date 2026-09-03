@@ -58,13 +58,9 @@ describe('PaymentService.reconcilePendingWithdrawals', () => {
     service = new PaymentService(
       prisma as PrismaService,
       {} as any,
-      {} as any,
-      {} as any,
-      {} as any,
       monnifyBanks as any,
       config as any,
       logger as any,
-      {} as any,
       ledger as any,
       {} as any,
     );

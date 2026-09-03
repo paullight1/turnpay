@@ -27,7 +27,7 @@ import {
 } from './providers/banking-provider.types';
 import { formatKycTier, isKycTierAtLeast } from '../common/utils/kyc-tier';
 
-type PrismaProvider = 'PAYSTACK' | 'FLUTTERWAVE' | 'MONNIFY';
+type PrismaProvider = 'MONNIFY';
 
 @Injectable()
 export class BankingService {
@@ -57,6 +57,10 @@ export class BankingService {
       },
       orderBy: { createdAt: 'desc' },
     });
+  }
+
+  async getTransferStatus(reference: string) {
+    return this.monnifyVirtualAccounts.getTransferStatus(reference);
   }
 
   async provisionVirtualAccount(
@@ -438,11 +442,7 @@ export class BankingService {
   private normalizeProvider(provider: string): PrismaProvider;
   private normalizeProvider(provider: string): PrismaProvider {
     const normalized = provider.toUpperCase();
-    if (
-      normalized !== 'PAYSTACK' &&
-      normalized !== 'FLUTTERWAVE' &&
-      normalized !== 'MONNIFY'
-    ) {
+    if (normalized !== 'MONNIFY') {
       throw new BadRequestException('Unsupported provider');
     }
     return normalized;

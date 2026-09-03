@@ -27,8 +27,6 @@ import {
 } from '@prisma/client';
 import { Decimal } from '@prisma/client/runtime/library';
 import { LedgerService } from '../wallets/ledger.service';
-import { PaystackProvider } from '../payments/providers/paystack.provider';
-import { FlutterwaveProvider } from '../payments/providers/flutterwave.provider';
 import { SupabaseService } from '../supabase/supabase.service';
 import { VtuService } from '../vtu/vtu.service';
 import { BankingService } from '../banking/banking.service';
@@ -57,8 +55,6 @@ export class AdminService {
     private readonly prisma: PrismaService,
     private readonly logger: PinoLogger,
     private readonly ledger: LedgerService,
-    private readonly paystack: PaystackProvider,
-    private readonly flutterwave: FlutterwaveProvider,
     private readonly configService: ConfigService,
     private readonly supabaseService: SupabaseService,
     private readonly vtuService: VtuService,
@@ -2534,40 +2530,16 @@ export class AdminService {
   private async verifyProviderTransfer(latestAttempt: {
     provider: string;
     providerReference: string;
-    metadata: unknown;
   }) {
-    if (latestAttempt.provider === 'PAYSTACK') {
-      const transfer = await this.paystack.verifyTransfer(
-        latestAttempt.providerReference,
-      );
-
-      return {
-        providerStatus: transfer.status,
-        payload: transfer,
-      };
-    }
-
-    if (latestAttempt.provider !== 'FLUTTERWAVE') {
+    if (latestAttempt.provider !== 'MONNIFY') {
       throw new BadRequestException(
         'Provider transfer verification is not supported for this provider',
       );
     }
 
-    const metadata =
-      latestAttempt.metadata &&
-      typeof latestAttempt.metadata === 'object' &&
-      !Array.isArray(latestAttempt.metadata)
-        ? (latestAttempt.metadata as Record<string, unknown>)
-        : {};
-    const providerTransferId = Number(metadata.providerTransferId);
-
-    if (!Number.isFinite(providerTransferId)) {
-      throw new BadRequestException(
-        'Flutterwave transfer id is required for provider verification',
-      );
-    }
-
-    const transfer = await this.flutterwave.verifyTransfer(providerTransferId);
+    const transfer = await this.bankingService.getTransferStatus(
+      latestAttempt.providerReference,
+    );
 
     return {
       providerStatus: transfer.status,
