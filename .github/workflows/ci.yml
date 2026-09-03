@@ -14,7 +14,9 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Check production manifests for unsafe defaults
-        run: ./scripts/check-production-manifests.sh
+        run: |
+          ./scripts/check-production-manifests.sh
+          sh ./scripts/check-production-manifests.test.sh
 
       - name: Check repository for committed secrets
         run: ./scripts/check-secrets.sh
