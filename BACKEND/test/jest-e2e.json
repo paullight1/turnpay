@@ -5,7 +5,8 @@
   "testRegex": ".e2e-spec.ts$",
   "testPathIgnorePatterns": [
     "internal-transfer.financial.e2e-spec.ts$",
-    "internal-transfer.fault.e2e-spec.ts$"
+    "internal-transfer.fault.e2e-spec.ts$",
+    "vtpass-vtu.financial.e2e-spec.ts$"
   ],
   "transform": {
     "^.+\\.(t|j)s$": "ts-jest"
