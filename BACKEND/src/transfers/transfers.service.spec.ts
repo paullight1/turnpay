@@ -615,6 +615,9 @@ describe('TransfersService', () => {
     });
 
     expect(preview.found).toBe(true);
+    if (!preview.found) {
+      throw new Error('Expected an eligible recipient preview');
+    }
     expect(preview.displayName).toBe('Ada G. L.');
     expect(preview.displayName).not.toContain('Lovelace');
     expect(preview.maskedIdentifier).not.toBe('recipient@example.com');

@@ -385,7 +385,7 @@ describe('KycService', () => {
 
     await expect(
       service.verifyWithYouverify('user-1', {
-        country: 'GH',
+        country: 'GH' as never,
         type: 'BVN',
         idNumber: '12345678901',
         dateOfBirth: '1990-01-02',

@@ -63,7 +63,7 @@ export class VtpassWebhookController {
   }
 
   private verifyWebhook(input: {
-    rawBody: string | undefined;
+    rawBody: Buffer | string | undefined;
     receivedSignature: string | undefined;
   }) {
     const secret = this.configService.get<string>('VTPASS_WEBHOOK_SECRET');

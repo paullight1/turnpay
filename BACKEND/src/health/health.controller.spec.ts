@@ -23,7 +23,7 @@ describe('HealthController', () => {
     PII_ENCRYPTION_KEY: 'test-pii-key-with-at-least-32-characters',
   };
   const config = {
-    get: jest.fn((key: string) => kycConfig[key]),
+    get: jest.fn<string | undefined, [string]>((key) => kycConfig[key]),
   };
 
   const controller = new HealthController(

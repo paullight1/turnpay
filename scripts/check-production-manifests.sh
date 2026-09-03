@@ -82,9 +82,8 @@ else
   check_absent "https://api.sandbox.ninja.boucloud.io" "render.yaml"
 fi
 
-# Render's public ingress contributes two trusted entries to the forwarded-for
-# chain. A lower value rejects legitimate traffic before it reaches Nest; a
-# higher value would accept a caller-supplied address beyond the platform edge.
+# Keep an explicit non-Render fallback. On Render, the platform-provided RENDER
+# variable selects Render's normalized first-address trust policy instead.
 check_env_value "TRUST_PROXY_HOPS" "2" "render.yaml"
 
 check_absent "https://api-service.vtpass.com" "render.yaml"

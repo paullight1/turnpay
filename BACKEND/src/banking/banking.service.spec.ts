@@ -24,6 +24,9 @@ describe('BankingService', () => {
       create: jest.fn(),
       update: jest.fn(),
     },
+    auditLog: {
+      create: jest.fn(),
+    },
     kycDocument: {
       findMany: jest.fn(),
     },
@@ -504,6 +507,7 @@ describe('BankingService', () => {
     });
     ledger.creditWallet.mockResolvedValue({
       walletId: 'wallet-1',
+      balanceBefore: new Decimal(0),
       balanceAfter: new Decimal(2500),
     });
 
@@ -548,6 +552,28 @@ describe('BankingService', () => {
       where: { id: 'event-1' },
       data: { status: 'PROCESSED', processedAt: expect.any(Date) },
     });
+    expect(prisma.auditLog.create).toHaveBeenCalledWith({
+      data: {
+        action: 'MONNIFY_VIRTUAL_ACCOUNT_DEPOSIT_CREDITED',
+        targetType: 'Transaction',
+        targetId: 'tx-1',
+        reference: 'MNF-1',
+        before: {
+          walletBalance: '0.00',
+        },
+        after: {
+          walletBalance: '2500.00',
+          transactionStatus: 'SUCCESS',
+        },
+        metadata: {
+          provider: 'MONNIFY',
+          providerEventId: 'event-1',
+          walletId: 'wallet-1',
+          amount: '2500.00',
+          currency: 'NGN',
+        },
+      },
+    });
   });
 
   it('promotes a pending virtual account to active when a valid deposit arrives', async () => {
@@ -579,6 +605,7 @@ describe('BankingService', () => {
     });
     ledger.creditWallet.mockResolvedValue({
       walletId: 'wallet-1',
+      balanceBefore: new Decimal(0),
       balanceAfter: new Decimal(2500),
     });
 

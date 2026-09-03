@@ -46,7 +46,7 @@ export interface KycProviderGateway {
 
   verifyCallbackSignature(input: {
     signature?: string;
-    rawBody?: string;
+    rawBody?: Buffer | string;
   }): boolean;
 
   normalizeCallback(

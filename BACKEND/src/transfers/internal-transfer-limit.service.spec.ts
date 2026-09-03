@@ -47,7 +47,7 @@ describe('InternalTransferLimitService', () => {
 
       await expect(
         service.getActivePolicy(prisma as never, 'GHS', 'TIER_2'),
-      ).rejects.toMatchObject<ServiceUnavailableException>({
+      ).rejects.toMatchObject({
         response: expect.objectContaining({
           code: 'TRANSFER_POLICY_UNAVAILABLE',
         }),

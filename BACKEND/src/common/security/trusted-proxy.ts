@@ -14,18 +14,25 @@ export function forwardedChainLength(value: ForwardedHeader): number {
 export function isForwardedChainAllowed(
   value: ForwardedHeader,
   trustedProxyHops: number,
+  isRender = false,
 ): boolean {
+  // Render's edge defines the first X-Forwarded-For value as the real client
+  // address. Internal edge hops can vary, so a fixed maximum rejects valid
+  // requests and does not improve the trust decision on Render.
+  if (isRender) return true;
   return forwardedChainLength(value) <= trustedProxyHops;
 }
 
 export function rejectUntrustedForwardedFor(
   trustedProxyHops: number,
+  isRender = false,
 ): RequestHandler {
   return (request, response, next) => {
     if (
       !isForwardedChainAllowed(
         request.headers['x-forwarded-for'],
         trustedProxyHops,
+        isRender,
       )
     ) {
       response.status(400).json({

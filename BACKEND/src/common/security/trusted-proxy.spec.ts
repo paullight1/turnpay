@@ -15,4 +15,16 @@ describe('trusted proxy forwarding policy', () => {
     expect(isForwardedChainAllowed('203.0.113.4', 0)).toBe(false);
     expect(isForwardedChainAllowed(undefined, 0)).toBe(true);
   });
+
+  it('accepts Render-managed forwarded chains regardless of internal hop count', () => {
+    expect(
+      isForwardedChainAllowed('203.0.113.4, 172.16.0.10, 10.0.0.2', 2, true),
+    ).toBe(true);
+  });
+
+  it('still rejects excessive forwarded chains outside Render', () => {
+    expect(
+      isForwardedChainAllowed('203.0.113.4, 172.16.0.10, 10.0.0.2', 2, false),
+    ).toBe(false);
+  });
 });

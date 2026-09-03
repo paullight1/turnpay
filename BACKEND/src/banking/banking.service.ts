@@ -417,6 +417,29 @@ export class BankingService {
           data: { status: 'PROCESSED', processedAt: new Date() },
         });
 
+        await tx.auditLog.create({
+          data: {
+            action: 'MONNIFY_VIRTUAL_ACCOUNT_DEPOSIT_CREDITED',
+            targetType: 'Transaction',
+            targetId: transaction.id,
+            reference: event.providerReference,
+            before: {
+              walletBalance: creditResult.balanceBefore.toFixed(2),
+            },
+            after: {
+              walletBalance: creditResult.balanceAfter.toFixed(2),
+              transactionStatus: 'SUCCESS',
+            },
+            metadata: {
+              provider,
+              providerEventId: providerEvent.id,
+              walletId: creditResult.walletId,
+              amount: event.amount.toFixed(2),
+              currency: event.currency,
+            },
+          },
+        });
+
         return { received: true, processed: true };
       });
 

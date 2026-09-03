@@ -6,7 +6,7 @@ describe('internal transfer production configuration', () => {
     __dirname,
     '../../scripts/validate-production-config.sh',
   );
-  const productionEnv = {
+  const productionEnv: NodeJS.ProcessEnv = {
     ...process.env,
     NODE_ENV: 'production',
     DATABASE_URL:
@@ -21,6 +21,7 @@ describe('internal transfer production configuration', () => {
     IDEMPOTENCY_RESPONSE_ENCRYPTION_KEY: Buffer.alloc(32, 7).toString('base64'),
     IDEMPOTENCY_RESPONSE_ENCRYPTION_KEY_ID: 'v1',
     TRANSACTION_PIN_REQUIRED: 'true',
+    INTERNAL_TRANSFERS_ENABLED: 'false',
     BANKING_ENABLED: 'false',
     VIRTUAL_ACCOUNTS_ENABLED: 'false',
     WITHDRAWALS_ENABLED: 'false',

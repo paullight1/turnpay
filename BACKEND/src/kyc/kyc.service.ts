@@ -387,7 +387,7 @@ export class KycService {
 
   async processYouverifyCallback(input: {
     body: Record<string, unknown>;
-    rawBody?: string;
+    rawBody?: Buffer | string;
     signatureHeader?: string;
   }) {
     if (

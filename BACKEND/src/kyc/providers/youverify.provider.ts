@@ -118,7 +118,7 @@ export class YouverifyProvider implements KycProviderGateway {
   }
 
   verifyCallbackSignature(input: {
-    rawBody?: string;
+    rawBody?: Buffer | string;
     signature?: string;
   }): boolean {
     if (!input.rawBody || !input.signature) return false;

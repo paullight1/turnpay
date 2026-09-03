@@ -11,5 +11,5 @@ export type AuthenticatedRequest = Request & {
 };
 
 export type RawBodyRequest = AuthenticatedRequest & {
-  rawBody?: string;
+  rawBody?: Buffer;
 };

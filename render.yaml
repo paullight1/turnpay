@@ -36,7 +36,8 @@ services:
       - key: REDIS_ALLOW_MEMORY_FALLBACK
         value: "false"
       - key: TRUST_PROXY_HOPS
-        # Render's public ingress presents a two-entry X-Forwarded-For chain.
+        # Fallback for non-Render production runs; Render is detected via its
+        # platform-provided RENDER variable and trusts its normalized chain.
         value: "2"
       - key: JWT_SECRET
         generateValue: true

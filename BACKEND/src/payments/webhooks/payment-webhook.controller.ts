@@ -127,7 +127,7 @@ export class WebhookController {
 
   private verifyHmacHex(
     algorithm: 'sha512',
-    rawBody: string,
+    rawBody: Buffer,
     receivedSignature: string,
     secretEnvName: string,
   ) {

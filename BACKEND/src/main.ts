@@ -11,6 +11,7 @@ import { NativeLogger } from 'nestjs-pino';
 import { AppModule } from './app.module';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 import { IdempotencyInterceptor } from './common/interceptors/idempotency.interceptor';
+import { captureWebhookRawBody } from './common/http/webhook-raw-body';
 import { rejectUntrustedForwardedFor } from './common/security/trusted-proxy';
 import type { RawBodyRequest } from './common/types/request-context';
 
@@ -32,15 +33,17 @@ async function bootstrap() {
   const logger = app.get(NativeLogger);
   app.useLogger(logger);
 
-  // Trust only the explicitly configured number of infrastructure proxy hops.
-  // Reject longer caller-supplied chains before Express derives req.ip.
+  // Render guarantees that the first forwarded address is the client and can
+  // vary its internal hop count. Other environments retain the explicit hop
+  // limit and reject longer caller-supplied chains.
   const expressApp = app.getHttpAdapter().getInstance() as Application;
   const trustedProxyHops = Number(process.env.TRUST_PROXY_HOPS ?? 0);
+  const isRender = process.env.RENDER === 'true';
   expressApp.set(
     'trust proxy',
-    trustedProxyHops === 0 ? false : trustedProxyHops,
+    isRender ? true : trustedProxyHops === 0 ? false : trustedProxyHops,
   );
-  app.use(rejectUntrustedForwardedFor(trustedProxyHops));
+  app.use(rejectUntrustedForwardedFor(trustedProxyHops, isRender));
 
   app.use(
     helmet({
@@ -78,9 +81,7 @@ async function bootstrap() {
     json({
       limit: '10mb',
       verify: (req: RawBodyRequest, _res, buf) => {
-        if (req.url.startsWith('/api/webhooks')) {
-          req.rawBody = buf.toString();
-        }
+        captureWebhookRawBody(req, buf);
       },
     }),
   );
