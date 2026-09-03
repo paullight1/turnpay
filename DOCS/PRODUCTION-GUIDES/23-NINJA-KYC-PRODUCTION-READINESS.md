@@ -6,9 +6,25 @@ Last reviewed: 2026-09-03
 
 **GO for sandbox integration; NO-GO for live KYC activation.** The application
 integration, privacy controls, provider result normalization, web UI, and Flutter
-UI are implemented and covered by focused automated tests. Live activation still
-requires external Ninja credentials, live-account approval, compliance/privacy
+UI are implemented and verified against Ninja's sandbox. Live activation still
+requires Ninja live credentials, live-account approval, compliance/privacy
 sign-off, and retained staging evidence.
+
+## Verified sandbox state
+
+On 2026-09-03, the configured sandbox credentials were exercised through the
+real TRUSTPAY provider and the authenticated `/api/kyc/verify` endpoint:
+
+- Ninja authentication and token reuse succeeded.
+- The documented verified, not-found, and provider-error fixtures were handled.
+- The authenticated success path stored one `NINJA` verification, recorded
+  consent and result audit events, promoted the test account to Tier 1, and
+  replayed safely with the same idempotency key.
+- Database, Redis, and KYC readiness checks passed.
+- Desktop and mobile browser coverage passed for empty, recovery, and completion
+  states.
+
+The synthetic account and related test records were removed after verification.
 
 ## What is already implemented
 
@@ -25,16 +41,16 @@ sign-off, and retained staging evidence.
 - Readiness/config validation for selected provider and environment.
 - Web and Flutter empty/loading/error/review/rejected/failed/verified states.
 
-## User action required now
+## External action required for live activation
 
-Create or open the Ninja dashboard and copy the sandbox client key and client
-secret into the **backend deployment secret manager** using exactly:
+Obtain or activate the Ninja live client key and client secret, then add them to
+the **production backend secret manager** using exactly:
 
 ```env
 KYC_PROVIDER=ninja
-NINJA_CLIENT_KEY=<sandbox value>
-NINJA_CLIENT_SECRET=<sandbox value>
-NINJA_BASE_URL=https://api.sandbox.ninja.boucloud.io
+NINJA_CLIENT_KEY=<live value>
+NINJA_CLIENT_SECRET=<live value>
+NINJA_BASE_URL=https://api.ninja.boucloud.io
 ```
 
 Do not paste credentials into chat, source files, Vercel public variables, or
@@ -43,14 +59,14 @@ needed for this direct flow.
 
 ## Release sequence
 
-1. Add sandbox credentials to the backend secret manager.
-2. Apply Prisma migrations and deploy the backend.
-3. Confirm the readiness endpoint reports `kyc: configured`.
-4. Deploy the web release and build the mobile release candidate.
-5. Execute and record every sandbox case in `DOCS/KYC-GUIDE.MD`.
-6. Obtain compliance/privacy and provider approval.
-7. Replace only the backend credentials and base URL with live values.
-8. Run one controlled live verification, inspect masked evidence, and record the
+1. Retain the completed sandbox test evidence from `DOCS/KYC-GUIDE.MD`.
+2. Obtain compliance/privacy approval and Ninja live-account approval.
+3. Add the live Ninja credentials and base URL to the production backend secret
+   manager.
+4. Apply Prisma migrations and deploy the backend.
+5. Confirm the readiness endpoint reports `kyc: configured`.
+6. Deploy the web release and build the mobile release candidate.
+7. Run one controlled live verification, inspect masked evidence, and record the
    final GO/NO-GO decision before increasing exposure.
 
 ## Rollback
