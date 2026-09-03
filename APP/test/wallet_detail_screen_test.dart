@@ -57,17 +57,32 @@ void main() {
 
     await tester.pumpAndSettle();
 
-    expect(find.text('NGN Wallet'), findsOneWidget);
+    expect(find.text('NGN Wallet'), findsWidgets);
     expect(find.text('Send Money'), findsOneWidget);
     expect(find.text('Receive Money'), findsOneWidget);
     expect(find.text('Transaction History'), findsOneWidget);
+    await tester.drag(
+      find.byType(CustomScrollView),
+      const Offset(0, -500),
+    );
+    await tester.pumpAndSettle();
     expect(find.text('Wallet Deposit'), findsWidgets);
     expect(find.text('Virtual Account — Active'), findsOneWidget);
 
+    await tester.drag(
+      find.byType(CustomScrollView),
+      const Offset(0, 500),
+    );
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Receive Money'));
     await tester.pumpAndSettle();
 
     expect(find.text('Receive Money'), findsWidgets);
+    await tester.drag(
+      find.byType(CustomScrollView),
+      const Offset(0, -500),
+    );
+    await tester.pumpAndSettle();
     expect(find.text('Recent Deposits'), findsOneWidget);
   });
 }

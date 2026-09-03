@@ -1,5 +1,7 @@
 # 📡 Stream 4: VTU, KYC & Notifications — User Services Activation
 
+> Archived workstream. Provider selection is superseded by `DOCS/PROVIDER-SOURCE-OF-TRUTH.MD`: VTpass for VTU and Youverify for KYC.
+
 > **Parallel Stream ID:** `STREAM-VTU-KYC`
 > **Depends On:** Stream 2 (Core Infrastructure) for production deployment + Supabase buckets + secrets
 > **Blocks:** VTU purchases, KYC verification, user notifications — all user-facing services

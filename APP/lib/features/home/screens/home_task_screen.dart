@@ -42,6 +42,12 @@ class HomeTaskScreen extends StatelessWidget {
         route: AppRoutes.data,
       ),
       _FeatureItem(
+        title: 'Cable TV',
+        subtitle: 'Pay DStv, GOtv and StarTimes',
+        icon: Icons.live_tv_rounded,
+        route: AppRoutes.cable,
+      ),
+      _FeatureItem(
         title: 'Electricity',
         subtitle: 'Recharge prepaid meters',
         icon: Icons.bolt_rounded,
@@ -127,26 +133,26 @@ class HomeTaskScreen extends StatelessWidget {
               ),
               sliver: SliverList.list(
                 children: [
-                  TpPageHeader(
+                  const TpPageHeader(
                     label: 'Feature hub',
                   ),
-                  SizedBox(height: AppSpacing.xl),
+                  const SizedBox(height: AppSpacing.xl),
                   Text('Explore features', style: AppTextStyles.displayMedium),
-                  SizedBox(height: AppSpacing.sm),
+                  const SizedBox(height: AppSpacing.sm),
                   Text(
                     'Everything users can do now, plus the next actions already planned for this wallet.',
                     style: AppTextStyles.bodyL,
                   ),
-                  SizedBox(height: AppSpacing.xl),
+                  const SizedBox(height: AppSpacing.xl),
                   const _FeatureGrid(items: liveFeatures),
-                  SizedBox(height: AppSpacing.xl),
+                  const SizedBox(height: AppSpacing.xl),
                   Text('Coming soon', style: AppTextStyles.headingM),
-                  SizedBox(height: AppSpacing.xs),
+                  const SizedBox(height: AppSpacing.xs),
                   Text(
                     'These remain visible so users know what the platform is growing into.',
                     style: AppTextStyles.bodyM,
                   ),
-                  SizedBox(height: AppSpacing.md),
+                  const SizedBox(height: AppSpacing.md),
                   ...comingSoon.asMap().entries.map(
                     (entry) => _ComingSoonCard(
                       item: entry.value,

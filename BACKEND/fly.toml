@@ -14,6 +14,15 @@ primary_region = "jnb"  # Johannesburg — closest to West African users
   NODE_ENV = "production"
   PORT = "3000"
   ENABLE_SWAGGER = "false"
+  REDIS_ALLOW_MEMORY_FALLBACK = "false"
+  TRUST_PROXY_HOPS = "1"
+  KYC_PROVIDER = "ninja"
+  NINJA_BASE_URL = "https://api.ninja.boucloud.io"
+  VTU_PROVIDER = "vtpass"
+  VTU_ENABLED = "true"
+  VTU_SIMULATION_ENABLED = "false"
+  VTPASS_BASE_URL = "https://vtpass.com/api"
+  VTPASS_LOW_BALANCE_THRESHOLD = "5000"
 
 # ─── Networking ─────────────────────────────────────────────────
 [[services]]
@@ -40,7 +49,7 @@ primary_region = "jnb"  # Johannesburg — closest to West African users
     timeout = "5s"
     grace_period = "30s"
     method = "get"
-    path = "/api/health"
+    path = "/api/health/ready"
     protocol = "http"
     tls_skip_verify = false
     headers = {}
@@ -50,7 +59,7 @@ primary_region = "jnb"  # Johannesburg — closest to West African users
     timeout = "5s"
     grace_period = "5s"
     method = "get"
-    path = "/api/health"
+    path = "/api/health/ready"
     protocol = "http"
     tls_skip_verify = false
     headers = {}
@@ -72,7 +81,7 @@ primary_region = "jnb"  # Johannesburg — closest to West African users
 # ─── Metrics ────────────────────────────────────────────────────
 [metrics]
   port = 3000
-  path = "/api/health"
+  path = "/api/health/ready"
 
 # ─── Filesystem (for uploads, if needed) ────────────────────────
 # Uncomment if the app needs persistent disk storage

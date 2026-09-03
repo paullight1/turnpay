@@ -30,25 +30,25 @@ class VtuProviderOption {
 class VtuPackageOption {
   final String id;
   final String name;
-  final num price;
+  final String price;
   final String validity;
+  final String serviceType;
 
   const VtuPackageOption({
     required this.id,
     required this.name,
     required this.price,
     required this.validity,
+    required this.serviceType,
   });
 
   factory VtuPackageOption.fromJson(Map<String, dynamic> json) {
-    final rawPrice = json['price'];
     return VtuPackageOption(
       id: '${json['id']}',
       name: '${json['name'] ?? json['id']}',
-      price: rawPrice is num
-          ? rawPrice
-          : num.tryParse('${rawPrice ?? 0}') ?? 0,
+      price: '${json['price'] ?? '0'}',
       validity: '${json['validity'] ?? ''}',
+      serviceType: '${json['serviceType'] ?? ''}',
     );
   }
 }
@@ -63,6 +63,7 @@ class VtuOrderStatus {
   final String currency;
   final String? targetMasked;
   final String? nextRequeryAt;
+  final String? purchasedCode;
 
   const VtuOrderStatus({
     required this.orderId,
@@ -74,6 +75,7 @@ class VtuOrderStatus {
     required this.currency,
     required this.targetMasked,
     required this.nextRequeryAt,
+    required this.purchasedCode,
   });
 
   factory VtuOrderStatus.fromJson(Map<String, dynamic> json) {
@@ -87,6 +89,7 @@ class VtuOrderStatus {
       currency: '${json['currency']}',
       targetMasked: json['targetMasked'] as String?,
       nextRequeryAt: json['nextRequeryAt'] as String?,
+      purchasedCode: json['purchasedCode'] as String?,
     );
   }
 }
@@ -98,23 +101,62 @@ class VtuMeterCustomer {
   const VtuMeterCustomer({required this.name, required this.address});
 }
 
+class VtuCardCustomer {
+  final String name;
+  final String status;
+  final String? renewalAmount;
+
+  const VtuCardCustomer({
+    required this.name,
+    required this.status,
+    required this.renewalAmount,
+  });
+}
+
+class VtuPurchaseReceipt {
+  final bool success;
+  final String status;
+  final String reference;
+  final String orderId;
+  final String amount;
+  final String fee;
+  final String totalDebit;
+  final String? purchasedCode;
+
+  const VtuPurchaseReceipt({
+    required this.success,
+    required this.status,
+    required this.reference,
+    required this.orderId,
+    required this.amount,
+    required this.fee,
+    required this.totalDebit,
+    required this.purchasedCode,
+  });
+
+  factory VtuPurchaseReceipt.fromJson(Map<String, dynamic> json) {
+    return VtuPurchaseReceipt(
+      success: json['success'] == true,
+      status: '${json['status'] ?? ''}',
+      reference: '${json['reference'] ?? ''}',
+      orderId: '${json['orderId'] ?? ''}',
+      amount: '${json['amount'] ?? ''}',
+      fee: '${json['fee'] ?? '0'}',
+      totalDebit: '${json['totalDebit'] ?? ''}',
+      purchasedCode: json['purchasedCode'] as String?,
+    );
+  }
+}
+
 class VtuService {
   VtuService({required ApiClient apiClient}) : _apiClient = apiClient;
 
   final ApiClient _apiClient;
 
-  Future<List<VtuProviderOption>> getProviders(
-    String type, {
-    String? scope,
-    String? countryCode,
-  }) async {
+  Future<List<VtuProviderOption>> getProviders(String type) async {
     final response = await _apiClient.client.get<List<dynamic>>(
       '/api/vtu/providers',
-      queryParameters: {
-        'type': type,
-        if (scope != null) 'scope': scope,
-        if (countryCode != null) 'countryCode': countryCode,
-      },
+      queryParameters: {'type': type},
     );
 
     return (response.data ?? [])
@@ -144,11 +186,19 @@ class VtuService {
   Future<VtuMeterCustomer> validateMeter({
     required String provider,
     required String meterNumber,
+    required String meterType,
+    required String contactPhone,
+    required String idempotencyKey,
   }) async {
     final response = await _apiClient.client.post<Map<String, dynamic>>(
       '/api/vtu/validate/meter',
-      queryParameters: {'provider': provider, 'number': meterNumber},
-      data: const {},
+      options: Options(headers: {'Idempotency-Key': idempotencyKey}),
+      data: {
+        'provider': provider,
+        'meterNumber': meterNumber,
+        'meterType': meterType,
+        'contactPhone': contactPhone,
+      },
     );
 
     final data = response.data ?? const {};
@@ -156,6 +206,46 @@ class VtuService {
       name: '${data['name'] ?? ''}'.trim(),
       address: '${data['address'] ?? ''}'.trim(),
     );
+  }
+
+  Future<VtuCardCustomer> validateSmartCard({
+    required String provider,
+    required String smartCardNumber,
+    required String subscriptionType,
+    required String contactPhone,
+    required String idempotencyKey,
+  }) async {
+    final response = await _apiClient.client.post<Map<String, dynamic>>(
+      '/api/vtu/validate/smartcard',
+      options: Options(headers: {'Idempotency-Key': idempotencyKey}),
+      data: {
+        'provider': provider,
+        'smartCardNumber': smartCardNumber,
+        'subscriptionType': subscriptionType,
+        'contactPhone': contactPhone,
+      },
+    );
+
+    final data = response.data ?? const {};
+    return VtuCardCustomer(
+      name: '${data['name'] ?? ''}'.trim(),
+      status: '${data['status'] ?? ''}'.trim(),
+      renewalAmount: data['renewalAmount'] == null
+          ? null
+          : '${data['renewalAmount']}'.trim(),
+    );
+  }
+
+  Future<VtuPurchaseReceipt> purchase({
+    required Map<String, dynamic> data,
+    required String idempotencyKey,
+  }) async {
+    final response = await _apiClient.client.post<Map<String, dynamic>>(
+      '/api/vtu/purchase',
+      options: Options(headers: {'Idempotency-Key': idempotencyKey}),
+      data: data,
+    );
+    return VtuPurchaseReceipt.fromJson(response.data ?? const {});
   }
 
   Future<VtuOrderStatus> requeryOrder(

@@ -1,6 +1,12 @@
 "use client";
 
-import { Suspense, useDeferredValue, useEffect, useMemo, useState } from "react";
+import {
+  Suspense,
+  useDeferredValue,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -15,7 +21,13 @@ import {
 import DashboardLayout from "@/components/layout/dashboard-layout";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -52,6 +64,10 @@ const TARGET_TYPE_OPTIONS = [
   "VtuPricingRule",
   "SupportTicket",
   "KycVerification",
+  "INTERNAL_TRANSFER",
+  "InternalTransferReversal",
+  "InternalTransferLimitPolicy",
+  "ReconciliationRun",
 ] as const;
 const FINANCIAL_TARGETS = new Set([
   "Transaction",
@@ -101,7 +117,9 @@ function safeJson(value: unknown) {
   }
 }
 
-function actionVariant(action: string): "default" | "secondary" | "destructive" | "outline" {
+function actionVariant(
+  action: string,
+): "default" | "secondary" | "destructive" | "outline" {
   const normalized = action.toUpperCase();
   if (
     normalized.includes("SUSPEND") ||
@@ -127,14 +145,17 @@ function actionVariant(action: string): "default" | "secondary" | "destructive" 
   return "secondary";
 }
 
-function targetVariant(targetType: string): "default" | "secondary" | "destructive" | "outline" {
+function targetVariant(
+  targetType: string,
+): "default" | "secondary" | "destructive" | "outline" {
   if (FINANCIAL_TARGETS.has(targetType)) return "default";
   if (CUSTOMER_TARGETS.has(targetType)) return "secondary";
   return "outline";
 }
 
 function escapeCsv(value: unknown) {
-  const stringValue = value === null || value === undefined ? "" : String(value);
+  const stringValue =
+    value === null || value === undefined ? "" : String(value);
   return `"${stringValue.replace(/"/g, '""')}"`;
 }
 
@@ -221,10 +242,22 @@ function AdminAuditContent() {
       : "ALL";
   });
   const [targetId, setTargetId] = useState(searchParams.get("targetId") ?? "");
+  const [reference, setReference] = useState(
+    searchParams.get("reference") ?? "",
+  );
+  const [requestId, setRequestId] = useState(
+    searchParams.get("requestId") ?? "",
+  );
+  const [userId, setUserId] = useState(searchParams.get("userId") ?? "");
+  const [reversalState, setReversalState] = useState(
+    searchParams.get("reversalState") ?? "ALL",
+  );
   const [fromDate, setFromDate] = useState(
     searchParams.get("from")?.slice(0, 10) ?? "",
   );
-  const [toDate, setToDate] = useState(searchParams.get("to")?.slice(0, 10) ?? "");
+  const [toDate, setToDate] = useState(
+    searchParams.get("to")?.slice(0, 10) ?? "",
+  );
   const [selectedLogId, setSelectedLogId] = useState<string | null>(null);
   const deferredSearch = useDeferredValue(search.trim());
 
@@ -251,6 +284,10 @@ function AdminAuditContent() {
       adminFilter,
       targetType,
       targetId,
+      reference,
+      requestId,
+      userId,
+      reversalState,
       fromDate,
       toDate,
     ],
@@ -261,8 +298,14 @@ function AdminAuditContent() {
       if (adminFilter !== "ALL") params.set("adminId", adminFilter);
       if (targetType !== "ALL") params.set("targetType", targetType);
       if (targetId.trim()) params.set("targetId", targetId.trim());
-      if (fromDate) params.set("from", new Date(`${fromDate}T00:00:00.000Z`).toISOString());
-      if (toDate) params.set("to", new Date(`${toDate}T23:59:59.999Z`).toISOString());
+      if (reference.trim()) params.set("reference", reference.trim());
+      if (requestId.trim()) params.set("requestId", requestId.trim());
+      if (userId.trim()) params.set("userId", userId.trim());
+      if (reversalState !== "ALL") params.set("reversalState", reversalState);
+      if (fromDate)
+        params.set("from", new Date(`${fromDate}T00:00:00.000Z`).toISOString());
+      if (toDate)
+        params.set("to", new Date(`${toDate}T23:59:59.999Z`).toISOString());
 
       const res = await adminAuditApi.getLogs(limit, params);
       return res.data as AdminAuditLog[];
@@ -275,8 +318,8 @@ function AdminAuditContent() {
   const logs = useMemo(() => logsQuery.data ?? [], [logsQuery.data]);
 
   const availableActions = useMemo(() => {
-    return Array.from(new Set(logs.map((log) => log.action))).sort((left, right) =>
-      left.localeCompare(right),
+    return Array.from(new Set(logs.map((log) => log.action))).sort(
+      (left, right) => left.localeCompare(right),
     );
   }, [logs]);
 
@@ -295,22 +338,24 @@ function AdminAuditContent() {
               },
             ] as const;
           })
-          .filter((entry): entry is readonly [string, { id: string; label: string }] => Boolean(entry)),
+          .filter(
+            (
+              entry,
+            ): entry is readonly [string, { id: string; label: string }] =>
+              Boolean(entry),
+          ),
       ).values(),
     ).sort((left, right) => left.label.localeCompare(right.label));
   }, [logs]);
 
-  const selectedLog = useMemo(
-    () => {
-      const activeSelectedId =
-        selectedLogId && logs.some((log) => log.id === selectedLogId)
-          ? selectedLogId
-          : logs[0]?.id ?? null;
+  const selectedLog = useMemo(() => {
+    const activeSelectedId =
+      selectedLogId && logs.some((log) => log.id === selectedLogId)
+        ? selectedLogId
+        : (logs[0]?.id ?? null);
 
-      return logs.find((log) => log.id === activeSelectedId) ?? null;
-    },
-    [logs, selectedLogId],
-  );
+    return logs.find((log) => log.id === activeSelectedId) ?? null;
+  }, [logs, selectedLogId]);
 
   const auditStats = useMemo(() => {
     const uniqueAdmins = new Set(
@@ -341,6 +386,10 @@ function AdminAuditContent() {
     setAdminFilter("ALL");
     setTargetType("ALL");
     setTargetId("");
+    setReference("");
+    setRequestId("");
+    setUserId("");
+    setReversalState("ALL");
     setFromDate("");
     setToDate("");
   };
@@ -380,7 +429,12 @@ function AdminAuditContent() {
           </div>
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
             <div className="w-40">
-              <Select value={String(limit)} onValueChange={(value) => setLimit(Number(value) as (typeof LIMIT_OPTIONS)[number])}>
+              <Select
+                value={String(limit)}
+                onValueChange={(value) =>
+                  setLimit(Number(value) as (typeof LIMIT_OPTIONS)[number])
+                }
+              >
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
@@ -393,7 +447,11 @@ function AdminAuditContent() {
                 </SelectContent>
               </Select>
             </div>
-            <Button variant="outline" onClick={exportCsv} disabled={logs.length === 0}>
+            <Button
+              variant="outline"
+              onClick={exportCsv}
+              disabled={logs.length === 0}
+            >
               Export CSV
             </Button>
             <Button variant="outline" onClick={() => void logsQuery.refetch()}>
@@ -426,10 +484,7 @@ function AdminAuditContent() {
                 <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                   Action
                 </p>
-                <Select
-                  value={actionFilter}
-                  onValueChange={setActionFilter}
-                >
+                <Select value={actionFilter} onValueChange={setActionFilter}>
                   <SelectTrigger className="w-full">
                     <SelectValue placeholder="All actions" />
                   </SelectTrigger>
@@ -447,10 +502,7 @@ function AdminAuditContent() {
                 <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                   Actor
                 </p>
-                <Select
-                  value={adminFilter}
-                  onValueChange={setAdminFilter}
-                >
+                <Select value={adminFilter} onValueChange={setAdminFilter}>
                   <SelectTrigger className="w-full">
                     <SelectValue placeholder="All actors" />
                   </SelectTrigger>
@@ -470,7 +522,9 @@ function AdminAuditContent() {
                 </p>
                 <Select
                   value={targetType}
-                  onValueChange={(value) => setTargetType(value as (typeof TARGET_TYPE_OPTIONS)[number])}
+                  onValueChange={(value) =>
+                    setTargetType(value as (typeof TARGET_TYPE_OPTIONS)[number])
+                  }
                 >
                   <SelectTrigger className="w-full">
                     <SelectValue placeholder="All targets" />
@@ -478,7 +532,9 @@ function AdminAuditContent() {
                   <SelectContent>
                     {TARGET_TYPE_OPTIONS.map((option) => (
                       <SelectItem key={option} value={option}>
-                        {option === "ALL" ? "All targets" : humanizeLabel(option)}
+                        {option === "ALL"
+                          ? "All targets"
+                          : humanizeLabel(option)}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -515,9 +571,64 @@ function AdminAuditContent() {
                 />
               </div>
               <div className="flex items-end gap-2">
-                <Button variant="ghost" onClick={clearFilters} className="w-full">
+                <Button
+                  variant="ghost"
+                  onClick={clearFilters}
+                  className="w-full"
+                >
                   Clear
                 </Button>
+              </div>
+            </div>
+            <div className="mt-4 grid gap-3 border-t border-border/60 pt-4 md:grid-cols-2 xl:grid-cols-4">
+              <div className="flex flex-col gap-2">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Transfer reference
+                </p>
+                <Input
+                  value={reference}
+                  onChange={(event) => setReference(event.target.value)}
+                  placeholder="IT-… or ITR-…"
+                />
+              </div>
+              <div className="flex flex-col gap-2">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Request ID
+                </p>
+                <Input
+                  value={requestId}
+                  onChange={(event) => setRequestId(event.target.value)}
+                  placeholder="Request correlation ID"
+                />
+              </div>
+              <div className="flex flex-col gap-2">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  User ID
+                </p>
+                <Input
+                  value={userId}
+                  onChange={(event) => setUserId(event.target.value)}
+                  placeholder="Exact user UUID"
+                />
+              </div>
+              <div className="flex flex-col gap-2">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Reversal state
+                </p>
+                <Select value={reversalState} onValueChange={setReversalState}>
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="All reversal states" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="ALL">All reversal states</SelectItem>
+                    <SelectItem value="PENDING_APPROVAL">
+                      Pending approval
+                    </SelectItem>
+                    <SelectItem value="COMPLETED">Completed</SelectItem>
+                    <SelectItem value="REJECTED">Rejected</SelectItem>
+                    <SelectItem value="BLOCKED">Blocked</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
             </div>
           </CardContent>
@@ -629,10 +740,15 @@ function AdminAuditContent() {
                         <TableCell>
                           <div>
                             <p className="font-medium">
-                              {log.admin?.fullName ?? log.admin?.email ?? log.adminId ?? "System"}
+                              {log.admin?.fullName ??
+                                log.admin?.email ??
+                                log.adminId ??
+                                "System"}
                             </p>
                             <p className="text-xs text-muted-foreground">
-                              {log.admin?.email ?? log.adminId ?? "No actor recorded"}
+                              {log.admin?.email ??
+                                log.adminId ??
+                                "No actor recorded"}
                             </p>
                           </div>
                         </TableCell>
@@ -704,10 +820,15 @@ function AdminAuditContent() {
                           Actor
                         </p>
                         <p className="mt-1 font-medium">
-                          {selectedLog.admin?.fullName ?? selectedLog.admin?.email ?? selectedLog.adminId ?? "System"}
+                          {selectedLog.admin?.fullName ??
+                            selectedLog.admin?.email ??
+                            selectedLog.adminId ??
+                            "System"}
                         </p>
                         <p className="text-xs text-muted-foreground">
-                          {selectedLog.admin?.email ?? selectedLog.adminId ?? "No actor recorded"}
+                          {selectedLog.admin?.email ??
+                            selectedLog.adminId ??
+                            "No actor recorded"}
                         </p>
                       </div>
                       <div>

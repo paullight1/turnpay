@@ -162,9 +162,9 @@ This provides interactive Swagger documentation for all 29 API endpoints.
            ▼                      ▼                        ▼
  ┌──────────────────┐   ┌──────────────────────┐   ┌──────────────────────┐
  │ PostgreSQL       │   │ Redis Cache          │   │ External APIs        │
- │ (Users, Wallets, │   │ (OTP, Quotes,        │   │ (Paystack,           │
- │  Transactions)   │   │  Idempotency,        │   │  Flutterwave,        │
- │                  │   │  Circuit Breaker)    │   │  VTU, FX)            │
+ │ (Users, Wallets, │   │ (OTP, Quotes,        │   │ (Monnify,            │
+ │  Transactions)   │   │  Idempotency,        │   │  VTpass, Youverify,  │
+ │                  │   │  Circuit Breaker)    │   │  FX)                 │
  └──────────────────┘   └──────────────────────┘   └──────────────────────┘
 ```
 
@@ -177,7 +177,7 @@ This provides interactive Swagger documentation for all 29 API endpoints.
    - See `DOCS/INTEGRATION-GUIDE.MD`
 2. **Email Integration** — Connect Resend/SendGrid for password reset
    - See `DOCS/INTEGRATION-GUIDE.MD`
-3. **Live Payment Keys** — Switch from test to live Paystack/Flutterwave keys
+3. **Live Provider Keys** — Configure live Monnify, VTpass, and Youverify credentials
 4. **SSL Certificates** — Set up HTTPS for production domains
 5. **Sentry Setup** — Create Sentry project and add DSN to `.env`
 

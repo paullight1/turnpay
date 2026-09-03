@@ -27,10 +27,16 @@ import { KycModule } from './kyc/kyc.module';
 import { SupabaseModule } from './supabase/supabase.module';
 import { BankingModule } from './banking/banking.module';
 import { TransfersModule } from './transfers/transfers.module';
+import { internalTransfersEnabledSchema } from './transfers/internal-transfers.config';
 import { SupportModule } from './support/support.module';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { IdempotencyInterceptor } from './common/interceptors/idempotency.interceptor';
+import { IdempotencyResponseCryptoService } from './common/services/idempotency-response-crypto.service';
+import {
+  HTTP_LOG_REDACTION_CENSOR,
+  HTTP_LOG_REDACTION_PATHS,
+} from './common/security/http-log-redaction';
 
 const deployedEnvironment = Joi.valid('production', 'staging');
 const defaultNodeEnv =
@@ -105,6 +111,75 @@ const defaultNodeEnv =
           .min(60)
           .max(900)
           .default(300),
+        KYC_PROVIDER: Joi.string()
+          .trim()
+          .lowercase()
+          .valid('ninja', 'youverify')
+          .default('ninja'),
+        NINJA_CLIENT_KEY: Joi.when('KYC_PROVIDER', {
+          is: 'ninja',
+          then: Joi.when('NODE_ENV', {
+            is: deployedEnvironment,
+            then: Joi.string().trim().min(1).required(),
+            otherwise: Joi.string().allow('').optional(),
+          }),
+          otherwise: Joi.string().allow('').optional(),
+        }),
+        NINJA_CLIENT_SECRET: Joi.when('KYC_PROVIDER', {
+          is: 'ninja',
+          then: Joi.when('NODE_ENV', {
+            is: deployedEnvironment,
+            then: Joi.string().trim().min(1).required(),
+            otherwise: Joi.string().allow('').optional(),
+          }),
+          otherwise: Joi.string().allow('').optional(),
+        }),
+        NINJA_BASE_URL: Joi.string()
+          .valid(
+            'https://api.ninja.boucloud.io',
+            'https://api.sandbox.ninja.boucloud.io',
+          )
+          .default('https://api.sandbox.ninja.boucloud.io'),
+        YOUVERIFY_API_KEY: Joi.when('KYC_PROVIDER', {
+          is: 'youverify',
+          then: Joi.when('NODE_ENV', {
+            is: deployedEnvironment,
+            then: Joi.string().min(16).required(),
+            otherwise: Joi.string().allow('').optional(),
+          }),
+          otherwise: Joi.string().allow('').optional(),
+        }),
+        YOUVERIFY_BASE_URL: Joi.when('KYC_PROVIDER', {
+          is: 'youverify',
+          then: Joi.string()
+            .uri({ scheme: ['https'] })
+            .default('https://api.sandbox.youverify.co'),
+          otherwise: Joi.string().allow('').optional(),
+        }),
+        YOUVERIFY_WEBHOOK_URL: Joi.when('KYC_PROVIDER', {
+          is: 'youverify',
+          then: Joi.when('NODE_ENV', {
+            is: deployedEnvironment,
+            then: Joi.string()
+              .uri({ scheme: ['https'] })
+              .required(),
+            otherwise: Joi.string()
+              .uri({ scheme: ['http', 'https'] })
+              .allow('')
+              .optional(),
+          }),
+          otherwise: Joi.string().allow('').optional(),
+        }),
+        YOUVERIFY_WEBHOOK_SECRET: Joi.when('KYC_PROVIDER', {
+          is: 'youverify',
+          then: Joi.when('NODE_ENV', {
+            is: deployedEnvironment,
+            then: Joi.string().min(16).required(),
+            otherwise: Joi.string().allow('').optional(),
+          }),
+          otherwise: Joi.string().allow('').optional(),
+        }),
+        YOUVERIFY_WEBHOOK_ID: Joi.string().allow('').optional(),
         EXCHANGE_RECEIPT_BUCKET: Joi.string().default('exchange-receipts'),
         EXCHANGE_RECEIPT_PROOF_URL_TTL_SECONDS: Joi.number()
           .empty('')
@@ -132,26 +207,23 @@ const defaultNodeEnv =
         REDIS_HOST: Joi.string().empty('').default('localhost'),
         REDIS_PORT: Joi.number().empty('').default(6379),
         REDIS_PASSWORD: Joi.string().allow('').optional(),
+        REDIS_ALLOW_MEMORY_FALLBACK: Joi.when('NODE_ENV', {
+          is: deployedEnvironment,
+          then: Joi.boolean()
+            .truthy('true')
+            .falsy('false')
+            .valid(false)
+            .default(false),
+          otherwise: Joi.boolean().truthy('true').falsy('false').default(false),
+        }),
+        TRUST_PROXY_HOPS: Joi.when('NODE_ENV', {
+          is: deployedEnvironment,
+          then: Joi.number().integer().min(1).max(2).required(),
+          otherwise: Joi.number().integer().min(0).max(2).default(0),
+        }),
         OTP_EXPIRES_IN: Joi.string().allow('').optional(),
         OTP_LENGTH: Joi.string().allow('').optional(),
         OTP_DEV_CODE: Joi.string().allow('').optional(),
-        PAYSTACK_SECRET_KEY: Joi.when('NODE_ENV', {
-          is: 'production',
-          then: Joi.string().min(1).required(),
-          otherwise: Joi.string().allow('').optional(),
-        }),
-        PAYSTACK_PUBLIC_KEY: Joi.string().allow('').optional(),
-        PAYSTACK_WEBHOOK_URL: Joi.string().allow('').optional(),
-        PAYSTACK_WEBHOOK_SECRET: Joi.string().allow('').optional(),
-        PAYSTACK_DVA_PREFERRED_BANK: Joi.string().default('test-bank'),
-        FLUTTERWAVE_SECRET_KEY: Joi.when('NODE_ENV', {
-          is: 'production',
-          then: Joi.string().min(1).required(),
-          otherwise: Joi.string().allow('').optional(),
-        }),
-        FLUTTERWAVE_PUBLIC_KEY: Joi.string().allow('').optional(),
-        FLUTTERWAVE_ENCRYPTION_KEY: Joi.string().allow('').optional(),
-        FLUTTERWAVE_SECRET_HASH: Joi.string().allow('').optional(),
         BANKING_ENABLED: Joi.boolean()
           .truthy('true')
           .falsy('false')
@@ -164,11 +236,11 @@ const defaultNodeEnv =
           .truthy('true')
           .falsy('false')
           .default(false),
+        INTERNAL_TRANSFERS_ENABLED: internalTransfersEnabledSchema,
         MONNIFY_API_KEY: Joi.string().allow('').optional(),
         MONNIFY_SECRET_KEY: Joi.string().allow('').optional(),
         MONNIFY_CONTRACT_CODE: Joi.string().allow('').optional(),
         MONNIFY_BASE_URL: Joi.string().uri().allow('').optional(),
-        MONNIFY_WEBHOOK_SECRET: Joi.string().allow('').optional(),
         MONNIFY_WEBHOOK_URL: Joi.string().uri().allow('').optional(),
         MONNIFY_GET_ALL_AVAILABLE_BANKS: Joi.boolean()
           .truthy('true')
@@ -198,7 +270,7 @@ const defaultNodeEnv =
           .falsy('false')
           .default(true),
         PII_ENCRYPTION_KEY: Joi.when('NODE_ENV', {
-          is: 'production',
+          is: deployedEnvironment,
           then: Joi.string().min(32).required(),
           otherwise: Joi.string().allow('').optional(),
         }),
@@ -209,61 +281,95 @@ const defaultNodeEnv =
           otherwise: Joi.string().allow('').optional(),
         }),
         TRANSACTION_PIN_REQUIRED: Joi.when('NODE_ENV', {
-          is: 'production',
-          then: Joi.boolean().truthy('true').falsy('false').default(true),
+          is: deployedEnvironment,
+          then: Joi.boolean()
+            .truthy('true')
+            .falsy('false')
+            .valid(true)
+            .default(true),
           otherwise: Joi.boolean().truthy('true').falsy('false').default(false),
         }),
-        VTU_PROVIDER: Joi.string()
-          .valid('generic', 'vtpass')
-          .default('generic'),
+        IDEMPOTENCY_RESPONSE_ENCRYPTION_KEY: Joi.when('NODE_ENV', {
+          is: deployedEnvironment,
+          then: Joi.string()
+            .custom((value: string, helpers) =>
+              Buffer.from(value, 'base64').length === 32
+                ? value
+                : helpers.error('any.invalid'),
+            )
+            .required(),
+          otherwise: Joi.string().allow('').optional(),
+        }),
+        IDEMPOTENCY_RESPONSE_ENCRYPTION_KEY_ID: Joi.when('NODE_ENV', {
+          is: deployedEnvironment,
+          then: Joi.string().trim().max(64).required(),
+          otherwise: Joi.string().trim().max(64).default('v1'),
+        }),
+        VTU_PROVIDER: Joi.string().valid('vtpass').default('vtpass'),
+        VTU_ENABLED: Joi.boolean().truthy('true').falsy('false').default(true),
+        VTU_SIMULATION_ENABLED: Joi.boolean()
+          .truthy('true')
+          .falsy('false')
+          .default(false),
         VTU_KYC_BYPASS: Joi.boolean()
           .truthy('true')
           .falsy('false')
           .default(false),
-        VTU_API_URL: Joi.string().uri().allow('').optional(),
-        VTU_API_KEY: Joi.string().allow('').optional(),
-        VTPASS_BASE_URL: Joi.string().uri().allow('').optional(),
-        VTPASS_API_KEY: Joi.string().allow('').optional(),
-        VTPASS_PUBLIC_KEY: Joi.string().allow('').optional(),
-        VTPASS_SECRET_KEY: Joi.string().allow('').optional(),
-        RELOADLY_ENABLED: Joi.boolean()
-          .truthy('true')
-          .falsy('false')
-          .default(false),
-        RELOADLY_AUTH_URL: Joi.string()
-          .uri()
-          .default('https://auth.reloadly.com/oauth/token'),
-        RELOADLY_TOPUPS_BASE_URL: Joi.string()
-          .uri()
-          .default('https://topups-sandbox.reloadly.com'),
-        RELOADLY_AUDIENCE: Joi.string()
-          .uri()
-          .default('https://topups-sandbox.reloadly.com'),
-        RELOADLY_UTILITIES_BASE_URL: Joi.string()
-          .uri()
-          .default('https://utilities-sandbox.reloadly.com'),
-        RELOADLY_UTILITIES_AUDIENCE: Joi.string()
-          .uri()
-          .default('https://utilities-sandbox.reloadly.com'),
-        RELOADLY_CLIENT_ID: Joi.string().allow('').optional(),
-        RELOADLY_CLIENT_SECRET: Joi.string().allow('').optional(),
-        RELOADLY_SENDER_COUNTRY_CODE: Joi.string().default('NG'),
-        RELOADLY_WEBHOOK_SECRET: Joi.string().allow('').optional(),
-        RELOADLY_WEBHOOK_URL: Joi.string().uri().allow('').optional(),
+        VTPASS_BASE_URL: Joi.when('VTU_ENABLED', {
+          is: true,
+          then: Joi.when('NODE_ENV', {
+            is: deployedEnvironment,
+            then: Joi.string()
+              .uri({ scheme: ['https'] })
+              .required(),
+            otherwise: Joi.string().uri().allow('').optional(),
+          }),
+          otherwise: Joi.string().allow('').optional(),
+        }),
+        VTPASS_API_KEY: Joi.when('VTU_ENABLED', {
+          is: true,
+          then: Joi.when('NODE_ENV', {
+            is: deployedEnvironment,
+            then: Joi.string().min(1).required(),
+            otherwise: Joi.string().allow('').optional(),
+          }),
+          otherwise: Joi.string().allow('').optional(),
+        }),
+        VTPASS_PUBLIC_KEY: Joi.when('VTU_ENABLED', {
+          is: true,
+          then: Joi.when('NODE_ENV', {
+            is: deployedEnvironment,
+            then: Joi.string().min(1).required(),
+            otherwise: Joi.string().allow('').optional(),
+          }),
+          otherwise: Joi.string().allow('').optional(),
+        }),
+        VTPASS_SECRET_KEY: Joi.when('VTU_ENABLED', {
+          is: true,
+          then: Joi.when('NODE_ENV', {
+            is: deployedEnvironment,
+            then: Joi.string().min(1).required(),
+            otherwise: Joi.string().allow('').optional(),
+          }),
+          otherwise: Joi.string().allow('').optional(),
+        }),
+        VTPASS_WEBHOOK_SECRET: Joi.when('VTU_ENABLED', {
+          is: true,
+          then: Joi.when('NODE_ENV', {
+            is: deployedEnvironment,
+            then: Joi.string().min(16).required(),
+            otherwise: Joi.string().allow('').optional(),
+          }),
+          otherwise: Joi.string().allow('').optional(),
+        }),
+        VTPASS_LOW_BALANCE_THRESHOLD: Joi.number().min(0).default(5000),
       }),
     }),
     LoggerModule.forRoot({
       pinoHttp: {
         redact: {
-          paths: [
-            'req.headers.authorization',
-            'req.headers.cookie',
-            "req.headers['set-cookie']",
-            "req.headers['x-api-key']",
-            "req.headers['x-auth-token']",
-            "res.headers['set-cookie']",
-          ],
-          censor: '[REDACTED]',
+          paths: [...HTTP_LOG_REDACTION_PATHS],
+          censor: HTTP_LOG_REDACTION_CENSOR,
         },
         level:
           process.env.LOG_LEVEL ||
@@ -277,14 +383,20 @@ const defaultNodeEnv =
           {
             // Generous global ceiling so ordinary authenticated browsing is
             // never throttled; tight abuse limits are applied per-endpoint via
-            // @Throttle (e.g. withdraw 5/min, provision 3/min). Keyed per user
-            // by UserThrottlerGuard, not per shared proxy IP.
+            // @Throttle (e.g. withdraw 5/min, provision 3/min). The global
+            // guard uses a verified user identity when one is already present;
+            // otherwise it falls back to the proxy-normalized client IP.
             ttl: 60000,
             limit: 120,
           },
+          {
+            name: 'verifiedUser',
+            ttl: 60000,
+            limit: 5,
+          },
         ],
         // Redis-backed so limits survive restarts and are shared across
-        // instances; degrades to per-instance memory when Redis is down.
+        // instances. Deployed environments fail closed when Redis is down.
         storage: new RedisThrottlerStorage(redisService),
         // Rate limiting would make request-count assertions in the e2e suite
         // flaky; it is only meaningful in real deployments.
@@ -316,6 +428,7 @@ const defaultNodeEnv =
   controllers: [AppController],
   providers: [
     AppService,
+    IdempotencyResponseCryptoService,
     IdempotencyInterceptor,
     { provide: APP_GUARD, useClass: UserThrottlerGuard },
   ],

@@ -71,8 +71,7 @@ void main() {
                 body: WalletBalanceCard(
                   balanceGHS: 17298.92,
                   visible: visible,
-                  onToggleVisibility: () =>
-                      setState(() => visible = !visible),
+                  onToggleVisibility: () => setState(() => visible = !visible),
                 ),
               );
             },
@@ -112,8 +111,8 @@ void main() {
     expect(find.text('Send'), findsOneWidget);
     expect(find.text('Exchange'), findsOneWidget);
     expect(find.text('Wallets'), findsOneWidget);
-    expect(find.text('GHS'), findsWidgets);
-    expect(find.text('NGN'), findsWidgets);
+    expect(find.textContaining('GHS'), findsWidgets);
+    expect(find.textContaining('NGN'), findsWidgets);
   });
 
   testWidgets('recent recipients and transactions render live data',
@@ -143,9 +142,10 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Recipients'), findsOneWidget);
-    expect(find.text('First Bank'), findsOneWidget);
+    expect(find.textContaining('First Bank'), findsOneWidget);
     expect(find.text('Recent transactions'), findsOneWidget);
-    expect(find.text('Fund success'), findsWidgets);
+    expect(find.text('Fund'), findsWidgets);
+    expect(find.text('DEP-001'), findsOneWidget);
     expect(find.text('See all'), findsOneWidget);
   });
 }

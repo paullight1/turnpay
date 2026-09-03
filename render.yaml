@@ -2,21 +2,24 @@ services:
   - type: web
     name: trustpay-backend
     runtime: docker
-    plan: free # TODO(launch): move to paid plan with backups
-    region: oregon
+    plan: free
+    region: frankfurt
     branch: main
-    autoDeploy: true
+    autoDeployTrigger: checksPass
+    domains:
+      - api.truspayhq.com
     dockerfilePath: ./BACKEND/Dockerfile
     dockerContext: ./BACKEND
-    preDeployCommand: npx prisma migrate deploy
-    healthCheckPath: /api/health
+    healthCheckPath: /api/health/ready
     envVars:
       - key: NODE_ENV
-        value: "production"
+        value: "staging"
+      - key: RUN_MIGRATIONS_ON_STARTUP
+        value: "true" # Free services do not support pre-deploy commands.
       - key: WEB_URL
-        value: "https://trustpay.xyz" # TODO(launch): set real origin
+        value: "https://www.truspayhq.com"
       - key: ADMIN_URL
-        value: "https://admin.trustpay.xyz" # TODO(launch): set real origin
+        value: "https://www.truspayhq.com"
       - key: SENTRY_DSN
         sync: false # TODO(launch): set Sentry DSN for error monitoring
       - key: PORT
@@ -24,44 +27,62 @@ services:
       - key: LOG_LEVEL
         value: "info"
       - key: DATABASE_URL
-        fromDatabase:
-          name: trustpay-postgres
-          property: connectionString
+        sync: false # Supabase session pooler URL (port 5432) with sslmode=require
       - key: REDIS_URL
         fromService:
           type: keyvalue
           name: trustpay-redis
           property: connectionString
+      - key: REDIS_ALLOW_MEMORY_FALLBACK
+        value: "false"
+      - key: TRUST_PROXY_HOPS
+        value: "1"
       - key: JWT_SECRET
         generateValue: true
       - key: JWT_REFRESH_SECRET
         generateValue: true
       - key: PII_ENCRYPTION_KEY
         generateValue: true
+      - key: IDEMPOTENCY_RESPONSE_ENCRYPTION_KEY
+        sync: false # Exactly 32 random bytes encoded as base64
+      - key: IDEMPOTENCY_RESPONSE_ENCRYPTION_KEY_ID
+        value: "v1"
       - key: BANK_ACCOUNT_ENCRYPTION_KEY
         generateValue: true
       - key: PII_KEY_VERSION
         value: "1"
       - key: TRANSACTION_PIN_REQUIRED
         value: "true"
+      - key: INTERNAL_TRANSFERS_ENABLED
+        value: "false"
       - key: BANKING_ENABLED
         value: "true"
       - key: VIRTUAL_ACCOUNTS_ENABLED
         value: "true"
       - key: WITHDRAWALS_ENABLED
-        value: "true"
-      - key: BANKING_SANDBOX_MODE
         value: "false"
+      - key: BANKING_SANDBOX_MODE
+        value: "true"
       - key: KYC_PROVIDER
-        value: "manual"
+        value: "ninja"
       - key: KYC_DOCUMENT_BUCKET
         value: "kyc-documents"
+      - key: NINJA_CLIENT_KEY
+        sync: false
+      - key: NINJA_CLIENT_SECRET
+        sync: false
+      - key: NINJA_BASE_URL
+        value: "https://api.sandbox.ninja.boucloud.io"
       - key: EXCHANGE_RECEIPT_BUCKET
         value: "exchange-receipts"
       - key: VTU_PROVIDER
         value: "vtpass"
+      - key: VTU_ENABLED
+        value: "true"
+      - key: VTU_SIMULATION_ENABLED
+        value: "false"
       - key: VTPASS_BASE_URL
-        sync: false # Operator gate: set the live VTpass base URL before enabling production traffic
+        value: "https://vtpass.com/api"
       - key: VTPASS_LOW_BALANCE_THRESHOLD
         value: "5000"
       - key: VTPASS_API_KEY
@@ -74,6 +95,8 @@ services:
         sync: false
       - key: SUPABASE_URL
         sync: false
+      - key: SUPABASE_PUBLISHABLE_KEY
+        sync: false
       - key: SUPABASE_ANON_KEY
         sync: false
       - key: SUPABASE_SERVICE_ROLE_KEY
@@ -85,11 +108,9 @@ services:
       - key: MONNIFY_CONTRACT_CODE
         sync: false
       - key: MONNIFY_BASE_URL
-        sync: false # Operator gate: set the live Monnify base URL before enabling production traffic
-      - key: MONNIFY_WEBHOOK_SECRET
-        sync: false
+        value: "https://sandbox.monnify.com"
       - key: MONNIFY_WEBHOOK_URL
-        sync: false # Operator gate: set the canonical HTTPS callback URL for this deployment
+        value: "https://api.truspayhq.com/api/webhooks/monnify"
       - key: MONNIFY_GET_ALL_AVAILABLE_BANKS
         value: "true"
       - key: MONNIFY_RESTRICT_PAYMENT_SOURCE
@@ -98,22 +119,11 @@ services:
         sync: false
       - key: MONNIFY_TEST_NIN
         sync: false
-      - key: PAYSTACK_SECRET_KEY
-        sync: false
-      - key: FLUTTERWAVE_SECRET_KEY
-        sync: false
 
   - type: keyvalue
     name: trustpay-redis
-    plan: free # TODO(launch): move to paid plan with backups
-    region: oregon
-    maxmemoryPolicy: allkeys-lru
-    ipAllowList: []
-
-databases:
-  - name: trustpay-postgres
-    databaseName: trustpay
-    user: trustpay
-    plan: free # TODO(launch): move to paid plan with backups
-    postgresMajorVersion: "15"
+    plan: free
+    region: frankfurt
+    # Idempotency, lockout, and OTP keys must never be silently evicted.
+    maxmemoryPolicy: noeviction
     ipAllowList: []

@@ -90,6 +90,45 @@ class AuthService {
     );
   }
 
+  Future<TransactionPinServerStatus> getTransactionPinStatus() async {
+    final response = await _apiClient.client.get(
+      '/api/auth/transaction-pin/status',
+    );
+    final data = response.data;
+    if (data is! Map<String, dynamic>) {
+      throw StateError('Invalid transaction PIN status response');
+    }
+
+    final rawLength = data['pinLength'];
+    final pinLength =
+        rawLength is int && rawLength >= 4 && rawLength <= 6 ? rawLength : null;
+    return TransactionPinServerStatus(
+      configured: data['configured'] == true,
+      pinLength: pinLength,
+      resetHoldUntil: data['resetHoldUntil'] is String
+          ? DateTime.tryParse(data['resetHoldUntil'] as String)?.toUtc()
+          : null,
+      locked: data['locked'] == true,
+    );
+  }
+
+  Future<void> verifyTransactionPin(String pin) async {
+    await _apiClient.client.post(
+      '/api/auth/transaction-pin/verify',
+      data: {'pin': pin},
+    );
+  }
+
+  Future<void> resetTransactionPin({
+    required String currentPin,
+    required String newPin,
+  }) async {
+    await _apiClient.client.patch(
+      '/api/auth/transaction-pin',
+      data: {'currentPin': currentPin, 'newPin': newPin},
+    );
+  }
+
   Future<void> logout() async {
     final refreshToken = await _apiClient.readRefreshToken();
 
@@ -236,6 +275,20 @@ class AuthService {
 
     return 'TrustPay Flutter $platform';
   }
+}
+
+class TransactionPinServerStatus {
+  final bool configured;
+  final int? pinLength;
+  final DateTime? resetHoldUntil;
+  final bool locked;
+
+  const TransactionPinServerStatus({
+    required this.configured,
+    required this.pinLength,
+    required this.resetHoldUntil,
+    required this.locked,
+  });
 }
 
 String authErrorMessage(Object error, String fallback) {

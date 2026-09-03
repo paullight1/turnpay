@@ -173,6 +173,7 @@ void main() {
                   context,
                   'Saved',
                   type: TpSnackbarType.success,
+                  haptic: false,
                 ),
                 child: const Text('Show snackbar'),
               );

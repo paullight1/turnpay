@@ -1,8 +1,9 @@
 # =============================================================================
 # TRUSTPAY — DigitalOcean App Platform Configuration
 # =============================================================================
-# Deploys backend (NestJS) + website (Next.js) to DO App Platform (Lagos).
-# Managed PostgreSQL + Redis are provisioned separately (see 16-PROVISIONING-GUIDE.md).
+# Legacy alternative deployment definition. TRUSTPAY V1 uses Render + Vercel.
+# If this file is ever used, PostgreSQL must still be the Supabase production
+# project; this definition must never provision or reference a DO database.
 #
 # Deploy:  doctl apps create --spec BACKEND/do-app.yaml
 # Update:  doctl apps update YOUR_APP_ID --spec BACKEND/do-app.yaml
@@ -30,7 +31,7 @@ services:
     http_port: 3000
 
     health_check:
-      http_path: /api/health
+      http_path: /api/health/ready
       initial_delay_seconds: 30
       period_seconds: 30
       timeout_seconds: 10
@@ -45,10 +46,16 @@ services:
       - key: PORT
         value: "3000"
         scope: RUN_TIME
+      - key: REDIS_ALLOW_MEMORY_FALLBACK
+        value: "false"
+        scope: RUN_TIME
+      - key: TRUST_PROXY_HOPS
+        value: "1"
+        scope: RUN_TIME
 
-      # Database (references managed DO database — set via dashboard or doctl)
+      # Database (Supabase session pooler, port 5432, TLS required)
       - key: DATABASE_URL
-        value: ${trustpay-db.DATABASE_URL}?sslmode=require&schema=public
+        value: REPLACE_WITH_SUPABASE_SESSION_POOLER_URL
         scope: RUN_TIME
         type: SECRET
 
@@ -61,6 +68,10 @@ services:
         scope: RUN_TIME
       - key: REDIS_PASSWORD
         value: ${trustpay-redis.PASSWORD}
+        scope: RUN_TIME
+        type: SECRET
+      - key: REDIS_URL
+        value: rediss://default:${trustpay-redis.PASSWORD}@${trustpay-redis.HOSTNAME}:${trustpay-redis.PORT}
         scope: RUN_TIME
         type: SECRET
 
@@ -123,36 +134,9 @@ services:
       - key: MONNIFY_BASE_URL
         value: https://api.monnify.com
         scope: RUN_TIME
-
-      # Paystack
-      - key: PAYSTACK_SECRET_KEY
-        value: sk_live_REPLACE
+      - key: MONNIFY_WEBHOOK_URL
+        value: https://api.trustpay.com/api/webhooks/monnify
         scope: RUN_TIME
-        type: SECRET
-      - key: PAYSTACK_PUBLIC_KEY
-        value: pk_live_REPLACE
-        scope: RUN_TIME
-      - key: PAYSTACK_WEBHOOK_SECRET
-        value: whsec_REPLACE
-        scope: RUN_TIME
-        type: SECRET
-
-      # Flutterwave
-      - key: FLUTTERWAVE_SECRET_KEY
-        value: FLWSECK_REPLACE
-        scope: RUN_TIME
-        type: SECRET
-      - key: FLUTTERWAVE_PUBLIC_KEY
-        value: FLWPUBK_REPLACE
-        scope: RUN_TIME
-      - key: FLUTTERWAVE_ENCRYPTION_KEY
-        value: REPLACE
-        scope: RUN_TIME
-        type: SECRET
-      - key: FLUTTERWAVE_SECRET_HASH
-        value: REPLACE
-        scope: RUN_TIME
-        type: SECRET
 
       # Encryption
       - key: PII_ENCRYPTION_KEY
@@ -163,13 +147,29 @@ services:
         value: GENERATE_WITH_OPENSSL_RAND_HEX_32
         scope: RUN_TIME
         type: SECRET
+      - key: IDEMPOTENCY_RESPONSE_ENCRYPTION_KEY
+        value: REPLACE_WITH_32_RANDOM_BYTES_BASE64
+        scope: RUN_TIME
+        type: SECRET
+      - key: IDEMPOTENCY_RESPONSE_ENCRYPTION_KEY_ID
+        value: v1
+        scope: RUN_TIME
 
       # VTU
       - key: VTU_PROVIDER
         value: vtpass
         scope: RUN_TIME
+      - key: VTU_ENABLED
+        value: "true"
+        scope: RUN_TIME
+      - key: VTU_SIMULATION_ENABLED
+        value: "false"
+        scope: RUN_TIME
       - key: VTPASS_BASE_URL
-        value: https://api-service.vtpass.com
+        value: https://vtpass.com/api
+        scope: RUN_TIME
+      - key: VTPASS_LOW_BALANCE_THRESHOLD
+        value: "5000"
         scope: RUN_TIME
       - key: VTPASS_API_KEY
         value: REPLACE
@@ -181,6 +181,26 @@ services:
         type: SECRET
       - key: VTPASS_SECRET_KEY
         value: SK_REPLACE
+        scope: RUN_TIME
+        type: SECRET
+      - key: VTPASS_WEBHOOK_SECRET
+        value: REPLACE
+        scope: RUN_TIME
+        type: SECRET
+
+      # KYC
+      - key: KYC_PROVIDER
+        value: ninja
+        scope: RUN_TIME
+      - key: NINJA_BASE_URL
+        value: https://api.ninja.boucloud.io
+        scope: RUN_TIME
+      - key: NINJA_CLIENT_KEY
+        value: REPLACE
+        scope: RUN_TIME
+        type: SECRET
+      - key: NINJA_CLIENT_SECRET
+        value: REPLACE
         scope: RUN_TIME
         type: SECRET
 

@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
@@ -27,9 +29,7 @@ class ApiClient {
                 headers: {'Content-Type': 'application/json'},
               ),
             ) {
-    _dio.interceptors.add(
-      SafeDioLogInterceptor(enabled: kDebugMode),
-    );
+    _dio.interceptors.add(SafeDioLogInterceptor(enabled: kDebugMode));
 
     _dio.interceptors.add(
       InterceptorsWrapper(
@@ -85,6 +85,12 @@ class ApiClient {
     required String accessToken,
     String? refreshToken,
   }) async {
+    final subject = _jwtSubject(accessToken);
+    if (subject == null) {
+      await _transactionSecurity.clearAllDevicePinState();
+    } else {
+      await _transactionSecurity.bindToAuthenticatedUser(subject);
+    }
     await _storage.write(key: _accessTokenKey, value: accessToken);
 
     if (refreshToken != null && refreshToken.isNotEmpty) {
@@ -95,7 +101,7 @@ class ApiClient {
   Future<void> clearSession() async {
     await _storage.delete(key: _accessTokenKey);
     await _storage.delete(key: _refreshTokenKey);
-    await clearTransactionApproval();
+    await _transactionSecurity.clearAllDevicePinState();
   }
 
   Future<void> clearTransactionApproval() {
@@ -181,14 +187,30 @@ class ApiClient {
     final status = error.response?.statusCode;
     return status == 401 || status == 403;
   }
+
+  static String? _jwtSubject(String token) {
+    final segments = token.split('.');
+    if (segments.length != 3) return null;
+    try {
+      final payload = jsonDecode(
+        utf8.decode(base64Url.decode(base64Url.normalize(segments[1]))),
+      );
+      if (payload is! Map<String, dynamic>) return null;
+      final subject = payload['sub'];
+      return subject is String && subject.trim().isNotEmpty
+          ? subject.trim()
+          : null;
+    } catch (_) {
+      return null;
+    }
+  }
 }
 
 typedef IdempotencyKeyGenerator = String Function();
 
 class MoneyAttemptIdempotency {
-  MoneyAttemptIdempotency({
-    IdempotencyKeyGenerator? keyGenerator,
-  }) : _keyGenerator = keyGenerator ?? ApiClient._uuid.v4;
+  MoneyAttemptIdempotency({IdempotencyKeyGenerator? keyGenerator})
+      : _keyGenerator = keyGenerator ?? ApiClient._uuid.v4;
 
   final IdempotencyKeyGenerator _keyGenerator;
   String? _attemptFingerprint;
@@ -229,7 +251,9 @@ class SafeDioLogInterceptor extends Interceptor {
 
   @override
   void onResponse(
-      Response<dynamic> response, ResponseInterceptorHandler handler) {
+    Response<dynamic> response,
+    ResponseInterceptorHandler handler,
+  ) {
     if (enabled) {
       final snapshot = ApiLogRedactor.redactResponse(response);
       debugPrint(
@@ -258,10 +282,7 @@ class SafeDioLogInterceptor extends Interceptor {
 }
 
 class ApiLogSnapshot {
-  const ApiLogSnapshot({
-    required this.headers,
-    required this.body,
-  });
+  const ApiLogSnapshot({required this.headers, required this.body});
 
   final Map<String, dynamic> headers;
   final dynamic body;
@@ -269,18 +290,8 @@ class ApiLogSnapshot {
 
 class ApiLogRedactor {
   static const redacted = '<redacted>';
-  static const omittedSensitiveEndpoint = '<omitted:sensitive-endpoint>';
-
-  static final List<RegExp> _sensitiveEndpointPatterns = [
-    RegExp(r'/api/auth/(login|register|refresh|otp|password|reset)',
-        caseSensitive: false),
-    RegExp(r'/api/payments', caseSensitive: false),
-    RegExp(r'/api/transfers', caseSensitive: false),
-    RegExp(r'/api/exchange', caseSensitive: false),
-    RegExp(r'/api/kyc', caseSensitive: false),
-    RegExp(r'/api/vtu', caseSensitive: false),
-    RegExp(r'/api/banking/accounts', caseSensitive: false),
-  ];
+  static const omittedRequestBody = '<omitted:request-body>';
+  static const omittedResponseBody = '<omitted:response-body>';
 
   static final List<RegExp> _sensitiveKeyPatterns = [
     RegExp('authorization', caseSensitive: false),
@@ -289,6 +300,7 @@ class ApiLogRedactor {
     RegExp('token', caseSensitive: false),
     RegExp('secret', caseSensitive: false),
     RegExp('api[-_]?key', caseSensitive: false),
+    RegExp('idempotency[-_]?key', caseSensitive: false),
     RegExp('pin', caseSensitive: false),
     RegExp('otp', caseSensitive: false),
     RegExp('account(number)?', caseSensitive: false),
@@ -298,23 +310,15 @@ class ApiLogRedactor {
   static ApiLogSnapshot redactRequest(RequestOptions options) {
     return ApiLogSnapshot(
       headers: _redactMap(options.headers),
-      body: _shouldOmitBody(options.path)
-          ? omittedSensitiveEndpoint
-          : _redactValue(options.data),
+      body: options.data == null ? null : omittedRequestBody,
     );
   }
 
   static ApiLogSnapshot redactResponse(Response<dynamic> response) {
     return ApiLogSnapshot(
       headers: _redactMap(response.headers.map),
-      body: _shouldOmitBody(response.requestOptions.path)
-          ? omittedSensitiveEndpoint
-          : _redactValue(response.data),
+      body: response.data == null ? null : omittedResponseBody,
     );
-  }
-
-  static bool _shouldOmitBody(String path) {
-    return _sensitiveEndpointPatterns.any((pattern) => pattern.hasMatch(path));
   }
 
   static Map<String, dynamic> _redactMap(Map<dynamic, dynamic> input) {

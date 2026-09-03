@@ -12,9 +12,6 @@ import { WebhookInboxService } from '../src/payments/webhooks/webhook-inbox.serv
 
 describe('Exchange — Monnify Deposit Flow (e2e simulated)', () => {
   const mockPaymentService = {
-    verifyPaystackSignature: jest.fn(),
-    verifyFlutterwaveSignature: jest.fn(),
-    verifyFlutterwaveSecretHash: jest.fn(),
     processTransferWebhook: jest.fn(),
     processWebhookDeposit: jest.fn(),
   };

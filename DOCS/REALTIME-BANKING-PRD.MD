@@ -1,5 +1,7 @@
 # TRUSTPAY Real-Time Banking PRD
 
+> Archived provider-planning record. Use `DOCS/PROVIDER-SOURCE-OF-TRUTH.MD`: Monnify is the only active banking/payment provider.
+
 ## Objective
 
 Build TRUSTPAY's next banking phase as a wallet-first financial platform. Users should be able to receive money through provider-backed virtual accounts, send money instantly to other TRUSTPAY users, and withdraw wallet balances to external bank accounts.

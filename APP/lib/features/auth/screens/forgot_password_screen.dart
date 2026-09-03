@@ -3,7 +3,6 @@ import 'package:go_router/go_router.dart';
 
 import '../../../core/theme/app_theme.dart';
 import '../../../core/router/app_router.dart';
-import '../../../core/widgets/tp_auth_background.dart';
 import '../../../core/widgets/tp_back_button.dart';
 import '../../../core/widgets/tp_card.dart';
 import '../../../core/widgets/tp_snackbar.dart';
@@ -74,97 +73,95 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Row(
+                const Row(
                   children: [
                     TpBackButton(),
-                    const Spacer(),
-                    const AuthHelpButton(),
+                    Spacer(),
+                    AuthHelpButton(),
                   ],
                 ),
-                  const SizedBox(height: AppSpacing.xxl),
-                  Text(
-                    _sent ? 'Check your\nemail.' : 'Forgot your\npassword?',
-                    style: AppTextStyles.displayMedium,
+                const SizedBox(height: AppSpacing.xxl),
+                Text(
+                  _sent ? 'Check your\nemail.' : 'Forgot your\npassword?',
+                  style: AppTextStyles.displayMedium,
+                ),
+                const SizedBox(height: AppSpacing.sm),
+                if (_sent) ...[
+                  TrustPayAnimatedState(
+                    variant: TrustPayAnimationVariant.success,
+                    title: 'Reset link sent',
+                    detail:
+                        'We\'ve sent a reset link to ${_emailController.text.trim()}. Check your inbox and spam folder.',
+                    animationSize: 78,
                   ),
-                  const SizedBox(height: AppSpacing.sm),
-                  if (_sent) ...[
-                    TrustPayAnimatedState(
-                      variant: TrustPayAnimationVariant.success,
-                      title: 'Reset link sent',
-                      detail:
-                          'We\'ve sent a reset link to ${_emailController.text.trim()}. Check your inbox and spam folder.',
-                      animationSize: 78,
-                    ),
-                  ] else ...[
-                    Text(
-                      'Enter the email address associated with your account. We\'ll send a link to reset your password.',
-                      style: AppTextStyles.bodyL,
-                    ),
-                  ],
-                  if (!_sent) ...[
-                    const SizedBox(height: AppSpacing.xxl),
-                    TpCard(
-                      padding: const EdgeInsets.all(AppSpacing.lg),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          AuthTextField(
-                            controller: _emailController,
-                            label: 'Email address',
-                            hint: 'you@example.com',
-                            keyboardType: TextInputType.emailAddress,
-                            validator: (v) {
-                              if (v == null || v.isEmpty) {
-                                return 'Please enter your email';
-                              }
-                              final emailRegex =
-                                  RegExp(r'^[\w\.-]+@[\w-]+\.\w+$');
-                              if (!emailRegex.hasMatch(v)) {
-                                return 'Enter a valid email';
-                              }
-                              return null;
-                            },
-                          ),
-                          const SizedBox(height: AppSpacing.xl),
-                          TpButton(
-                            label: 'Send reset link',
-                            isLoading: _isLoading,
-                            onTap: _onSubmit,
-                          ),
-                        ],
-                      ),
-                    ),
-                  ] else ...[
-                    const SizedBox(height: AppSpacing.xxl),
-                    TpButton(
-                      label: 'Back to login',
-                      onTap: () => context.go(AppRoutes.login),
-                    ),
-                  ],
-                  const SizedBox(height: AppSpacing.xl),
-                  if (!_sent)
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
+                ] else ...[
+                  Text(
+                    'Enter the email address associated with your account. We\'ll send a link to reset your password.',
+                    style: AppTextStyles.bodyL,
+                  ),
+                ],
+                if (!_sent) ...[
+                  const SizedBox(height: AppSpacing.xxl),
+                  TpCard(
+                    padding: const EdgeInsets.all(AppSpacing.lg),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text('Remembered it? ', style: AppTextStyles.bodyM),
-                        GestureDetector(
-                          onTap: () => context.go(AppRoutes.login),
-                          child: Text(
-                            'Back to login',
-                            style: AppTextStyles.link.copyWith(
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
+                        AuthTextField(
+                          controller: _emailController,
+                          label: 'Email address',
+                          hint: 'you@example.com',
+                          keyboardType: TextInputType.emailAddress,
+                          validator: (v) {
+                            if (v == null || v.isEmpty) {
+                              return 'Please enter your email';
+                            }
+                            final emailRegex =
+                                RegExp(r'^[\w\.-]+@[\w-]+\.\w+$');
+                            if (!emailRegex.hasMatch(v)) {
+                              return 'Enter a valid email';
+                            }
+                            return null;
+                          },
+                        ),
+                        const SizedBox(height: AppSpacing.xl),
+                        TpButton(
+                          label: 'Send reset link',
+                          isLoading: _isLoading,
+                          onTap: _onSubmit,
                         ),
                       ],
                     ),
+                  ),
+                ] else ...[
+                  const SizedBox(height: AppSpacing.xxl),
+                  TpButton(
+                    label: 'Back to login',
+                    onTap: () => context.go(AppRoutes.login),
+                  ),
                 ],
-              ),
+                const SizedBox(height: AppSpacing.xl),
+                if (!_sent)
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text('Remembered it? ', style: AppTextStyles.bodyM),
+                      GestureDetector(
+                        onTap: () => context.go(AppRoutes.login),
+                        child: Text(
+                          'Back to login',
+                          style: AppTextStyles.link.copyWith(
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+              ],
             ),
           ),
+        ),
       ),
     );
   }
 }
-
-

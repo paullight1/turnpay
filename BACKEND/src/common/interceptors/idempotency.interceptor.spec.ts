@@ -26,14 +26,25 @@ describe('IdempotencyInterceptor', () => {
     warn: jest.fn(),
     error: jest.fn(),
   };
+  const responseCrypto = {
+    encrypt: jest.fn(),
+    decrypt: jest.fn(),
+  };
 
-  const makeContext = (body: unknown) =>
+  const makeContext = (
+    body: unknown,
+    overrides: {
+      method?: string;
+      path?: string;
+      headers?: Record<string, string>;
+    } = {},
+  ) =>
     ({
       switchToHttp: () => ({
         getRequest: () => ({
-          method: 'POST',
-          originalUrl: '/api/payments/fund',
-          headers: { 'idempotency-key': 'idem-1' },
+          method: overrides.method ?? 'POST',
+          originalUrl: overrides.path ?? '/api/payments/fund',
+          headers: overrides.headers ?? { 'idempotency-key': 'idem-1' },
           user: { userId: 'user-1' },
           body,
         }),
@@ -49,6 +60,15 @@ describe('IdempotencyInterceptor', () => {
     prisma.idempotencyRecord.update.mockResolvedValue({});
     prisma.idempotencyRecord.updateMany.mockResolvedValue({ count: 1 });
     prisma.idempotencyRecord.delete.mockResolvedValue({});
+    responseCrypto.encrypt.mockReturnValue({
+      responseCiphertext: 'ciphertext',
+      responseIv: 'iv',
+      responseTag: 'tag',
+      encryptionKeyId: 'v1',
+    });
+    responseCrypto.decrypt.mockReturnValue({
+      session: { access_token: 'access', refresh_token: 'refresh' },
+    });
   });
 
   const hashBody = (body: unknown) =>
@@ -76,6 +96,38 @@ describe('IdempotencyInterceptor', () => {
     ).rejects.toBeInstanceOf(ConflictException);
   });
 
+  it('logs only a short digest when an idempotency key is replayed', async () => {
+    const interceptor = new IdempotencyInterceptor(
+      redis as any,
+      prisma as any,
+      logger as any,
+    );
+    const rawKey = 'raw-retry-key-that-must-never-be-logged';
+    const requestBody = { amount: '200.00' };
+    redis.get.mockResolvedValue(
+      JSON.stringify({
+        requestHash: hashBody(requestBody),
+        response: { reference: 'FUND-1' },
+      }),
+    );
+
+    const result = await interceptor.intercept(
+      makeContext(requestBody, {
+        headers: { 'x-idempotency-key': rawKey },
+      }),
+      { handle: () => of({ reference: 'should-not-run' }) },
+    );
+
+    await expect(lastValueFrom(result)).resolves.toEqual({
+      reference: 'FUND-1',
+    });
+    const serializedLogs = JSON.stringify(logger.info.mock.calls);
+    expect(serializedLogs).not.toContain(rawKey);
+    expect(serializedLogs).toContain(
+      createHash('sha256').update(rawKey).digest('hex').slice(0, 12),
+    );
+  });
+
   it('requires idempotency key on protected mutation requests', async () => {
     const interceptor = new IdempotencyInterceptor(
       redis as any,
@@ -99,6 +151,105 @@ describe('IdempotencyInterceptor', () => {
         handle: () => of({ reference: 'FUND-1' }),
       }),
     ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('requires idempotency keys for explicitly classified auth mutations', async () => {
+    const interceptor = new IdempotencyInterceptor(
+      redis as any,
+      prisma as any,
+      logger as any,
+      responseCrypto as any,
+    );
+
+    await expect(
+      interceptor.intercept(
+        makeContext(
+          { pin: '1234' },
+          {
+            path: '/api/auth/transaction-pin',
+            headers: {},
+          },
+        ),
+        { handle: () => of({ success: true }) },
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('stores token-bearing auth responses only in encrypted fields', async () => {
+    const interceptor = new IdempotencyInterceptor(
+      redis as any,
+      prisma as any,
+      logger as any,
+      responseCrypto as any,
+    );
+    const tokenResponse = {
+      session: { access_token: 'access', refresh_token: 'refresh' },
+    };
+
+    const result = await interceptor.intercept(
+      makeContext(
+        { email: 'user@example.com', password: 'secret' },
+        { path: '/api/auth/login' },
+      ),
+      { handle: () => of(tokenResponse) },
+    );
+
+    await expect(lastValueFrom(result)).resolves.toEqual(tokenResponse);
+    expect(responseCrypto.encrypt).toHaveBeenCalledWith(
+      tokenResponse,
+      expect.objectContaining({
+        route: '/api/auth/login',
+        keyDigest: expect.stringMatching(/^[a-f0-9]{64}$/),
+      }),
+    );
+    expect(prisma.idempotencyRecord.update).toHaveBeenCalledWith({
+      where: { id: 'idem-record-1' },
+      data: expect.objectContaining({
+        status: 'COMPLETED',
+        response: Prisma.DbNull,
+        responseCiphertext: 'ciphertext',
+        responseIv: 'iv',
+        responseTag: 'tag',
+        encryptionKeyId: 'v1',
+      }),
+    });
+    expect(
+      JSON.stringify(prisma.idempotencyRecord.update.mock.calls),
+    ).not.toContain('access_token');
+  });
+
+  it('decrypts a persisted token-bearing auth replay without invoking the handler', async () => {
+    const interceptor = new IdempotencyInterceptor(
+      redis as any,
+      prisma as any,
+      logger as any,
+      responseCrypto as any,
+    );
+    prisma.idempotencyRecord.findUnique.mockResolvedValue({
+      requestHash: hashBody({ email: 'user@example.com', password: 'secret' }),
+      status: 'COMPLETED',
+      response: null,
+      responseCiphertext: 'ciphertext',
+      responseIv: 'iv',
+      responseTag: 'tag',
+      encryptionKeyId: 'v1',
+      updatedAt: new Date(),
+    });
+    const handler = jest.fn(() => of({ shouldNotRun: true }));
+
+    const result = await interceptor.intercept(
+      makeContext(
+        { email: 'user@example.com', password: 'secret' },
+        { path: '/api/auth/login' },
+      ),
+      { handle: handler },
+    );
+
+    await expect(lastValueFrom(result)).resolves.toEqual({
+      session: { access_token: 'access', refresh_token: 'refresh' },
+    });
+    expect(responseCrypto.decrypt).toHaveBeenCalled();
+    expect(handler).not.toHaveBeenCalled();
   });
 
   it('replays the original failed response for a matching persisted key', async () => {
@@ -177,6 +328,26 @@ describe('IdempotencyInterceptor', () => {
 
     await expect(lastValueFrom(response)).resolves.toEqual({
       accountName: 'NWOSU PAUL CHIBUIKE',
+    });
+    expect(prisma.idempotencyRecord.create).not.toHaveBeenCalled();
+  });
+
+  it('delegates internal-transfer idempotency to its atomic business record', async () => {
+    const interceptor = new IdempotencyInterceptor(
+      redis as any,
+      prisma as any,
+      logger as any,
+    );
+    const response = await interceptor.intercept(
+      makeContext(
+        { recipientEmail: 'recipient@example.com', amount: '10.00' },
+        { path: '/api/transfers/internal', headers: {} },
+      ),
+      { handle: () => of({ reference: 'IT-atomic' }) },
+    );
+
+    await expect(lastValueFrom(response)).resolves.toEqual({
+      reference: 'IT-atomic',
     });
     expect(prisma.idempotencyRecord.create).not.toHaveBeenCalled();
   });

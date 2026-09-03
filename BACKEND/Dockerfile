@@ -21,17 +21,17 @@ RUN npm ci --only=production && npm cache clean --force
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/prisma ./prisma
 COPY --from=builder /app/scripts/validate-production-config.sh ./scripts/validate-production-config.sh
+COPY --from=builder /app/scripts/start-production.sh ./scripts/start-production.sh
 
 RUN npx prisma generate
-RUN chmod +x ./scripts/validate-production-config.sh
+RUN chmod +x ./scripts/validate-production-config.sh ./scripts/start-production.sh
 
 USER node
 
 EXPOSE 3000
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=5 \
-  CMD node -e "fetch('http://127.0.0.1:' + (process.env.PORT || '3000') + '/api/health').then((res) => { if (!res.ok) process.exit(1); }).catch(() => process.exit(1))"
+  CMD node -e "fetch('http://127.0.0.1:' + (process.env.PORT || '3000') + '/api/health/ready').then((res) => { if (!res.ok) process.exit(1); }).catch(() => process.exit(1))"
 
-# Migrations run via the platform preDeployCommand (see render.yaml), not on every container boot.
 ENTRYPOINT ["./scripts/validate-production-config.sh"]
-CMD ["dumb-init", "--", "node", "dist/src/main.js"]
+CMD ["./scripts/start-production.sh"]

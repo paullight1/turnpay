@@ -20,6 +20,19 @@ export interface KycVerificationMetadata {
   reviewedAt?: string | null;
   createdAt?: string;
   updatedAt?: string;
+  reviewSource?: "DOCUMENT" | "PROVIDER" | "NONE";
+  reviewEvidence?: {
+    provider: string;
+    status: string;
+    providerStatus?: string;
+    allValidationPassed?: boolean;
+    dataValidation?: boolean;
+    country?: string;
+    providerType?: string;
+    documentType?: string;
+    identifierMasked?: string;
+    reviewRequired?: boolean;
+  };
 }
 
 export interface KycDocument extends KycVerificationMetadata {
@@ -28,6 +41,25 @@ export interface KycDocument extends KycVerificationMetadata {
   idNumber: string;
   status: string;
   kycTier?: string | number | null;
+}
+
+export interface KycStatusOverview {
+  provider: string;
+  kycStatus: string;
+  kycTier: string | number;
+  reference?: string;
+  latestVerification?: {
+    provider: string;
+    status: string;
+    reference: string;
+    errorMessage?: string | null;
+    updatedAt?: string;
+  } | null;
+  documents: KycDocument[];
+}
+
+export interface KycVerificationResult extends KycDocument {
+  reference: string;
 }
 
 export interface Wallet {
@@ -107,8 +139,9 @@ export interface VtuProvider {
 export interface VtuPackage {
   id: string;
   name: string;
-  price: number;
+  price: string;
   validity: string;
+  serviceType: "data" | "cable";
 }
 
 export interface VtuPurchaseResult {
@@ -118,6 +151,9 @@ export interface VtuPurchaseResult {
   orderId?: string;
   message?: string;
   amount?: string;
+  fee?: string;
+  totalDebit?: string;
+  purchasedCode?: string;
 }
 
 export interface VtuOrderStatus {
@@ -136,6 +172,9 @@ export interface VtuOrderStatus {
   providerTransactionId?: string | null;
   providerStatus?: string | null;
   amount: string;
+  fee: string;
+  totalDebit: string;
+  purchasedCode?: string;
   currency: string;
   targetMasked?: string | null;
   requeryAttempts: number;
@@ -164,6 +203,7 @@ export interface AdminVtuStaleOrder {
   amount: number | string;
   currency: string;
   costAmount?: number | string | null;
+  providerCommission?: number | string | null;
   fee?: number | string | null;
   margin?: number | string | null;
   status: string;
@@ -186,7 +226,7 @@ export interface AdminVtuStaleOrdersResponse {
 }
 
 export interface AdminVtuProviderHealth {
-  id: "vtpass" | "reloadly";
+  id: "vtpass";
   name: string;
   configured: boolean;
   enabled: boolean;
@@ -221,6 +261,7 @@ export interface AdminVtuReconciliationSummary {
   totalOrders?: number;
   totalAmount?: number | string;
   totalCostAmount?: number | string;
+  totalProviderCommission?: number | string;
   totalFees?: number | string;
   totalMargin?: number | string;
   amountMismatches?: number;
@@ -238,6 +279,7 @@ export interface AdminVtuReconciliationBreakdown {
   count: number;
   amount?: number | string | null;
   costAmount?: number | string | null;
+  providerCommission?: number | string | null;
   fees?: number | string | null;
   margin?: number | string | null;
 }
@@ -283,6 +325,35 @@ export interface AdminVtuReconciliationResponse {
   providerBreakdown: AdminVtuReconciliationBreakdown[];
   statusBreakdown: AdminVtuReconciliationBreakdown[];
   exceptions: AdminVtuReconciliationExceptions;
+  orders: Array<{
+    orderId: string;
+    provider: string;
+    providerRequestId: string;
+    providerTransactionId?: string | null;
+    providerStatus?: string | null;
+    status: string;
+    serviceType: string;
+    amount: string;
+    costAmount: string;
+    providerCommission: string;
+    fee: string;
+    margin: string;
+    currency: string;
+    targetMasked?: string | null;
+    requeryAttempts: number;
+    createdAt: string;
+    updatedAt: string;
+  }>;
+  callbackFailures: Array<{
+    providerRequestId: string;
+    providerTransactionId?: string | null;
+    providerStatus?: string | null;
+    attempts: number;
+    nextAttemptAt?: string | null;
+    lastError?: string | null;
+    createdAt: string;
+    updatedAt: string;
+  }>;
 }
 
 export interface AdminVtuPricingRule {

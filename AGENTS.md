@@ -23,7 +23,9 @@ See `DOCS/SECURITY-RULES.MD` for the complete 15-section security checklist.
 - **Web/Admin:** Next.js 16 + shadcn/ui + TanStack Query
 - **Mobile:** Flutter + Riverpod + Dio + go_router
 - **Auth:** JWT (15m access / 7d refresh) + OTP
-- **Payments:** Flutterwave / Paystack (planned)
+- **Payments:** Monnify only
+- **KYC:** Ninja primary for Nigeria; Youverify retained only for rollback
+- **VTU:** VTpass only
 
 ## Code Style
 

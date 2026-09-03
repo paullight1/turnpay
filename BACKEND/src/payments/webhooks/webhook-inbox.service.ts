@@ -5,7 +5,7 @@ import { PinoLogger } from 'nestjs-pino';
 import { PrismaService } from '../../prisma/prisma.service';
 
 export interface WebhookInboxAcceptInput {
-  provider: 'PAYSTACK' | 'FLUTTERWAVE' | 'MONNIFY';
+  provider: 'MONNIFY';
   eventType: string;
   providerReference: string;
   payload: Record<string, unknown>;
@@ -29,6 +29,7 @@ export class WebhookInboxService {
     input: WebhookInboxAcceptInput,
   ): Promise<{ eventId: string; duplicate: boolean }> {
     const sanitizedPayload = this.sanitizePayload(input.payload);
+    const payloadHash = this.hashPayload(sanitizedPayload);
     const now = new Date();
 
     try {
@@ -38,7 +39,7 @@ export class WebhookInboxService {
           eventType: input.eventType,
           providerReference: input.providerReference,
           payload: sanitizedPayload as Prisma.InputJsonValue,
-          payloadHash: this.hashPayload(sanitizedPayload),
+          payloadHash,
           status: 'RECEIVED',
           nextAttemptAt: now,
           receivedAt: now,
@@ -57,6 +58,7 @@ export class WebhookInboxService {
           provider: input.provider,
           eventType: input.eventType,
           providerReference: input.providerReference,
+          payloadHash,
         },
         select: { id: true },
       });

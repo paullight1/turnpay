@@ -1,7 +1,7 @@
 import { Decimal } from '@prisma/client/runtime/library';
 
-export type BankingProviderName = 'paystack' | 'flutterwave' | 'monnify';
-export type NormalizedProviderName = 'PAYSTACK' | 'FLUTTERWAVE' | 'MONNIFY';
+export type BankingProviderName = 'monnify';
+export type NormalizedProviderName = 'MONNIFY';
 export type BankingCurrency = 'NGN' | 'GHS';
 
 export interface ProvisionVirtualAccountInput {

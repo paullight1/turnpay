@@ -3,6 +3,8 @@
 declare global {
   interface Window {
     Tawk_API?: {
+      hideWidget?: () => void;
+      showWidget?: () => void;
       maximize?: () => void;
     };
   }

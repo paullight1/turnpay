@@ -1,5 +1,6 @@
 import { Type } from 'class-transformer';
 import {
+  IsDefined,
   IsNumber,
   IsObject,
   IsOptional,
@@ -8,104 +9,6 @@ import {
   Min,
   ValidateNested,
 } from 'class-validator';
-
-class PaystackAuthorizationDto {
-  @IsOptional()
-  @IsString()
-  @MaxLength(32)
-  receiver_bank_account_number?: string;
-}
-
-class PaystackWebhookDataDto {
-  @IsString()
-  @MaxLength(128)
-  reference!: string;
-
-  @IsString()
-  @MaxLength(64)
-  status!: string;
-
-  @IsNumber()
-  @Min(0)
-  amount!: number;
-
-  @IsString()
-  @MaxLength(8)
-  currency!: string;
-
-  @IsOptional()
-  @IsString()
-  @MaxLength(128)
-  gateway_response?: string;
-
-  @IsOptional()
-  @ValidateNested()
-  @Type(() => PaystackAuthorizationDto)
-  authorization?: PaystackAuthorizationDto;
-}
-
-export class PaystackWebhookDto {
-  @IsString()
-  @MaxLength(64)
-  event!: string;
-
-  @ValidateNested()
-  @Type(() => PaystackWebhookDataDto)
-  data!: PaystackWebhookDataDto;
-}
-
-class FlutterwaveCustomerDto {
-  @IsOptional()
-  @IsString()
-  @MaxLength(32)
-  account_number?: string;
-}
-
-class FlutterwaveWebhookDataDto {
-  @IsNumber()
-  id!: number;
-
-  @IsString()
-  @MaxLength(128)
-  tx_ref!: string;
-
-  @IsOptional()
-  @IsString()
-  @MaxLength(128)
-  reference?: string;
-
-  @IsString()
-  @MaxLength(64)
-  status!: string;
-
-  @IsNumber()
-  @Min(0)
-  amount!: number;
-
-  @IsString()
-  @MaxLength(8)
-  currency!: string;
-
-  @IsOptional()
-  @IsString()
-  @MaxLength(32)
-  account_number?: string;
-
-  @IsOptional()
-  @ValidateNested()
-  @Type(() => FlutterwaveCustomerDto)
-  customer?: FlutterwaveCustomerDto;
-}
-
-export class FlutterwaveWebhookDto {
-  @IsString()
-  @MaxLength(64)
-  event!: string;
-
-  @ValidateNested()
-  @Type(() => FlutterwaveWebhookDataDto)
-  data!: FlutterwaveWebhookDataDto;
-}
 
 class MonnifyDestinationAccountDto {
   @IsOptional()
@@ -163,16 +66,19 @@ class MonnifyWebhookEventDataDto {
   transactionStatus?: string;
 
   @IsOptional()
+  @Type(() => Number)
   @IsNumber()
   @Min(0)
   amountPaid?: number;
 
   @IsOptional()
+  @Type(() => Number)
   @IsNumber()
   @Min(0)
   totalPayable?: number;
 
   @IsOptional()
+  @Type(() => Number)
   @IsNumber()
   @Min(0)
   settlementAmount?: number;
@@ -203,16 +109,16 @@ export class MonnifyWebhookDto {
   @MaxLength(64)
   eventType!: string;
 
-  @IsOptional()
+  @IsDefined()
   @ValidateNested()
   @Type(() => MonnifyWebhookEventDataDto)
-  eventData?: MonnifyWebhookEventDataDto;
+  eventData!: MonnifyWebhookEventDataDto;
 }
 
 export class PaymentWebhookInboxDto {
   @IsString()
   @MaxLength(32)
-  provider!: 'PAYSTACK' | 'FLUTTERWAVE' | 'MONNIFY';
+  provider!: 'MONNIFY';
 
   @IsString()
   @MaxLength(128)

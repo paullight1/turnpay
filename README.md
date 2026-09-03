@@ -33,7 +33,7 @@
 
 ## Current Implementation Status
 
-Date updated: 2026-05-22
+Date updated: 2026-09-01
 
 TRUSTPAY is in active development and is **not ready for real-money launch yet**. The backend, web/admin, and Flutter app foundations are implemented, but production activation still requires staging migrations, live secrets, Supabase storage buckets, Monnify KYB/credentials, HTTPS webhook registration, sandbox/live provider validation, reconciliation checks, and launch sign-off.
 
@@ -41,8 +41,8 @@ Current banking direction:
 
 - Monnify only for Nigerian NGN virtual accounts.
 - Nomba is not active.
-- Paystack dedicated virtual accounts are not active.
-- Paystack/Flutterwave provider code exists, but the active virtual-account path is Monnify.
+- Monnify is the only payment, virtual-account, and withdrawal provider.
+- VTpass is the only VTU provider, and Ninja is the primary Nigerian KYC provider.
 - Monnify-verified NGN exchange deposits require admin approval before GHS wallet credit.
 
 Primary status docs:
@@ -144,8 +144,8 @@ graph TB
     end
 
     subgraph "🌐 External APIs"
-        O[Flutterwave/Paystack]
-        P[VTU Providers]
+        O[Monnify]
+        P[VTpass]
         Q[FX Rate APIs]
         R[SMS/OTP APIs]
     end
@@ -188,7 +188,9 @@ graph TB
 | **Database** | [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-316192?style=flat-square&logo=postgresql&logoColor=white)](https://postgresql.org) | ACID compliance for financial data |
 | **Cache** | [![Redis](https://img.shields.io/badge/Redis-DC382D?style=flat-square&logo=redis&logoColor=white)](https://redis.io) | Fast rate caching, session storage |
 | **Auth** | JWT + OTP | Secure, industry standard |
-| **Payments** | Monnify active for NGN virtual accounts; Paystack/Flutterwave code present but not active DVA path | African payment infrastructure |
+| **Payments** | Monnify for NGN virtual accounts, deposits, bank resolution, and withdrawals | Nigerian payment infrastructure |
+| **KYC** | Ninja direct identity API | Server-mediated Nigerian BVN/NIN verification |
+| **VTU** | VTpass | Airtime, data, cable, and electricity |
 | **CI/CD** | [![GitHub Actions](https://img.shields.io/badge/GitHub_Actions-2088FF?style=flat-square&logo=github-actions&logoColor=white)](https://github.com/features/actions) | Automated testing & deployment |
 
 ---
@@ -278,20 +280,26 @@ REDIS_URL="redis://localhost:6379"
 JWT_SECRET="your-super-secret-jwt-key-change-in-production"
 JWT_REFRESH_SECRET="your-super-secret-refresh-key-change-in-production"
 
-# ─── Payment Gateway (Choose One) ──────────────────────────
-# Flutterwave
-FLUTTERWAVE_SECRET_KEY="FLWSECK_TEST-xxx"
-FLUTTERWAVE_PUBLIC_KEY="FLWPUBK_TEST-xxx"
-FLUTTERWAVE_SECRET_HASH="your-webhook-hash"
+# ─── Monnify ───────────────────────────────────────────────
+MONNIFY_API_KEY="MK_TEST_xxx"
+MONNIFY_SECRET_KEY="your-monnify-secret"
+MONNIFY_CONTRACT_CODE="your-contract-code"
+MONNIFY_BASE_URL="https://sandbox.monnify.com"
+MONNIFY_WEBHOOK_URL=""
 
-# Paystack
-PAYSTACK_SECRET_KEY="sk_test_xxx"
-PAYSTACK_PUBLIC_KEY="pk_test_xxx"
-PAYSTACK_SECRET_HASH="your-webhook-hash"
+# ─── VTpass ────────────────────────────────────────────────
+VTU_PROVIDER="vtpass"
+VTPASS_BASE_URL="https://sandbox.vtpass.com/api"
+VTPASS_API_KEY="your-vtpass-api-key"
+VTPASS_PUBLIC_KEY="your-vtpass-public-key"
+VTPASS_SECRET_KEY="your-vtpass-secret-key"
+VTPASS_WEBHOOK_SECRET="your-webhook-secret"
 
-# ─── VTU Provider ──────────────────────────────────────────
-VTU_API_KEY="your-vtu-api-key"
-VTU_API_URL="https://api.vtu-provider.com/v1"
+# ─── Ninja KYC ─────────────────────────────────────────────
+KYC_PROVIDER="ninja"
+NINJA_CLIENT_KEY="your-ninja-client-key"
+NINJA_CLIENT_SECRET="your-ninja-client-secret"
+NINJA_BASE_URL="https://api.sandbox.ninja.boucloud.io"
 
 # ─── FX Rate API ───────────────────────────────────────────
 FX_API_KEY="your-fx-api-key"
@@ -336,11 +344,14 @@ NODE_ENV="development"
 ### Payments
 | Method | Endpoint | Description | Auth |
 |--------|----------|-------------|------|
-| `POST` | `/payments/fund` | Initialize wallet funding | ✅ |
 | `POST` | `/payments/withdraw` | Request bank withdrawal | ✅ |
 | `GET` | `/payments/banks` | List supported banks | ✅ |
-| `POST` | `/webhooks/paystack` | Paystack webhook handler | 🔒 |
-| `POST` | `/webhooks/flutterwave` | Flutterwave webhook handler | 🔒 |
+| `POST` | `/webhooks/monnify` | Monnify webhook handler | 🔒 |
+
+### KYC
+| Method | Endpoint | Description | Auth |
+|--------|----------|-------------|------|
+| `POST` | `/kyc/verify` | Verify a consented Nigerian BVN or NIN through Ninja | ✅ |
 
 ### VTU
 | Method | Endpoint | Description | Auth |

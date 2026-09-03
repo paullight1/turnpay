@@ -180,19 +180,42 @@ const termsTopics: LegalTopic[] = [
   },
 ];
 
-function TopicCard({ topic }: { topic: LegalTopic }) {
+function TopicCard({
+  topic,
+  tone = "light",
+}: {
+  topic: LegalTopic;
+  tone?: "light" | "dark";
+}) {
   const Icon = topic.icon;
+  const isDark = tone === "dark";
 
   return (
-    <Card className="rounded-xl border-white/10 bg-white/[0.04] text-white shadow-none">
-      <CardHeader className="border-b border-white/10 pb-4">
+    <Card
+      className={
+        isDark
+          ? "rounded-xl border-white/10 bg-white/[0.04] text-white shadow-none"
+          : "rounded-xl border-gray-200 bg-white text-gray-900 shadow-sm"
+      }
+    >
+      <CardHeader
+        className={isDark ? "border-b border-white/10 pb-4" : "border-b border-gray-100 pb-4"}
+      >
         <div className="flex items-start gap-3">
-          <div className="grid size-10 shrink-0 place-items-center rounded-lg bg-red-600/10 text-red-400">
+          <div
+            className={
+              isDark
+                ? "grid size-10 shrink-0 place-items-center rounded-lg bg-red-600/10 text-red-400"
+                : "grid size-10 shrink-0 place-items-center rounded-lg bg-red-50 text-red-600"
+            }
+          >
             <Icon aria-hidden="true" className="size-5" />
           </div>
           <div className="space-y-1">
-            <CardTitle className="text-lg text-white">{topic.title}</CardTitle>
-            <CardDescription className="text-white/62">
+            <CardTitle className={isDark ? "text-lg text-white" : "text-lg text-gray-900"}>
+              {topic.title}
+            </CardTitle>
+            <CardDescription className={isDark ? "text-white/62" : "text-gray-600"}>
               {topic.description}
             </CardDescription>
           </div>
@@ -201,8 +224,21 @@ function TopicCard({ topic }: { topic: LegalTopic }) {
       <CardContent className="pt-4">
         <ul className="space-y-2">
           {topic.points.map((point) => (
-            <li key={point} className="flex gap-3 text-sm leading-6 text-white/76">
-              <span className="mt-2 size-1.5 shrink-0 rounded-full bg-red-400" />
+            <li
+              key={point}
+              className={
+                isDark
+                  ? "flex gap-3 text-sm leading-6 text-white/76"
+                  : "flex gap-3 text-sm leading-6 text-gray-700"
+              }
+            >
+              <span
+                className={
+                  isDark
+                    ? "mt-2 size-1.5 shrink-0 rounded-full bg-red-400"
+                    : "mt-2 size-1.5 shrink-0 rounded-full bg-red-500"
+                }
+              />
               <span>{point}</span>
             </li>
           ))}
@@ -226,28 +262,36 @@ export default function LegalPage() {
             <ArrowRight data-icon="inline-end" aria-hidden="true" />
           </Link>
         </Button>
-        <Button variant="outline" asChild>
+        <Button
+          variant="outline"
+          asChild
+          className="border-white bg-white text-gray-900 hover:bg-gray-100 hover:text-gray-900"
+        >
           <Link href="/legal#terms">Terms of Use</Link>
         </Button>
-        <Button variant="outline" asChild>
+        <Button
+          variant="outline"
+          asChild
+          className="border-white bg-white text-gray-900 hover:bg-gray-100 hover:text-gray-900"
+        >
           <Link href="/support">Contact Support</Link>
         </Button>
       </PageHero>
 
       <section className="px-4 py-14 sm:px-6 lg:px-8">
         <div className="mx-auto grid max-w-7xl gap-4 lg:grid-cols-[1.2fr_0.8fr]">
-          <Card className="rounded-xl border-white/10 bg-white/[0.04] text-white shadow-none">
+          <Card className="rounded-xl border-gray-200 bg-white text-gray-900 shadow-sm">
             <CardHeader>
               <Badge
                 variant="secondary"
-                className="w-fit border-white/10 bg-white/[0.06] text-red-300"
+                className="w-fit border-red-100 bg-red-50 text-red-700"
               >
                 Read this first
               </Badge>
-              <CardTitle className="text-2xl text-white">
+              <CardTitle className="text-2xl text-gray-900">
                 Clear information, clear rules.
               </CardTitle>
-              <CardDescription className="text-white/62">
+              <CardDescription className="text-gray-600">
                 We keep this page practical: what data is collected, why we use
                 it, when it may be shared, and what rules apply when you use the
                 app or website.
@@ -296,23 +340,24 @@ export default function LegalPage() {
             title="Rules for using the TrustPay app and website."
             description="These terms cover account safety, payments, limits, acceptable use, and how we handle changes to the service."
             align="center"
+            tone="dark"
             className="mx-auto"
           />
           <div className="mt-10 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
             {termsTopics.map((topic) => (
-              <TopicCard key={topic.title} topic={topic} />
+              <TopicCard key={topic.title} topic={topic} tone="dark" />
             ))}
           </div>
         </div>
       </section>
 
       <section className="border-t border-white/10 px-4 py-16 sm:px-6 lg:px-8">
-        <div className="mx-auto flex max-w-7xl flex-col gap-4 rounded-xl border border-white/10 bg-white/[0.04] p-6 text-white md:flex-row md:items-center md:justify-between">
+        <div className="mx-auto flex max-w-7xl flex-col gap-4 rounded-xl border border-gray-200 bg-gray-50 p-6 text-gray-900 md:flex-row md:items-center md:justify-between">
           <div className="max-w-2xl">
             <h2 className="text-xl font-semibold">
               Need help with a policy or transaction?
             </h2>
-            <p className="mt-2 text-sm leading-6 text-white/66">
+            <p className="mt-2 text-sm leading-6 text-gray-600">
               Contact support if a transaction looks wrong, if you want help
               understanding a fee, or if you need clarification on how your
               information is used.
@@ -320,7 +365,7 @@ export default function LegalPage() {
           </div>
           <Button
             asChild
-            className="rounded-full bg-white text-black hover:bg-red-600 hover:text-white"
+            className="rounded-full bg-red-600 text-white hover:bg-red-700"
           >
             <Link href="/support">
               Open Support

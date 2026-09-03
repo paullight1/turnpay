@@ -27,12 +27,12 @@ class SendMoneyEntryScreen extends StatelessWidget {
               ),
               sliver: SliverList.list(
                 children: [
-                  TpPageHeader(
+                  const TpPageHeader(
                     label: 'Send money',
                     showBackButton: true,
                   ),
                   const SizedBox(height: AppSpacing.md),
-                  Center(
+                  const Center(
                     child: TpIllustration(
                       variant: TpIllustrationVariant.send,
                       size: 148,

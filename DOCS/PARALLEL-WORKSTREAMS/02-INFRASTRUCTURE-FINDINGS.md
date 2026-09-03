@@ -1,5 +1,7 @@
 # Phase 1: Production Environment Provisioning -- Research, Planning & Recommendations
 
+> Historical findings only. The current provider and environment-variable contract is `DOCS/PROVIDER-SOURCE-OF-TRUTH.MD` and `BACKEND/.env.example`.
+
 **Date:** 2026-05-31  
 **Stream:** STREAM-INFRA  
 **Status:** Research Complete (No provisioning executed)  
@@ -233,7 +235,7 @@ The following secrets were extracted by analyzing `BACKEND/.env`, `BACKEND/src/a
 | 32 | `MONNIFY_SECRET_KEY` | [B] | .env, app.module.ts | Live in prod, test in staging |
 | 33 | `MONNIFY_CONTRACT_CODE` | [B] | .env, app.module.ts | Contract ID per env |
 | 34 | `MONNIFY_BASE_URL` | [B] | .env, app.module.ts | `https://sandbox.monnify.com` staging, `https://api.monnify.com` prod |
-| 35 | `MONNIFY_WEBHOOK_SECRET` | [B] | app.module.ts | For validating `monnify-signature` |
+| 35 | Monnify webhook signing | [B] | app.module.ts | Uses `MONNIFY_SECRET_KEY` for `monnify-signature` |
 | 36 | `MONNIFY_WEBHOOK_URL` | [P] | app.module.ts | Production HTTPS webhook URL |
 | 37 | `MONNIFY_GET_ALL_AVAILABLE_BANKS` | [B] | app.module.ts | `true` |
 | 38 | `MONNIFY_RESTRICT_PAYMENT_SOURCE` | [B] | app.module.ts | `false` |

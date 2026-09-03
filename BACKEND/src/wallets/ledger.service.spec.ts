@@ -42,7 +42,7 @@ describe('LedgerService', () => {
       amount: new Decimal(250),
       transactionId: 'tx-1',
       reference: 'DEP-1',
-      source: 'PAYSTACK_DVA',
+      source: 'MONNIFY_DVA',
     });
 
     expect(prisma.$transaction).toHaveBeenCalledTimes(1);
@@ -65,7 +65,7 @@ describe('LedgerService', () => {
         balanceBefore: new Decimal(1000),
         balanceAfter: new Decimal(1250),
         reference: 'DEP-1',
-        source: 'PAYSTACK_DVA',
+        source: 'MONNIFY_DVA',
         metadata: undefined,
       },
     });
@@ -80,7 +80,7 @@ describe('LedgerService', () => {
         amount: new Decimal(0),
         transactionId: 'tx-1',
         reference: 'DEP-1',
-        source: 'PAYSTACK_DVA',
+        source: 'MONNIFY_DVA',
       }),
     ).rejects.toBeInstanceOf(BadRequestException);
   });
@@ -155,7 +155,7 @@ describe('LedgerService', () => {
         amount: new Decimal(250),
         transactionId: 'tx-1',
         reference: 'DEP-1',
-        source: 'PAYSTACK_DVA',
+        source: 'MONNIFY_DVA',
       }),
     ).rejects.toBeInstanceOf(NotFoundException);
   });

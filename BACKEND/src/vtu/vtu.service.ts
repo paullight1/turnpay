@@ -3,6 +3,7 @@ import {
   ForbiddenException,
   Injectable,
   NotFoundException,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
@@ -13,8 +14,11 @@ import {
 } from '@prisma/client';
 import { WalletsService } from '../wallets/wallets.service';
 import { VtuApiProvider } from './providers/vtu-api.provider';
-import { ReloadlyProvider } from './providers/reloadly.provider';
-import { AutoDetectReloadlyOperatorDto, PurchaseVtuDto } from './dto/vtu.dto';
+import {
+  PurchaseVtuDto,
+  ValidateMeterDto,
+  ValidateSmartCardDto,
+} from './dto/vtu.dto';
 import { v4 as uuidv4 } from 'uuid';
 import { PinoLogger } from 'nestjs-pino';
 import { Decimal } from '@prisma/client/runtime/library';
@@ -23,40 +27,16 @@ import { maskAccountNumber, maskPhone } from '../common/utils/masking';
 import { TransactionPinService } from '../common/services/transaction-pin.service';
 import { formatKycTier, isKycTierAtLeast } from '../common/utils/kyc-tier';
 import { VtuProviderHealthResponse } from './providers/provider-health.types';
-
-type VtuProviderResult = {
-  reference: string;
-  status: string;
-  message: string;
-  providerRequestId?: string;
-  rawResponse?: Record<string, unknown>;
-};
-
-type ReloadlyWebhookEvent = {
-  eventType: string;
-  eventId?: string;
-  providerReference: string;
-  providerRequestId?: string;
-  status: string;
-  message?: string;
-  rawPayload: Record<string, unknown>;
-};
-
-type VtpassWebhookEvent = {
-  eventType: string;
-  providerRequestId: string;
-  providerReference?: string;
-  status: string;
-  message?: string;
-  rawPayload: Record<string, unknown>;
-};
+import type { VtuProviderResult } from './providers/vtpass.types';
+import type { VtpassInboxEvent } from './vtu-webhook-inbox.service';
+import { VtuReceiptService } from './vtu-receipt.service';
 
 type VtuPricingContext = {
   amount: Decimal;
   countryCode: string;
   serviceType: TransactionType;
   provider: string;
-  scope: 'LOCAL' | 'INTERNATIONAL';
+  scope: 'LOCAL';
 };
 
 @Injectable()
@@ -65,122 +45,33 @@ export class VtuService {
     private readonly prisma: PrismaService,
     private readonly walletsService: WalletsService,
     private readonly vtuApi: VtuApiProvider,
-    private readonly reloadly: ReloadlyProvider,
     private readonly configService: ConfigService,
     private readonly logger: PinoLogger,
     private readonly ledger: LedgerService,
     private readonly transactionPin: TransactionPinService,
+    private readonly receipt: VtuReceiptService,
   ) {}
 
-  async getProviders(type?: string, scope?: string, countryCode?: string) {
-    if (scope === 'international') {
-      if (type && !['airtime', 'data', 'electricity'].includes(type)) {
-        throw new BadRequestException(
-          'International VTU currently supports airtime, data, and Ghana electricity only',
-        );
-      }
-
-      if (type === 'electricity') {
-        return this.reloadly.getUtilityBillers(countryCode, 'electricity');
-      }
-
-      return this.reloadly.getOperators(
-        countryCode,
-        type === 'data' ? 'data' : 'airtime',
-      );
-    }
-
+  async getProviders(type?: string) {
+    this.assertVtuEnabled();
     return this.vtuApi.getProviders(type);
   }
 
   async getPackages(provider: string) {
+    this.assertVtuEnabled();
     return this.vtuApi.getPackages(provider);
   }
 
-  async autoDetectReloadlyOperator(dto: AutoDetectReloadlyOperatorDto) {
-    return this.reloadly.autoDetectOperator({
-      phone: dto.phone,
-      countryCode: dto.countryCode,
-      type: dto.type,
-    });
-  }
-
-  async getReloadlyTopupStatus(transactionId: string) {
-    return this.reloadly.getTopupStatus(transactionId);
-  }
-
   async getProviderHealth(): Promise<VtuProviderHealthResponse> {
-    const [vtpass, reloadly] = await Promise.all([
-      this.vtuApi.getVtpassHealth(),
-      this.reloadly.getHealth(),
-    ]);
+    const vtpass = await this.vtuApi.getVtpassHealth();
 
     return {
       generatedAt: new Date(),
-      providers: [vtpass, reloadly],
+      providers: [vtpass],
     };
   }
 
-  async recordReloadlyWebhookEvent(event: ReloadlyWebhookEvent) {
-    const reference = this.reloadlyWebhookReference(event);
-
-    try {
-      const log = await this.prisma.webhookLog.create({
-        data: {
-          provider: 'reloadly',
-          eventType: event.eventType,
-          reference,
-          payload: event.rawPayload as Prisma.InputJsonValue,
-          processed: false,
-        },
-        select: { id: true, reference: true },
-      });
-
-      return { duplicate: false, logId: log.id, reference: log.reference };
-    } catch (error) {
-      if (this.isUniqueConstraintError(error)) {
-        return { duplicate: true, reference };
-      }
-
-      throw error;
-    }
-  }
-
-  async recordVtpassWebhookEvent(event: VtpassWebhookEvent) {
-    const reference = this.vtpassWebhookReference(event);
-
-    try {
-      const log = await this.prisma.webhookLog.create({
-        data: {
-          provider: 'vtpass',
-          eventType: event.eventType,
-          reference,
-          payload: event.rawPayload as Prisma.InputJsonValue,
-          processed: false,
-        },
-        select: { id: true, reference: true },
-      });
-
-      return { duplicate: false, logId: log.id, reference: log.reference };
-    } catch (error) {
-      if (this.isUniqueConstraintError(error)) {
-        return { duplicate: true, reference };
-      }
-
-      throw error;
-    }
-  }
-
-  async processVtpassWebhookEvent(event: VtpassWebhookEvent) {
-    const reference = this.vtpassWebhookReference(event);
-    const log = await this.prisma.webhookLog.findUnique({
-      where: { reference },
-    });
-
-    if (log?.processed) {
-      return { processed: false, duplicate: true };
-    }
-
+  async processVtpassWebhookEvent(event: VtpassInboxEvent) {
     try {
       const order = await this.prisma.vtuOrder.findFirst({
         where: {
@@ -205,40 +96,42 @@ export class VtuService {
               fee: true,
               currency: true,
               status: true,
+              metadata: true,
             },
           },
         },
       });
 
       if (!order) {
-        await this.markVtpassWebhookLog(
-          reference,
-          false,
-          'VTU order not found',
-        );
         this.logger.warn(
-          { reference, providerRequestId: event.providerRequestId },
+          { providerRequestId: event.providerRequestId },
           'VTpass webhook VTU order not found',
         );
-        return { processed: false, orderFound: false };
+        throw new NotFoundException('VTU order not found for callback');
       }
 
       await this.applyProviderResultToOrder({
         order,
         result: {
           reference: event.providerReference || event.providerRequestId,
+          providerTransactionId:
+            event.providerReference || event.providerRequestId,
           status: event.status,
           message: event.message || 'VTpass webhook status update',
           providerRequestId: event.providerRequestId,
-          rawResponse: event.rawPayload,
+          safeResponse: {
+            code: event.code,
+            status: event.status,
+          },
+          rawResponse: {
+            code: event.code,
+            status: event.status,
+          },
         },
       });
 
-      await this.markVtpassWebhookLog(reference, true);
-
       this.logger.info(
         {
-          reference,
           providerRequestId: event.providerRequestId,
           providerReference: event.providerReference,
           status: event.status,
@@ -251,142 +144,37 @@ export class VtuService {
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : 'Unknown VTpass webhook error';
-      await this.markVtpassWebhookLog(reference, false, errorMessage);
       this.logger.error(
-        { reference, providerRequestId: event.providerRequestId, errorMessage },
+        { providerRequestId: event.providerRequestId, errorMessage },
         'VTpass webhook VTU processing failed',
       );
       throw error;
     }
   }
 
-  async processReloadlyWebhookEvent(event: ReloadlyWebhookEvent) {
-    const reference = this.reloadlyWebhookReference(event);
-    const log = await this.prisma.webhookLog.findUnique({
-      where: { reference },
-    });
-
-    if (log?.processed) {
-      return { processed: false, duplicate: true };
-    }
-
-    try {
-      const orderFilters: Prisma.VtuOrderWhereInput[] = [
-        { providerTransactionId: event.providerReference },
-        { providerRequestId: event.providerReference },
-      ];
-
-      if (event.providerRequestId) {
-        orderFilters.push(
-          { providerRequestId: event.providerRequestId },
-          { transaction: { reference: event.providerRequestId } },
-        );
-      }
-
-      const order = await this.prisma.vtuOrder.findFirst({
-        where: {
-          provider: 'RELOADLY',
-          OR: orderFilters,
-        },
-        select: {
-          id: true,
-          transactionId: true,
-          providerRequestId: true,
-          transaction: {
-            select: {
-              id: true,
-              userId: true,
-              reference: true,
-              amount: true,
-              fee: true,
-              currency: true,
-              status: true,
-            },
-          },
-        },
-      });
-
-      if (!order) {
-        await this.markReloadlyWebhookLog(
-          reference,
-          false,
-          'VTU order not found',
-        );
-        this.logger.warn(
-          { reference, providerReference: event.providerReference },
-          'Reloadly webhook VTU order not found',
-        );
-        return { processed: false, orderFound: false };
-      }
-
-      await this.applyProviderResultToOrder({
-        order,
-        result: {
-          reference: event.providerReference,
-          status: event.status,
-          message: event.message || 'Reloadly webhook status update',
-          providerRequestId: event.providerRequestId,
-          rawResponse: event.rawPayload,
-        },
-      });
-
-      await this.markReloadlyWebhookLog(reference, true);
-
-      this.logger.info(
-        {
-          reference,
-          providerReference: event.providerReference,
-          status: event.status,
-          orderId: order.id,
-        },
-        'Reloadly webhook VTU order processed',
-      );
-
-      return { processed: true, orderId: order.id, status: event.status };
-    } catch (error) {
-      const errorMessage =
-        error instanceof Error
-          ? error.message
-          : 'Unknown Reloadly webhook error';
-      await this.markReloadlyWebhookLog(reference, false, errorMessage);
-      this.logger.error(
-        { reference, providerReference: event.providerReference, errorMessage },
-        'Reloadly webhook VTU processing failed',
-      );
-      throw error;
-    }
+  async validateSmartCard(dto: ValidateSmartCardDto) {
+    this.assertVtuEnabled();
+    return this.vtuApi.validateSmartCard(dto.provider, dto.smartCardNumber);
   }
 
-  async getCountries(search?: string) {
-    const countries = await this.reloadly.getCountries();
-    const query = search?.trim().toLowerCase();
-
-    if (!query) {
-      return countries;
-    }
-
-    return countries.filter(
-      (country) =>
-        country.name.toLowerCase().includes(query) ||
-        country.code.toLowerCase() === query,
+  async validateMeter(dto: ValidateMeterDto) {
+    this.assertVtuEnabled();
+    return this.vtuApi.validateMeter(
+      dto.provider,
+      dto.meterNumber,
+      dto.meterType,
     );
   }
 
-  async validateSmartCard(provider: string, smartCardNumber: string) {
-    return this.vtuApi.validateSmartCard(provider, smartCardNumber);
-  }
-
-  async validateMeter(provider: string, meterNumber: string) {
-    return this.vtuApi.validateMeter(provider, meterNumber);
-  }
-
   async purchase(userId: string, dto: PurchaseVtuDto) {
+    this.assertVtuEnabled();
     await this.transactionPin.verifyRequired(userId, dto.transactionPin);
     await this.assertUserCanPurchase(userId);
     this.assertRequiredTarget(dto);
     await this.assertProviderSupportsType(dto);
 
-    const amount = await this.resolveServerAmount(dto);
+    const verification = await this.verifyCustomerForPurchase(dto);
+    const amount = await this.resolveServerAmount(dto, verification);
     const wallet = await this.walletsService.getWallet(userId, 'NGN');
     if (!wallet) {
       throw new NotFoundException('NGN wallet not found');
@@ -402,14 +190,6 @@ export class VtuService {
 
     const pricing = await this.calculatePricingForPurchase(dto, amount);
     const debitAmount = amount.plus(pricing.fee);
-    if (new Decimal(wallet.balance).lessThan(debitAmount)) {
-      throw new BadRequestException(
-        `Insufficient NGN balance. Required: ${debitAmount.toString()}`,
-      );
-    }
-
-    const verification = await this.verifyCustomerForPurchase(dto);
-
     const reference = `VTU-${Date.now()}-${uuidv4().slice(0, 8)}`;
     const metadata = {
       ...this.buildSafeMetadata(dto),
@@ -420,8 +200,8 @@ export class VtuService {
       marginFee: pricing.fee.toString(),
       debitAmount: debitAmount.toString(),
     };
-    const provider = this.getOrderProvider(dto);
-    const providerRequestId = this.getProviderRequestId(dto, reference);
+    const provider = this.getOrderProvider();
+    const providerRequestId = this.getProviderRequestId(reference);
 
     const transactionRecord = await this.prisma.$transaction(async (tx) => {
       const transaction = await tx.transaction.create({
@@ -455,15 +235,10 @@ export class VtuService {
         data: {
           transactionId: transaction.id,
           provider,
-          scope: this.isInternationalPurchase(dto) ? 'INTERNATIONAL' : 'LOCAL',
+          scope: 'LOCAL',
           serviceType: this.mapVtuType(dto.type),
-          countryCode: this.isInternationalPurchase(dto)
-            ? dto.countryCode
-            : 'NG',
-          localProvider: this.isInternationalPurchase(dto)
-            ? undefined
-            : this.getLocalProvider(dto),
-          operatorId: dto.operatorId,
+          countryCode: 'NG',
+          localProvider: this.getLocalProvider(dto),
           providerRequestId,
           status: 'PENDING',
           amount,
@@ -487,38 +262,20 @@ export class VtuService {
     let purchaseResult: VtuProviderResult;
 
     try {
-      if (this.isInternationalPurchase(dto)) {
-        purchaseResult =
-          dto.type === 'electricity'
-            ? await this.reloadly.payUtilityBill({
-                type: 'electricity',
-                billerId: dto.operatorId as string,
-                countryCode: dto.countryCode as string,
-                meterNumber: dto.meterNumber as string,
-                amount: amount.toNumber(),
-                reference,
-              })
-            : await this.reloadly.purchase({
-                type: dto.type as 'airtime' | 'data',
-                operatorId: dto.operatorId as string,
-                countryCode: dto.countryCode as string,
-                recipientNumber: dto.recipientNumber as string,
-                amount: amount.toNumber(),
-                reference,
-              });
-      } else {
-        purchaseResult = await this.vtuApi.purchase({
-          type: dto.type,
-          provider: this.getLocalProvider(dto),
-          recipientNumber: dto.recipientNumber,
-          amount: amount.toNumber(),
-          reference,
-          packageId: dto.packageId,
-          smartCardNumber: dto.smartCardNumber,
-          meterNumber: dto.meterNumber,
-          providerRequestId,
-        });
-      }
+      purchaseResult = await this.vtuApi.purchase({
+        type: dto.type,
+        provider: this.getLocalProvider(dto),
+        contactPhone: dto.contactPhone,
+        recipientNumber: dto.recipientNumber,
+        amount: amount.toFixed(2),
+        reference,
+        packageId: dto.packageId,
+        smartCardNumber: dto.smartCardNumber,
+        subscriptionType: dto.subscriptionType,
+        meterNumber: dto.meterNumber,
+        meterType: dto.meterType,
+        providerRequestId,
+      });
     } catch (error) {
       await this.markProviderResultUnknown(transactionRecord, {
         ...metadata,
@@ -613,32 +370,23 @@ export class VtuService {
       };
     }
 
-    await this.prisma.$transaction(async (tx) => {
-      await tx.transaction.update({
-        where: { reference: transactionRecord.reference },
-        data: {
-          status: 'SUCCESS',
-          metadata: {
-            ...metadata,
-            providerReference: purchaseResult.reference,
-            providerStatus: purchaseResult.status,
-          },
+    await this.applyProviderResultToOrder({
+      order: {
+        id: transactionRecord.orderId,
+        transactionId: transactionRecord.id,
+        providerRequestId,
+        transaction: {
+          id: transactionRecord.id,
+          userId,
+          reference: transactionRecord.reference,
+          amount,
+          fee: pricing.fee,
+          currency: 'NGN',
+          status: 'PENDING',
+          metadata,
         },
-      });
-
-      await tx.vtuOrder.update({
-        where: { id: transactionRecord.orderId },
-        data: {
-          status: 'SUCCESS',
-          providerTransactionId: purchaseResult.reference,
-          providerStatus: purchaseResult.status,
-          rawResponse: purchaseResult.rawResponse as
-            | Prisma.InputJsonValue
-            | undefined,
-          completedAt: new Date(),
-          nextRequeryAt: null,
-        },
-      });
+      },
+      result: purchaseResult,
     });
 
     this.logger.info(
@@ -646,9 +394,7 @@ export class VtuService {
         userId,
         reference,
         type: dto.type,
-        provider: this.isInternationalPurchase(dto)
-          ? 'reloadly'
-          : this.getLocalProvider(dto),
+        provider: this.getLocalProvider(dto),
         amount: dto.amount,
       },
       'VTU purchase successful',
@@ -663,18 +409,19 @@ export class VtuService {
       amount: amount.toString(),
       fee: pricing.fee.toString(),
       totalDebit: debitAmount.toString(),
+      ...this.receipt.toOwnerReceipt(
+        this.receipt.encryptPurchasedCode(purchaseResult.purchasedCode),
+      ),
     };
   }
 
   async calculatePricingForPurchase(dto: PurchaseVtuDto, amount: Decimal) {
     return this.calculateVtuPricing({
       amount,
-      countryCode: this.isInternationalPurchase(dto)
-        ? (dto.countryCode as string)
-        : 'NG',
+      countryCode: 'NG',
       serviceType: this.mapVtuType(dto.type),
       provider: this.getPricingProvider(dto),
-      scope: this.isInternationalPurchase(dto) ? 'INTERNATIONAL' : 'LOCAL',
+      scope: 'LOCAL',
     });
   }
 
@@ -783,22 +530,7 @@ export class VtuService {
     let result: VtuProviderResult;
 
     try {
-      if (order.provider === 'RELOADLY') {
-        if (!order.providerTransactionId) {
-          await this.scheduleOrderRequery(
-            order.id,
-            'Awaiting provider reference',
-          );
-          return { processed: false, pendingProviderReference: true };
-        }
-
-        result =
-          order.serviceType === 'ELECTRICITY'
-            ? await this.reloadly.requeryUtilityPayment(order.providerRequestId)
-            : await this.reloadly.requery(order.providerTransactionId);
-      } else {
-        result = await this.vtuApi.requery(order.providerRequestId);
-      }
+      result = await this.vtuApi.requery(order.providerRequestId);
     } catch (error) {
       await this.scheduleOrderRequery(
         order.id,
@@ -956,44 +688,16 @@ export class VtuService {
     return configured === true || configured === 'true';
   }
 
-  private assertRequiredTarget(dto: PurchaseVtuDto) {
-    if (this.isInternationalPurchase(dto)) {
-      if (!['airtime', 'data', 'electricity'].includes(dto.type)) {
-        throw new BadRequestException(
-          dto.countryCode === 'GH'
-            ? 'Ghana electricity and cable recharge are coming soon'
-            : 'International VTU currently supports airtime and data only',
-        );
-      }
-
-      if (
-        dto.type === 'electricity' &&
-        dto.countryCode &&
-        dto.countryCode !== 'GH'
-      ) {
-        throw new BadRequestException(
-          'International electricity is currently available for Ghana only',
-        );
-      }
-
-      if (!dto.countryCode || !dto.operatorId) {
-        throw new BadRequestException('Country and operator are required');
-      }
-
-      if (dto.type === 'electricity') {
-        if (!dto.meterNumber) {
-          throw new BadRequestException('Meter number is required');
-        }
-        return;
-      }
-
-      if (!dto.recipientNumber) {
-        throw new BadRequestException('Recipient phone number is required');
-      }
-
-      return;
+  private assertVtuEnabled() {
+    const configured = this.configService.get<unknown>('VTU_ENABLED');
+    if (configured === false || configured === 'false') {
+      throw new ServiceUnavailableException(
+        'VTU services are temporarily unavailable',
+      );
     }
+  }
 
+  private assertRequiredTarget(dto: PurchaseVtuDto) {
     if (
       (dto.type === 'airtime' || dto.type === 'data') &&
       !dto.recipientNumber
@@ -1009,8 +713,24 @@ export class VtuService {
       throw new BadRequestException('Smart card number is required');
     }
 
+    if (dto.type === 'cable' && !dto.subscriptionType) {
+      throw new BadRequestException('Cable subscription type is required');
+    }
+
+    if (
+      dto.type === 'cable' &&
+      dto.subscriptionType === 'change' &&
+      !dto.packageId
+    ) {
+      throw new BadRequestException('Cable package is required');
+    }
+
     if (dto.type === 'electricity' && !dto.meterNumber) {
       throw new BadRequestException('Meter number is required');
+    }
+
+    if (dto.type === 'electricity' && !dto.meterType) {
+      throw new BadRequestException('Meter type is required');
     }
   }
 
@@ -1020,10 +740,6 @@ export class VtuService {
    * and a mistyped meter/smartcard would burn real funds.
    */
   private async verifyCustomerForPurchase(dto: PurchaseVtuDto) {
-    if (this.isInternationalPurchase(dto)) {
-      return {};
-    }
-
     if (dto.type === 'cable') {
       const customer = await this.vtuApi.validateSmartCard(
         this.getLocalProvider(dto),
@@ -1032,6 +748,7 @@ export class VtuService {
       return {
         verifiedCustomerName: this.safeCustomerField(customer.name),
         verifiedCustomerStatus: this.safeCustomerField(customer.status),
+        verifiedRenewalAmount: customer.renewalAmount,
       };
     }
 
@@ -1039,6 +756,7 @@ export class VtuService {
       const customer = await this.vtuApi.validateMeter(
         this.getLocalProvider(dto),
         dto.meterNumber as string,
+        dto.meterType,
       );
       return {
         verifiedCustomerName: this.safeCustomerField(customer.name),
@@ -1055,11 +773,6 @@ export class VtuService {
   }
 
   private async assertProviderSupportsType(dto: PurchaseVtuDto) {
-    if (this.isInternationalPurchase(dto)) {
-      this.reloadly.assertReadyForPurchase();
-      return;
-    }
-
     const providers = await this.vtuApi.getProviders(dto.type);
     const provider = providers.find(
       (item) =>
@@ -1076,10 +789,27 @@ export class VtuService {
     }
   }
 
-  private async resolveServerAmount(dto: PurchaseVtuDto) {
+  private async resolveServerAmount(
+    dto: PurchaseVtuDto,
+    verification: { verifiedRenewalAmount?: string },
+  ) {
     const amount = new Decimal(dto.amount);
 
-    if (dto.type !== 'data' || this.isInternationalPurchase(dto)) {
+    if (dto.type === 'cable' && dto.subscriptionType === 'renew') {
+      if (!verification.verifiedRenewalAmount) {
+        throw new BadRequestException(
+          'Provider did not return a valid cable renewal amount',
+        );
+      }
+
+      const renewalAmount = new Decimal(verification.verifiedRenewalAmount);
+      if (!amount.equals(renewalAmount)) {
+        throw new BadRequestException('Cable renewal price mismatch');
+      }
+      return renewalAmount;
+    }
+
+    if (dto.type !== 'data' && dto.type !== 'cable') {
       return amount;
     }
 
@@ -1087,6 +817,10 @@ export class VtuService {
     const selectedPackage = packages.find((item) => item.id === dto.packageId);
 
     if (!selectedPackage) {
+      throw new BadRequestException('Invalid VTU package');
+    }
+
+    if (selectedPackage.serviceType !== dto.type) {
       throw new BadRequestException('Invalid VTU package');
     }
 
@@ -1144,9 +878,17 @@ export class VtuService {
         where: { id: transaction.orderId },
         data: {
           status: this.orderStatusFromProviderStatus(result.status),
-          providerTransactionId: result.reference,
+          providerTransactionId:
+            result.providerTransactionId || result.reference,
           providerStatus: result.status,
-          rawResponse: result.rawResponse as Prisma.InputJsonValue | undefined,
+          costAmount: this.optionalDecimal(result.providerCost),
+          providerCommission: this.optionalDecimal(result.providerCommission),
+          purchasedCodeEncrypted: this.receipt.encryptPurchasedCode(
+            result.purchasedCode,
+          ),
+          rawResponse: (result.safeResponse || result.rawResponse) as
+            | Prisma.InputJsonValue
+            | undefined,
           nextRequeryAt: this.nextRequeryAt(),
         },
       });
@@ -1179,12 +921,14 @@ export class VtuService {
         fee: Decimal;
         currency: 'NGN' | 'GHS';
         status: TransactionStatus;
+        metadata?: Prisma.JsonValue;
       };
     };
     result: VtuProviderResult;
   }) {
     const orderStatus = this.orderStatusFromProviderStatus(input.result.status);
     const metadata = {
+      ...this.asMetadata(input.order.transaction.metadata),
       providerReference: input.result.reference,
       providerStatus: input.result.status,
       providerRequestId:
@@ -1193,7 +937,7 @@ export class VtuService {
 
     if (orderStatus === 'SUCCESS') {
       await this.prisma.$transaction(async (tx) => {
-        await tx.transaction.updateMany({
+        const transitioned = await tx.transaction.updateMany({
           where: { id: input.order.transactionId, status: 'PENDING' },
           data: {
             status: 'SUCCESS',
@@ -1201,15 +945,24 @@ export class VtuService {
           },
         });
 
+        if (transitioned.count !== 1) return;
+
         await tx.vtuOrder.update({
           where: { id: input.order.id },
           data: {
             status: 'SUCCESS',
-            providerTransactionId: input.result.reference,
+            providerTransactionId:
+              input.result.providerTransactionId || input.result.reference,
             providerStatus: input.result.status,
-            rawResponse: input.result.rawResponse as
-              | Prisma.InputJsonValue
-              | undefined,
+            costAmount: this.optionalDecimal(input.result.providerCost),
+            providerCommission: this.optionalDecimal(
+              input.result.providerCommission,
+            ),
+            purchasedCodeEncrypted: this.receipt.encryptPurchasedCode(
+              input.result.purchasedCode,
+            ),
+            rawResponse: (input.result.safeResponse ||
+              input.result.rawResponse) as Prisma.InputJsonValue | undefined,
             requeryAttempts: { increment: 1 },
             lastRequeryAt: new Date(),
             nextRequeryAt: null,
@@ -1238,13 +991,24 @@ export class VtuService {
       return;
     }
 
-    await this.prisma.vtuOrder.update({
-      where: { id: input.order.id },
+    await this.prisma.vtuOrder.updateMany({
+      where: {
+        id: input.order.id,
+        status: { in: ['PENDING', 'PROCESSING', 'UNKNOWN'] },
+      },
       data: {
         status: orderStatus,
-        providerTransactionId: input.result.reference,
+        providerTransactionId:
+          input.result.providerTransactionId || input.result.reference,
         providerStatus: input.result.status,
-        rawResponse: input.result.rawResponse as
+        costAmount: this.optionalDecimal(input.result.providerCost),
+        providerCommission: this.optionalDecimal(
+          input.result.providerCommission,
+        ),
+        purchasedCodeEncrypted: this.receipt.encryptPurchasedCode(
+          input.result.purchasedCode,
+        ),
+        rawResponse: (input.result.safeResponse || input.result.rawResponse) as
           | Prisma.InputJsonValue
           | undefined,
         requeryAttempts: { increment: 1 },
@@ -1410,12 +1174,9 @@ export class VtuService {
   private buildSafeMetadata(dto: PurchaseVtuDto) {
     return {
       vtuType: dto.type,
-      scope: this.getScope(dto),
-      provider: this.isInternationalPurchase(dto)
-        ? 'reloadly'
-        : this.getLocalProvider(dto),
-      countryCode: dto.countryCode,
-      operatorId: dto.operatorId,
+      scope: 'local',
+      provider: this.getLocalProvider(dto),
+      countryCode: 'NG',
       recipientNumberMasked: dto.recipientNumber
         ? maskPhone(dto.recipientNumber)
         : undefined,
@@ -1440,14 +1201,6 @@ export class VtuService {
     return typeMap[type] || 'AIRTIME';
   }
 
-  private isInternationalPurchase(dto: PurchaseVtuDto) {
-    return this.getScope(dto) === 'international';
-  }
-
-  private getScope(dto: PurchaseVtuDto) {
-    return dto.scope || 'local';
-  }
-
   private getLocalProvider(dto: PurchaseVtuDto) {
     if (!dto.provider) {
       throw new BadRequestException('Provider is required');
@@ -1456,27 +1209,15 @@ export class VtuService {
     return dto.provider;
   }
 
-  private getOrderProvider(dto: PurchaseVtuDto) {
-    if (this.isInternationalPurchase(dto)) {
-      return 'RELOADLY';
-    }
-
-    return this.vtuApi.getProviderName();
+  private getOrderProvider() {
+    return 'VTPASS' as const;
   }
 
   private getPricingProvider(dto: PurchaseVtuDto) {
-    if (this.isInternationalPurchase(dto)) {
-      return 'reloadly';
-    }
-
     return this.getLocalProvider(dto);
   }
 
-  private getProviderRequestId(dto: PurchaseVtuDto, reference: string) {
-    if (this.isInternationalPurchase(dto)) {
-      return reference;
-    }
-
+  private getProviderRequestId(reference: string) {
     return this.vtuApi.createProviderRequestId(reference);
   }
 
@@ -1500,56 +1241,6 @@ export class VtuService {
     return new Date(Date.now() + delayMs);
   }
 
-  private reloadlyWebhookReference(event: ReloadlyWebhookEvent) {
-    const eventKey =
-      event.eventId ||
-      `${event.eventType}:${event.providerReference}:${event.status}`;
-    return `reloadly:${eventKey}`;
-  }
-
-  private vtpassWebhookReference(event: VtpassWebhookEvent) {
-    const providerReference =
-      event.providerReference || 'no-provider-reference';
-    return `vtpass:${event.eventType}:${event.providerRequestId}:${providerReference}:${event.status}`;
-  }
-
-  private async markReloadlyWebhookLog(
-    reference: string,
-    processed: boolean,
-    errorMessage?: string,
-  ) {
-    await this.prisma.webhookLog.update({
-      where: { reference },
-      data: {
-        processed,
-        errorMessage,
-      },
-    });
-  }
-
-  private async markVtpassWebhookLog(
-    reference: string,
-    processed: boolean,
-    errorMessage?: string,
-  ) {
-    await this.prisma.webhookLog.update({
-      where: { reference },
-      data: {
-        processed,
-        errorMessage,
-      },
-    });
-  }
-
-  private isUniqueConstraintError(error: unknown) {
-    return (
-      typeof error === 'object' &&
-      error !== null &&
-      'code' in error &&
-      error.code === 'P2002'
-    );
-  }
-
   private toOrderStatusResponse(order: {
     id: string;
     provider: string;
@@ -1563,8 +1254,10 @@ export class VtuService {
     providerStatus: string | null;
     status: string;
     amount: Decimal;
+    fee: Decimal | null;
     currency: string;
     targetMasked: string | null;
+    purchasedCodeEncrypted: string | null;
     requeryAttempts: number;
     lastRequeryAt: Date | null;
     nextRequeryAt: Date | null;
@@ -1581,6 +1274,7 @@ export class VtuService {
       updatedAt: Date;
     };
   }) {
+    const fee = order.fee ? new Decimal(order.fee) : new Decimal(0);
     return {
       orderId: order.id,
       transactionId: order.transaction.id,
@@ -1597,6 +1291,8 @@ export class VtuService {
       providerTransactionId: order.providerTransactionId,
       providerStatus: order.providerStatus,
       amount: order.amount.toString(),
+      fee: fee.toString(),
+      totalDebit: new Decimal(order.amount).plus(fee).toString(),
       currency: order.currency,
       targetMasked: order.targetMasked,
       requeryAttempts: order.requeryAttempts,
@@ -1606,6 +1302,17 @@ export class VtuService {
       failedAt: order.failedAt,
       createdAt: order.transaction.createdAt,
       updatedAt: order.transaction.updatedAt,
+      ...this.receipt.toOwnerReceipt(order.purchasedCodeEncrypted),
     };
+  }
+
+  private optionalDecimal(value?: string) {
+    return value ? new Decimal(value) : undefined;
+  }
+
+  private asMetadata(value?: Prisma.JsonValue): Record<string, unknown> {
+    return value && typeof value === 'object' && !Array.isArray(value)
+      ? value
+      : {};
   }
 }

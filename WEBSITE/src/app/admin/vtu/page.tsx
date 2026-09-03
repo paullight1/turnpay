@@ -921,6 +921,13 @@ export default function AdminVtuPage() {
                         reconciliationCurrency,
                       )}
                     </p>
+                    <p className="text-xs text-muted-foreground">
+                      Provider commission{" "}
+                      {formatMoney(
+                        reconciliationSummary?.totalProviderCommission ?? 0,
+                        reconciliationCurrency,
+                      )}
+                    </p>
                   </div>
                   <div className="rounded-md border p-3">
                     <p className="text-xs text-muted-foreground">Risk queue</p>
@@ -1139,6 +1146,72 @@ export default function AdminVtuPage() {
                     </Table>
                   </div>
                 )}
+
+                <div className="rounded-md border p-3">
+                  <div className="mb-3 flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-medium">Callback retries</p>
+                      <p className="text-xs text-muted-foreground">
+                        Redacted VTpass callbacks waiting for automatic retry.
+                      </p>
+                    </div>
+                    <Badge
+                      variant={
+                        reconciliationQuery.data.callbackFailures.length > 0
+                          ? "destructive"
+                          : "outline"
+                      }
+                    >
+                      {reconciliationQuery.data.callbackFailures.length}
+                    </Badge>
+                  </div>
+                  {reconciliationQuery.data.callbackFailures.length === 0 ? (
+                    <p className="py-4 text-center text-sm text-muted-foreground">
+                      No failed callbacks are awaiting retry.
+                    </p>
+                  ) : (
+                    <div className="overflow-x-auto">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>Provider request</TableHead>
+                            <TableHead>Status</TableHead>
+                            <TableHead>Attempts</TableHead>
+                            <TableHead>Next retry</TableHead>
+                            <TableHead>Last error</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {reconciliationQuery.data.callbackFailures.map(
+                            (failure) => (
+                              <TableRow key={failure.providerRequestId}>
+                                <TableCell className="font-mono text-xs">
+                                  {failure.providerRequestId}
+                                </TableCell>
+                                <TableCell>
+                                  <Badge
+                                    variant={statusVariant(
+                                      failure.providerStatus,
+                                    )}
+                                  >
+                                    {humanize(failure.providerStatus)}
+                                  </Badge>
+                                </TableCell>
+                                <TableCell>{failure.attempts}</TableCell>
+                                <TableCell className="text-xs">
+                                  {formatDateTime(failure.nextAttemptAt)}
+                                </TableCell>
+                                <TableCell className="max-w-64 truncate text-xs text-muted-foreground">
+                                  {failure.lastError || "Retry scheduled"}
+                                </TableCell>
+                              </TableRow>
+                            ),
+                          )}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  )}
+                </div>
               </div>
             )}
           </CardContent>
@@ -1233,6 +1306,20 @@ export default function AdminVtuPage() {
                                 {formatMoney(order.fee ?? 0, order.currency)}
                               </p>
                             )}
+                            <p className="text-xs text-muted-foreground">
+                              Cost{" "}
+                              {formatMoney(
+                                order.costAmount ?? 0,
+                                order.currency,
+                              )}
+                            </p>
+                            <p className="text-xs text-muted-foreground">
+                              Commission{" "}
+                              {formatMoney(
+                                order.providerCommission ?? 0,
+                                order.currency,
+                              )}
+                            </p>
                           </div>
                         </TableCell>
                         <TableCell className="font-mono text-xs">
@@ -1597,7 +1684,7 @@ export default function AdminVtuPage() {
               <Input
                 id="pricing-provider"
                 maxLength={50}
-                placeholder="mtn, reloadly, or blank for any"
+                placeholder="mtn, dstv, or blank for any VTpass service"
                 value={pricingForm.provider}
                 onChange={(event) =>
                   setPricingForm((form) => ({

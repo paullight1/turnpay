@@ -139,7 +139,7 @@ export default function WalletDetailPage() {
   const params = useParams<{ currency?: string }>();
   const currency = resolveCurrency(params.currency);
   const moneyGate = getMoneyActionGate(profile);
-  const sendHref = moneyGate?.actionHref ?? "/dashboard/withdraw";
+  const sendHref = moneyGate?.actionHref ?? "/dashboard/send";
   const receiveHref = moneyGate?.actionHref ?? "/dashboard/fund";
 
   const walletsQuery = useQuery({

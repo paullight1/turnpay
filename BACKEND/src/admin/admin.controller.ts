@@ -6,6 +6,7 @@ import {
   Body,
   Param,
   Query,
+  Req,
   UseGuards,
 } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
@@ -29,12 +30,24 @@ import {
   AdminVtuStaleOrdersQueryDto,
 } from './dto/admin.dto';
 import { LimitQueryDto, ReferenceParamDto } from '../common/dto/query.dto';
+import {
+  ApproveInternalTransferLimitPolicyDto,
+  CreateInternalTransferLimitPolicyDto,
+  InternalTransferLimitPolicyIdParamDto,
+  InternalTransferLimitPolicyQueryDto,
+} from './dto/internal-transfer-limit-policy.dto';
+import { ReconciliationService } from '../common/services/reconciliation.service';
+import { createRequestAuditContext } from '../common/services/request-audit-context';
+import type { AuthenticatedRequest } from '../common/types/request-context';
 
 @Controller('admin')
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles('ADMIN')
 export class AdminController {
-  constructor(private readonly adminService: AdminService) {}
+  constructor(
+    private readonly adminService: AdminService,
+    private readonly reconciliation: ReconciliationService,
+  ) {}
 
   @Get('users')
   @Throttle({ default: { limit: 30, ttl: 60000 } })
@@ -110,6 +123,59 @@ export class AdminController {
   @Get('transactions')
   async getRecentTransactions(@Query() query: LimitQueryDto) {
     return this.adminService.getRecentTransactions(query.limit);
+  }
+
+  @Get('transfer-limit-policies')
+  listInternalTransferLimitPolicies(
+    @Query() query: InternalTransferLimitPolicyQueryDto,
+  ) {
+    return this.adminService.listInternalTransferLimitPolicies(query);
+  }
+
+  @Post('transfer-limit-policies')
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  requestInternalTransferLimitPolicy(
+    @CurrentUser() user: { userId: string },
+    @Body() dto: CreateInternalTransferLimitPolicyDto,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    return this.adminService.requestInternalTransferLimitPolicy(
+      dto,
+      user.userId,
+      createRequestAuditContext(request, { actorId: user.userId }),
+    );
+  }
+
+  @Post('transfer-limit-policies/:policyId/approve')
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  approveInternalTransferLimitPolicy(
+    @CurrentUser() user: { userId: string },
+    @Param() params: InternalTransferLimitPolicyIdParamDto,
+    @Body() dto: ApproveInternalTransferLimitPolicyDto,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    return this.adminService.approveInternalTransferLimitPolicy(
+      params.policyId,
+      dto,
+      user.userId,
+      createRequestAuditContext(request, { actorId: user.userId }),
+    );
+  }
+
+  @Post('transfer-limit-policies/:policyId/disable')
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  disableInternalTransferLimitPolicy(
+    @CurrentUser() user: { userId: string },
+    @Param() params: InternalTransferLimitPolicyIdParamDto,
+    @Body() dto: AdminActionReasonDto,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    return this.adminService.disableInternalTransferLimitPolicy(
+      params.policyId,
+      dto,
+      user.userId,
+      createRequestAuditContext(request, { actorId: user.userId }),
+    );
   }
 
   @Get('transactions/:reference')
@@ -261,5 +327,22 @@ export class AdminController {
   @Throttle({ default: { limit: 20, ttl: 60000 } })
   async getAuditLogs(@Query() query: AdminAuditLogsQueryDto) {
     return this.adminService.getAuditLogs(query);
+  }
+
+  @Get('transfer-reconciliation/runs')
+  getInternalTransferReconciliationRuns(@Query() query: LimitQueryDto) {
+    return this.reconciliation.getInternalTransferRuns(query.limit);
+  }
+
+  @Post('transfer-reconciliation/run')
+  @Throttle({ default: { limit: 3, ttl: 60000 } })
+  runInternalTransferReconciliation(
+    @CurrentUser() user: { userId: string },
+    @Body() dto: AdminActionReasonDto,
+  ) {
+    return this.reconciliation.runInternalTransferReconciliation(
+      user.userId,
+      dto.reason,
+    );
   }
 }

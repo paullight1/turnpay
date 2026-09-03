@@ -27,9 +27,9 @@ class WalletCardsRow extends StatelessWidget {
             ),
           ],
         ),
-        SizedBox(height: AppSpacing.sm),
+        const SizedBox(height: AppSpacing.sm),
         SizedBox(
-          height: 100,
+          height: 120,
           child: ListView(
             scrollDirection: Axis.horizontal,
             clipBehavior: Clip.none,
@@ -39,7 +39,7 @@ class WalletCardsRow extends StatelessWidget {
                 onTap: () {},
                 child: Container(
                   width: 64,
-                  height: 100,
+                  height: 120,
                   margin: const EdgeInsets.only(right: AppSpacing.sm),
                   decoration: BoxDecoration(
                     color: AppColors.surfaceVariant,
@@ -60,7 +60,7 @@ class WalletCardsRow extends StatelessWidget {
               // â”€â”€ GHS Wallet Card â”€â”€
               _WalletCard(
                 currency: 'GHS',
-                flag: 'ðŸ‡¬ðŸ‡­',
+                flag: '🇬🇭',
                 label: 'Ghana Cedi',
                 balance: 17298.92,
                 gradientColors: [
@@ -71,12 +71,12 @@ class WalletCardsRow extends StatelessWidget {
                 lastFour: '4269',
               ),
 
-              SizedBox(width: AppSpacing.sm),
+              const SizedBox(width: AppSpacing.sm),
 
               // â”€â”€ NGN Wallet Card â”€â”€
               _WalletCard(
                 currency: 'NGN',
-                flag: 'ðŸ‡³ðŸ‡¬',
+                flag: '🇳🇬',
                 label: 'Naira',
                 balance: 5240000,
                 gradientColors: [
@@ -87,7 +87,7 @@ class WalletCardsRow extends StatelessWidget {
                 lastFour: '4258',
               ),
 
-              SizedBox(width: AppSpacing.lg),
+              const SizedBox(width: AppSpacing.lg),
             ],
           ),
         ),
@@ -119,8 +119,8 @@ class _WalletCard extends StatelessWidget {
     final formatted = _formatBalance(balance, currency);
 
     return Container(
-      width: 180,
-      height: 100,
+      width: 200,
+      height: 120,
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(AppRadius.lg),
         gradient: LinearGradient(
@@ -164,7 +164,7 @@ class _WalletCard extends StatelessWidget {
                         shape: BoxShape.circle,
                       ),
                     ),
-                    SizedBox(width: 4),
+                    const SizedBox(width: 4),
                     Text(
                       'Active',
                       style: AppTextStyles.caption.copyWith(
@@ -188,7 +188,7 @@ class _WalletCard extends StatelessWidget {
                 ),
               ),
               Text(
-                'â€¢â€¢â€¢â€¢ â€¢â€¢â€¢â€¢ $lastFour',
+                '•••• •••• $lastFour',
                 style: AppTextStyles.caption.copyWith(
                   color: Colors.white60,
                   letterSpacing: 2,
@@ -202,7 +202,7 @@ class _WalletCard extends StatelessWidget {
   }
 
   String _formatBalance(double amount, String currency) {
-    final symbol = currency == 'GHS' ? 'GHâ‚µ' : 'â‚¦';
+    final symbol = currency == 'GHS' ? 'GH₵' : '₦';
     if (amount >= 1000000) {
       return '$symbol${(amount / 1000000).toStringAsFixed(2)}M';
     } else if (amount >= 1000) {

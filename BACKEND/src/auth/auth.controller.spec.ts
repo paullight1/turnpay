@@ -17,6 +17,8 @@ describe('AuthController', () => {
     resendConfirmationEmail: jest.fn(),
     setupTransactionPin: jest.fn(),
     resetTransactionPin: jest.fn(),
+    getTransactionPinStatus: jest.fn(),
+    verifyTransactionPin: jest.fn(),
   };
 
   const mockRequest = {
@@ -187,28 +189,73 @@ describe('AuthController', () => {
 
   it('forwards transaction pin operations', async () => {
     const user = { userId: 'user-1' };
+    const request = {
+      id: 'request-pin-1',
+      ip: '203.0.113.9',
+      headers: { 'user-agent': 'jest-agent' },
+      socket: {},
+    } as never;
     authService.setupTransactionPin.mockResolvedValue({ success: true });
     authService.resetTransactionPin.mockResolvedValue({ success: true });
-
-    const setup = await controller.setupTransactionPin(user, {
-      pin: '1234',
+    authService.getTransactionPinStatus.mockResolvedValue({
+      configured: true,
+      pinLength: 4,
+      resetHoldUntil: null,
+      locked: false,
     });
-    const reset = await controller.resetTransactionPin(user, {
-      currentPin: '1234',
-      newPin: '5678',
-      otp: '000000',
+    authService.verifyTransactionPin.mockResolvedValue({ verified: true });
+
+    const setup = await controller.setupTransactionPin(
+      user,
+      {
+        pin: '1234',
+      },
+      request,
+    );
+    const reset = await controller.resetTransactionPin(
+      user,
+      {
+        currentPin: '1234',
+        newPin: '5678',
+        otp: '000000',
+      },
+      request,
+    );
+    const status = await controller.getTransactionPinStatus(user);
+    const verified = await controller.verifyTransactionPin(user, {
+      pin: '1234',
     });
 
     expect(authService.setupTransactionPin).toHaveBeenCalledWith(
       'user-1',
       '1234',
+      expect.objectContaining({
+        actorId: 'user-1',
+        requestId: 'request-pin-1',
+        ipAddress: '203.0.113.9',
+        userAgent: 'jest-agent',
+      }),
     );
-    expect(authService.resetTransactionPin).toHaveBeenCalledWith('user-1', {
-      currentPin: '1234',
-      newPin: '5678',
-      otp: '000000',
-    });
+    expect(authService.resetTransactionPin).toHaveBeenCalledWith(
+      'user-1',
+      {
+        currentPin: '1234',
+        newPin: '5678',
+        otp: '000000',
+      },
+      expect.objectContaining({
+        actorId: 'user-1',
+        requestId: 'request-pin-1',
+      }),
+    );
     expect(setup).toEqual({ success: true });
     expect(reset).toEqual({ success: true });
+    expect(status).toEqual({
+      configured: true,
+      pinLength: 4,
+      resetHoldUntil: null,
+      locked: false,
+    });
+    expect(verified).toEqual({ verified: true });
   });
 });

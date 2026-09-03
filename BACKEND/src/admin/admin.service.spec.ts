@@ -40,6 +40,9 @@ describe('AdminService banking operations', () => {
       groupBy: jest.fn(),
       count: jest.fn(),
     },
+    vtuWebhookInbox: {
+      findMany: jest.fn(),
+    },
     vtuPricingRule: {
       findMany: jest.fn(),
       findUnique: jest.fn(),
@@ -52,6 +55,14 @@ describe('AdminService banking operations', () => {
     auditLog: {
       create: jest.fn(),
       findMany: jest.fn(),
+    },
+    internalTransferLimitPolicy: {
+      findMany: jest.fn(),
+      findFirst: jest.fn(),
+      findUnique: jest.fn(),
+      create: jest.fn(),
+      update: jest.fn(),
+      updateMany: jest.fn(),
     },
     webhookLog: {
       findUnique: jest.fn(),
@@ -72,14 +83,6 @@ describe('AdminService banking operations', () => {
 
   const ledger = {
     creditWallet: jest.fn(),
-  };
-
-  const paystack = {
-    verifyTransfer: jest.fn(),
-  };
-
-  const flutterwave = {
-    verifyTransfer: jest.fn(),
   };
 
   const configService = {
@@ -104,23 +107,172 @@ describe('AdminService banking operations', () => {
 
   const bankingService = {
     processVirtualAccountDeposit: jest.fn(),
+    getTransferStatus: jest.fn(),
   };
 
   let service: AdminService;
 
   beforeEach(() => {
     jest.clearAllMocks();
+    prisma.vtuWebhookInbox.findMany.mockResolvedValue([]);
     service = new AdminService(
       prisma,
       logger as any,
       ledger as any,
-      paystack as any,
-      flutterwave as any,
       configService as any,
       supabase as any,
       vtuService as any,
       bankingService as any,
     );
+  });
+
+  describe('internal transfer limit policy approvals', () => {
+    it('creates a disabled version and audits the request', async () => {
+      prisma.internalTransferLimitPolicy.findFirst.mockResolvedValue({
+        version: 2,
+      });
+      prisma.internalTransferLimitPolicy.create.mockResolvedValue({
+        id: 'policy-v3',
+        currency: 'NGN',
+        kycTier: 'TIER_2',
+        perTransaction: new Decimal('300000'),
+        daily: new Decimal('1200000'),
+        monthly: new Decimal('6000000'),
+        enabled: false,
+        version: 3,
+        requestedById: 'admin-requester',
+        approvedById: null,
+        reason: 'Risk review ticket RISK-1234',
+        approvalReason: null,
+        approvedAt: null,
+        effectiveFrom: new Date('2026-09-01T12:00:00.000Z'),
+        disabledAt: null,
+        createdAt: new Date('2026-09-01T12:00:00.000Z'),
+        updatedAt: new Date('2026-09-01T12:00:00.000Z'),
+      });
+
+      const result = await service.requestInternalTransferLimitPolicy(
+        {
+          currency: 'NGN',
+          kycTier: 'TIER_2',
+          perTransaction: '300000.00',
+          daily: '1200000.00',
+          monthly: '6000000.00',
+          reason: 'Risk review ticket RISK-1234',
+        },
+        'admin-requester',
+      );
+
+      expect(result.enabled).toBe(false);
+      expect(prisma.internalTransferLimitPolicy.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          version: 3,
+          enabled: false,
+          requestedById: 'admin-requester',
+        }),
+      });
+      expect(prisma.auditLog.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          adminId: 'admin-requester',
+          action: 'internal_transfer_limit_policy_requested',
+          targetId: 'policy-v3',
+        }),
+      });
+    });
+
+    it('rejects self-approval', async () => {
+      prisma.internalTransferLimitPolicy.findUnique.mockResolvedValue({
+        id: 'policy-v3',
+        currency: 'NGN',
+        kycTier: 'TIER_2',
+        enabled: false,
+        requestedById: 'admin-requester',
+        approvedById: null,
+      });
+
+      await expect(
+        service.approveInternalTransferLimitPolicy(
+          'policy-v3',
+          { reason: 'Independent approval RISK-1234' },
+          'admin-requester',
+        ),
+      ).rejects.toThrow('A second administrator must approve this policy');
+
+      expect(prisma.internalTransferLimitPolicy.update).not.toHaveBeenCalled();
+    });
+
+    it('atomically disables the old policy, activates the approved version, and writes approval audits', async () => {
+      prisma.internalTransferLimitPolicy.findUnique.mockResolvedValue({
+        id: 'policy-v3',
+        currency: 'NGN',
+        kycTier: 'TIER_2',
+        perTransaction: new Decimal('300000'),
+        daily: new Decimal('1200000'),
+        monthly: new Decimal('6000000'),
+        enabled: false,
+        version: 3,
+        requestedById: 'admin-requester',
+        approvedById: null,
+        reason: 'Risk review ticket RISK-1234',
+        approvalReason: null,
+        approvedAt: null,
+        effectiveFrom: new Date('2026-09-01T12:00:00.000Z'),
+        disabledAt: null,
+        createdAt: new Date('2026-09-01T12:00:00.000Z'),
+        updatedAt: new Date('2026-09-01T12:00:00.000Z'),
+      });
+      prisma.internalTransferLimitPolicy.findMany.mockResolvedValue([
+        { id: 'policy-v2' },
+      ]);
+      prisma.internalTransferLimitPolicy.updateMany
+        .mockResolvedValueOnce({ count: 1 })
+        .mockResolvedValueOnce({ count: 1 });
+      prisma.internalTransferLimitPolicy.update.mockResolvedValue({
+        id: 'policy-v3',
+        currency: 'NGN',
+        kycTier: 'TIER_2',
+        perTransaction: new Decimal('300000'),
+        daily: new Decimal('1200000'),
+        monthly: new Decimal('6000000'),
+        enabled: true,
+        version: 3,
+        requestedById: 'admin-requester',
+        approvedById: 'admin-approver',
+        reason: 'Risk review ticket RISK-1234',
+        approvalReason: 'Independent approval RISK-1234',
+        approvedAt: new Date('2026-09-01T12:01:00.000Z'),
+        effectiveFrom: new Date('2026-09-01T12:01:00.000Z'),
+        disabledAt: null,
+        createdAt: new Date('2026-09-01T12:00:00.000Z'),
+        updatedAt: new Date('2026-09-01T12:01:00.000Z'),
+      });
+
+      const result = await service.approveInternalTransferLimitPolicy(
+        'policy-v3',
+        { reason: 'Independent approval RISK-1234' },
+        'admin-approver',
+      );
+
+      expect(result.enabled).toBe(true);
+      expect(prisma.$transaction).toHaveBeenCalledWith(expect.any(Function), {
+        maxWait: 2_000,
+        timeout: 5_000,
+      });
+      expect(prisma.auditLog.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          adminId: 'admin-approver',
+          action: 'internal_transfer_limit_policy_approved',
+          targetId: 'policy-v3',
+        }),
+      });
+      expect(prisma.auditLog.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          adminId: 'admin-approver',
+          action: 'internal_transfer_limit_policy_activated',
+          targetId: 'policy-v3',
+        }),
+      });
+    });
   });
 
   it('builds an admin ops summary with masked settlement details and live activity data', async () => {
@@ -984,6 +1136,10 @@ describe('AdminService banking operations', () => {
       adminId: '11111111-1111-4111-8111-111111111111',
       from: '2026-05-21T00:00:00.000Z',
       to: '2026-05-22T00:00:00.000Z',
+      reference: 'IT-123',
+      requestId: 'request-123',
+      userId: '22222222-2222-4222-8222-222222222222',
+      reversalState: 'BLOCKED',
     });
 
     expect(prisma.auditLog.findMany).toHaveBeenCalledWith(
@@ -1009,6 +1165,15 @@ describe('AdminService banking operations', () => {
                 lte: new Date('2026-05-22T00:00:00.000Z'),
               }),
             }),
+            { reference: 'IT-123' },
+            {
+              metadata: { path: ['requestId'], equals: 'request-123' },
+            },
+            expect.objectContaining({ OR: expect.any(Array) }),
+            {
+              targetType: 'InternalTransferReversal',
+              after: { path: ['status'], equals: 'BLOCKED' },
+            },
             expect.objectContaining({
               OR: expect.arrayContaining([
                 expect.objectContaining({
@@ -1037,7 +1202,7 @@ describe('AdminService banking operations', () => {
       transferAttempts: [
         {
           id: 'attempt-1',
-          provider: 'PAYSTACK',
+          provider: 'MONNIFY',
           providerReference: 'WD-1',
           providerStatus: 'pending',
           status: 'PENDING',
@@ -1045,11 +1210,10 @@ describe('AdminService banking operations', () => {
         },
       ],
     });
-    paystack.verifyTransfer.mockResolvedValue({
+    bankingService.getTransferStatus.mockResolvedValue({
       status: 'success',
       reference: 'WD-1',
-      amount: 100000,
-      currency: 'NGN',
+      raw: { requestSuccessful: true },
     });
     prisma.transaction.updateMany.mockResolvedValue({ count: 1 });
 
@@ -1059,7 +1223,7 @@ describe('AdminService banking operations', () => {
       'admin-1',
     );
 
-    expect(paystack.verifyTransfer).toHaveBeenCalledWith('WD-1');
+    expect(bankingService.getTransferStatus).toHaveBeenCalledWith('WD-1');
     expect(prisma.transaction.updateMany).toHaveBeenCalledWith({
       where: { id: 'tx-1', status: 'PENDING' },
       data: { status: 'SUCCESS' },
@@ -1096,7 +1260,7 @@ describe('AdminService banking operations', () => {
       transferAttempts: [
         {
           id: 'attempt-1',
-          provider: 'PAYSTACK',
+          provider: 'MONNIFY',
           providerReference: 'WD-1',
           providerStatus: 'pending',
           status: 'PENDING',
@@ -1104,7 +1268,11 @@ describe('AdminService banking operations', () => {
         },
       ],
     });
-    paystack.verifyTransfer.mockResolvedValue({ status: 'failed' });
+    bankingService.getTransferStatus.mockResolvedValue({
+      status: 'failed',
+      reference: 'WD-1',
+      raw: { requestSuccessful: true },
+    });
     prisma.transaction.updateMany.mockResolvedValue({ count: 1 });
     prisma.ledgerEntry.findFirst.mockResolvedValue(null);
 
@@ -1146,6 +1314,10 @@ describe('AdminService banking operations', () => {
         serviceType: 'AIRTIME',
         amount: new Decimal(500),
         currency: 'NGN',
+        costAmount: new Decimal(480),
+        providerCommission: new Decimal(20),
+        fee: new Decimal(10),
+        margin: new Decimal(30),
         targetMasked: '******1234',
         requeryAttempts: 2,
         lastRequeryAt: null,
@@ -1178,6 +1350,10 @@ describe('AdminService banking operations', () => {
         providerRequestId: 'REQ-1',
         providerTransactionId: 'PROV-TX-1',
         transactionReference: 'VTU-1',
+        costAmount: new Decimal(480),
+        providerCommission: new Decimal(20),
+        fee: new Decimal(10),
+        margin: new Decimal(30),
         targetMasked: '******1234',
         attempts: 2,
       }),
@@ -1222,6 +1398,7 @@ describe('AdminService banking operations', () => {
         amount: new Decimal(500),
         currency: 'NGN',
         costAmount: new Decimal(500),
+        providerCommission: new Decimal(15),
         fee: new Decimal(10),
         margin: new Decimal(10),
         status: 'PENDING',
@@ -1258,18 +1435,19 @@ describe('AdminService banking operations', () => {
       },
       {
         id: 'order-2',
-        provider: 'RELOADLY',
+        provider: 'VTPASS',
         providerRequestId: 'REQ-2',
         providerTransactionId: null,
         providerStatus: null,
-        scope: 'INTERNATIONAL',
+        scope: 'LOCAL',
         serviceType: 'DATA',
-        countryCode: 'GH',
-        localProvider: null,
-        operatorId: '100',
+        countryCode: 'NG',
+        localProvider: 'mtn',
+        operatorId: null,
         amount: new Decimal(1000),
         currency: 'NGN',
         costAmount: new Decimal(1000),
+        providerCommission: new Decimal(30),
         fee: new Decimal(25),
         margin: new Decimal(25),
         status: 'PROCESSING',
@@ -1295,6 +1473,18 @@ describe('AdminService banking operations', () => {
         },
       },
     ]);
+    prisma.vtuWebhookInbox.findMany.mockResolvedValue([
+      {
+        providerRequestId: 'REQ-CALLBACK-1',
+        providerTransactionId: 'PROV-CALLBACK-1',
+        providerStatus: 'success',
+        attempts: 3,
+        nextAttemptAt: new Date('2026-05-21T10:05:00.000Z'),
+        lastError: 'Order not found yet',
+        createdAt,
+        updatedAt: createdAt,
+      },
+    ]);
 
     const report = await service.getVtuReconciliationReport(10, 50);
 
@@ -1314,6 +1504,8 @@ describe('AdminService banking operations', () => {
       expect.objectContaining({
         ordersReviewed: 2,
         totalOrderAmount: '1500',
+        totalCostAmount: '1500',
+        totalProviderCommission: '45',
         totalFees: '35',
         totalDebitAmount: '1535',
         amountMismatches: 1,
@@ -1326,10 +1518,10 @@ describe('AdminService banking operations', () => {
       expect.arrayContaining([
         expect.objectContaining({
           provider: 'VTPASS',
-          count: 1,
-          totalAmount: '500',
-          totalFees: '10',
-          totalDebitAmount: '510',
+          count: 2,
+          totalAmount: '1500',
+          totalFees: '35',
+          totalDebitAmount: '1535',
         }),
       ]),
     );
@@ -1353,6 +1545,22 @@ describe('AdminService banking operations', () => {
         expectedDebitAmount: '1025',
       }),
     );
+    expect(report.orders[0]).toEqual(
+      expect.objectContaining({
+        costAmount: '500',
+        providerCommission: '15',
+        fee: '10',
+        margin: '10',
+      }),
+    );
+    expect(report.orders[0]).not.toHaveProperty('purchasedCodeEncrypted');
+    expect(report.callbackFailures[0]).toEqual(
+      expect.objectContaining({
+        providerRequestId: 'REQ-CALLBACK-1',
+        attempts: 3,
+      }),
+    );
+    expect(report.callbackFailures[0]).not.toHaveProperty('payload');
   });
 
   it('flags terminal failed VTU orders without reversal credit', async () => {

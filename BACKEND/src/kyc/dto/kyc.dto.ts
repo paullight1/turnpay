@@ -10,6 +10,8 @@ import {
   Max,
   IsBoolean,
   Equals,
+  IsObject,
+  IsDateString,
 } from 'class-validator';
 import { KYCType } from '@prisma/client';
 
@@ -39,24 +41,14 @@ export class CreateKycUploadDto {
   fileSize: number;
 }
 
-export class SubmitKycDto {
+export class CreateIdentityVerificationDto {
   @IsString()
-  @IsIn([
-    'BVN',
-    'NIN',
-    'GHANA_CARD',
-    'PASSPORT',
-    'DRIVERS_LICENSE',
-    'VOTERS_CARD',
-  ])
+  @IsIn(['BVN', 'NIN'])
   type: KYCType;
 
   @IsString()
-  @MaxLength(300)
-  @Matches(/^kyc\/[A-Za-z0-9_-]+\/[A-Za-z0-9._-]+$/, {
-    message: 'Document object key is invalid',
-  })
-  documentObjectKey: string;
+  @IsIn(['NG'])
+  country: 'NG';
 
   @IsString()
   @MinLength(5)
@@ -65,29 +57,32 @@ export class SubmitKycDto {
     message: 'ID number can contain letters, numbers, and hyphen only',
   })
   idNumber: string;
-}
 
-export class CreateSmileKycSessionDto {
-  @IsString()
-  @IsIn([
-    'BVN',
-    'NIN',
-    'GHANA_CARD',
-    'PASSPORT',
-    'DRIVERS_LICENSE',
-    'VOTERS_CARD',
-  ])
-  type: KYCType;
-
-  @IsString()
-  @IsIn(['NG', 'GH'])
-  country: 'NG' | 'GH';
+  @IsDateString({ strict: true, strictSeparator: true })
+  dateOfBirth: string;
 
   @IsBoolean()
   @Equals(true, {
     message: 'Consent is required before starting identity verification',
   })
-  consentAccepted: boolean;
+  consentAccepted: true;
+}
+
+export { CreateIdentityVerificationDto as CreateYouverifyKycDto };
+
+export class YouverifyWebhookDto {
+  @IsString()
+  @MinLength(1)
+  @MaxLength(80)
+  event: string;
+
+  @IsString()
+  @MinLength(1)
+  @MaxLength(16)
+  apiVersion: string;
+
+  @IsObject()
+  data: Record<string, unknown>;
 }
 
 export class ReviewKycDto {

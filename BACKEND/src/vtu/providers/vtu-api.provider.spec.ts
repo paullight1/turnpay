@@ -15,25 +15,36 @@ describe('VtuApiProvider VTpass adapter', () => {
     VTPASS_SECRET_KEY: 'secret-key',
   };
   const configService = {
-    get: jest.fn((key: keyof typeof configValues) => configValues[key]),
+    get: jest.fn(
+      (key: string): unknown => configValues[key as keyof typeof configValues],
+    ),
   };
   const logger = {
     setContext: jest.fn(),
     warn: jest.fn(),
     error: jest.fn(),
   };
+  const circuitBreaker = {
+    canExecute: jest.fn(),
+    recordSuccess: jest.fn(),
+    recordFailure: jest.fn(),
+  };
 
   let provider: VtuApiProvider;
 
   beforeEach(() => {
     jest.clearAllMocks();
+    circuitBreaker.canExecute.mockResolvedValue(true);
+    circuitBreaker.recordSuccess.mockResolvedValue(undefined);
+    circuitBreaker.recordFailure.mockResolvedValue(undefined);
     configService.get.mockImplementation(
-      (key: keyof typeof configValues) => configValues[key],
+      (key: string): unknown => configValues[key as keyof typeof configValues],
     );
-    provider = new VtuApiProvider(
+    provider = new (VtuApiProvider as any)(
       httpService as any,
       configService as any,
       logger as any,
+      circuitBreaker as any,
     );
   });
 
@@ -80,10 +91,19 @@ describe('VtuApiProvider VTpass adapter', () => {
       {
         id: 'mtn-100mb-1000',
         name: 'N1000 1.5GB - 30 days',
-        price: 1000,
+        price: '1000.00',
         validity: '30 days',
+        serviceType: 'data',
       },
     ]);
+  });
+
+  it('does not replace a failed live catalogue request with simulated prices', async () => {
+    httpService.get.mockReturnValue(throwError(() => new Error('timeout')));
+
+    await expect(provider.getPackages('mtn')).rejects.toThrow(
+      'VTpass packages are temporarily unavailable',
+    );
   });
 
   it('posts airtime purchases to VTpass pay endpoint with secret-key auth', async () => {
@@ -106,6 +126,7 @@ describe('VtuApiProvider VTpass adapter', () => {
     const result = await provider.purchase({
       type: 'airtime',
       provider: 'mtn',
+      contactPhone: '+2348011111111',
       recipientNumber: '08011111111',
       amount: 100,
       reference: 'VTU-1234567890-ABCDEF',
@@ -115,7 +136,7 @@ describe('VtuApiProvider VTpass adapter', () => {
       'https://sandbox.vtpass.com/api/pay',
       expect.objectContaining({
         serviceID: 'mtn',
-        amount: 100,
+        amount: '100.00',
         phone: '08011111111',
       }),
       {
@@ -137,6 +158,183 @@ describe('VtuApiProvider VTpass adapter', () => {
         providerRequestId: expect.any(String),
       }),
     );
+    expect(circuitBreaker.canExecute).toHaveBeenCalledWith('vtpass');
+    expect(circuitBreaker.recordSuccess).toHaveBeenCalledWith('vtpass');
+  });
+
+  it('uses the selected postpaid meter type and normalized contact phone', async () => {
+    httpService.post.mockReturnValue(
+      of({
+        data: {
+          code: '000',
+          response_description: 'TRANSACTION SUCCESSFUL',
+          requestId: '202609031122ABC',
+          content: {
+            transactions: {
+              status: 'delivered',
+              transactionId: 'provider-electricity-1',
+            },
+          },
+        },
+      }),
+    );
+
+    await provider.purchase({
+      type: 'electricity',
+      provider: 'ikedc',
+      contactPhone: '+2348031234567',
+      amount: '1000.00',
+      reference: 'VTU-ELECTRICITY-1',
+      meterNumber: '1111111111111',
+      meterType: 'postpaid',
+    } as any);
+
+    expect(httpService.post.mock.calls[0][1]).toEqual(
+      expect.objectContaining({
+        serviceID: 'ikeja-electric',
+        billersCode: '1111111111111',
+        variation_code: 'postpaid',
+        amount: '1000.00',
+        phone: '08031234567',
+      }),
+    );
+  });
+
+  it('maps cable renewal without a bouquet variation', async () => {
+    httpService.post.mockReturnValue(
+      of({
+        data: {
+          code: '000',
+          response_description: 'TRANSACTION SUCCESSFUL',
+          content: {
+            transactions: {
+              status: 'delivered',
+              transactionId: 'provider-cable-1',
+            },
+          },
+        },
+      }),
+    );
+
+    await provider.purchase({
+      type: 'cable',
+      provider: 'dstv',
+      contactPhone: '+2348031234567',
+      amount: '6500.00',
+      reference: 'VTU-CABLE-1',
+      smartCardNumber: '1212121212',
+      subscriptionType: 'renew',
+    } as any);
+
+    expect(httpService.post.mock.calls[0][1]).toEqual(
+      expect.objectContaining({
+        serviceID: 'dstv',
+        billersCode: '1212121212',
+        subscription_type: 'renew',
+        amount: '6500.00',
+        phone: '08031234567',
+      }),
+    );
+    expect(httpService.post.mock.calls[0][1]).not.toHaveProperty(
+      'variation_code',
+    );
+  });
+
+  it('extracts purchased codes and provider economics without persisting raw PII', async () => {
+    httpService.post.mockReturnValue(
+      of({
+        data: {
+          code: '000',
+          response_description: 'TRANSACTION SUCCESSFUL',
+          requestId: '202609031122ABC',
+          purchased_code: '1234-5678-9012-3456-7890',
+          content: {
+            transactions: {
+              status: 'delivered',
+              transactionId: 'provider-electricity-2',
+              unique_element: '1111111111111',
+              phone: '08031234567',
+              email: 'customer@example.com',
+              total_amount: '970.00',
+              commission: '30.00',
+            },
+          },
+        },
+      }),
+    );
+
+    const result = await provider.purchase({
+      type: 'electricity',
+      provider: 'ikedc',
+      contactPhone: '+2348031234567',
+      amount: '1000.00',
+      reference: 'VTU-ELECTRICITY-2',
+      meterNumber: '1111111111111',
+      meterType: 'prepaid',
+    } as any);
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        status: 'success',
+        purchasedCode: '1234-5678-9012-3456-7890',
+        providerCost: '970.00',
+        providerCommission: '30.00',
+      }),
+    );
+    expect(JSON.stringify(result.safeResponse)).not.toContain('1111111111111');
+    expect(JSON.stringify(result.safeResponse)).not.toContain('08031234567');
+    expect(JSON.stringify(result.safeResponse)).not.toContain(
+      'customer@example.com',
+    );
+    expect(JSON.stringify(result.safeResponse)).not.toContain(
+      '1234-5678-9012-3456-7890',
+    );
+  });
+
+  it('keeps VTpass reversal distinct from an outright failure', async () => {
+    httpService.post.mockReturnValue(
+      of({
+        data: {
+          code: '000',
+          response_description: 'TRANSACTION REVERSAL TO WALLET',
+          content: {
+            transactions: {
+              status: 'reversed',
+              transactionId: 'provider-reversal-1',
+            },
+          },
+        },
+      }),
+    );
+
+    await expect(provider.requery('202609031122REV')).resolves.toEqual(
+      expect.objectContaining({ status: 'reversed' }),
+    );
+  });
+
+  it('fails closed when simulation is not explicitly enabled', async () => {
+    configService.get.mockImplementation((key: string) => {
+      if (key === 'NODE_ENV') return 'test';
+      if (key === 'VTU_SIMULATION_ENABLED') return false;
+      return '';
+    });
+    const unconfigured = new (VtuApiProvider as any)(
+      httpService as any,
+      configService as any,
+      logger as any,
+      circuitBreaker as any,
+    );
+
+    await expect(
+      unconfigured.purchase({
+        type: 'airtime',
+        provider: 'mtn',
+        contactPhone: '+2348031234567',
+        recipientNumber: '+2348031234567',
+        amount: '100.00',
+        reference: 'VTU-NO-CONFIG-1',
+      }),
+    ).rejects.toThrow('VTpass is not configured');
   });
 
   it('requeries VTpass transactions by provider request id', async () => {
@@ -230,6 +428,7 @@ describe('VtuApiProvider VTpass adapter', () => {
       httpService as any,
       configService as any,
       logger as any,
+      circuitBreaker as any,
     );
 
     const result = await provider.getVtpassHealth();
@@ -263,6 +462,7 @@ describe('VtuApiProvider VTpass adapter', () => {
       provider.purchase({
         type: 'airtime',
         provider: 'mtn',
+        contactPhone: '+2348011111111',
         recipientNumber: '201000000000',
         amount: 100,
         reference: 'VTU-1234567890-PENDING',
@@ -368,6 +568,7 @@ describe('VtuApiProvider VTpass adapter', () => {
       provider.purchase({
         type: 'airtime',
         provider: 'mtn',
+        contactPhone: '+2348011111111',
         recipientNumber: '300000000000',
         amount: 100,
         reference: 'VTU-1234567890-TIMEOUT',

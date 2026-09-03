@@ -22,7 +22,7 @@ class WalletBalanceCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final formatted = NumberFormat.currency(
       locale: 'en_GH',
-      symbol: 'GHâ‚µ ',
+      symbol: 'GH₵ ',
       decimalDigits: 2,
     ).format(balanceGHS);
 
@@ -45,7 +45,7 @@ class WalletBalanceCard extends StatelessWidget {
             ),
           ],
         ),
-        SizedBox(height: AppSpacing.xs),
+        const SizedBox(height: AppSpacing.xs),
         Row(
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
@@ -61,7 +61,7 @@ class WalletBalanceCard extends StatelessWidget {
                       overflow: TextOverflow.ellipsis,
                     )
                   : Text(
-                      'GHâ‚µ â€¢â€¢â€¢â€¢â€¢â€¢',
+                      'GH₵ ••••••',
                       style: AppTextStyles.displayLarge.copyWith(
                         fontSize: 36,
                         letterSpacing: 4,
@@ -70,7 +70,7 @@ class WalletBalanceCard extends StatelessWidget {
                       ),
                     ),
             ),
-            SizedBox(width: AppSpacing.sm),
+            const SizedBox(width: AppSpacing.sm),
             GestureDetector(
               onTap: onToggleVisibility,
               child: Icon(

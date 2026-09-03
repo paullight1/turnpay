@@ -3,9 +3,8 @@ import { createHmac } from 'crypto';
 import { VtpassWebhookController } from './vtpass-webhook.controller';
 
 describe('VtpassWebhookController', () => {
-  const vtuService = {
-    recordVtpassWebhookEvent: jest.fn(),
-    processVtpassWebhookEvent: jest.fn(),
+  const inbox = {
+    record: jest.fn(),
   };
   const configService = {
     get: jest.fn(),
@@ -22,16 +21,12 @@ describe('VtpassWebhookController', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     configService.get.mockReturnValue(undefined);
-    vtuService.recordVtpassWebhookEvent.mockResolvedValue({
+    inbox.record.mockResolvedValue({
       duplicate: false,
-      reference: 'vtpass:transaction-update:REQ-1:TX-1:delivered',
-      logId: 'webhook-log-1',
-    });
-    vtuService.processVtpassWebhookEvent.mockResolvedValue({
-      processed: true,
+      inboxId: 'inbox-1',
     });
     controller = new VtpassWebhookController(
-      vtuService as any,
+      inbox as any,
       configService as any,
       logger as any,
     );
@@ -40,7 +35,7 @@ describe('VtpassWebhookController', () => {
   it('accepts a valid signed VTpass transaction update webhook', async () => {
     const secret = 'vtpass-webhook-test-secret';
     const body = {
-      type: 'transaction-update',
+      type: 'transaction-update' as const,
       data: {
         code: '000',
         requestId: 'REQ-1',
@@ -60,38 +55,23 @@ describe('VtpassWebhookController', () => {
     configService.get.mockReturnValue(secret);
 
     await expect(
-      controller.handleVtpassWebhook(
-        signature,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        { rawBody } as any,
-        body,
-      ),
+      controller.handleVtpassWebhook(signature, { rawBody } as any, body),
     ).resolves.toEqual({ response: 'success' });
 
-    expect(vtuService.recordVtpassWebhookEvent).toHaveBeenCalledWith({
+    expect(inbox.record).toHaveBeenCalledWith({
       eventType: 'transaction-update',
       providerRequestId: 'REQ-1',
       providerReference: 'TX-1',
-      status: 'delivered',
+      status: 'success',
       message: 'TRANSACTION DELIVERED',
-      rawPayload: body,
+      code: '000',
     });
-    expect(vtuService.processVtpassWebhookEvent).toHaveBeenCalledWith(
-      expect.objectContaining({
-        providerRequestId: 'REQ-1',
-        providerReference: 'TX-1',
-        status: 'delivered',
-      }),
-    );
   });
 
-  it('accepts a configured shared secret token for dashboard callback URLs', async () => {
+  it('rejects shared secret tokens in callback URLs', async () => {
     const secret = 'vtpass-dashboard-token';
     const body = {
-      type: 'transaction-update',
+      type: 'transaction-update' as const,
       data: {
         requestId: 'REQ-2',
         response_description: 'TRANSACTION REVERSAL TO WALLET',
@@ -108,22 +88,12 @@ describe('VtpassWebhookController', () => {
     await expect(
       controller.handleVtpassWebhook(
         undefined,
-        undefined,
-        undefined,
-        undefined,
-        secret,
         { rawBody: JSON.stringify(body) } as any,
         body,
       ),
-    ).resolves.toEqual({ response: 'success' });
+    ).rejects.toThrow('Missing signature header');
 
-    expect(vtuService.recordVtpassWebhookEvent).toHaveBeenCalledWith(
-      expect.objectContaining({
-        providerRequestId: 'REQ-2',
-        providerReference: 'TX-2',
-        status: 'reversed',
-      }),
-    );
+    expect(inbox.record).not.toHaveBeenCalled();
   });
 
   it('rejects VTpass webhooks when the configured secret does not match', async () => {
@@ -131,33 +101,46 @@ describe('VtpassWebhookController', () => {
 
     await expect(
       controller.handleVtpassWebhook(
-        undefined,
-        undefined,
-        undefined,
         'wrong-secret',
-        undefined,
         { rawBody: '{}' } as any,
-        {},
+        {} as any,
       ),
     ).rejects.toThrow(BadRequestException);
 
-    expect(vtuService.recordVtpassWebhookEvent).not.toHaveBeenCalled();
-    expect(vtuService.processVtpassWebhookEvent).not.toHaveBeenCalled();
+    expect(inbox.record).not.toHaveBeenCalled();
   });
 
   it('rejects VTpass webhooks when no webhook secret is configured', async () => {
     await expect(
       controller.handleVtpassWebhook(
         undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
         { rawBody: '{}' } as any,
-        {},
+        {} as any,
       ),
     ).rejects.toThrow(BadRequestException);
 
-    expect(vtuService.recordVtpassWebhookEvent).not.toHaveBeenCalled();
+    expect(inbox.record).not.toHaveBeenCalled();
+  });
+
+  it('rejects callbacks without a provider transaction id or known status', async () => {
+    const secret = 'vtpass-webhook-test-secret';
+    const body = {
+      type: 'transaction-update' as const,
+      data: { requestId: 'REQ-3', status: 'mystery' },
+    };
+    const rawBody = JSON.stringify(body);
+    const signature = createHmac('sha256', secret)
+      .update(rawBody)
+      .digest('hex');
+    configService.get.mockReturnValue(secret);
+
+    await expect(
+      controller.handleVtpassWebhook(
+        signature,
+        { rawBody } as any,
+        body as any,
+      ),
+    ).rejects.toThrow('Invalid VTpass webhook payload');
+    expect(inbox.record).not.toHaveBeenCalled();
   });
 });

@@ -1,5 +1,7 @@
 # Team And Async Workflow
 
+> Archived workflow. Provider roles below are superseded by the Monnify-only decision in `DOCS/PROVIDER-SOURCE-OF-TRUTH.MD`.
+
 ## Required Expert Roles
 
 Core roles already created as repo-local skills:
@@ -64,4 +66,3 @@ Before live banking launch:
 - Reconciliation QA confirms duplicate, replay, reversal, and mismatch tests.
 - Admin Ops confirms review queues and manual recovery flows.
 - DevOps SRE confirms alerts, backups, webhooks, and incident runbooks.
-

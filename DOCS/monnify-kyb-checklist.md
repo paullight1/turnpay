@@ -76,8 +76,7 @@ MONNIFY_SECRET_KEY=sandbox_sk_xxxxxxxxxxxxxxxx
 MONNIFY_CONTRACT_CODE=xxxxxxxxxxxx
 MONNIFY_BASE_URL=https://sandbox.monnify.com
 
-# Webhook
-MONNIFY_WEBHOOK_SECRET=whsec_xxxxxxxxxxxxxxxx
+# Webhooks are signed with MONNIFY_SECRET_KEY; no separate webhook secret exists.
 
 # Production (overridden in production environment)
 BANKING_SANDBOX_MODE=true

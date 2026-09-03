@@ -48,15 +48,14 @@ const serviceTypes = [
 ];
 
 const markets = [
-  { code: "NG", name: "Nigeria", status: "Live" },
-  { code: "GH", name: "Ghana", status: "Live" },
-  { code: "KE", name: "Kenya", status: "Coming soon" },
-  { code: "ZA", name: "South Africa", status: "Coming soon" },
-  { code: "US", name: "United States", status: "Coming soon" },
-  { code: "GB", name: "United Kingdom", status: "Coming soon" },
+  { code: "NG", name: "Nigeria", enabled: true },
+  { code: "GH", name: "Ghana", enabled: false },
+  { code: "KE", name: "Kenya", enabled: false },
+  { code: "ZA", name: "South Africa", enabled: false },
+  { code: "US", name: "United States", enabled: false },
+  { code: "GB", name: "United Kingdom", enabled: false },
 ] as const;
 
-const liveMarkets = new Set(["NG", "GH"]);
 const terminalOrderStatuses = new Set(["SUCCESS", "FAILED", "REVERSED"]);
 const currencySymbols: Record<string, string> = {
   NGN: "₦",
@@ -103,56 +102,31 @@ function formatDateTime(value?: string | null) {
   }).format(date);
 }
 
-function MarketSelector({
-  value,
-  onChange,
-}: {
-  value: string;
-  onChange: (value: string) => void;
-}) {
-  return (
-    <div className="grid gap-3">
-      <Label>Service country</Label>
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-        {markets.map((market) => {
-          const isLive = market.status === "Live";
-          const isSelected = value === market.code;
-          return (
-            <Button
-              key={market.code}
-              type="button"
-              variant={isSelected ? "default" : "outline"}
-              disabled={!isLive}
-              className="h-auto justify-start px-3 py-2 text-left"
-              onClick={() => onChange(market.code)}
-            >
-              <span className="flex min-w-0 flex-col">
-                <span className="truncate text-sm">{market.name}</span>
-                <span className="text-xs opacity-75">{market.status}</span>
-              </span>
-            </Button>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
 function VtuContent() {
   const { profile } = useAuth();
   const searchParams = useSearchParams();
   const initialType = searchParams.get("type") || "airtime";
   const [activeType, setActiveType] = useState(initialType);
-  const [airtimeScope, setAirtimeScope] = useState<"local" | "international">(
-    "local",
-  );
-  const [selectedCountryCode, setSelectedCountryCode] = useState("GH");
   const [selectedProvider, setSelectedProvider] = useState("");
+  const [countryCode, setCountryCode] = useState("NG");
   const [selectedPackage, setSelectedPackage] = useState("");
+  const [contactPhone, setContactPhone] = useState("");
   const [recipientNumber, setRecipientNumber] = useState("");
   const [smartCardNumber, setSmartCardNumber] = useState("");
   const [meterNumber, setMeterNumber] = useState("");
+  const [subscriptionType, setSubscriptionType] = useState<"change" | "renew">(
+    "change",
+  );
+  const [meterType, setMeterType] = useState<"prepaid" | "postpaid">("prepaid");
   const [amount, setAmount] = useState("");
+  const [verifiedCustomer, setVerifiedCustomer] = useState<{
+    name: string;
+    detail?: string;
+  } | null>(null);
+  const [isValidating, setIsValidating] = useState(false);
+  const [lastReceipt, setLastReceipt] = useState<VtuPurchaseResult | null>(
+    null,
+  );
   const [transactionPin, setTransactionPin] = useState("");
   const [isPurchasing, setIsPurchasing] = useState(false);
   const [isConfirming, setIsConfirming] = useState(false);
@@ -164,23 +138,6 @@ function VtuContent() {
   const inFlightRef = useRef(false);
   const attemptKeyRef = useRef<string | null>(null);
   const moneyGate = getMoneyActionGate(profile);
-  const effectiveCountryCode =
-    activeType === "airtime" && airtimeScope === "local"
-      ? "NG"
-      : selectedCountryCode;
-  const isReloadlyMarket =
-    ["airtime", "data"].includes(activeType) && effectiveCountryCode === "GH";
-  const isReloadlyUtilityMarket =
-    activeType === "electricity" && effectiveCountryCode === "GH";
-  const providerScope =
-    isReloadlyMarket ||
-    isReloadlyUtilityMarket ||
-    (activeType === "airtime" && airtimeScope === "international")
-      ? "international"
-      : "local";
-  const serviceComingSoon =
-    !liveMarkets.has(effectiveCountryCode) ||
-    (effectiveCountryCode === "GH" && ["cable"].includes(activeType));
 
   const resetAttempt = () => {
     attemptKeyRef.current = null;
@@ -188,32 +145,92 @@ function VtuContent() {
   };
 
   const { data: providers = [] } = useQuery({
-    queryKey: [
-      "vtu-providers",
-      activeType,
-      providerScope,
-      effectiveCountryCode,
-    ],
+    queryKey: ["vtu-providers", activeType],
     queryFn: async () => {
-      const response = await vtuApi.getProviders(activeType, {
-        scope: providerScope,
-        countryCode:
-          providerScope === "international" ? effectiveCountryCode : undefined,
-      });
+      const response = await vtuApi.getProviders(activeType);
       return response.data as VtuProvider[];
     },
-    enabled: !serviceComingSoon,
   });
 
   const { data: packages = [] } = useQuery({
-    queryKey: ["vtu-packages", selectedProvider],
+    queryKey: ["vtu-packages", selectedProvider, activeType],
     queryFn: async () => {
       const response = await vtuApi.getPackages(selectedProvider);
       return response.data as VtuPackage[];
     },
     enabled:
-      !!selectedProvider && activeType === "data" && providerScope === "local",
+      !!selectedProvider &&
+      (activeType === "data" ||
+        (activeType === "cable" && subscriptionType === "change")),
   });
+
+  const resetVerification = () => {
+    setVerifiedCustomer(null);
+    resetAttempt();
+  };
+
+  const handleValidateCustomer = async () => {
+    if (!selectedProvider || !contactPhone) {
+      toast.error("Select a provider and enter a contact phone number");
+      return;
+    }
+
+    setIsValidating(true);
+    try {
+      const idempotencyKey = createMoneyAttemptIdempotencyKey("vtu-validate");
+      if (activeType === "cable") {
+        if (!smartCardNumber) {
+          toast.error("Enter your smart card number");
+          return;
+        }
+        const response = await vtuApi.validateSmartCard(
+          {
+            provider: selectedProvider,
+            smartCardNumber,
+            subscriptionType,
+            contactPhone,
+          },
+          idempotencyKey,
+        );
+        const customer = response.data as {
+          name: string;
+          status?: string;
+          renewalAmount?: string;
+        };
+        if (subscriptionType === "renew" && customer.renewalAmount) {
+          setAmount(customer.renewalAmount);
+        }
+        setVerifiedCustomer({ name: customer.name, detail: customer.status });
+      } else if (activeType === "electricity") {
+        if (!meterNumber) {
+          toast.error("Enter your meter number");
+          return;
+        }
+        const response = await vtuApi.validateMeter(
+          {
+            provider: selectedProvider,
+            meterNumber,
+            meterType,
+            contactPhone,
+          },
+          idempotencyKey,
+        );
+        const customer = response.data as { name: string; address?: string };
+        setVerifiedCustomer({ name: customer.name, detail: customer.address });
+      }
+      toast.success("Customer verified");
+    } catch (error) {
+      const err = error as { response?: { data?: ApiError } };
+      toast.error(
+        typeof err.response?.data?.message === "string"
+          ? err.response.data.message
+          : "Customer verification failed",
+      );
+      setVerifiedCustomer(null);
+    } finally {
+      setIsValidating(false);
+    }
+  };
 
   const handleCheckOrderStatus = async () => {
     const reference = trackedOrder?.orderId || pendingOrderReference;
@@ -260,58 +277,45 @@ function VtuContent() {
 
     if (inFlightRef.current) return;
 
-    if (serviceComingSoon) {
-      toast.error(`${activeType} is coming soon in ${effectiveCountryCode}`);
-      return;
-    }
-
     if (activeType === "airtime" && (!recipientNumber || !amount)) {
       toast.error("Please fill in all required fields");
       return;
     }
-    if (
-      activeType === "airtime" &&
-      providerScope === "international" &&
-      !effectiveCountryCode
-    ) {
-      toast.error("Select the recipient country");
-      return;
-    }
-    if (
-      activeType === "data" &&
-      providerScope === "local" &&
-      (!recipientNumber || !selectedPackage)
-    ) {
+    if (activeType === "data" && (!recipientNumber || !selectedPackage)) {
       toast.error("Please select a package and enter phone number");
       return;
     }
     if (
-      activeType === "data" &&
-      providerScope === "international" &&
-      (!recipientNumber || !amount)
+      activeType === "cable" &&
+      (!smartCardNumber ||
+        !verifiedCustomer ||
+        (subscriptionType === "change" ? !selectedPackage : !amount))
     ) {
-      toast.error("Please enter the phone number and amount");
+      toast.error("Verify the customer and complete the cable details");
       return;
     }
-    if (activeType === "cable" && (!smartCardNumber || !amount)) {
-      toast.error("Please enter your smart card number and amount");
+    if (
+      activeType === "electricity" &&
+      (!meterNumber || !amount || !verifiedCustomer)
+    ) {
+      toast.error("Verify the meter and enter an amount");
       return;
     }
-    if (activeType === "electricity" && (!meterNumber || !amount)) {
-      toast.error("Please enter your meter number and amount");
+
+    if (!contactPhone) {
+      toast.error("Enter a contact phone number");
       return;
     }
 
     const purchaseAmount =
       activeType === "airtime"
-        ? parseFloat(amount)
-        : activeType === "data"
-          ? providerScope === "international"
-            ? parseFloat(amount)
-            : packages.find((p) => p.id === selectedPackage)?.price || 0
-          : parseFloat(amount);
+        ? amount
+        : activeType === "data" ||
+            (activeType === "cable" && subscriptionType === "change")
+          ? packages.find((p) => p.id === selectedPackage)?.price || 0
+          : amount;
 
-    if (!purchaseAmount || purchaseAmount <= 0) {
+    if (!purchaseAmount || Number(purchaseAmount) <= 0) {
       toast.error("Please select a valid amount");
       return;
     }
@@ -336,19 +340,20 @@ function VtuContent() {
       const response = await vtuApi.purchase(
         {
           type: activeType,
-          scope: providerScope,
-          provider: providerScope === "local" ? selectedProvider : undefined,
-          countryCode:
-            providerScope === "international"
-              ? effectiveCountryCode
-              : undefined,
-          operatorId:
-            providerScope === "international" ? selectedProvider : undefined,
-          recipientNumber,
-          amount: purchaseAmount,
-          packageId: selectedPackage || undefined,
-          smartCardNumber: smartCardNumber || undefined,
-          meterNumber: meterNumber || undefined,
+          provider: selectedProvider,
+          contactPhone,
+          amount: String(purchaseAmount),
+          ...(activeType === "airtime" || activeType === "data"
+            ? { recipientNumber }
+            : {}),
+          ...(activeType === "data" ||
+          (activeType === "cable" && subscriptionType === "change")
+            ? { packageId: selectedPackage }
+            : {}),
+          ...(activeType === "cable"
+            ? { smartCardNumber, subscriptionType }
+            : {}),
+          ...(activeType === "electricity" ? { meterNumber, meterType } : {}),
           transactionPin,
         },
         idempotencyKey,
@@ -368,11 +373,13 @@ function VtuContent() {
       }
 
       toast.success(result.message || "Purchase successful!");
+      setLastReceipt(result);
       setPendingOrderReference(null);
       setTrackedOrder(null);
       setRecipientNumber("");
       setSmartCardNumber("");
       setMeterNumber("");
+      setVerifiedCustomer(null);
       setSelectedPackage("");
       setAmount("");
       setTransactionPin("");
@@ -450,13 +457,7 @@ function VtuContent() {
                 <div>
                   <p className="text-muted-foreground">Provider</p>
                   <p className="font-medium">
-                    {trackedOrder
-                      ? trackedOrder.provider === "RELOADLY"
-                        ? "Reloadly"
-                        : trackedOrder.provider
-                      : providerScope === "international"
-                        ? "Reloadly"
-                        : "VTpass"}
+                    {trackedOrder?.provider || "VTpass"}
                   </p>
                 </div>
                 {trackedOrder && (
@@ -520,16 +521,29 @@ function VtuContent() {
           </Card>
         )}
 
+        {(lastReceipt?.purchasedCode || trackedOrder?.purchasedCode) && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Delivery receipt</CardTitle>
+              <CardDescription>
+                Keep this code private. It is shown only in your authenticated
+                order view.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <p className="break-all font-mono text-lg font-semibold">
+                {lastReceipt?.purchasedCode || trackedOrder?.purchasedCode}
+              </p>
+            </CardContent>
+          </Card>
+        )}
+
         <Tabs
           value={activeType}
           onValueChange={(value) => {
             setActiveType(value);
             setSelectedProvider("");
             setSelectedPackage("");
-            setAirtimeScope("local");
-            if (value !== "airtime") {
-              setSelectedCountryCode("NG");
-            }
             resetAttempt();
           }}
         >
@@ -555,92 +569,47 @@ function VtuContent() {
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="flex flex-col gap-4">
-                  {type.id === "airtime" && (
-                    <div className="grid gap-3">
-                      <Label>Top-up destination</Label>
-                      <Tabs
-                        value={airtimeScope}
-                        onValueChange={(value) => {
-                          setAirtimeScope(value as "local" | "international");
-                          setSelectedProvider("");
-                          resetAttempt();
-                        }}
+                  <div>
+                    <Label htmlFor={`${type.id}-country`}>Country</Label>
+                    <Select value={countryCode} onValueChange={setCountryCode}>
+                      <SelectTrigger
+                        id={`${type.id}-country`}
+                        aria-label="Country"
                       >
-                        <TabsList className="grid grid-cols-2">
-                          <TabsTrigger value="local">Local</TabsTrigger>
-                          <TabsTrigger value="international">
-                            International
-                          </TabsTrigger>
-                        </TabsList>
-                      </Tabs>
-                    </div>
-                  )}
-
-                  {type.id === "airtime" &&
-                    airtimeScope === "international" && (
-                      <MarketSelector
-                        value={selectedCountryCode}
-                        onChange={(value) => {
-                          setSelectedCountryCode(value);
-                          setSelectedProvider("");
-                          resetAttempt();
-                        }}
-                      />
-                    )}
-
-                  {type.id !== "airtime" && (
-                    <MarketSelector
-                      value={effectiveCountryCode}
-                      onChange={(value) => {
-                        setSelectedCountryCode(value);
-                        setSelectedProvider("");
-                        setSelectedPackage("");
-                        resetAttempt();
-                      }}
-                    />
-                  )}
-
-                  {serviceComingSoon && (
-                    <div className="rounded-md border border-dashed bg-muted/40 p-3 text-sm">
-                      <p className="font-medium">
-                        {type.label} is coming soon in {effectiveCountryCode}
-                      </p>
-                      <p className="mt-1 text-muted-foreground">
-                        Nigeria supports the full VTU set today. Ghana airtime
-                        and data are available through Reloadly, Ghana
-                        electricity is being enabled through Reloadly Utilities,
-                        and cable remains in provider onboarding.
-                      </p>
-                    </div>
-                  )}
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {markets.map((market) => (
+                          <SelectItem
+                            key={market.code}
+                            value={market.code}
+                            disabled={!market.enabled}
+                          >
+                            {market.name}
+                            {!market.enabled ? " — Coming soon" : ""}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
 
                   <div>
-                    <Label>
-                      {providerScope === "international"
-                        ? activeType === "electricity"
-                          ? "Biller"
-                          : "Operator"
-                        : "Provider"}
+                    <Label htmlFor={`${type.id}-provider`}>
+                      VTpass provider
                     </Label>
                     <Select
                       value={selectedProvider}
-                      disabled={serviceComingSoon}
                       onValueChange={(value) => {
                         setSelectedProvider(value);
                         setSelectedPackage("");
-                        resetAttempt();
+                        resetVerification();
                       }}
                     >
-                      <SelectTrigger>
-                        <SelectValue
-                          placeholder={
-                            providerScope === "international"
-                              ? activeType === "electricity"
-                                ? "Select biller"
-                                : "Select operator"
-                              : "Select provider"
-                          }
-                        />
+                      <SelectTrigger
+                        id={`${type.id}-provider`}
+                        aria-label="VTpass provider"
+                      >
+                        <SelectValue placeholder="Select provider" />
                       </SelectTrigger>
                       <SelectContent>
                         {providers.map((p) => (
@@ -654,24 +623,48 @@ function VtuContent() {
 
                   {(type.id === "airtime" || type.id === "data") && (
                     <div>
-                      <Label>Phone Number</Label>
+                      <Label htmlFor={`${type.id}-recipient`}>
+                        Recipient phone number
+                      </Label>
                       <Input
+                        id={`${type.id}-recipient`}
                         type="tel"
                         placeholder="08012345678"
                         value={recipientNumber}
                         onChange={(e) => {
                           setRecipientNumber(e.target.value);
+                          if (!contactPhone) setContactPhone(e.target.value);
                           resetAttempt();
                         }}
                       />
                     </div>
                   )}
 
-                  {type.id === "data" &&
-                    selectedProvider &&
-                    providerScope === "local" && (
+                  <div>
+                    <Label htmlFor={`${type.id}-contact`}>
+                      Contact phone number
+                    </Label>
+                    <Input
+                      id={`${type.id}-contact`}
+                      type="tel"
+                      placeholder="08012345678"
+                      value={contactPhone}
+                      onChange={(event) => {
+                        setContactPhone(event.target.value);
+                        resetVerification();
+                      }}
+                    />
+                  </div>
+
+                  {(type.id === "data" ||
+                    (type.id === "cable" && subscriptionType === "change")) &&
+                    selectedProvider && (
                       <div>
-                        <Label>Data Package</Label>
+                        <Label>
+                          {type.id === "data"
+                            ? "Data package"
+                            : "Cable package"}
+                        </Label>
                         <Select
                           value={selectedPackage}
                           onValueChange={(value) => {
@@ -693,16 +686,11 @@ function VtuContent() {
                       </div>
                     )}
 
-                  {(type.id === "airtime" ||
-                    (type.id === "data" &&
-                      providerScope === "international")) && (
+                  {type.id === "airtime" && (
                     <div>
-                      <Label>
-                        {providerScope === "international"
-                          ? "Amount (NGN wallet)"
-                          : "Amount (₦)"}
-                      </Label>
+                      <Label htmlFor={`${type.id}-amount`}>Amount (₦)</Label>
                       <Input
+                        id={`${type.id}-amount`}
                         type="number"
                         placeholder="500"
                         value={amount}
@@ -716,41 +704,110 @@ function VtuContent() {
                   )}
 
                   {type.id === "cable" && (
-                    <div>
-                      <Label>Smart Card Number</Label>
-                      <Input
-                        placeholder="Enter your smart card number"
-                        value={smartCardNumber}
-                        onChange={(e) => {
-                          setSmartCardNumber(e.target.value);
-                          resetAttempt();
-                        }}
-                      />
-                    </div>
+                    <>
+                      <div>
+                        <Label>Subscription type</Label>
+                        <Select
+                          value={subscriptionType}
+                          onValueChange={(value: "change" | "renew") => {
+                            setSubscriptionType(value);
+                            setSelectedPackage("");
+                            setAmount("");
+                            resetVerification();
+                          }}
+                        >
+                          <SelectTrigger aria-label="Subscription type">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="change">
+                              Change package
+                            </SelectItem>
+                            <SelectItem value="renew">
+                              Renew current package
+                            </SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div>
+                        <Label htmlFor="smart-card-number">
+                          Smart card number
+                        </Label>
+                        <Input
+                          id="smart-card-number"
+                          placeholder="Enter your smart card number"
+                          value={smartCardNumber}
+                          onChange={(e) => {
+                            setSmartCardNumber(e.target.value);
+                            resetVerification();
+                          }}
+                        />
+                      </div>
+                    </>
                   )}
 
                   {type.id === "electricity" && (
-                    <div>
-                      <Label>Meter Number</Label>
-                      <Input
-                        placeholder="Enter your meter number"
-                        value={meterNumber}
-                        onChange={(e) => {
-                          setMeterNumber(e.target.value);
-                          resetAttempt();
-                        }}
-                      />
-                    </div>
+                    <>
+                      <div>
+                        <Label>Meter type</Label>
+                        <Select
+                          value={meterType}
+                          onValueChange={(value: "prepaid" | "postpaid") => {
+                            setMeterType(value);
+                            resetVerification();
+                          }}
+                        >
+                          <SelectTrigger aria-label="Meter type">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="prepaid">Prepaid</SelectItem>
+                            <SelectItem value="postpaid">Postpaid</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div>
+                        <Label htmlFor="meter-number">Meter number</Label>
+                        <Input
+                          id="meter-number"
+                          placeholder="Enter your meter number"
+                          value={meterNumber}
+                          onChange={(e) => {
+                            setMeterNumber(e.target.value);
+                            resetVerification();
+                          }}
+                        />
+                      </div>
+                    </>
                   )}
 
                   {(type.id === "cable" || type.id === "electricity") && (
+                    <div className="flex flex-col gap-2">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={handleValidateCustomer}
+                        disabled={isValidating || !selectedProvider}
+                      >
+                        {isValidating ? "Verifying…" : "Verify customer"}
+                      </Button>
+                      {verifiedCustomer && (
+                        <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-950 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-100">
+                          <p className="font-medium">{verifiedCustomer.name}</p>
+                          {verifiedCustomer.detail && (
+                            <p>{verifiedCustomer.detail}</p>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {(type.id === "electricity" ||
+                    (type.id === "cable" && subscriptionType === "renew")) && (
                     <div>
-                      <Label>
-                        {providerScope === "international"
-                          ? "Amount (NGN wallet)"
-                          : "Amount (₦)"}
-                      </Label>
+                      <Label htmlFor={`${type.id}-amount`}>Amount (₦)</Label>
                       <Input
+                        id={`${type.id}-amount`}
                         type="number"
                         placeholder="5000"
                         value={amount}
@@ -759,13 +816,17 @@ function VtuContent() {
                           resetAttempt();
                         }}
                         min="50"
+                        readOnly={
+                          type.id === "cable" && subscriptionType === "renew"
+                        }
                       />
                     </div>
                   )}
 
                   <div>
-                    <Label>Transaction PIN</Label>
+                    <Label htmlFor={`${type.id}-pin`}>Transaction PIN</Label>
                     <Input
+                      id={`${type.id}-pin`}
                       type="password"
                       inputMode="numeric"
                       placeholder="4 to 6 digits"
@@ -796,12 +857,7 @@ function VtuContent() {
 
                   <Button
                     onClick={handlePurchase}
-                    disabled={
-                      isPurchasing ||
-                      !selectedProvider ||
-                      !!moneyGate ||
-                      serviceComingSoon
-                    }
+                    disabled={isPurchasing || !selectedProvider || !!moneyGate}
                     className="w-full"
                   >
                     {isPurchasing

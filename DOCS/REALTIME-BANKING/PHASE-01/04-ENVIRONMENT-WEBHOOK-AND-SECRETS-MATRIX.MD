@@ -1,5 +1,7 @@
 # Phase 01 Environment, Webhook, And Secrets Matrix
 
+> Archived environment matrix. `BACKEND/.env.example` and `DOCS/PROVIDER-SOURCE-OF-TRUTH.MD` are authoritative.
+
 ## Environment Separation
 
 | Environment | Purpose | Provider Credentials | Webhook URL | Allowed Operations |

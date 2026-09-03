@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:trustpay_app/core/widgets/main_shell.dart';
@@ -17,8 +18,10 @@ void main() {
     final bundle = buildTrustPayTestBundle();
 
     await tester.pumpWidget(
-      MaterialApp(
-        home: MainShell(homeDataService: bundle.homeDataService),
+      ProviderScope(
+        child: MaterialApp(
+          home: MainShell(homeDataService: bundle.homeDataService),
+        ),
       ),
     );
 
@@ -42,6 +45,11 @@ void main() {
 
     expect(find.text('Profile'), findsWidgets);
     expect(find.text('Account Details'), findsWidgets);
+    await tester.scrollUntilVisible(
+      find.text('Help & Support'),
+      300,
+      scrollable: find.byType(Scrollable).last,
+    );
     expect(find.text('Help & Support'), findsWidgets);
   });
 }

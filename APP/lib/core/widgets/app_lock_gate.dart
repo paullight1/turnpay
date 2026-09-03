@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -52,6 +54,7 @@ class _AppLockGateState extends ConsumerState<AppLockGate>
     if (state == AppLifecycleState.paused ||
         state == AppLifecycleState.inactive ||
         state == AppLifecycleState.hidden) {
+      unawaited(widget.securityService.clearEphemeralTransactionApproval());
       _lockOnResume = true;
       return;
     }
@@ -170,7 +173,7 @@ class _AppLockGateState extends ConsumerState<AppLockGate>
     // App-unlock only needs proof of presence — it never needs the plaintext
     // PIN, so use a pass/fail biometric prompt rather than revealing the PIN.
     final approved = await widget.securityService.authenticateBiometric(
-      reason: 'Unlock TRUSTPAY with ${config.biometricLabel}',
+      reason: 'Unlock TrustPay with ${config.biometricLabel}',
     );
     if (!mounted) return;
 
@@ -279,7 +282,7 @@ class _LockOverlay extends StatelessWidget {
               ),
               const SizedBox(height: AppSpacing.md),
               Text(
-                'Unlock TRUSTPAY',
+                'Unlock TrustPay',
                 style: AppTextStyles.headingXL,
                 textAlign: TextAlign.center,
               ),

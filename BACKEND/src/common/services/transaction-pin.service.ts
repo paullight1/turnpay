@@ -4,17 +4,20 @@ import {
   Injectable,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { pbkdf2Sync, randomBytes, timingSafeEqual } from 'crypto';
+import { Prisma } from '@prisma/client';
+import { pbkdf2, randomBytes, timingSafeEqual } from 'crypto';
+import { promisify } from 'util';
 import { RedisService } from '../../redis/redis.service';
+import { PrismaService } from '../../prisma/prisma.service';
 
 type StoredPin = {
   salt: string;
   hash: string;
   iterations: number;
+  pinLength: number;
 };
 
 const PIN_ITERATIONS = 210_000;
-const PIN_TTL_SECONDS = 60 * 60 * 24 * 365;
 const LOCK_SECONDS = 15 * 60;
 const MAX_FAILED_ATTEMPTS = 5;
 // Absolute ceiling on failed attempts within a rolling 24h window. Without this
@@ -23,6 +26,7 @@ const MAX_FAILED_ATTEMPTS = 5;
 // of the day and only a successful verify (or PIN reset) clears it.
 const MAX_DAILY_FAILED_ATTEMPTS = 15;
 const DAILY_WINDOW_SECONDS = 60 * 60 * 24;
+const pbkdf2Async = promisify(pbkdf2);
 const RECORD_PIN_FAILURE_SCRIPT = `
 local dailyCount = redis.call("INCR", KEYS[2])
 local dailyTtlMs = redis.call("PTTL", KEYS[2])
@@ -55,34 +59,44 @@ export class TransactionPinService {
   constructor(
     private readonly redis: RedisService,
     private readonly configService: ConfigService,
+    private readonly prisma: PrismaService,
   ) {}
 
   async setPin(userId: string, pin: string) {
+    this.redis.assertAvailable();
     this.assertValidPin(pin);
-    const stored = this.buildStoredPin(pin);
+    const stored = await this.buildStoredPin(pin);
 
-    await this.redis.set(
-      this.pinKey(userId),
-      JSON.stringify(stored),
-      PIN_TTL_SECONDS,
-    );
+    await this.prisma.transactionPinCredential.upsert({
+      where: { userId },
+      create: { userId, ...stored },
+      update: { ...stored, resetHoldUntil: null },
+    });
+    await this.redis.del(this.legacyPinKey(userId));
     await this.clearFailures(userId);
     return { success: true };
   }
 
   async setInitialPin(userId: string, pin: string) {
+    this.redis.assertAvailable();
     this.assertValidPin(pin);
-    const created = await this.redis.setIfNotExists(
-      this.pinKey(userId),
-      JSON.stringify(this.buildStoredPin(pin)),
-      PIN_TTL_SECONDS,
-    );
-
-    if (created) {
-      await this.clearFailures(userId);
+    if (await this.redis.get(this.legacyPinKey(userId))) {
+      return false;
     }
 
-    return created;
+    try {
+      const stored = await this.buildStoredPin(pin);
+      await this.prisma.transactionPinCredential.create({
+        data: { userId, ...stored },
+      });
+      await this.clearFailures(userId);
+      return true;
+    } catch (error: unknown) {
+      if (this.isUniqueConstraintError(error)) {
+        return false;
+      }
+      throw error;
+    }
   }
 
   async verifyPin(userId: string, pin: string) {
@@ -93,13 +107,25 @@ export class TransactionPinService {
       throw new ForbiddenException('Transaction PIN is temporarily locked');
     }
 
-    const raw = await this.redis.get(this.pinKey(userId));
-    if (!raw) {
+    let stored = await this.prisma.transactionPinCredential.findUnique({
+      where: { userId },
+      select: { salt: true, hash: true, iterations: true },
+    });
+    let legacyCredential = false;
+
+    if (!stored) {
+      const raw = await this.redis.get(this.legacyPinKey(userId));
+      if (raw) {
+        stored = JSON.parse(raw) as StoredPin;
+        legacyCredential = true;
+      }
+    }
+
+    if (!stored) {
       throw new ForbiddenException('Transaction PIN setup is required');
     }
 
-    const stored = JSON.parse(raw) as StoredPin;
-    const candidate = this.hashPin(pin, stored.salt, stored.iterations);
+    const candidate = await this.hashPin(pin, stored.salt, stored.iterations);
     const isValid = this.safeEqual(candidate, stored.hash);
 
     if (!isValid) {
@@ -107,12 +133,43 @@ export class TransactionPinService {
       throw new ForbiddenException('Invalid transaction PIN');
     }
 
+    if (legacyCredential) {
+      await this.prisma.transactionPinCredential.upsert({
+        where: { userId },
+        create: { userId, ...stored, pinLength: pin.length },
+        update: {},
+      });
+      await this.redis.del(this.legacyPinKey(userId));
+    }
+
     await this.clearFailures(userId);
   }
 
+  async getStatus(userId: string) {
+    const [credential, locked] = await Promise.all([
+      this.prisma.transactionPinCredential.findUnique({
+        where: { userId },
+        select: { pinLength: true, resetHoldUntil: true },
+      }),
+      this.redis.get(this.lockKey(userId)),
+    ]);
+
+    return {
+      configured: credential !== null,
+      pinLength: credential?.pinLength ?? null,
+      resetHoldUntil: credential?.resetHoldUntil?.toISOString() ?? null,
+      locked: Boolean(locked),
+    };
+  }
+
   async setResetHold(userId: string, holdSeconds = 60 * 60) {
+    this.redis.assertAvailable();
     const holdUntil = new Date(Date.now() + holdSeconds * 1000).toISOString();
-    await this.redis.set(this.resetHoldKey(userId), holdUntil, holdSeconds);
+    await this.prisma.transactionPinCredential.update({
+      where: { userId },
+      data: { resetHoldUntil: new Date(holdUntil) },
+    });
+    await this.redis.del(this.legacyResetHoldKey(userId));
     return holdUntil;
   }
 
@@ -121,8 +178,17 @@ export class TransactionPinService {
       return;
     }
 
-    const resetHold = await this.redis.get(this.resetHoldKey(userId));
-    if (resetHold) {
+    const [credential, legacyResetHold] = await Promise.all([
+      this.prisma.transactionPinCredential.findUnique({
+        where: { userId },
+        select: { resetHoldUntil: true },
+      }),
+      this.redis.get(this.legacyResetHoldKey(userId)),
+    ]);
+    if (
+      (credential?.resetHoldUntil && credential.resetHoldUntil > new Date()) ||
+      legacyResetHold
+    ) {
       throw new ForbiddenException(
         'Transaction PIN was recently reset; money movement is temporarily locked',
       );
@@ -152,7 +218,8 @@ export class TransactionPinService {
   }
 
   private async recordFailure(userId: string) {
-    if (this.redis.isRedisAvailable()) {
+    this.redis.assertAvailable();
+    if (this.redis.isAvailable()) {
       await this.recordFailureWithRedis(userId);
       return;
     }
@@ -163,20 +230,28 @@ export class TransactionPinService {
   }
 
   private async recordFailureWithRedis(userId: string) {
-    await this.redis
-      .getClient()
-      .eval(
-        RECORD_PIN_FAILURE_SCRIPT,
-        3,
-        this.failuresKey(userId),
-        this.dailyFailuresKey(userId),
-        this.lockKey(userId),
-        String(MAX_FAILED_ATTEMPTS),
-        String(MAX_DAILY_FAILED_ATTEMPTS),
-        String(DAILY_WINDOW_SECONDS * 1000),
-        String(LOCK_SECONDS * 1000),
-        String(LOCK_SECONDS * 1000),
-      );
+    const result = (await this.redis.execute(
+      'transaction-pin-failure',
+      (client) =>
+        client.eval(
+          RECORD_PIN_FAILURE_SCRIPT,
+          3,
+          this.failuresKey(userId),
+          this.dailyFailuresKey(userId),
+          this.lockKey(userId),
+          String(MAX_FAILED_ATTEMPTS),
+          String(MAX_DAILY_FAILED_ATTEMPTS),
+          String(DAILY_WINDOW_SECONDS * 1000),
+          String(LOCK_SECONDS * 1000),
+          String(LOCK_SECONDS * 1000),
+        ),
+    )) as [number, number, number, number];
+    if (Number(result[2]) === 1) {
+      this.redis.reportOperationalAlert('TRANSACTION_PIN_LOCK_TRIGGERED', {
+        lockWindow:
+          Number(result[1]) >= MAX_DAILY_FAILED_ATTEMPTS ? 'daily' : 'rolling',
+      });
+    }
   }
 
   private async recordFailureWithLocalState(userId: string) {
@@ -189,6 +264,9 @@ export class TransactionPinService {
     if (dailyCount >= MAX_DAILY_FAILED_ATTEMPTS) {
       await this.redis.set(this.lockKey(userId), '1', DAILY_WINDOW_SECONDS);
       await this.redis.del(this.failuresKey(userId));
+      this.redis.reportOperationalAlert('TRANSACTION_PIN_LOCK_TRIGGERED', {
+        lockWindow: 'daily',
+      });
       return;
     }
 
@@ -199,6 +277,9 @@ export class TransactionPinService {
     if (next >= MAX_FAILED_ATTEMPTS) {
       await this.redis.set(this.lockKey(userId), '1', LOCK_SECONDS);
       await this.redis.del(failuresKey);
+      this.redis.reportOperationalAlert('TRANSACTION_PIN_LOCK_TRIGGERED', {
+        lockWindow: 'rolling',
+      });
       return;
     }
 
@@ -211,18 +292,18 @@ export class TransactionPinService {
     await this.redis.del(this.lockKey(userId));
   }
 
-  private hashPin(pin: string, salt: string, iterations: number) {
-    return pbkdf2Sync(pin, salt, iterations, 32, 'sha256').toString(
-      'base64url',
-    );
+  private async hashPin(pin: string, salt: string, iterations: number) {
+    const derived = await pbkdf2Async(pin, salt, iterations, 32, 'sha256');
+    return derived.toString('base64url');
   }
 
-  private buildStoredPin(pin: string): StoredPin {
+  private async buildStoredPin(pin: string): Promise<StoredPin> {
     const salt = randomBytes(16).toString('base64url');
     return {
       salt,
       iterations: PIN_ITERATIONS,
-      hash: this.hashPin(pin, salt, PIN_ITERATIONS),
+      pinLength: pin.length,
+      hash: await this.hashPin(pin, salt, PIN_ITERATIONS),
     };
   }
 
@@ -235,7 +316,7 @@ export class TransactionPinService {
     );
   }
 
-  private pinKey(userId: string) {
+  private legacyPinKey(userId: string) {
     return `transaction-pin:${userId}`;
   }
 
@@ -251,8 +332,15 @@ export class TransactionPinService {
     return `transaction-pin-lock:${userId}`;
   }
 
-  private resetHoldKey(userId: string) {
+  private legacyResetHoldKey(userId: string) {
     return `transaction-pin-reset-hold:${userId}`;
+  }
+
+  private isUniqueConstraintError(error: unknown) {
+    return (
+      error instanceof Prisma.PrismaClientKnownRequestError &&
+      error.code === 'P2002'
+    );
   }
 
   private async withLocalLock<T>(key: string, work: () => Promise<T>) {

@@ -85,6 +85,12 @@ export class UsersService {
       (field) => updateUserDto[field] !== undefined,
     );
 
+    if (updatesIdentity && existing.kycStatus === 'VERIFIED') {
+      throw new ConflictException(
+        'Verified identity details require a support-assisted re-verification',
+      );
+    }
+
     if (updatesIdentity && existing.profileDetailsUpdatedAt) {
       throw new ConflictException(
         'Profile identity details can only be updated once',
@@ -102,29 +108,56 @@ export class UsersService {
       this.assertPhoneMatchesCountry(nextCountry, nextPhone);
     }
 
-    return this.prisma.user.update({
-      where: { id },
-      data: {
-        ...updateUserDto,
-        ...(updateUserDto.phone ? { phone: updateUserDto.phone.trim() } : {}),
-        ...(updateUserDto.country
-          ? { country: updateUserDto.country.trim().toUpperCase() }
-          : {}),
-        ...(updatesIdentity ? { profileDetailsUpdatedAt: new Date() } : {}),
-      },
-      select: {
-        id: true,
-        email: true,
-        phone: true,
-        fullName: true,
-        yearOfBirth: true,
-        country: true,
-        profileDetailsUpdatedAt: true,
-        role: true,
-        kycStatus: true,
-        kycTier: true,
-        updatedAt: true,
-      },
+    return this.prisma.$transaction(async (tx) => {
+      const updated = await tx.user.update({
+        where: { id },
+        data: {
+          ...updateUserDto,
+          ...(updateUserDto.phone ? { phone: updateUserDto.phone.trim() } : {}),
+          ...(updateUserDto.country
+            ? { country: updateUserDto.country.trim().toUpperCase() }
+            : {}),
+          ...(updatesIdentity ? { profileDetailsUpdatedAt: new Date() } : {}),
+        },
+        select: {
+          id: true,
+          email: true,
+          phone: true,
+          fullName: true,
+          yearOfBirth: true,
+          country: true,
+          profileDetailsUpdatedAt: true,
+          role: true,
+          kycStatus: true,
+          kycTier: true,
+          updatedAt: true,
+        },
+      });
+
+      if (updatesIdentity) {
+        await tx.auditLog.create({
+          data: {
+            action: 'user_identity_profile_updated',
+            targetType: 'USER',
+            targetId: id,
+            before: {
+              fullName: existing.fullName,
+              phone: existing.phone,
+              yearOfBirth: existing.yearOfBirth,
+              country: existing.country,
+            },
+            after: {
+              fullName: updated.fullName,
+              phone: updated.phone,
+              yearOfBirth: updated.yearOfBirth,
+              country: updated.country,
+            },
+            metadata: { actorUserId: id },
+          },
+        });
+      }
+
+      return updated;
     });
   }
 

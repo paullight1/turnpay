@@ -6,11 +6,17 @@ import { toast } from "sonner";
 import { ChevronLeft, Eye, EyeOff, Loader2 } from "lucide-react";
 import { AuthShell } from "@/components/auth/auth-shell";
 import { Button } from "@/components/ui/button";
-import { CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { getErrorMessage } from "@/lib/errors";
 import { useAuth } from "@/lib/auth-provider";
+import { useHydrated } from "@/lib/use-hydrated";
 
 type RegisterStep = {
   title: string;
@@ -23,7 +29,8 @@ type RegisterStep = {
 const REGISTER_STEPS: RegisterStep[] = [
   {
     title: "Create a wallet profile.",
-    description: "Start with the identity details tied to this TRUSTPAY account.",
+    description:
+      "Start with the identity details tied to this TRUSTPAY account.",
     cardTitle: "Account owner",
     cardDescription: "Use the name, email, and phone number you want verified.",
     action: "Continue",
@@ -32,14 +39,17 @@ const REGISTER_STEPS: RegisterStep[] = [
     title: "Secure account access.",
     description: "Set the password you will use when signing in on web.",
     cardTitle: "Sign-in password",
-    cardDescription: "Use at least 8 characters with uppercase, lowercase, and a number.",
+    cardDescription:
+      "Use at least 8 characters with uppercase, lowercase, and a number.",
     action: "Set password",
   },
   {
     title: "Protect money actions.",
-    description: "Create the transaction PIN used for transfers, withdrawals, and swaps.",
+    description:
+      "Create the transaction PIN used for transfers, withdrawals, and swaps.",
     cardTitle: "Transaction PIN",
-    cardDescription: "Use digits only. TRUSTPAY will never show this PIN after setup.",
+    cardDescription:
+      "Use digits only. TRUSTPAY will never show this PIN after setup.",
     action: "Review setup",
   },
   {
@@ -64,13 +74,17 @@ export default function RegisterPage() {
   const [confirmTransactionPin, setConfirmTransactionPin] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const isHydrated = useHydrated();
   const { signUp } = useAuth();
 
   const currentStep = REGISTER_STEPS[step];
   const isLastStep = step === REGISTER_STEPS.length - 1;
   const normalizedPhone = phone.replace(/\s+/g, "");
   const hasStrongPassword =
-    password.length >= 8 && /[a-z]/.test(password) && /[A-Z]/.test(password) && /\d/.test(password);
+    password.length >= 8 &&
+    /[a-z]/.test(password) &&
+    /[A-Z]/.test(password) &&
+    /\d/.test(password);
   const hasValidPin = /^\d{4,6}$/.test(transactionPin);
   const pinsMatch = hasValidPin && transactionPin === confirmTransactionPin;
 
@@ -132,7 +146,13 @@ export default function RegisterPage() {
     setIsLoading(true);
 
     try {
-      await signUp(email.trim(), password, normalizedPhone, fullName, transactionPin);
+      await signUp(
+        email.trim(),
+        password,
+        normalizedPhone,
+        fullName,
+        transactionPin,
+      );
       toast.success("Account created successfully");
     } catch (error: unknown) {
       toast.error(getErrorMessage(error, "Registration failed"));
@@ -169,8 +189,12 @@ export default function RegisterPage() {
 
         <div className="space-y-4 text-left">
           <div>
-            <CardTitle className="text-3xl font-black text-white">{currentStep.cardTitle}</CardTitle>
-            <CardDescription className="mt-3 text-base leading-7 text-white/58">{currentStep.cardDescription}</CardDescription>
+            <CardTitle className="text-3xl font-black text-white">
+              {currentStep.cardTitle}
+            </CardTitle>
+            <CardDescription className="mt-3 text-base leading-7 text-white/58">
+              {currentStep.cardDescription}
+            </CardDescription>
           </div>
         </div>
 
@@ -187,171 +211,234 @@ export default function RegisterPage() {
       </CardHeader>
 
       <CardContent className="px-6 pb-6 sm:px-7 sm:pb-7">
-        <form onSubmit={handleSubmit} className="flex flex-col gap-5" aria-busy={isLoading}>
-          {step === 0 ? (
-            <>
-              <div className="flex flex-col gap-2">
-                <Label htmlFor="fullName" className="text-white/80">Full name</Label>
-                <Input
-                  id="fullName"
-                  type="text"
-                  autoComplete="name"
-                  placeholder="Ada Mensah"
-                  value={fullName}
-                  onChange={(e) => setFullName(e.target.value)}
-                  maxLength={120}
-                  required
-                  className="h-12 border-white/10 bg-black/35 text-white placeholder:text-white/30"
-                />
-              </div>
-              <div className="flex flex-col gap-2">
-                <Label htmlFor="email" className="text-white/80">Email</Label>
-                <Input
-                  id="email"
-                  type="email"
-                  autoComplete="email"
-                  placeholder="you@example.com"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  required
-                  className="h-12 border-white/10 bg-black/35 text-white placeholder:text-white/30"
-                />
-              </div>
-              <div className="flex flex-col gap-2">
-                <Label htmlFor="phone" className="text-white/80">Phone number</Label>
-                <Input
-                  id="phone"
-                  type="tel"
-                  autoComplete="tel"
-                  inputMode="tel"
-                  pattern="^(\+?\d{10,15})$"
-                  placeholder="+2348012345678"
-                  value={phone}
-                  onChange={(e) => setPhone(e.target.value)}
-                  required
-                  className="h-12 border-white/10 bg-black/35 text-white placeholder:text-white/30"
-                />
-              </div>
-            </>
-          ) : null}
+        <form
+          onSubmit={handleSubmit}
+          className="flex flex-col gap-5"
+          aria-busy={isLoading}
+        >
+          <fieldset disabled={!isHydrated || isLoading} className="contents">
+            {step === 0 ? (
+              <>
+                <div className="flex flex-col gap-2">
+                  <Label htmlFor="fullName" className="text-white/80">
+                    Full name
+                  </Label>
+                  <Input
+                    id="fullName"
+                    type="text"
+                    autoComplete="name"
+                    placeholder="Ada Mensah"
+                    value={fullName}
+                    onChange={(e) => setFullName(e.target.value)}
+                    maxLength={120}
+                    required
+                    className="h-12 border-white/10 bg-black/35 text-white placeholder:text-white/30"
+                  />
+                </div>
+                <div className="flex flex-col gap-2">
+                  <Label htmlFor="email" className="text-white/80">
+                    Email
+                  </Label>
+                  <Input
+                    id="email"
+                    type="email"
+                    autoComplete="email"
+                    placeholder="you@example.com"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    required
+                    className="h-12 border-white/10 bg-black/35 text-white placeholder:text-white/30"
+                  />
+                </div>
+                <div className="flex flex-col gap-2">
+                  <Label htmlFor="phone" className="text-white/80">
+                    Phone number
+                  </Label>
+                  <Input
+                    id="phone"
+                    type="tel"
+                    autoComplete="tel"
+                    inputMode="tel"
+                    pattern="^(\+?\d{10,15})$"
+                    placeholder="+2348012345678"
+                    value={phone}
+                    onChange={(e) => setPhone(e.target.value)}
+                    required
+                    className="h-12 border-white/10 bg-black/35 text-white placeholder:text-white/30"
+                  />
+                </div>
+              </>
+            ) : null}
 
-          {step === 1 ? (
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="password" className="text-white/80">Password</Label>
-              <div className="relative">
-                <Input
-                  id="password"
-                  type={showPassword ? "text" : "password"}
-                  autoComplete="new-password"
-                  placeholder="Min 8 chars, uppercase, number"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  required
-                  minLength={8}
-                  aria-invalid={password.length > 0 && !hasStrongPassword}
-                  className="h-12 border-white/10 bg-black/35 pr-10 text-white placeholder:text-white/30"
-                />
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon-sm"
-                  className="absolute right-1 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                  aria-label={showPassword ? "Hide password" : "Show password"}
-                  onClick={() => setShowPassword((current) => !current)}
+            {step === 1 ? (
+              <div className="flex flex-col gap-2">
+                <Label htmlFor="password" className="text-white/80">
+                  Password
+                </Label>
+                <div className="relative">
+                  <Input
+                    id="password"
+                    type={showPassword ? "text" : "password"}
+                    autoComplete="new-password"
+                    placeholder="Min 8 chars, uppercase, number"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    required
+                    minLength={8}
+                    aria-invalid={password.length > 0 && !hasStrongPassword}
+                    className="h-12 border-white/10 bg-black/35 pr-10 text-white placeholder:text-white/30"
+                  />
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    className="absolute right-1 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                    aria-label={
+                      showPassword ? "Hide password" : "Show password"
+                    }
+                    onClick={() => setShowPassword((current) => !current)}
+                  >
+                    {showPassword ? (
+                      <EyeOff className="size-4" />
+                    ) : (
+                      <Eye className="size-4" />
+                    )}
+                  </Button>
+                </div>
+                <p
+                  className={`text-xs ${hasStrongPassword ? "text-emerald-600 dark:text-emerald-300" : "text-muted-foreground"}`}
                 >
-                  {showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
-                </Button>
+                  8+ chars, uppercase, lowercase, and number
+                </p>
               </div>
-              <p className={`text-xs ${hasStrongPassword ? "text-emerald-600 dark:text-emerald-300" : "text-muted-foreground"}`}>
-                8+ chars, uppercase, lowercase, and number
-              </p>
-            </div>
-          ) : null}
+            ) : null}
 
-          {step === 2 ? (
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="transactionPin" className="text-white/80">Transaction PIN</Label>
-              <Input
-                id="transactionPin"
-                type="password"
-                inputMode="numeric"
-                pattern="[0-9]*"
-                placeholder="4 to 6 digits"
-                value={transactionPin}
-                onChange={(e) => setTransactionPin(e.target.value.replace(/\D/g, "").slice(0, 6))}
-                required
-                minLength={4}
-                maxLength={6}
-                autoComplete="new-password"
-                aria-invalid={transactionPin.length > 0 && !hasValidPin}
-                className="h-12 border-white/10 bg-black/35 text-white placeholder:text-white/30"
-              />
-              <p className={`text-xs ${hasValidPin ? "text-emerald-600 dark:text-emerald-300" : "text-muted-foreground"}`}>
-                {hasValidPin ? "PIN length looks good" : "Use digits only"}
-              </p>
-            </div>
-          ) : null}
-
-          {step === 3 ? (
-            <>
+            {step === 2 ? (
               <div className="flex flex-col gap-2">
-                <Label htmlFor="confirmTransactionPin" className="text-white/80">Confirm PIN</Label>
+                <Label htmlFor="transactionPin" className="text-white/80">
+                  Transaction PIN
+                </Label>
                 <Input
-                  id="confirmTransactionPin"
+                  id="transactionPin"
                   type="password"
                   inputMode="numeric"
                   pattern="[0-9]*"
-                  placeholder="Repeat PIN"
-                  value={confirmTransactionPin}
-                  onChange={(e) => setConfirmTransactionPin(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                  placeholder="4 to 6 digits"
+                  value={transactionPin}
+                  onChange={(e) =>
+                    setTransactionPin(
+                      e.target.value.replace(/\D/g, "").slice(0, 6),
+                    )
+                  }
                   required
                   minLength={4}
                   maxLength={6}
                   autoComplete="new-password"
-                  aria-invalid={confirmTransactionPin.length > 0 && !pinsMatch}
+                  aria-invalid={transactionPin.length > 0 && !hasValidPin}
                   className="h-12 border-white/10 bg-black/35 text-white placeholder:text-white/30"
                 />
-                <p className={`text-xs ${pinsMatch ? "text-emerald-600 dark:text-emerald-300" : "text-muted-foreground"}`}>
-                  {pinsMatch ? "PINs match" : "Repeat your transaction PIN"}
+                <p
+                  className={`text-xs ${hasValidPin ? "text-emerald-600 dark:text-emerald-300" : "text-muted-foreground"}`}
+                >
+                  {hasValidPin ? "PIN length looks good" : "Use digits only"}
                 </p>
               </div>
+            ) : null}
 
-              <div className="rounded-lg border border-white/10 bg-black/35 p-4 text-sm">
-                <p className="font-medium text-white">Account owner</p>
-                <dl className="mt-3 grid gap-2 text-white/54">
-                  <div className="flex justify-between gap-4">
-                    <dt>Name</dt>
-                    <dd className="text-right font-medium text-white">{fullName.trim()}</dd>
-                  </div>
-                  <div className="flex justify-between gap-4">
-                    <dt>Email</dt>
-                    <dd className="text-right font-medium text-white">{email.trim()}</dd>
-                  </div>
-                  <div className="flex justify-between gap-4">
-                    <dt>Phone</dt>
-                    <dd className="text-right font-medium text-white">{normalizedPhone}</dd>
-                  </div>
-                </dl>
-              </div>
-            </>
-          ) : null}
+            {step === 3 ? (
+              <>
+                <div className="flex flex-col gap-2">
+                  <Label
+                    htmlFor="confirmTransactionPin"
+                    className="text-white/80"
+                  >
+                    Confirm PIN
+                  </Label>
+                  <Input
+                    id="confirmTransactionPin"
+                    type="password"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    placeholder="Repeat PIN"
+                    value={confirmTransactionPin}
+                    onChange={(e) =>
+                      setConfirmTransactionPin(
+                        e.target.value.replace(/\D/g, "").slice(0, 6),
+                      )
+                    }
+                    required
+                    minLength={4}
+                    maxLength={6}
+                    autoComplete="new-password"
+                    aria-invalid={
+                      confirmTransactionPin.length > 0 && !pinsMatch
+                    }
+                    className="h-12 border-white/10 bg-black/35 text-white placeholder:text-white/30"
+                  />
+                  <p
+                    className={`text-xs ${pinsMatch ? "text-emerald-600 dark:text-emerald-300" : "text-muted-foreground"}`}
+                  >
+                    {pinsMatch ? "PINs match" : "Repeat your transaction PIN"}
+                  </p>
+                </div>
 
-          {isLastStep ? (
-            <Button type="submit" disabled={isLoading} className="mt-3 h-12 w-full rounded-full bg-red-600 text-white hover:bg-red-700">
-              {isLoading ? <Loader2 aria-hidden="true" className="size-4 animate-spin" /> : null}
-              {isLoading ? "Creating account..." : currentStep.action}
-            </Button>
-          ) : (
-            <Button type="button" disabled={isLoading} className="mt-3 h-12 w-full rounded-full bg-red-600 text-white hover:bg-red-700" onClick={goNext}>
-              {currentStep.action}
-            </Button>
-          )}
+                <div className="rounded-lg border border-white/10 bg-black/35 p-4 text-sm">
+                  <p className="font-medium text-white">Account owner</p>
+                  <dl className="mt-3 grid gap-2 text-white/54">
+                    <div className="flex justify-between gap-4">
+                      <dt>Name</dt>
+                      <dd className="text-right font-medium text-white">
+                        {fullName.trim()}
+                      </dd>
+                    </div>
+                    <div className="flex justify-between gap-4">
+                      <dt>Email</dt>
+                      <dd className="text-right font-medium text-white">
+                        {email.trim()}
+                      </dd>
+                    </div>
+                    <div className="flex justify-between gap-4">
+                      <dt>Phone</dt>
+                      <dd className="text-right font-medium text-white">
+                        {normalizedPhone}
+                      </dd>
+                    </div>
+                  </dl>
+                </div>
+              </>
+            ) : null}
+
+            {isLastStep ? (
+              <Button
+                type="submit"
+                disabled={isLoading}
+                className="mt-3 h-12 w-full rounded-full bg-red-600 text-white hover:bg-red-700"
+              >
+                {isLoading ? (
+                  <Loader2 aria-hidden="true" className="size-4 animate-spin" />
+                ) : null}
+                {isLoading ? "Creating account..." : currentStep.action}
+              </Button>
+            ) : (
+              <Button
+                type="button"
+                disabled={isLoading}
+                className="mt-3 h-12 w-full rounded-full bg-red-600 text-white hover:bg-red-700"
+                onClick={goNext}
+              >
+                {currentStep.action}
+              </Button>
+            )}
+          </fieldset>
         </form>
 
         {step === 0 ? (
           <p className="mt-6 text-center text-sm text-white/54">
             Already have an account?{" "}
-            <Link href="/login" className="font-semibold text-red-400 hover:text-red-300">
+            <Link
+              href="/login"
+              className="font-semibold text-red-400 hover:text-red-300"
+            >
               Sign in
             </Link>
           </p>

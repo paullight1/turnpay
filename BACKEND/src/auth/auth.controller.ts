@@ -30,6 +30,9 @@ import {
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { SupabaseAuthGuard } from './guards/supabase-auth.guard';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
+import { VerifyTransactionPinDto } from './dto/verify-transaction-pin.dto';
+import { createRequestAuditContext } from '../common/services/request-audit-context';
+import type { AuthenticatedRequest } from '../common/types/request-context';
 
 @Controller('auth')
 export class AuthController {
@@ -150,8 +153,32 @@ export class AuthController {
   async setupTransactionPin(
     @CurrentUser() user: { userId: string },
     @Body() dto: SetTransactionPinDto,
+    @Req() request: AuthenticatedRequest,
   ) {
-    return await this.authService.setupTransactionPin(user.userId, dto.pin);
+    return await this.authService.setupTransactionPin(
+      user.userId,
+      dto.pin,
+      createRequestAuditContext(request, { actorId: user.userId }),
+    );
+  }
+
+  @Get('transaction-pin/status')
+  @UseGuards(JwtAuthGuard)
+  @Throttle({ default: { limit: 30, ttl: 60000 } })
+  @HttpCode(HttpStatus.OK)
+  getTransactionPinStatus(@CurrentUser() user: { userId: string }) {
+    return this.authService.getTransactionPinStatus(user.userId);
+  }
+
+  @Post('transaction-pin/verify')
+  @UseGuards(JwtAuthGuard)
+  @Throttle({ default: { limit: 5, ttl: 900000 } })
+  @HttpCode(HttpStatus.OK)
+  verifyTransactionPin(
+    @CurrentUser() user: { userId: string },
+    @Body() dto: VerifyTransactionPinDto,
+  ) {
+    return this.authService.verifyTransactionPin(user.userId, dto.pin);
   }
 
   @Patch('transaction-pin')
@@ -161,8 +188,13 @@ export class AuthController {
   async resetTransactionPin(
     @CurrentUser() user: { userId: string },
     @Body() dto: ResetTransactionPinDto,
+    @Req() request: AuthenticatedRequest,
   ) {
-    return await this.authService.resetTransactionPin(user.userId, dto);
+    return await this.authService.resetTransactionPin(
+      user.userId,
+      dto,
+      createRequestAuditContext(request, { actorId: user.userId }),
+    );
   }
 
   private extractBearerToken(authorization?: string) {

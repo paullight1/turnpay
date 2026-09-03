@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
 
 import 'package:trustpay_app/core/router/app_router.dart';
+import 'package:trustpay_app/core/widgets/micro_interactions.dart';
 import 'package:trustpay_app/features/home/screens/dashboard_detail_screen.dart';
 import 'package:trustpay_app/features/home/screens/home_screen.dart';
 import 'package:trustpay_app/features/home/screens/home_task_screen.dart';
@@ -45,22 +46,70 @@ void main() {
 
     await tester.pumpAndSettle();
 
-    expect(find.text('Welcome back'), findsOneWidget);
+    expect(find.textContaining('Good '), findsOneWidget);
     expect(find.text('Top services'), findsOneWidget);
     expect(find.text('Ada Lovelace'), findsWidgets);
-    expect(find.text('Other wallets'), findsOneWidget);
-    expect(find.text('Recent transactions'), findsOneWidget);
-    expect(find.text('Fund success'), findsOneWidget);
 
     await tester.tap(find.byIcon(Icons.visibility_outlined).first);
     await tester.pumpAndSettle();
 
     expect(find.text('******'), findsWidgets);
 
+    await tester.scrollUntilVisible(
+      find.text('Other wallets'),
+      300,
+      scrollable: find.byType(Scrollable).first,
+    );
+    expect(find.text('Other wallets'), findsOneWidget);
+    await tester.scrollUntilVisible(
+      find.text('View more'),
+      300,
+      scrollable: find.byType(Scrollable).first,
+    );
+    expect(find.text('Recent transactions'), findsOneWidget);
+    expect(find.text('Fund success'), findsOneWidget);
+
     await tester.tap(find.text('View more'));
     await tester.pumpAndSettle();
 
     expect(find.text('History'), findsOneWidget);
+  });
+
+  testWidgets('wallet calls to action provide 48-pixel tap targets',
+      (tester) async {
+    final bundle = buildTrustPayTestBundle();
+
+    await tester.pumpWidget(
+      MaterialApp.router(
+        routerConfig: GoRouter(
+          initialLocation: AppRoutes.home,
+          routes: [
+            GoRoute(
+              path: AppRoutes.home,
+              builder: (context, state) =>
+                  HomeScreen(homeDataService: bundle.homeDataService),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    await tester.pumpAndSettle();
+
+    final sendAction = find.ancestor(
+      of: find.text('Send money').first,
+      matching: find.byType(TapScale),
+    );
+    final receiveAction = find.ancestor(
+      of: find.text('Receive').first,
+      matching: find.byType(TapScale),
+    );
+
+    expect(tester.getSize(sendAction.first).height, greaterThanOrEqualTo(48));
+    expect(
+      tester.getSize(receiveAction.first).height,
+      greaterThanOrEqualTo(48),
+    );
   });
 
   testWidgets('home screen opens the feature hub from quick actions',
@@ -94,6 +143,11 @@ void main() {
     expect(find.text('Feature hub'), findsOneWidget);
     expect(find.text('Explore features'), findsOneWidget);
     expect(find.text('Fund wallet'), findsOneWidget);
+    await tester.scrollUntilVisible(
+      find.text('Virtual cards'),
+      400,
+      scrollable: find.byType(Scrollable).first,
+    );
     expect(find.text('Virtual cards'), findsOneWidget);
     expect(find.text('Coming soon'), findsOneWidget);
   });
@@ -137,13 +191,12 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Add money'), findsOneWidget);
-    expect(find.text('Copy account number'), findsOneWidget);
+    expect(find.byTooltip('Copy account number'), findsOneWidget);
     expect(find.text('Providus Bank'), findsOneWidget);
-    expect(find.text('0123456789'), findsOneWidget);
+    expect(find.textContaining('0123456789'), findsOneWidget);
   });
 
-  testWidgets('funding workflow opens directly from its route',
-      (tester) async {
+  testWidgets('funding workflow opens directly from its route', (tester) async {
     final bundle = buildTrustPayTestBundle();
 
     await tester.pumpWidget(
@@ -166,9 +219,9 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Add money'), findsOneWidget);
-    expect(find.text('Copy account number'), findsOneWidget);
+    expect(find.byTooltip('Copy account number'), findsOneWidget);
     expect(find.text('Providus Bank'), findsOneWidget);
-    expect(find.text('0123456789'), findsOneWidget);
+    expect(find.textContaining('0123456789'), findsOneWidget);
   });
 
   testWidgets('home screen opens the wallets overview from manage',
@@ -199,6 +252,11 @@ void main() {
 
     await tester.pumpAndSettle();
 
+    await tester.scrollUntilVisible(
+      find.text('Manage'),
+      300,
+      scrollable: find.byType(Scrollable).first,
+    );
     await tester.tap(find.text('Manage'));
     await tester.pumpAndSettle();
 

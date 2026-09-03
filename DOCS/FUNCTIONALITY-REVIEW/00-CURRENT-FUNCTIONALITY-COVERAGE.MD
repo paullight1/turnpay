@@ -1,5 +1,7 @@
 # TRUSTPAY Current Functionality Coverage
 
+> Historical snapshot. For current provider/runtime status use `DOCS/PROVIDER-SOURCE-OF-TRUTH.MD` and `DOCS/CODEBASE-STATUS-REVIEW.MD`.
+
 Date: 2026-05-22
 
 This review covers the user app, backend banking flows, exchange flow, and admin operations. It separates what is functional now from what must be completed before real money launch.

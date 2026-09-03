@@ -134,7 +134,8 @@ export class OtpService {
     const normalizedOtp = otp.trim();
     const phoneHash = this.hashPhone(normalizedPhone);
     const phoneMasked = maskPhone(normalizedPhone);
-    const result = this.redis.isRedisAvailable()
+    this.redis.assertAvailable();
+    const result = this.redis.isAvailable()
       ? await this.verifyWithRedis(phoneHash, normalizedOtp)
       : await this.withLocalLock(`otp:${phoneHash}`, async () =>
           this.verifyWithLocalState(phoneHash, normalizedOtp),
@@ -183,7 +184,8 @@ export class OtpService {
     limit: number,
     message: string,
   ) {
-    const total = this.redis.isRedisAvailable()
+    this.redis.assertAvailable();
+    const total = this.redis.isAvailable()
       ? await this.incrementWithRedis(key, ttlSeconds)
       : await this.withLocalLock(key, async () =>
           this.incrementWithLocalState(key, ttlSeconds),
@@ -195,12 +197,9 @@ export class OtpService {
   }
 
   private async incrementWithRedis(key: string, ttlSeconds: number) {
-    const result = (await this.redis
-      .getClient()
-      .eval(INCREMENT_WITH_TTL_SCRIPT, 1, key, String(ttlSeconds * 1000))) as [
-      number,
-      number,
-    ];
+    const result = (await this.redis.execute('otp-rate-limit', (client) =>
+      client.eval(INCREMENT_WITH_TTL_SCRIPT, 1, key, String(ttlSeconds * 1000)),
+    )) as [number, number];
 
     return Number(result[0]);
   }
@@ -215,16 +214,16 @@ export class OtpService {
     phoneHash: string,
     otp: string,
   ): Promise<'missing' | 'invalid' | 'verified' | 'locked' | 'exhausted'> {
-    const result = (await this.redis
-      .getClient()
-      .eval(
+    const result = (await this.redis.execute('otp-verify', (client) =>
+      client.eval(
         VERIFY_OTP_SCRIPT,
         2,
         this.codeKey(phoneHash),
         this.attemptsKey(phoneHash),
         otp,
         String(this.maxAttempts),
-      )) as [string, number];
+      ),
+    )) as [string, number];
 
     return result[0] as
       | 'missing'

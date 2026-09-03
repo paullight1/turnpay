@@ -172,7 +172,7 @@ class _ReceiveMoneyScreenState extends State<ReceiveMoneyScreen> {
                           // shown above, so only render it once the user has an
                           // account to share.
                           if (hasAccount) ...[
-                            SizedBox(height: AppSpacing.md),
+                            const SizedBox(height: AppSpacing.md),
 
                             // Deposit instructions
                             Container(
@@ -195,33 +195,33 @@ class _ReceiveMoneyScreenState extends State<ReceiveMoneyScreen> {
                                         color: AppColors.primary,
                                         size: 20,
                                       ),
-                                      SizedBox(width: AppSpacing.sm),
+                                      const SizedBox(width: AppSpacing.sm),
                                       Text(
                                         'How to receive money',
                                         style: AppTextStyles.labelM,
                                       ),
                                     ],
                                   ),
-                                  SizedBox(height: AppSpacing.md),
-                                  _InstructionStep(
+                                  const SizedBox(height: AppSpacing.md),
+                                  const _InstructionStep(
                                     number: '1',
                                     text:
                                         'Share your virtual account number above with the sender',
                                   ),
-                                  SizedBox(height: AppSpacing.sm),
-                                  _InstructionStep(
+                                  const SizedBox(height: AppSpacing.sm),
+                                  const _InstructionStep(
                                     number: '2',
                                     text:
                                         'The sender transfers money to this account number from any Nigerian bank or mobile app',
                                   ),
-                                  SizedBox(height: AppSpacing.sm),
-                                  _InstructionStep(
+                                  const SizedBox(height: AppSpacing.sm),
+                                  const _InstructionStep(
                                     number: '3',
                                     text:
                                         'Once the transfer is confirmed, your TrustPay wallet is credited automatically',
                                   ),
-                                  SizedBox(height: AppSpacing.sm),
-                                  _InstructionStep(
+                                  const SizedBox(height: AppSpacing.sm),
+                                  const _InstructionStep(
                                     number: '4',
                                     text:
                                         'Bank transfers usually arrive within 5–30 minutes during business hours',
@@ -231,14 +231,14 @@ class _ReceiveMoneyScreenState extends State<ReceiveMoneyScreen> {
                             ),
                           ],
 
-                          SizedBox(height: AppSpacing.xl),
+                          const SizedBox(height: AppSpacing.xl),
 
                           // Recent deposits header
                           Text(
                             'Recent Deposits',
                             style: AppTextStyles.headingM,
                           ),
-                          SizedBox(height: AppSpacing.md),
+                          const SizedBox(height: AppSpacing.md),
                         ],
                       ),
                     ),
@@ -263,7 +263,7 @@ class _ReceiveMoneyScreenState extends State<ReceiveMoneyScreen> {
         padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
         sliver: SliverList.separated(
           itemCount: 4,
-          separatorBuilder: (_, __) => SizedBox(height: AppSpacing.sm),
+          separatorBuilder: (_, __) => const SizedBox(height: AppSpacing.sm),
           itemBuilder: (context, index) => ShimmerBlock(
             width: double.infinity,
             height: 68,
@@ -299,17 +299,17 @@ class _ReceiveMoneyScreenState extends State<ReceiveMoneyScreen> {
             ),
             child: Column(
               children: [
-                TpIllustration(
+                const TpIllustration(
                   variant: TpIllustrationVariant.emptyTransactions,
                   size: 128,
                   semanticLabel: 'No deposits yet',
                 ),
-                SizedBox(height: AppSpacing.sm),
+                const SizedBox(height: AppSpacing.sm),
                 Text(
                   'No deposits yet',
                   style: AppTextStyles.labelM,
                 ),
-                SizedBox(height: AppSpacing.xs),
+                const SizedBox(height: AppSpacing.xs),
                 Text(
                   'Deposits will appear here once someone sends money to your virtual account',
                   style: AppTextStyles.bodyS,
@@ -327,7 +327,7 @@ class _ReceiveMoneyScreenState extends State<ReceiveMoneyScreen> {
       padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
       sliver: SliverList.separated(
         itemCount: deposits.length,
-        separatorBuilder: (_, __) => SizedBox(height: AppSpacing.sm),
+        separatorBuilder: (_, __) => const SizedBox(height: AppSpacing.sm),
         itemBuilder: (context, index) {
           final deposit = deposits[index];
           return _DepositRow(deposit: deposit);
@@ -423,7 +423,7 @@ class _VirtualAccountCard extends StatelessWidget {
                   size: 20,
                 ),
               ),
-              SizedBox(width: AppSpacing.sm),
+              const SizedBox(width: AppSpacing.sm),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -435,7 +435,7 @@ class _VirtualAccountCard extends StatelessWidget {
                         fontWeight: FontWeight.w900,
                       ),
                     ),
-                    SizedBox(height: 2),
+                    const SizedBox(height: 2),
                     Row(
                       children: [
                         Container(
@@ -448,7 +448,7 @@ class _VirtualAccountCard extends StatelessWidget {
                             shape: BoxShape.circle,
                           ),
                         ),
-                        SizedBox(width: AppSpacing.xs),
+                        const SizedBox(width: AppSpacing.xs),
                         Flexible(
                           child: Text(
                             isActive ? 'Active receiving account' : account.status,
@@ -485,12 +485,12 @@ class _VirtualAccountCard extends StatelessWidget {
               )
             ],
           ),
-          SizedBox(height: AppSpacing.md),
+          const SizedBox(height: AppSpacing.md),
           _AccountDetailRow(
             label: 'Account name',
             value: account.accountName.isEmpty ? 'TrustPay user' : account.accountName,
           ),
-          SizedBox(height: AppSpacing.sm),
+          const SizedBox(height: AppSpacing.sm),
           TapScale(
             onTap: () => _copyAccountNumber(context),
             borderRadius: BorderRadius.circular(AppRadius.sm),
@@ -511,7 +511,7 @@ class _VirtualAccountCard extends StatelessWidget {
                       isLarge: true,
                     ),
                   ),
-                  SizedBox(width: AppSpacing.sm),
+                  const SizedBox(width: AppSpacing.sm),
                   Icon(
                     Icons.copy_rounded,
                     color: AppColors.primary,
@@ -521,7 +521,7 @@ class _VirtualAccountCard extends StatelessWidget {
               ),
             ),
           ),
-          SizedBox(height: AppSpacing.md),
+          const SizedBox(height: AppSpacing.md),
           SizedBox(
             width: double.infinity,
             child: OutlinedButton.icon(
@@ -569,7 +569,7 @@ class _AccountDetailRow extends StatelessWidget {
             fontWeight: FontWeight.w700,
           ),
         ),
-        SizedBox(height: 3),
+        const SizedBox(height: 3),
         Text(
           value,
           maxLines: isLarge ? 1 : 2,
@@ -607,23 +607,23 @@ class _NoVirtualAccountCard extends StatelessWidget {
       ),
       child: Column(
         children: [
-          TpIllustration(
+          const TpIllustration(
             variant: TpIllustrationVariant.emptyWallet,
             size: 132,
             semanticLabel: 'No virtual account yet',
           ),
-          SizedBox(height: AppSpacing.sm),
+          const SizedBox(height: AppSpacing.sm),
           Text(
             'No virtual account yet',
             style: AppTextStyles.labelM,
           ),
-          SizedBox(height: AppSpacing.xs),
+          const SizedBox(height: AppSpacing.xs),
           Text(
             'Request a virtual account to receive bank transfers directly into your TrustPay wallet.',
             style: AppTextStyles.bodyS,
             textAlign: TextAlign.center,
           ),
-          SizedBox(height: AppSpacing.lg),
+          const SizedBox(height: AppSpacing.lg),
           FilledButton(
             onPressed: isRequesting
                 ? null
@@ -667,14 +667,14 @@ class _ReceiveMoneyLoadingState extends StatelessWidget {
           height: 220,
           borderRadius: BorderRadius.circular(AppRadius.md),
         ),
-        SizedBox(height: AppSpacing.xl),
+        const SizedBox(height: AppSpacing.xl),
         // "Recent Deposits" header skeleton
         ShimmerBlock(
           width: 160,
           height: 20,
           borderRadius: BorderRadius.circular(AppRadius.sm),
         ),
-        SizedBox(height: AppSpacing.md),
+        const SizedBox(height: AppSpacing.md),
         ...List.generate(4, (_) {
           return Padding(
             padding: const EdgeInsets.only(bottom: AppSpacing.sm),
@@ -719,19 +719,19 @@ class _ReceiveMoneyErrorState extends StatelessWidget {
               color: AppColors.primary,
               size: 48,
             ),
-            SizedBox(height: AppSpacing.md),
+            const SizedBox(height: AppSpacing.md),
             Text(
               message,
               style: AppTextStyles.labelM,
               textAlign: TextAlign.center,
             ),
-            SizedBox(height: AppSpacing.xs),
+            const SizedBox(height: AppSpacing.xs),
             Text(
               'Check your connection and try again.',
               style: AppTextStyles.bodyS,
               textAlign: TextAlign.center,
             ),
-            SizedBox(height: AppSpacing.lg),
+            const SizedBox(height: AppSpacing.lg),
             FilledButton(
               onPressed: onRetry,
               child: const Text('Retry'),
@@ -763,18 +763,18 @@ class _DepositsErrorCard extends StatelessWidget {
             color: AppColors.primary,
             size: 40,
           ),
-          SizedBox(height: AppSpacing.sm),
+          const SizedBox(height: AppSpacing.sm),
           Text(
             'Could not load deposits',
             style: AppTextStyles.labelM,
           ),
-          SizedBox(height: AppSpacing.xs),
+          const SizedBox(height: AppSpacing.xs),
           Text(
             'Something went wrong while loading your deposit history.',
             style: AppTextStyles.bodyS,
             textAlign: TextAlign.center,
           ),
-          SizedBox(height: AppSpacing.md),
+          const SizedBox(height: AppSpacing.md),
           OutlinedButton.icon(
             onPressed: onRetry,
             icon: const Icon(Icons.refresh_rounded, size: 18),
@@ -826,7 +826,7 @@ class _InstructionStep extends StatelessWidget {
             ),
           ),
         ),
-        SizedBox(width: AppSpacing.md),
+        const SizedBox(width: AppSpacing.md),
         Expanded(
           child: Text(text, style: AppTextStyles.bodyM),
         ),
@@ -875,13 +875,13 @@ class _DepositRow extends StatelessWidget {
               size: 20,
             ),
           ),
-          SizedBox(width: AppSpacing.md),
+          const SizedBox(width: AppSpacing.md),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text('Bank Transfer', style: AppTextStyles.labelM),
-                SizedBox(height: 2),
+                const SizedBox(height: 2),
                 Text(dateFormatted, style: AppTextStyles.bodyS),
               ],
             ),
@@ -896,7 +896,7 @@ class _DepositRow extends StatelessWidget {
                   fontWeight: FontWeight.w700,
                 ),
               ),
-              SizedBox(height: 2),
+              const SizedBox(height: 2),
               Text(
                 deposit.status.toUpperCase(),
                 style: AppTextStyles.caption.copyWith(

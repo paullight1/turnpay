@@ -48,7 +48,7 @@ class ReceiptExporter {
 
   static Future<Uint8List> buildPdf(
     Uint8List imageBytes, {
-    String title = 'TRUSTPAY receipt',
+    String title = 'TrustPay receipt',
   }) async {
     final document = pw.Document();
     final image = pw.MemoryImage(imageBytes);
@@ -105,7 +105,7 @@ class ReceiptExporter {
         ),
       ],
       text: text,
-      subject: 'TRUSTPAY receipt',
+      subject: 'TrustPay receipt',
       sharePositionOrigin: sharePositionOrigin,
     );
   }
@@ -126,7 +126,7 @@ class ReceiptExporter {
         ),
       ],
       text: text,
-      subject: 'TRUSTPAY receipt',
+      subject: 'TrustPay receipt',
       sharePositionOrigin: sharePositionOrigin,
     );
   }

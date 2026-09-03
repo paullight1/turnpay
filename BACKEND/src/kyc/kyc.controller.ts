@@ -19,11 +19,11 @@ import { Roles } from '../common/decorators/roles.decorator';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import {
   CreateKycUploadDto,
-  SubmitKycDto,
   ReviewKycDto,
   CreateDisputeDto,
   ResolveDisputeDto,
-  CreateSmileKycSessionDto,
+  CreateIdentityVerificationDto,
+  YouverifyWebhookDto,
 } from './dto/kyc.dto';
 import type { RawBodyRequest } from '../common/types/request-context';
 
@@ -41,22 +41,22 @@ export class KycController {
     return this.kycService.createDocumentUploadUrl(user.userId, dto);
   }
 
-  @Post('submit')
+  @Post('youverify/verify')
   @Throttle({ default: { limit: 3, ttl: 86400000 } })
-  async submitKyc(
+  async verifyWithYouverify(
     @CurrentUser() user: { userId: string },
-    @Body() dto: SubmitKycDto,
+    @Body() dto: CreateIdentityVerificationDto,
   ) {
-    return this.kycService.submitKyc(user.userId, dto);
+    return this.kycService.verifyIdentity(user.userId, dto);
   }
 
-  @Post('smile-id/session')
+  @Post('verify')
   @Throttle({ default: { limit: 3, ttl: 86400000 } })
-  async createSmileIdSession(
+  async verifyIdentity(
     @CurrentUser() user: { userId: string },
-    @Body() dto: CreateSmileKycSessionDto,
+    @Body() dto: CreateIdentityVerificationDto,
   ) {
-    return this.kycService.createSmileIdSession(user.userId, dto);
+    return this.kycService.verifyIdentity(user.userId, dto);
   }
 
   @Get('status')
@@ -96,20 +96,18 @@ export class KycController {
 export class KycWebhookController {
   constructor(private readonly kycService: KycService) {}
 
-  @Post('smile-id')
+  @Post('youverify')
   @HttpCode(200)
   @Throttle({ default: { limit: 100, ttl: 60000 } })
-  async handleSmileIdWebhook(
-    @Headers('x-smile-signature') smileSignature: string | undefined,
-    @Headers('x-smile-timestamp') smileTimestamp: string | undefined,
+  async handleYouverifyWebhook(
+    @Headers('x-youverify-signature') youverifySignature: string | undefined,
     @Req() req: RawBodyRequest,
-    @Body() body: Record<string, unknown>,
+    @Body() body: YouverifyWebhookDto,
   ) {
-    return this.kycService.processSmileIdCallback({
-      body,
+    return this.kycService.processYouverifyCallback({
+      body: body as unknown as Record<string, unknown>,
       rawBody: req.rawBody,
-      signatureHeader: smileSignature,
-      timestampHeader: smileTimestamp,
+      signatureHeader: youverifySignature,
     });
   }
 }

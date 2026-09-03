@@ -160,17 +160,21 @@ class _LiquidGlassPill extends StatelessWidget {
 
     // Derive the "glass" tint from the active theme so the pill reads as frosted
     // light glass in day mode and a softly lit surface in dark mode.
-    final Color glassHi =
-        isDark ? Colors.white.withValues(alpha: 0.16) : Colors.white.withValues(alpha: 0.92);
-    final Color glassMid =
-        isDark ? Colors.white.withValues(alpha: 0.05) : Colors.white.withValues(alpha: 0.26);
-    final Color glassLo =
-        isDark ? AppColors.primary.withValues(alpha: 0.22) : Colors.white.withValues(alpha: 0.56);
+    final Color glassHi = isDark
+        ? Colors.white.withValues(alpha: 0.16)
+        : Colors.white.withValues(alpha: 0.92);
+    final Color glassMid = isDark
+        ? Colors.white.withValues(alpha: 0.05)
+        : Colors.white.withValues(alpha: 0.26);
+    final Color glassLo = isDark
+        ? AppColors.primary.withValues(alpha: 0.22)
+        : Colors.white.withValues(alpha: 0.56);
     final Color rim = isDark
         ? Colors.white.withValues(alpha: 0.22)
         : Colors.white.withValues(alpha: 0.86);
-    final Color topSheen =
-        isDark ? Colors.white.withValues(alpha: 0.5) : Colors.white.withValues(alpha: 0.96);
+    final Color topSheen = isDark
+        ? Colors.white.withValues(alpha: 0.5)
+        : Colors.white.withValues(alpha: 0.96);
 
     return ClipRRect(
       borderRadius: radius,
@@ -219,30 +223,6 @@ class _LiquidGlassPill extends StatelessWidget {
                         topSheen.withValues(alpha: 0),
                       ],
                     ),
-                  ),
-                ),
-              ),
-              Positioned(
-                left: 8,
-                top: 10,
-                child: Container(
-                  width: 18,
-                  height: 28,
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(AppRadius.full),
-                    color: Colors.white.withValues(alpha: isDark ? 0.10 : 0.22),
-                  ),
-                ),
-              ),
-              Positioned(
-                right: 10,
-                bottom: 7,
-                child: Container(
-                  width: 30,
-                  height: 13,
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(AppRadius.full),
-                    color: AppColors.primaryLight.withValues(alpha: 0.10),
                   ),
                 ),
               ),

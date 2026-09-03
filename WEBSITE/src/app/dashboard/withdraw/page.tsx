@@ -133,8 +133,8 @@ export default function WithdrawPage() {
             label={isLoading ? "Processing withdrawal" : "Withdraw money"}
           />
           <div>
-            <h1 className="text-3xl font-bold">Withdraw</h1>
-            <p className="text-muted-foreground mt-1">Send money to your bank account</p>
+            <h1 className="text-3xl font-bold">Withdraw to bank</h1>
+            <p className="text-muted-foreground mt-1">Move money from TrustPay to a bank account</p>
           </div>
         </div>
 
@@ -156,7 +156,7 @@ export default function WithdrawPage() {
 
         <Card>
           <CardHeader>
-            <CardTitle>Bank Details</CardTitle>
+            <CardTitle>Bank withdrawal details</CardTitle>
             <CardDescription>Enter your bank account information</CardDescription>
           </CardHeader>
           <CardContent className="flex flex-col gap-4">

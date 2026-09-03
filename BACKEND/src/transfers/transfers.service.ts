@@ -7,6 +7,7 @@ import {
 import { Decimal } from '@prisma/client/runtime/library';
 import { KYCTier, Prisma } from '@prisma/client';
 import { v4 as uuidv4 } from 'uuid';
+import { createHash } from 'crypto';
 import { PinoLogger } from 'nestjs-pino';
 import { PrismaService } from '../prisma/prisma.service';
 import { LedgerService } from '../wallets/ledger.service';
@@ -19,25 +20,37 @@ type RecipientIdentifiers = Pick<
   InternalTransferDto,
   'recipientId' | 'recipientEmail' | 'recipientPhone'
 >;
+
+const RECIPIENT_PREVIEW_MIN_DELAY_MS = 120;
+const RECIPIENT_PREVIEW_JITTER_MS = 30;
+
+export function recipientPreviewDelayMs(
+  startedAtMs: number,
+  identifier: string,
+  nowMs = Date.now(),
+) {
+  const jitterSeed = createHash('sha256').update(identifier).digest()[0];
+  const targetMs =
+    RECIPIENT_PREVIEW_MIN_DELAY_MS +
+    (jitterSeed % (RECIPIENT_PREVIEW_JITTER_MS + 1));
+  return Math.max(0, targetMs - Math.max(0, nowMs - startedAtMs));
+}
 import { maskEmail, maskPhone } from '../common/utils/masking';
 import { TransactionPinService } from '../common/services/transaction-pin.service';
 import { formatKycTier, isKycTierAtLeast } from '../common/utils/kyc-tier';
-
-const INTERNAL_TRANSFER_LIMITS: Record<
-  'TIER_2' | 'TIER_3',
-  { perTransaction: Decimal; daily: Decimal; monthly: Decimal }
-> = {
-  TIER_2: {
-    perTransaction: new Decimal(250_000),
-    daily: new Decimal(1_000_000),
-    monthly: new Decimal(5_000_000),
-  },
-  TIER_3: {
-    perTransaction: new Decimal(1_000_000),
-    daily: new Decimal(5_000_000),
-    monthly: new Decimal(20_000_000),
-  },
-};
+import { InternalTransferRequestContext } from './internal-transfer-request-context';
+import {
+  InternalTransferIdempotencyService,
+  InternalTransferResponse,
+} from './internal-transfer-idempotency.service';
+import {
+  ActiveInternalTransferLimitPolicy,
+  InternalTransferLimitService,
+} from './internal-transfer-limit.service';
+import {
+  TransferPostCommitFault,
+  TransferPostCommitHook,
+} from './transfer-post-commit.hook';
 
 @Injectable()
 export class TransfersService {
@@ -46,9 +59,16 @@ export class TransfersService {
     private readonly ledger: LedgerService,
     private readonly logger: PinoLogger,
     private readonly transactionPin: TransactionPinService,
+    private readonly idempotency: InternalTransferIdempotencyService,
+    private readonly limitPolicy: InternalTransferLimitService,
+    private readonly postCommitHook: TransferPostCommitHook,
   ) {}
 
-  async sendInternalTransfer(userId: string, dto: InternalTransferDto) {
+  async sendInternalTransfer(
+    userId: string,
+    dto: InternalTransferDto,
+    context: InternalTransferRequestContext,
+  ): Promise<InternalTransferResponse> {
     let amount: Decimal | undefined;
     let recipient: {
       id: string;
@@ -58,14 +78,31 @@ export class TransfersService {
       kycTier?: KYCTier | null;
       isSuspended: boolean;
     } | null = null;
+    const keyHash = this.idempotency.hashKey(context.idempotencyKey);
+    const requestHash = this.idempotency.fingerprint(dto);
 
     try {
+      const replay = await this.idempotency.findReplay(
+        userId,
+        keyHash,
+        requestHash,
+      );
+      if (replay) {
+        return replay;
+      }
+
       await this.transactionPin.verifyRequired(userId, dto.transactionPin);
       this.assertSingleRecipientIdentifier(dto);
 
       amount = new Decimal(dto.amount);
-      if (!amount.isFinite() || amount.lessThanOrEqualTo(0)) {
-        throw new BadRequestException('Amount must be positive');
+      if (
+        !amount.isFinite() ||
+        amount.lessThanOrEqualTo(0) ||
+        amount.decimalPlaces() > 2
+      ) {
+        throw new BadRequestException(
+          'Amount must be positive with at most 2 decimal places',
+        );
       }
 
       const sender = await this.prisma.user.findUnique({
@@ -85,7 +122,6 @@ export class TransfersService {
       }
 
       this.assertUserCanTransfer(sender, 'sender');
-      this.assertTransferAmountWithinLimit(amount, sender.kycTier);
 
       recipient = await this.findRecipient(dto);
       if (!recipient) {
@@ -104,114 +140,165 @@ export class TransfersService {
       const senderReference = `${transferReference}-OUT`;
       const recipientReference = `${transferReference}-IN`;
 
-      const result = await this.prisma.$transaction(async (tx) => {
-        await this.reserveTransferLimitUsage(
-          tx,
-          sender.id,
-          dto.currency,
-          transferAmount,
-          sender.kycTier,
-        );
-
-        const senderTx = await tx.transaction.create({
-          data: {
+      const result = await this.prisma.$transaction(
+        async (tx) => {
+          const attempt = await this.idempotency.createProcessing(tx, {
             userId: sender.id,
-            type: 'INTERNAL_TRANSFER',
-            amount: transferAmount,
-            currency: dto.currency,
-            status: 'SUCCESS',
-            reference: senderReference,
-            metadata: {
-              direction: 'OUT',
-              transferReference,
-              counterpartyUserId: transferRecipient.id,
-              counterpartyMaskedIdentifier:
-                this.maskRecipient(transferRecipient),
-              note: dto.note,
-            },
-          },
-        });
+            keyHash,
+            requestHash,
+            context,
+          });
 
-        const recipientTx = await tx.transaction.create({
-          data: {
-            userId: transferRecipient.id,
-            type: 'INTERNAL_TRANSFER',
-            amount: transferAmount,
-            currency: dto.currency,
-            status: 'SUCCESS',
-            reference: recipientReference,
-            metadata: {
-              direction: 'IN',
-              transferReference,
-              counterpartyUserId: sender.id,
-              counterpartyMaskedIdentifier: this.maskRecipient(sender),
-              note: dto.note,
-            },
-          },
-        });
+          const policy = await this.limitPolicy.getActivePolicy(
+            tx,
+            dto.currency,
+            sender.kycTier,
+          );
+          this.limitPolicy.assertAmountWithinPolicy(transferAmount, policy);
 
-        const senderLedger = await this.ledger.debitWallet(
-          {
-            userId: sender.id,
-            currency: dto.currency,
-            amount: transferAmount,
-            transactionId: senderTx.id,
+          await this.reserveTransferLimitUsage(
+            tx,
+            sender.id,
+            dto.currency,
+            transferAmount,
+            policy,
+          );
+
+          const senderTx = await tx.transaction.create({
+            data: {
+              userId: sender.id,
+              type: 'INTERNAL_TRANSFER',
+              amount: transferAmount,
+              currency: dto.currency,
+              status: 'SUCCESS',
+              reference: senderReference,
+              metadata: {
+                direction: 'OUT',
+                transferReference,
+                counterpartyUserId: transferRecipient.id,
+                counterpartyMaskedIdentifier:
+                  this.maskRecipient(transferRecipient),
+                note: dto.note,
+              },
+            },
+          });
+
+          const recipientTx = await tx.transaction.create({
+            data: {
+              userId: transferRecipient.id,
+              type: 'INTERNAL_TRANSFER',
+              amount: transferAmount,
+              currency: dto.currency,
+              status: 'SUCCESS',
+              reference: recipientReference,
+              metadata: {
+                direction: 'IN',
+                transferReference,
+                counterpartyUserId: sender.id,
+                counterpartyMaskedIdentifier: this.maskRecipient(sender),
+                note: dto.note,
+              },
+            },
+          });
+
+          const senderLedger = await this.ledger.debitWallet(
+            {
+              userId: sender.id,
+              currency: dto.currency,
+              amount: transferAmount,
+              transactionId: senderTx.id,
+              reference: transferReference,
+              source: 'INTERNAL_TRANSFER_OUT',
+              metadata: {
+                recipientUserId: transferRecipient.id,
+              },
+            },
+            tx,
+          );
+
+          const recipientLedger = await this.ledger.creditWallet(
+            {
+              userId: transferRecipient.id,
+              currency: dto.currency,
+              amount: transferAmount,
+              transactionId: recipientTx.id,
+              reference: transferReference,
+              source: 'INTERNAL_TRANSFER_IN',
+              metadata: {
+                senderUserId: sender.id,
+              },
+            },
+            tx,
+          );
+
+          await tx.transaction.update({
+            where: { id: senderTx.id },
+            data: { walletId: senderLedger.walletId },
+          });
+          await tx.transaction.update({
+            where: { id: recipientTx.id },
+            data: { walletId: recipientLedger.walletId },
+          });
+
+          const response: InternalTransferResponse = {
             reference: transferReference,
-            source: 'INTERNAL_TRANSFER_OUT',
-            metadata: {
-              recipientUserId: transferRecipient.id,
-            },
-          },
-          tx,
-        );
-
-        const recipientLedger = await this.ledger.creditWallet(
-          {
-            userId: transferRecipient.id,
+            status: 'SUCCESS',
+            amount: transferAmount.toString(),
             currency: dto.currency,
-            amount: transferAmount,
-            transactionId: recipientTx.id,
-            reference: transferReference,
-            source: 'INTERNAL_TRANSFER_IN',
-            metadata: {
-              senderUserId: sender.id,
+            senderTransactionReference: senderReference,
+            senderBalanceAfter: senderLedger.balanceAfter.toString(),
+            recipient: {
+              maskedIdentifier: this.maskRecipient(transferRecipient),
+              avatarInitials: this.getAvatarInitials(transferRecipient),
             },
-          },
-          tx,
-        );
+            createdAt: new Date().toISOString(),
+          };
 
-        await tx.transaction.update({
-          where: { id: senderTx.id },
-          data: { walletId: senderLedger.walletId },
-        });
-        await tx.transaction.update({
-          where: { id: recipientTx.id },
-          data: { walletId: recipientLedger.walletId },
-        });
-
-        await tx.internalTransferAttempt.create({
-          data: {
-            userId: sender.id,
+          await this.idempotency.complete(tx, attempt.id, {
             recipientUserId: transferRecipient.id,
             transferReference,
             senderTransactionId: senderTx.id,
             recipientTransactionId: recipientTx.id,
-            status: 'SUCCESS',
             amount: transferAmount,
             currency: dto.currency,
             recipientIdentifierType: this.getRecipientIdentifierType(dto),
             recipientMaskedIdentifier: this.maskRecipient(transferRecipient),
-          },
-        });
+            response,
+          });
 
-        return {
-          reference: transferReference,
-          senderTransactionReference: senderReference,
-          recipientTransactionReference: recipientReference,
-          senderBalanceAfter: senderLedger.balanceAfter,
-          recipientBalanceAfter: recipientLedger.balanceAfter,
-        };
-      });
+          await tx.auditLog.create({
+            data: {
+              action: 'internal_transfer_completed',
+              targetType: 'INTERNAL_TRANSFER',
+              targetId: attempt.id,
+              reference: transferReference,
+              before: { status: 'PROCESSING' },
+              after: {
+                status: 'SUCCESS',
+                amount: transferAmount.toString(),
+                currency: dto.currency,
+              },
+              metadata: {
+                actorUserId: sender.id,
+                recipientUserId: transferRecipient.id,
+                senderTransactionId: senderTx.id,
+                recipientTransactionId: recipientTx.id,
+                requestId: context.requestId,
+                ipAddress: context.ipAddress,
+                userAgent: context.userAgent,
+                idempotencyKeyDigest: keyHash.slice(0, 12),
+                recipientMaskedIdentifier:
+                  this.maskRecipient(transferRecipient),
+              },
+            },
+          });
+
+          return response;
+        },
+        { maxWait: 2_000, timeout: 5_000 },
+      );
+
+      await this.postCommitHook.afterCommit(result);
 
       this.logger.info(
         {
@@ -220,25 +307,37 @@ export class TransfersService {
           reference: transferReference,
           amount: transferAmount.toString(),
           currency: dto.currency,
+          requestId: context.requestId,
+          idempotencyKeyDigest: keyHash.slice(0, 12),
         },
         'Internal transfer completed',
       );
 
-      return {
-        reference: result.reference,
-        status: 'SUCCESS',
-        amount: transferAmount.toString(),
-        currency: dto.currency,
-        senderTransactionReference: result.senderTransactionReference,
-        senderBalanceAfter: result.senderBalanceAfter.toString(),
-        recipient: {
-          maskedIdentifier: this.maskRecipient(transferRecipient),
-          avatarInitials: this.getAvatarInitials(transferRecipient),
-        },
-        createdAt: new Date().toISOString(),
-      };
+      return result;
     } catch (error) {
-      await this.recordFailedAttempt(userId, dto, amount, recipient, error);
+      if (error instanceof TransferPostCommitFault) {
+        throw error;
+      }
+      if (this.idempotency.isBusinessKeyConflict(error)) {
+        const replay = await this.idempotency.findReplay(
+          userId,
+          keyHash,
+          requestHash,
+        );
+        if (replay) {
+          return replay;
+        }
+      }
+
+      await this.recordFailedAttempt(
+        userId,
+        dto,
+        amount,
+        recipient,
+        error,
+        requestHash,
+        context,
+      );
       throw error;
     }
   }
@@ -276,11 +375,22 @@ export class TransfersService {
     }
 
     const metadata = (transfer.metadata || {}) as Record<string, unknown>;
+    const transferReference =
+      (metadata.transferReference as string | undefined) || transfer.reference;
+    const attempt = await this.prisma.internalTransferAttempt.findFirst({
+      where: {
+        transferReference,
+        OR: [{ userId }, { recipientUserId: userId }],
+      },
+      select: {
+        reversal: {
+          select: { status: true, reversalReference: true },
+        },
+      },
+    });
 
     return {
-      reference:
-        (metadata.transferReference as string | undefined) ||
-        transfer.reference,
+      reference: transferReference,
       transactionReference: transfer.reference,
       type: transfer.type,
       direction: metadata.direction,
@@ -292,47 +402,97 @@ export class TransfersService {
         maskedIdentifier: metadata.counterpartyMaskedIdentifier,
       },
       note: metadata.note,
+      reversalStatus: attempt?.reversal?.status ?? null,
+      reversalReference: attempt?.reversal?.reversalReference ?? null,
       createdAt: transfer.createdAt,
       updatedAt: transfer.updatedAt,
     };
   }
 
   async previewRecipient(userId: string, dto: RecipientPreviewDto) {
-    this.assertSingleRecipientIdentifier(dto);
+    const startedAtMs = Date.now();
+    const identifier = this.getRecipientIdentifierValue(dto);
 
-    const sender = await this.prisma.user.findUnique({
-      where: { id: userId },
-      select: {
-        id: true,
-        kycStatus: true,
-        kycTier: true,
-        isSuspended: true,
+    try {
+      this.assertSingleRecipientIdentifier(dto);
+
+      const sender = await this.prisma.user.findUnique({
+        where: { id: userId },
+        select: {
+          id: true,
+          kycStatus: true,
+          kycTier: true,
+          isSuspended: true,
+        },
+      });
+
+      if (!sender) {
+        throw new NotFoundException('User not found');
+      }
+
+      this.assertUserCanTransfer(sender, 'sender');
+
+      const recipient = await this.findRecipient(dto);
+      if (!recipient) {
+        return this.unavailableRecipientPreview(userId, identifier);
+      }
+
+      if (recipient.id === sender.id) {
+        throw new BadRequestException('Cannot transfer to yourself');
+      }
+
+      if (!this.isRecipientEligible(recipient)) {
+        return this.unavailableRecipientPreview(userId, identifier);
+      }
+
+      return {
+        found: true as const,
+        displayName: this.maskDisplayName(recipient.fullName),
+        maskedIdentifier: this.maskRecipient(recipient),
+        avatarInitials: this.getAvatarInitials(recipient),
+      };
+    } finally {
+      const delayMs = recipientPreviewDelayMs(startedAtMs, identifier);
+      if (delayMs > 0) {
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+      }
+    }
+  }
+
+  private unavailableRecipientPreview(userId: string, identifier: string) {
+    this.logger.warn(
+      {
+        event: 'RECIPIENT_ENUMERATION_SIGNAL',
+        actorUserId: userId,
+        identifierDigest: createHash('sha256')
+          .update(identifier)
+          .digest('hex')
+          .slice(0, 12),
       },
-    });
+      'Recipient preview returned the uniform unavailable response',
+    );
+    return { found: false as const };
+  }
 
-    if (!sender) {
-      throw new NotFoundException('User not found');
-    }
+  private getRecipientIdentifierValue(dto: RecipientIdentifiers) {
+    return (
+      dto.recipientId ??
+      dto.recipientEmail?.trim().toLowerCase() ??
+      dto.recipientPhone?.trim() ??
+      'invalid-recipient-input'
+    );
+  }
 
-    this.assertUserCanTransfer(sender, 'sender');
-
-    const recipient = await this.findRecipient(dto);
-    if (!recipient) {
-      throw new NotFoundException('Recipient cannot be found or used');
-    }
-
-    if (recipient.id === sender.id) {
-      throw new BadRequestException('Cannot transfer to yourself');
-    }
-
-    this.assertRecipientCanReceive(recipient);
-
-    return {
-      found: true,
-      displayName: this.maskDisplayName(recipient.fullName),
-      maskedIdentifier: this.maskRecipient(recipient),
-      avatarInitials: this.getAvatarInitials(recipient),
-    };
+  private isRecipientEligible(user: {
+    kycStatus: string;
+    kycTier?: KYCTier | null;
+    isSuspended: boolean;
+  }) {
+    return (
+      !user.isSuspended &&
+      user.kycStatus === 'VERIFIED' &&
+      isKycTierAtLeast(user.kycTier, 'TIER_2')
+    );
   }
 
   private findRecipient(dto: RecipientIdentifiers) {
@@ -391,27 +551,13 @@ export class TransfersService {
     }
   }
 
-  private assertTransferAmountWithinLimit(
-    amount: Decimal,
-    tier?: KYCTier | null,
-  ) {
-    const limits = this.getTransferLimits(tier);
-
-    if (amount.greaterThan(limits.perTransaction)) {
-      throw new BadRequestException(
-        `Internal transfer limit exceeded. Maximum per transfer: ${limits.perTransaction.toFixed(2)}`,
-      );
-    }
-  }
-
   private async reserveTransferLimitUsage(
     tx: Pick<Prisma.TransactionClient, 'internalTransferLimitUsage'>,
     userId: string,
     currency: 'NGN' | 'GHS',
     amount: Decimal,
-    tier?: KYCTier | null,
+    policy: Pick<ActiveInternalTransferLimitPolicy, 'daily' | 'monthly'>,
   ) {
-    const limits = this.getTransferLimits(tier);
     const now = new Date();
     await this.reservePeriodLimit(tx, {
       userId,
@@ -419,7 +565,7 @@ export class TransfersService {
       amount,
       period: 'DAILY',
       periodStart: this.startOfUtcDay(now),
-      limit: limits.daily,
+      limit: policy.daily,
     });
     await this.reservePeriodLimit(tx, {
       userId,
@@ -427,7 +573,7 @@ export class TransfersService {
       amount,
       period: 'MONTHLY',
       periodStart: this.startOfUtcMonth(now),
-      limit: limits.monthly,
+      limit: policy.monthly,
     });
   }
 
@@ -477,12 +623,6 @@ export class TransfersService {
         `${input.period.toLowerCase()} internal transfer limit exceeded`,
       );
     }
-  }
-
-  private getTransferLimits(tier?: KYCTier | null) {
-    return tier === 'TIER_3'
-      ? INTERNAL_TRANSFER_LIMITS.TIER_3
-      : INTERNAL_TRANSFER_LIMITS.TIER_2;
   }
 
   private startOfUtcDay(date: Date) {
@@ -574,6 +714,8 @@ export class TransfersService {
       phone?: string | null;
     } | null,
     error: unknown,
+    requestHash: string,
+    context: InternalTransferRequestContext,
   ) {
     try {
       await this.prisma.internalTransferAttempt.create({
@@ -587,6 +729,10 @@ export class TransfersService {
           recipientMaskedIdentifier: recipient
             ? this.maskRecipient(recipient)
             : this.getProvidedRecipientMaskedIdentifier(dto),
+          requestHash,
+          requestId: context.requestId,
+          ipAddress: context.ipAddress,
+          userAgent: context.userAgent,
           failureCode: this.getFailureCode(error),
           failureMessage: this.getSafeFailureMessage(error),
         },
@@ -595,6 +741,7 @@ export class TransfersService {
       this.logger.warn(
         {
           userId,
+          requestId: context.requestId,
           error: logError instanceof Error ? logError.message : 'Unknown error',
         },
         'Failed to record internal transfer attempt',

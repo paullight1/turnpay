@@ -10,8 +10,8 @@ Do not treat sandbox success as launch approval. Every money movement path must 
 | --- | --- |
 | `01-AUTH-SUPABASE.MD` | Supabase project, auth keys, JWT mode, OTP/SMS, web and mobile auth config |
 | `02-DATABASE-REDIS.MD` | PostgreSQL, Prisma migrations, Redis, backups, TLS, operational checks |
-| `03-PAYMENTS-FUNDING.MD` | Card/payment-link funding through Paystack or Flutterwave and webhook crediting |
-| `04-VIRTUAL-ACCOUNTS.MD` | Historical virtual-account planning; current active path is Monnify-only in guide 13 |
+| `03-PAYMENTS-FUNDING.MD` | Monnify reserved-account funding and webhook crediting |
+| `04-VIRTUAL-ACCOUNTS.MD` | Monnify-only virtual-account activation |
 | `05-WITHDRAWALS.MD` | Beneficiaries, bank resolution, payouts, reversals, and admin verification |
 | `06-INTERNAL-TRANSFERS.MD` | TRUSTPAY user-to-user wallet transfers and ledger invariants |
 | `07-EXCHANGE.MD` | NGN/GHS exchange, rate feeds, quotes, execution, and limits |
@@ -22,6 +22,14 @@ Do not treat sandbox success as launch approval. Every money movement path must 
 | `12-TEST-LINT-MOCK-TYPING.MD` | Test/lint status and remaining typed-mock cleanup |
 | `13-MONNIFY-ONLY-VIRTUAL-ACCOUNTS-STATUS.MD` | Current Monnify-only NGN virtual-account decision and activation checklist |
 | `14-MANUAL-EXCHANGE-RECEIPT-FLOW.MD` | Manual and Monnify-verified exchange deposit review flow |
+| `19-INTERNAL-TRANSFER-OPERATIONS.md` | Internal-transfer alerts, incident freeze, reconciliation, reversal, and recovery runbook |
+| `20-INTERNAL-TRANSFER-CERTIFICATION.md` | Internal-transfer staging evidence, external approvals, and canary certification register |
+| `21-SUPABASE-RENDER-VERCEL-LAUNCH.MD` | Authoritative V1 hosting topology, dashboard setup order, secrets, and verification gates |
+| `22-YOUVERIFY-PRODUCTION-READINESS.md` | Historical Youverify readiness record; superseded for the active path |
+| `23-NINJA-KYC-PRODUCTION-READINESS.md` | Active Ninja sandbox certification, privacy checks, evidence, and launch gates |
+
+For V1 infrastructure, guide 21 is authoritative if an older guide mentions
+DigitalOcean, Fly.io, Render Postgres, or a self-hosted production Postgres.
 
 ## Production Env Groups
 
@@ -34,15 +42,14 @@ Keep live values in the deployment secret manager, not in committed files. Use d
 | Supabase | `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_JWT_SECRET` |
 | Website | `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `NEXT_PUBLIC_API_URL`, `NEXT_PUBLIC_WEBSITE_URL`, `NEXT_PUBLIC_ADMIN_URL` |
 | Mobile build | `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, API base URL build config |
-| Redis | `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD` |
+| Redis | `REDIS_URL`, `REDIS_ALLOW_MEMORY_FALLBACK`, `TRUST_PROXY_HOPS` |
 | OTP/SMS | `OTP_EXPIRES_IN`, `OTP_LENGTH`, `OTP_DEV_CODE`, `SMS_PROVIDER`, `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_PHONE_NUMBER` |
-| Paystack | `PAYSTACK_SECRET_KEY`, `PAYSTACK_PUBLIC_KEY`, `PAYSTACK_WEBHOOK_URL`, `PAYSTACK_WEBHOOK_SECRET`, `PAYSTACK_DVA_PREFERRED_BANK`, `PAYSTACK_TRANSFER_SOURCE` |
-| Flutterwave | `FLUTTERWAVE_SECRET_KEY`, `FLUTTERWAVE_PUBLIC_KEY`, `FLUTTERWAVE_ENCRYPTION_KEY`, `FLUTTERWAVE_SECRET_HASH`, `FLUTTERWAVE_WEBHOOK_URL` |
-| Monnify | `MONNIFY_BASE_URL`, `MONNIFY_API_KEY`, `MONNIFY_SECRET_KEY`, `MONNIFY_CONTRACT_CODE`, `MONNIFY_WEBHOOK_SECRET`, `MONNIFY_WEBHOOK_URL`, `MONNIFY_EXCHANGE_COLLECTION_ACCOUNT_NUMBER`, `MONNIFY_GET_ALL_AVAILABLE_BANKS`, `MONNIFY_RESTRICT_PAYMENT_SOURCE` |
-| Banking flags | `BANKING_ENABLED`, `VIRTUAL_ACCOUNTS_ENABLED`, `WITHDRAWALS_ENABLED`, `BANKING_PROVIDER_PRIMARY`, `BANKING_PROVIDER_FALLBACK`, `SUPPORTED_BANKING_CURRENCIES`, `BANKING_SANDBOX_MODE` |
-| Privacy | `PII_ENCRYPTION_KEY`, `PII_KEY_VERSION`, `BANK_ACCOUNT_ENCRYPTION_KEY` |
+| Monnify | `MONNIFY_BASE_URL`, `MONNIFY_API_KEY`, `MONNIFY_SECRET_KEY`, `MONNIFY_CONTRACT_CODE`, `MONNIFY_WEBHOOK_URL`, `MONNIFY_EXCHANGE_COLLECTION_ACCOUNT_NUMBER`, `MONNIFY_GET_ALL_AVAILABLE_BANKS`, `MONNIFY_RESTRICT_PAYMENT_SOURCE` |
+| Banking flags | `BANKING_ENABLED`, `VIRTUAL_ACCOUNTS_ENABLED`, `WITHDRAWALS_ENABLED`, `BANKING_PROVIDER_PRIMARY`, `SUPPORTED_BANKING_CURRENCIES`, `BANKING_SANDBOX_MODE` |
+| Privacy | `PII_ENCRYPTION_KEY`, `PII_KEY_VERSION`, `BANK_ACCOUNT_ENCRYPTION_KEY`, `IDEMPOTENCY_RESPONSE_ENCRYPTION_KEY`, `IDEMPOTENCY_RESPONSE_ENCRYPTION_KEY_ID` |
 | Jobs | `RECONCILIATION_CRON`, `WEBHOOK_QUEUE_NAME`, `DLQ_NAME`, `ADMIN_REVIEW_WEBHOOK_ALERT_CHANNEL` |
-| VTU | `VTU_API_URL`, `VTU_API_KEY` |
+| VTpass | `VTU_PROVIDER`, `VTPASS_BASE_URL`, `VTPASS_API_KEY`, `VTPASS_PUBLIC_KEY`, `VTPASS_SECRET_KEY`, `VTPASS_WEBHOOK_SECRET` |
+| Ninja KYC | `KYC_PROVIDER`, `NINJA_BASE_URL`, `NINJA_CLIENT_KEY`, `NINJA_CLIENT_SECRET` |
 | FX | `FX_RATE_API_URL`, `FX_RATE_API_KEY` |
 
 ## Sandbox To Live Pattern
@@ -63,10 +70,10 @@ As of 2026-05-22, TRUSTPAY's active virtual-account path is:
 - Monnify only.
 - NGN only.
 - No Nomba.
-- No Paystack dedicated virtual accounts.
+- No banking or payment fallback provider.
 - Admin review required before Monnify-verified NGN exchange deposits credit GHS.
 
-Treat older Paystack-first virtual-account notes as historical planning unless a later signed product decision updates this direction.
+Treat older multi-provider notes as historical planning. `DOCS/PROVIDER-SOURCE-OF-TRUTH.MD` is authoritative.
 
 ## Global Verification Checklist
 

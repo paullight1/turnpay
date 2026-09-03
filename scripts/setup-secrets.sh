@@ -60,32 +60,13 @@ done
 echo -e "${GREEN}✓ Environments ready${NC}"
 echo ""
 
-# ─── Generate Production Keys ──────────────────────────────────────────────
+# ─── Generate Application Keys ─────────────────────────────────────────────
 echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo -e "${BLUE}  Generating cryptographic keys...${NC}"
 echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo ""
 
-echo -e "${YELLOW}These keys will be generated ONCE. Store them safely.${NC}"
-echo -e "${YELLOW}They will be set in BOTH staging and production.${NC}"
-echo -e "${RED}In production, you should use DIFFERENT values per environment!${NC}"
-echo ""
-
-# Generate keys (these are examples — user should replace for actual production)
-JWT_SECRET=$(openssl rand -base64 32)
-JWT_REFRESH_SECRET=$(openssl rand -base64 32)
-PII_KEY=$(openssl rand -hex 32)
-BANK_KEY=$(openssl rand -hex 32)
-PG_PASSWORD=$(openssl rand -base64 48 | tr -d '/+' | head -c 64)
-REDIS_PASSWORD=$(openssl rand -base64 32)
-WEBHOOK_SECRET=$(openssl rand -base64 32)
-
-echo -e "  JWT_SECRET:              ${GREEN}${JWT_SECRET}${NC}"
-echo -e "  JWT_REFRESH_SECRET:      ${GREEN}${JWT_REFRESH_SECRET}${NC}"
-echo -e "  PII_ENCRYPTION_KEY:      ${GREEN}${PII_KEY}${NC}"
-echo -e "  BANK_ACCOUNT_KEY:        ${GREEN}${BANK_KEY}${NC}"
-echo -e "  POSTGRES_PASSWORD:       ${GREEN}${PG_PASSWORD}${NC}"
-echo -e "  REDIS_PASSWORD:          ${GREEN}${REDIS_PASSWORD}${NC}"
+echo -e "${YELLOW}Unique values will be generated for each environment and written directly to Doppler.${NC}"
 echo ""
 
 # ─── Set Critical Secrets ─────────────────────────────────────────────────
@@ -106,17 +87,16 @@ set_secret() {
 for CONFIG in staging production; do
   echo -e "${YELLOW}Configuring ${CONFIG} environment...${NC}"
 
+  # Generate independent values for every environment. Values are never
+  # printed; Doppler is the system of record.
+  JWT_SECRET=$(openssl rand -base64 48)
+  JWT_REFRESH_SECRET=$(openssl rand -base64 48)
+  PII_KEY=$(openssl rand -hex 32)
+  BANK_KEY=$(openssl rand -hex 32)
+
   # Application
   set_secret "NODE_ENV" "$CONFIG" "$CONFIG"
   set_secret "PORT" "3000" "$CONFIG"
-
-  # Database
-  set_secret "DATABASE_URL" "postgresql://trustpay:${PG_PASSWORD}@localhost:5432/trustpay_db?sslmode=require&schema=public" "$CONFIG"
-
-  # Redis
-  set_secret "REDIS_PASSWORD" "$REDIS_PASSWORD" "$CONFIG"
-  set_secret "REDIS_HOST" "localhost" "$CONFIG"
-  set_secret "REDIS_PORT" "6379" "$CONFIG"
 
   # JWT
   set_secret "JWT_SECRET" "$JWT_SECRET" "$CONFIG"
@@ -126,30 +106,12 @@ for CONFIG in staging production; do
   set_secret "PII_ENCRYPTION_KEY" "$PII_KEY" "$CONFIG"
   set_secret "BANK_ACCOUNT_ENCRYPTION_KEY" "$BANK_KEY" "$CONFIG"
 
-  # URLs (placeholder — update with actual URLs)
-  set_secret "WEB_URL" "http://localhost:3000" "$CONFIG"
-  set_secret "ADMIN_URL" "http://localhost:3000/admin" "$CONFIG"
-
   # Feature flags
   set_secret "TRANSACTION_PIN_REQUIRED" "true" "$CONFIG"
   set_secret "ENABLE_SWAGGER" "false" "$CONFIG"
   set_secret "BANKING_SANDBOX_MODE" "$([ "$CONFIG" = "production" ] && echo "false" || echo "true")" "$CONFIG"
   set_secret "BANKING_ENABLED" "true" "$CONFIG"
   set_secret "VIRTUAL_ACCOUNTS_ENABLED" "true" "$CONFIG"
-
-  # Provider placeholder keys (REPLACE THESE with real values!)
-  set_secret "MONNIFY_API_KEY" "MK_TEST_PLACEHOLDER" "$CONFIG"
-  set_secret "MONNIFY_SECRET_KEY" "PLACEHOLDER" "$CONFIG"
-  set_secret "MONNIFY_CONTRACT_CODE" "PLACEHOLDER" "$CONFIG"
-  set_secret "MONNIFY_BASE_URL" "$([ "$CONFIG" = "production" ] && echo "https://api.monnify.com" || echo "https://sandbox.monnify.com")" "$CONFIG"
-  set_secret "PAYSTACK_SECRET_KEY" "sk_test_placeholder" "$CONFIG"
-  set_secret "PAYSTACK_WEBHOOK_SECRET" "$WEBHOOK_SECRET" "$CONFIG"
-  set_secret "FLUTTERWAVE_SECRET_KEY" "FLWSECK_TEST_PLACEHOLDER" "$CONFIG"
-  set_secret "FLUTTERWAVE_ENCRYPTION_KEY" "PLACEHOLDER" "$CONFIG"
-  set_secret "FLUTTERWAVE_SECRET_HASH" "PLACEHOLDER" "$CONFIG"
-  set_secret "VTPASS_API_KEY" "PLACEHOLDER" "$CONFIG"
-  set_secret "VTPASS_SECRET_KEY" "PLACEHOLDER" "$CONFIG"
-  set_secret "SUPABASE_SERVICE_ROLE_KEY" "PLACEHOLDER" "$CONFIG"
 
   echo ""
 done
@@ -174,18 +136,16 @@ echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━
 echo ""
 echo -e "${YELLOW}Next steps:${NC}"
 echo ""
-echo "  1. Update placeholder secrets in Doppler dashboard:"
+echo "  1. Add deployment and provider secrets in the Doppler dashboard:"
 echo "     https://dashboard.doppler.com/projects/${PROJECT}"
 echo ""
-echo "  2. Replace these critical placeholders with real values:"
-echo "     - MONNIFY_API_KEY / MONNIFY_SECRET_KEY"
-echo "     - PAYSTACK_SECRET_KEY"
-echo "     - FLUTTERWAVE_SECRET_KEY / FLUTTERWAVE_ENCRYPTION_KEY"
-echo "     - VTPASS_API_KEY / VTPASS_SECRET_KEY"
-echo "     - SUPABASE_SERVICE_ROLE_KEY"
-echo "     - DATABASE_URL (update with DO managed DB hostname)"
-echo "     - REDIS_HOST / REDIS_PORT (update with DO managed Redis)"
-echo "     - WEB_URL / ADMIN_URL (update with production URLs)"
+echo "  2. Supply real, environment-specific values for:"
+echo "     - MONNIFY_API_KEY / MONNIFY_SECRET_KEY / MONNIFY_CONTRACT_CODE"
+echo "     - VTPASS_API_KEY / VTPASS_PUBLIC_KEY / VTPASS_SECRET_KEY / VTPASS_WEBHOOK_SECRET"
+echo "     - NINJA_CLIENT_KEY / NINJA_CLIENT_SECRET"
+echo "     - SUPABASE_URL / SUPABASE_ANON_KEY / SUPABASE_SERVICE_ROLE_KEY"
+echo "     - DATABASE_URL / REDIS_URL"
+echo "     - WEB_URL / ADMIN_URL / provider webhook URLs"
 echo ""
 echo "  3. Generate a Doppler Service Token for CI/CD:"
 echo "     doppler configs tokens create --project ${PROJECT} --config staging"
@@ -196,5 +156,4 @@ echo ""
 echo "  5. Run the backend with Doppler:"
 echo "     doppler run --config staging -- npm run start:dev"
 echo ""
-echo -e "${RED}⚠️  IMPORTANT: Use DIFFERENT keys for staging and production!${NC}"
-echo -e "${RED}   The keys generated above are for initial setup only.${NC}"
+echo -e "${RED}⚠️  IMPORTANT: Do not enable financial features until production config validation passes.${NC}"

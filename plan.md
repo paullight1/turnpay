@@ -1,5 +1,7 @@
 # TRUSTPAY Production Readiness Implementation Plan
 
+> Provider note (2026-09-01): provider references in this historical plan are superseded by `DOCS/PROVIDER-SOURCE-OF-TRUTH.MD`. Implement only Monnify, VTpass, and Youverify.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:subagent-driven-development` for isolated workstreams and review each task before integration. Steps use checkbox syntax for tracking.
 
 **Goal:** Move TRUSTPAY from active development to a production-ready fintech platform by closing financial-integrity, security, reliability, operational, mobile, infrastructure, and release-verification gaps.
@@ -427,7 +429,7 @@ npm run build
 
 - [ ] Test Monnify virtual-account provisioning, successful deposit, duplicate deposit, delayed deposit, incorrect amount, incorrect currency, reversal, and webhook retry.
 - [ ] Test transfer success, failure, pending timeout, reversal, duplicate callback, and reconciliation fallback.
-- [ ] Test VTpass/reloadly duplicate and failed provider events.
+- [ ] Test VTpass duplicate, timeout, failure, and reversal events.
 - [ ] Test exchange quote expiry, fee rounding, admin approval, duplicate approval, and ledger reconciliation.
 - [ ] Obtain provider-dashboard evidence for live KYB, credentials, webhook registration, and settlement configuration.
 

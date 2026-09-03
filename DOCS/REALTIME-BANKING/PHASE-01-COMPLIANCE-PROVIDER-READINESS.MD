@@ -1,5 +1,7 @@
 # Phase 01: Compliance And Provider Readiness
 
+> Archived readiness plan. Complete Monnify-only readiness using `DOCS/PROVIDER-SOURCE-OF-TRUTH.MD` and the production guides.
+
 ## Goal
 
 Confirm TRUSTPAY can legally and operationally offer wallet-first banking with provider-backed virtual accounts and withdrawals.

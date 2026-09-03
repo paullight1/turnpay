@@ -1,7 +1,18 @@
-import { ForbiddenException } from '@nestjs/common';
+import {
+  ForbiddenException,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import { TransactionPinService } from './transaction-pin.service';
 
 type StoredValue = { value: string; expiresAt?: number };
+type StoredCredential = {
+  userId: string;
+  salt: string;
+  hash: string;
+  iterations: number;
+  pinLength: number;
+  resetHoldUntil: Date | null;
+};
 
 function createRedisMock() {
   const store = new Map<string, StoredValue>();
@@ -36,9 +47,53 @@ function createRedisMock() {
         },
       ),
       isRedisAvailable: jest.fn(() => false),
+      isAvailable: jest.fn(() => false),
+      isMemoryFallbackAllowed: jest.fn(() => true),
+      assertAvailable: jest.fn(),
+      reportOperationalAlert: jest.fn(),
       getClient: jest.fn(),
     },
   };
+}
+
+function createPrismaMock(credentials = new Map<string, StoredCredential>()) {
+  const transactionPinCredential = {
+    upsert: jest.fn(async ({ where, create, update }: any) => {
+      const existing = credentials.get(where.userId);
+      const next = existing
+        ? { ...existing, ...update }
+        : { ...create, resetHoldUntil: create.resetHoldUntil ?? null };
+      credentials.set(where.userId, next);
+      return next;
+    }),
+    create: jest.fn(async ({ data }: any) => {
+      if (credentials.has(data.userId)) {
+        throw new Error('duplicate credential');
+      }
+      const created = { ...data, resetHoldUntil: null };
+      credentials.set(data.userId, created);
+      return created;
+    }),
+    findUnique: jest.fn(async ({ where, select }: any) => {
+      const credential = credentials.get(where.userId);
+      if (!credential) return null;
+      return Object.fromEntries(
+        Object.keys(select).map((key) => [
+          key,
+          credential[key as keyof StoredCredential],
+        ]),
+      );
+    }),
+    update: jest.fn(async ({ where, data }: any) => {
+      const existing = credentials.get(where.userId);
+      if (!existing) throw new Error('missing credential');
+      const updated = { ...existing, ...data };
+      credentials.set(where.userId, updated);
+      return updated;
+    }),
+  };
+
+  return { credentials, prisma: { transactionPinCredential } };
 }
 
 describe('TransactionPinService', () => {
@@ -52,9 +107,11 @@ describe('TransactionPinService', () => {
 
   it('locks verification after concurrent invalid PIN attempts', async () => {
     const { redis } = createRedisMock();
+    const { prisma } = createPrismaMock();
     const service = new TransactionPinService(
       redis as never,
       configService as never,
+      prisma as never,
     );
     await service.setPin('user-1', '1234');
 
@@ -76,13 +133,19 @@ describe('TransactionPinService', () => {
     await expect(service.verifyPin('user-1', '1234')).rejects.toThrow(
       'Transaction PIN is temporarily locked',
     );
+    expect(redis.reportOperationalAlert).toHaveBeenCalledWith(
+      'TRANSACTION_PIN_LOCK_TRIGGERED',
+      { lockWindow: 'rolling' },
+    );
   });
 
   it('promotes the lock window to the daily ceiling under concurrent failures', async () => {
     const { store, redis } = createRedisMock();
+    const { prisma } = createPrismaMock();
     const service = new TransactionPinService(
       redis as never,
       configService as never,
+      prisma as never,
     );
     await service.setPin('user-1', '1234');
 
@@ -96,4 +159,110 @@ describe('TransactionPinService', () => {
       23 * 60 * 60 * 1000,
     );
   });
+
+  it('keeps the PIN credential when Redis state is lost', async () => {
+    const persistent = createPrismaMock();
+    const firstRedis = createRedisMock();
+    const firstInstance = new TransactionPinService(
+      firstRedis.redis as never,
+      configService as never,
+      persistent.prisma as never,
+    );
+    await firstInstance.setPin('user-1', '1234');
+
+    const replacementRedis = createRedisMock();
+    const restartedInstance = new TransactionPinService(
+      replacementRedis.redis as never,
+      configService as never,
+      persistent.prisma as never,
+    );
+
+    await expect(
+      restartedInstance.verifyPin('user-1', '1234'),
+    ).resolves.toBeUndefined();
+    expect(persistent.credentials.get('user-1')?.hash).toBeTruthy();
+  });
+
+  it('verifies the PIN only once for a protected money movement', async () => {
+    const { redis } = createRedisMock();
+    const { prisma } = createPrismaMock();
+    const service = new TransactionPinService(
+      redis as never,
+      configService as never,
+      prisma as never,
+    );
+    await service.setPin('user-1', '1234');
+    prisma.transactionPinCredential.findUnique.mockClear();
+
+    await service.verifyRequired('user-1', '1234');
+
+    // One read checks resetHoldUntil; one read loads the credential for PBKDF2.
+    expect(prisma.transactionPinCredential.findUnique).toHaveBeenCalledTimes(2);
+  });
+
+  it('returns unconfigured state when no server credential exists', async () => {
+    const { redis } = createRedisMock();
+    const { prisma } = createPrismaMock();
+    const service = new TransactionPinService(
+      redis as never,
+      configService as never,
+      prisma as never,
+    );
+
+    await expect(service.getStatus('user-1')).resolves.toEqual({
+      configured: false,
+      pinLength: null,
+      resetHoldUntil: null,
+      locked: false,
+    });
+  });
+
+  it('returns configured, locked, and recent-reset state from server stores', async () => {
+    const { redis } = createRedisMock();
+    const { prisma } = createPrismaMock();
+    const service = new TransactionPinService(
+      redis as never,
+      configService as never,
+      prisma as never,
+    );
+    await service.setPin('user-1', '123456');
+    const holdUntil = await service.setResetHold('user-1', 3600);
+    await redis.set('transaction-pin-lock:user-1', '1', 900);
+
+    await expect(service.getStatus('user-1')).resolves.toEqual({
+      configured: true,
+      pinLength: 6,
+      resetHoldUntil: holdUntil,
+      locked: true,
+    });
+  });
+
+  it.each(['setPin', 'setInitialPin', 'setResetHold'] as const)(
+    'fails closed before persisting %s when distributed controls are unavailable',
+    async (method) => {
+      const { redis } = createRedisMock();
+      const { credentials, prisma } = createPrismaMock();
+      redis.assertAvailable.mockImplementation(() => {
+        throw new ServiceUnavailableException('Redis unavailable');
+      });
+      const service = new TransactionPinService(
+        redis as never,
+        configService as never,
+        prisma as never,
+      );
+
+      const operation =
+        method === 'setResetHold'
+          ? service.setResetHold('user-1')
+          : service[method]('user-1', '1234');
+
+      await expect(operation).rejects.toBeInstanceOf(
+        ServiceUnavailableException,
+      );
+      expect(credentials.size).toBe(0);
+      expect(prisma.transactionPinCredential.create).not.toHaveBeenCalled();
+      expect(prisma.transactionPinCredential.upsert).not.toHaveBeenCalled();
+      expect(prisma.transactionPinCredential.update).not.toHaveBeenCalled();
+    },
+  );
 });

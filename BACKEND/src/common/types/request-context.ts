@@ -6,6 +6,7 @@ export type AuthenticatedUser = {
 };
 
 export type AuthenticatedRequest = Request & {
+  id?: string | number | null;
   user?: AuthenticatedUser;
 };
 

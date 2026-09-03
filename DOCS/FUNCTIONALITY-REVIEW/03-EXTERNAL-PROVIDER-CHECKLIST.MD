@@ -1,53 +1,39 @@
 # External Provider Checklist
 
-Use this before enabling real money traffic.
+Use this before enabling real traffic. Provider selection is fixed by
+`DOCS/PROVIDER-SOURCE-OF-TRUTH.MD`.
 
-## Paystack
+## Monnify
 
-- Production secret key and public key.
-- Dedicated webhook URL for backend `/api/webhooks/paystack`.
-- Webhook signature verification tested with raw body.
-- Dedicated virtual account product approved.
-- Transfer recipient creation enabled.
-- Bank list and account resolve enabled.
-- Transfer status verification endpoint tested.
-- Settlement account configured.
+- Live API key, secret key, and contract code stored in backend secrets.
+- Reserved accounts, collections, account resolution, and disbursements approved.
+- `/api/webhooks/monnify` registered and raw-body signature verification proven.
+- Duplicate callbacks and reconciliation tested.
+- Settlement account, balance, transfer limits, fees, and support contacts confirmed.
 
-## Flutterwave
+## VTpass
 
-- Production secret key and encryption key.
-- Confirm webhook verification mode:
-  - `flw-signature` HMAC, or
-  - `verif-hash` static verification hash.
-- Webhook URL registered for backend `/api/webhooks/flutterwave`.
-- Ghana payout/mobile-money capability confirmed.
-- Currency support confirmed for NGN and GHS.
-- Bank/mobile-money destination requirements documented.
+- Live API, public, and secret keys stored in backend secrets.
+- Nigerian airtime networks, data plans, cable services, and electricity billers
+  confirmed against the live catalogue.
+- Customer/meter validation, transaction requery, timeout, failure, and reversal
+  behavior tested.
+- `/api/webhooks/vtu/vtpass` callback authentication and replay handling proven.
 
-## VTU/Data/Electricity Provider
+## Youverify
 
-- Airtime networks and codes.
-- Data bundle catalog endpoint.
-- Data plan package IDs.
-- Electricity biller list.
-- Meter validation endpoint.
-- Receipt/reference format.
-- Failure/reversal behavior.
+- Live API token stored only in backend secrets.
+- Direct identity products and commercial access approved for intended countries.
+- `/api/webhooks/kyc/youverify` registered with the HTTPS signing key matching
+  `YOUVERIFY_WEBHOOK_SECRET`.
+- Success, pending, review, failure, duplicate, invalid-signature, and stale-event
+  paths tested without logging raw identifiers.
 
-## Operations
+## Operations and security
 
-- Admin user policy.
-- Dual approval threshold.
-- Reconciliation schedule.
-- Incident runbook.
-- Provider dashboard access.
-- Support escalation contacts.
-- Daily settlement report process.
-
-## Security
-
-- Secrets stored only in environment variables or a secrets manager.
-- No provider secret printed in logs.
-- Idempotency key required for every mutation.
-- Webhook replay protection active.
-- Account numbers masked in admin UI and logs.
+- Admin user and dual-approval policies are defined.
+- Daily reconciliation and incident runbooks have named owners.
+- Secrets exist only in environment variables or a secret manager.
+- Every mutation supports idempotency and every webhook has replay protection.
+- Account numbers and identity values are encrypted at rest and masked in UI/logs.
+- Provider dashboard access and escalation contacts are controlled and audited.

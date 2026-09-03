@@ -1,5 +1,7 @@
 # Phase 05: Withdrawals And Beneficiaries
 
+> Archived plan. Use the Monnify-only flow documented in `DOCS/PRODUCTION-GUIDES/05-WITHDRAWALS.MD`.
+
 ## Goal
 
 Allow users to save bank beneficiaries and withdraw wallet balances to external bank accounts through provider transfer rails.

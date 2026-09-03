@@ -43,6 +43,7 @@ class TransactionSecurityService {
   static const _fingerprintKey = 'trustpay_tx_fingerprint_enabled';
   static const _pinFailedAttemptsKey = 'trustpay_tx_pin_failed_attempts';
   static const _pinLockedUntilKey = 'trustpay_tx_pin_locked_until';
+  static const _activeUserKey = 'trustpay_tx_pin_active_user';
   static String? _ephemeralApprovalPin;
 
   final LocalAuthentication _localAuth = LocalAuthentication();
@@ -108,6 +109,30 @@ class TransactionSecurityService {
     await _storage.write(key: _pinLengthKey, value: '$pinLength');
     _cacheApprovalPin(pin);
     await _clearPinFailures();
+  }
+
+  Future<void> saveVerifiedDevicePin(String pin) {
+    return savePin(pin, pinLength: pin.length);
+  }
+
+  Future<void> bindToAuthenticatedUser(String userId) async {
+    final normalized = userId.trim();
+    if (normalized.isEmpty) {
+      await clearAllDevicePinState();
+      return;
+    }
+
+    final current = await _storage.read(key: _activeUserKey);
+    if (current != null && current != normalized) {
+      await _clearPersistedPinState();
+    }
+    await _storage.write(key: _activeUserKey, value: normalized);
+  }
+
+  Future<void> clearAllDevicePinState() async {
+    _ephemeralApprovalPin = null;
+    await _clearPersistedPinState();
+    await _storage.delete(key: _activeUserKey);
   }
 
   Future<bool> verifyPin(String pin) async {
@@ -211,6 +236,22 @@ class TransactionSecurityService {
   Future<void> clearEphemeralTransactionApproval() async {
     _ephemeralApprovalPin = null;
     await _purgeLegacyStoredPinValue();
+  }
+
+  Future<void> _clearPersistedPinState() async {
+    for (final key in [
+      _pinHashKey,
+      _pinSaltKey,
+      _pinValueKey,
+      _pinLengthKey,
+      _biometricKey,
+      _faceIdKey,
+      _fingerprintKey,
+      _pinFailedAttemptsKey,
+      _pinLockedUntilKey,
+    ]) {
+      await _storage.delete(key: key);
+    }
   }
 
   Future<DateTime?> _readLockedUntil() async {
@@ -392,6 +433,66 @@ class TransactionPinFailureState {
     required this.failedAttempts,
     required this.lockedUntil,
   });
+}
+
+enum TransactionPinServerEntryMode { create, verifyExisting }
+
+enum TransactionPinResetStep {
+  verifyCurrent,
+  enterReplacement,
+  confirmReplacement,
+}
+
+class TransactionPinResetPolicy {
+  static TransactionPinResetStep step({
+    required String? currentPin,
+    required String? replacementPin,
+  }) {
+    if (currentPin == null) {
+      return TransactionPinResetStep.verifyCurrent;
+    }
+    if (replacementPin == null) {
+      return TransactionPinResetStep.enterReplacement;
+    }
+    return TransactionPinResetStep.confirmReplacement;
+  }
+
+  static String? validateReplacement({
+    required String currentPin,
+    required String replacementPin,
+  }) {
+    if (currentPin == replacementPin) {
+      return 'Choose a PIN different from your current PIN.';
+    }
+    return null;
+  }
+
+  static String? validateConfirmation({
+    required String replacementPin,
+    required String confirmationPin,
+  }) {
+    if (replacementPin != confirmationPin) {
+      return 'PINs did not match. Enter the new PIN again.';
+    }
+    return null;
+  }
+}
+
+class TransactionPinServerPolicy {
+  static TransactionPinServerEntryMode entryMode({
+    required bool serverConfigured,
+  }) {
+    return serverConfigured
+        ? TransactionPinServerEntryMode.verifyExisting
+        : TransactionPinServerEntryMode.create;
+  }
+
+  static bool mayPersistCreatedPin({
+    required bool setupSucceeded,
+    required bool serverConfiguredAfterConflict,
+  }) {
+    return setupSucceeded && !serverConfiguredAfterConflict;
+  }
 }
 
 class TransactionPinGatePolicy {

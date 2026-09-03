@@ -157,77 +157,58 @@ npm install @sendgrid/mail
 
 ---
 
-## Payment Gateways
+## Provider Integrations
 
-### Paystack
+TRUSTPAY has one provider per capability. Do not add fallback credentials or route
+selection for another provider.
 
-#### Setup
-```bash
-# Add to .env
-PAYSTACK_SECRET_KEY=sk_test_xxxxxxxxxxxxxxxx
-PAYSTACK_PUBLIC_KEY=pk_test_xxxxxxxxxxxxxxxx
-PAYSTACK_WEBHOOK_SECRET=whsec_xxxxxxxxxxxxxxxx
+### Monnify — banking and payments
+
+```env
+BANKING_PROVIDER_PRIMARY=monnify
+BANKING_PROVIDER_FALLBACK=
+MONNIFY_BASE_URL=https://sandbox.monnify.com
+MONNIFY_API_KEY=
+MONNIFY_SECRET_KEY=
+MONNIFY_CONTRACT_CODE=
+MONNIFY_WEBHOOK_URL=https://your-domain.com/api/webhooks/monnify
 ```
 
-#### Webhook URL
-```
-POST https://your-domain.com/api/webhooks/paystack
-Header: x-paystack-signature: {signature}
-```
+Monnify handles reserved accounts, deposits, account resolution, beneficiaries,
+withdrawals, status checks, and payment webhooks. Verify every webhook signature and
+process each provider reference only once.
 
-#### Events to Handle
-| Event | Action |
-|-------|--------|
-| `charge.success` | Credit user wallet |
-| `transfer.success` | Mark withdrawal as complete |
-| `transfer.failed` | Reverse withdrawal, notify user |
+### VTpass — VTU and bills
 
-### Flutterwave
-
-#### Setup
-```bash
-# Add to .env
-FLUTTERWAVE_SECRET_KEY=FLWSECK_TEST-xxxxxxxxxxxxxxxxxxxxx
-FLUTTERWAVE_PUBLIC_KEY=FLWPUBK_TEST-xxxxxxxxxxxxxxxxxxxxx
-FLUTTERWAVE_ENCRYPTION_KEY=FLWSECK_xxxxxxxxxxxxxxxxxxxx
-FLUTTERWAVE_SECRET_HASH=your_webhook_hash
+```env
+VTU_PROVIDER=vtpass
+VTPASS_BASE_URL=https://sandbox.vtpass.com/api
+VTPASS_API_KEY=
+VTPASS_PUBLIC_KEY=
+VTPASS_SECRET_KEY=
+VTPASS_WEBHOOK_SECRET=
 ```
 
-#### Webhook URL
-```
-POST https://your-domain.com/api/webhooks/flutterwave
-Header: flw-signature: {signature}
-```
+Register `https://your-domain.com/api/webhooks/vtu/vtpass` in the VTpass dashboard.
+The active product scope is Nigerian airtime, data, cable, and electricity supported
+by the VTpass catalogue.
 
----
+### Ninja — direct Nigerian KYC
 
-## VTU Providers
-
-### Reloadly
-
-#### Setup
-```bash
-# Add to .env
-VTU_API_URL=https://topups.reloadly.com
-VTU_API_KEY=your_reloadly_api_key
-VTU_API_SECRET=your_reloadly_secret
+```env
+KYC_PROVIDER=ninja
+NINJA_BASE_URL=https://api.sandbox.ninja.boucloud.io
+NINJA_CLIENT_KEY=
+NINJA_CLIENT_SECRET=
 ```
 
-#### API Endpoints
-| Endpoint | Purpose |
-|----------|---------|
-| `GET /operators` | List operators |
-| `GET /operators/{id}/discounts` | Get discounts |
-| `POST /topups` | Send topup |
+The mobile/web client submits explicit consent, BVN or NIN, and date of birth to
+`POST /api/kyc/verify`. Only the backend authenticates with Ninja. Ninja direct
+identity verification does not require a webhook; never expose either Ninja
+credential in a client environment.
 
-### Shago Payments
-
-#### Setup
-```bash
-# Add to .env
-VTU_API_URL=https://api.shagopay.com
-VTU_API_KEY=your_shago_api_key
-```
+See `DOCS/PROVIDER-SOURCE-OF-TRUTH.MD` and `DOCS/KYC-GUIDE.MD` for the supported
+routes and launch checks.
 
 ---
 

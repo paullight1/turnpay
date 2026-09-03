@@ -12,7 +12,15 @@ describe('ReconciliationService', () => {
     },
     ledgerEntry: {
       groupBy: jest.fn(),
+      findMany: jest.fn(),
     },
+    internalTransferAttempt: {
+      findMany: jest.fn(),
+      groupBy: jest.fn(),
+    },
+    internalTransferReversal: { findMany: jest.fn() },
+    internalTransferLimitUsage: { findMany: jest.fn() },
+    transaction: { findMany: jest.fn() },
   };
   const pinoLogger = {
     info: jest.fn(),
@@ -153,5 +161,243 @@ describe('ReconciliationService', () => {
     const result = await service.reconcileWallets();
 
     expect(result).toMatchObject({ totalChecked: 1, mismatches: [] });
+  });
+
+  describe('internal transfer reconciliation', () => {
+    const successfulAttempt = () => ({
+      id: 'attempt-1',
+      userId: 'sender-1',
+      recipientUserId: 'recipient-1',
+      transferReference: 'IT-1',
+      senderTransactionId: 'tx-out',
+      recipientTransactionId: 'tx-in',
+      status: 'SUCCESS',
+      amount: new Decimal('100.00'),
+      currency: 'NGN',
+      idempotencyKeyHash: 'a'.repeat(64),
+      requestHash: 'b'.repeat(64),
+      response: {
+        reference: 'IT-1',
+        amount: '100',
+        currency: 'NGN',
+        senderTransactionReference: 'IT-1-OUT',
+      },
+      createdAt: new Date('2026-09-01T10:00:00.000Z'),
+    });
+    const transactions = () => [
+      {
+        id: 'tx-out',
+        userId: 'sender-1',
+        reference: 'IT-1-OUT',
+        amount: new Decimal('100.00'),
+        currency: 'NGN',
+        type: 'INTERNAL_TRANSFER',
+      },
+      {
+        id: 'tx-in',
+        userId: 'recipient-1',
+        reference: 'IT-1-IN',
+        amount: new Decimal('100.00'),
+        currency: 'NGN',
+        type: 'INTERNAL_TRANSFER',
+      },
+    ];
+    const ledgers = () => [
+      {
+        transactionId: 'tx-out',
+        direction: 'DEBIT',
+        amount: new Decimal('100.00'),
+        currency: 'NGN',
+        reference: 'IT-1',
+        source: 'INTERNAL_TRANSFER_OUT',
+      },
+      {
+        transactionId: 'tx-in',
+        direction: 'CREDIT',
+        amount: new Decimal('100.00'),
+        currency: 'NGN',
+        reference: 'IT-1',
+        source: 'INTERNAL_TRANSFER_IN',
+      },
+    ];
+    const usages = () => [
+      {
+        userId: 'sender-1',
+        currency: 'NGN',
+        period: 'DAILY',
+        periodStart: new Date('2026-09-01T00:00:00.000Z'),
+        amount: new Decimal('100.00'),
+      },
+      {
+        userId: 'sender-1',
+        currency: 'NGN',
+        period: 'MONTHLY',
+        periodStart: new Date('2026-09-01T00:00:00.000Z'),
+        amount: new Decimal('100.00'),
+      },
+    ];
+
+    const arrange = (
+      overrides: {
+        attempts?: unknown[];
+        transactions?: unknown[];
+        ledgers?: unknown[];
+        usages?: unknown[];
+        reversals?: unknown[];
+        duplicates?: unknown[];
+      } = {},
+    ) => {
+      prisma.internalTransferAttempt.findMany.mockResolvedValue(
+        overrides.attempts ?? [successfulAttempt()],
+      );
+      prisma.transaction.findMany.mockResolvedValue(
+        overrides.transactions ?? transactions(),
+      );
+      prisma.ledgerEntry.findMany.mockResolvedValue(
+        overrides.ledgers ?? ledgers(),
+      );
+      prisma.internalTransferLimitUsage.findMany.mockResolvedValue(
+        overrides.usages ?? usages(),
+      );
+      prisma.internalTransferReversal.findMany.mockResolvedValue(
+        overrides.reversals ?? [],
+      );
+      prisma.internalTransferAttempt.groupBy.mockResolvedValue(
+        overrides.duplicates ?? [],
+      );
+    };
+
+    it('accepts a complete transfer, ledger, snapshot, and limit pair', async () => {
+      arrange();
+
+      await expect(service.reconcileInternalTransfers()).resolves.toMatchObject(
+        {
+          totalChecked: 1,
+          mismatches: [],
+        },
+      );
+    });
+
+    it('persists and alerts on a zero-tolerance blocked hourly run', async () => {
+      prisma.reconciliationRun.create.mockResolvedValue({
+        id: 'run-transfer-1',
+      });
+      jest.spyOn(service, 'reconcileInternalTransfers').mockResolvedValue({
+        totalChecked: 1,
+        mismatches: [
+          {
+            code: 'MISSING_LEDGER_LEG',
+            reference: 'IT-1',
+            detail: 'Missing debit ledger leg',
+          },
+        ],
+        timestamp: new Date().toISOString(),
+      });
+
+      await service.runInternalTransferReconciliation();
+
+      expect(prisma.reconciliationRun.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'run-transfer-1' },
+          data: expect.objectContaining({
+            status: 'BLOCKED',
+            mismatchCount: 1,
+          }),
+        }),
+      );
+      expect(pinoLogger.error).toHaveBeenCalledWith(
+        expect.objectContaining({
+          alertCode: 'INTERNAL_TRANSFER_RECONCILIATION_BLOCKED',
+        }),
+        'Internal transfer reconciliation blocked',
+      );
+    });
+
+    it.each([
+      {
+        name: 'missing transaction leg',
+        code: 'MISSING_TRANSFER_LEG',
+        overrides: { transactions: transactions().slice(0, 1) },
+      },
+      {
+        name: 'unequal amount',
+        code: 'TRANSFER_AMOUNT_MISMATCH',
+        overrides: {
+          transactions: [
+            transactions()[0],
+            { ...transactions()[1], amount: new Decimal('99.00') },
+          ],
+        },
+      },
+      {
+        name: 'wrong currency',
+        code: 'TRANSFER_CURRENCY_MISMATCH',
+        overrides: {
+          transactions: [
+            transactions()[0],
+            { ...transactions()[1], currency: 'GHS' },
+          ],
+        },
+      },
+      {
+        name: 'missing ledger leg',
+        code: 'MISSING_LEDGER_LEG',
+        overrides: { ledgers: ledgers().slice(0, 1) },
+      },
+      {
+        name: 'orphan response snapshot',
+        code: 'RESPONSE_SNAPSHOT_MISMATCH',
+        overrides: { attempts: [{ ...successfulAttempt(), response: null }] },
+      },
+      {
+        name: 'duplicate business key',
+        code: 'DUPLICATE_BUSINESS_KEY',
+        overrides: {
+          duplicates: [
+            {
+              userId: 'sender-1',
+              idempotencyKeyHash: 'a'.repeat(64),
+              _count: { _all: 2 },
+            },
+          ],
+        },
+      },
+      {
+        name: 'understated limit usage',
+        code: 'LIMIT_USAGE_UNDERSTATED',
+        overrides: {
+          usages: usages().map((usage) => ({
+            ...usage,
+            amount: new Decimal('99.00'),
+          })),
+        },
+      },
+      {
+        name: 'broken completed reversal',
+        code: 'BROKEN_REVERSAL_PAIR',
+        overrides: {
+          reversals: [
+            {
+              id: 'reversal-1',
+              status: 'COMPLETED',
+              originalTransferReference: 'IT-1',
+              reversalReference: 'ITR-1',
+              reversalSenderTransactionId: 'missing-credit',
+              reversalRecipientTransactionId: 'missing-debit',
+              amount: new Decimal('100.00'),
+              currency: 'NGN',
+            },
+          ],
+        },
+      },
+    ])('blocks $name', async ({ code, overrides }) => {
+      arrange(overrides);
+
+      const result = await service.reconcileInternalTransfers();
+
+      expect(result.mismatches).toEqual(
+        expect.arrayContaining([expect.objectContaining({ code })]),
+      );
+    });
   });
 });

@@ -40,6 +40,8 @@ enum KycVerificationProvider {
   NIBSS
   MONNIFY
   SMILE_ID
+  YOUVERIFY
+  NINJA
 }
 
 enum KycVerificationStatus {
@@ -148,8 +150,16 @@ enum TransferAttemptStatus {
 }
 
 enum InternalTransferAttemptStatus {
+  PROCESSING
   SUCCESS
   FAILED
+}
+
+enum InternalTransferReversalStatus {
+  PENDING_APPROVAL
+  COMPLETED
+  REJECTED
+  BLOCKED
 }
 
 enum TransferLimitPeriod {
@@ -236,6 +246,7 @@ model TransactionPinCredential {
   salt           String
   hash           String
   iterations     Int
+  pinLength      Int?
   resetHoldUntil DateTime?
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
@@ -438,16 +449,65 @@ model InternalTransferAttempt {
   recipientMaskedIdentifier String?
   failureCode               String?
   failureMessage            String?
+  idempotencyKeyHash        String?                       @db.VarChar(64)
+  requestHash               String?                       @db.VarChar(64)
+  response                  Json?
+  requestId                 String?                       @db.VarChar(128)
+  ipAddress                 String?                       @db.VarChar(64)
+  userAgent                 String?                       @db.VarChar(256)
   metadata                  Json?
   createdAt                 DateTime                      @default(now())
   updatedAt                 DateTime                      @updatedAt
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user     User                      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  reversal InternalTransferReversal?
 
+  @@unique([userId, idempotencyKeyHash], map: "internal_transfer_attempts_user_idempotency_key")
   @@index([userId, createdAt(sort: Desc)])
   @@index([status, createdAt])
   @@index([transferReference])
+  @@index([requestId])
   @@map("internal_transfer_attempts")
+}
+
+model InternalTransferReversal {
+  id                             String                         @id @default(uuid())
+  originalAttemptId              String                         @unique
+  originalTransferReference      String
+  originalSenderTransactionId    String
+  originalRecipientTransactionId String
+  reversalReference              String?                        @unique
+  reversalSenderTransactionId    String?
+  reversalRecipientTransactionId String?
+  status                         InternalTransferReversalStatus @default(PENDING_APPROVAL)
+  amount                         Decimal                        @db.Decimal(15, 2)
+  currency                       WalletCurrency
+  senderUserId                   String
+  recipientUserId                String
+  requesterAdminId               String
+  approverAdminId                String?
+  reviewerAdminId                String?
+  requestReason                  String
+  reviewReason                   String?
+  idempotencyKeyHash             String                         @db.VarChar(64)
+  requestHash                    String                         @db.VarChar(64)
+  requestId                      String?                        @db.VarChar(128)
+  ipAddress                      String?                        @db.VarChar(64)
+  userAgent                      String?                        @db.VarChar(256)
+  requestedAt                    DateTime                       @default(now())
+  approvedAt                     DateTime?
+  rejectedAt                     DateTime?
+  blockedAt                      DateTime?
+  completedAt                    DateTime?
+  updatedAt                      DateTime                       @updatedAt
+
+  originalAttempt InternalTransferAttempt @relation(fields: [originalAttemptId], references: [id], onDelete: Restrict)
+
+  @@unique([requesterAdminId, idempotencyKeyHash])
+  @@index([status, requestedAt])
+  @@index([originalTransferReference])
+  @@index([requestId])
+  @@map("internal_transfer_reversals")
 }
 
 model InternalTransferLimitUsage {
@@ -468,21 +528,51 @@ model InternalTransferLimitUsage {
   @@map("internal_transfer_limit_usage")
 }
 
+model InternalTransferLimitPolicy {
+  id             String         @id @default(uuid())
+  currency       WalletCurrency
+  kycTier        KYCTier
+  perTransaction Decimal        @db.Decimal(15, 2)
+  daily          Decimal        @db.Decimal(15, 2)
+  monthly        Decimal        @db.Decimal(15, 2)
+  enabled        Boolean        @default(false)
+  version        Int
+  requestedById  String?
+  approvedById   String?
+  reason         String
+  approvalReason String?
+  approvedAt     DateTime?
+  effectiveFrom  DateTime       @default(now())
+  disabledAt     DateTime?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  @@unique([currency, kycTier, version])
+  @@index([currency, kycTier, enabled, effectiveFrom])
+  @@index([requestedById, createdAt])
+  @@index([approvedById, approvedAt])
+  @@map("internal_transfer_limit_policies")
+}
+
 model IdempotencyRecord {
-  id            String   @id @default(uuid())
-  scope         String
-  key           String
-  method        String
-  path          String
-  requestHash   String
-  status        String   @default("IN_PROGRESS")
-  response      Json?
-  httpStatus    Int?
-  errorResponse Json?
-  errorMessage  String?
-  expiresAt     DateTime
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  id                 String   @id @default(uuid())
+  scope              String
+  key                String
+  method             String
+  path               String
+  requestHash        String
+  status             String   @default("IN_PROGRESS")
+  response           Json?
+  responseCiphertext String?
+  responseIv         String?  @db.VarChar(32)
+  responseTag        String?  @db.VarChar(32)
+  encryptionKeyId    String?  @db.VarChar(64)
+  httpStatus         Int?
+  errorResponse      Json?
+  errorMessage       String?
+  expiresAt          DateTime
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
 
   @@unique([scope, key])
   @@index([expiresAt])
@@ -624,33 +714,35 @@ model TransferAttempt {
 }
 
 model VtuOrder {
-  id                    String           @id @default(uuid())
-  transactionId         String           @unique
-  provider              VtuOrderProvider
-  scope                 VtuOrderScope
-  serviceType           TransactionType
-  countryCode           String?
-  localProvider         String?
-  operatorId            String?
-  providerRequestId     String
-  providerTransactionId String?
-  providerStatus        String?
-  status                VtuOrderStatus   @default(PENDING)
-  amount                Decimal          @db.Decimal(15, 2)
-  currency              WalletCurrency
-  targetMasked          String?
-  costAmount            Decimal?         @db.Decimal(15, 2)
-  fee                   Decimal?         @db.Decimal(15, 2)
-  margin                Decimal?         @db.Decimal(15, 2)
-  rawResponse           Json?
-  metadata              Json?
-  requeryAttempts       Int              @default(0)
-  lastRequeryAt         DateTime?
-  nextRequeryAt         DateTime?
-  completedAt           DateTime?
-  failedAt              DateTime?
-  createdAt             DateTime         @default(now())
-  updatedAt             DateTime         @updatedAt
+  id                     String           @id @default(uuid())
+  transactionId          String           @unique
+  provider               VtuOrderProvider
+  scope                  VtuOrderScope
+  serviceType            TransactionType
+  countryCode            String?
+  localProvider          String?
+  operatorId             String?
+  providerRequestId      String
+  providerTransactionId  String?
+  providerStatus         String?
+  status                 VtuOrderStatus   @default(PENDING)
+  amount                 Decimal          @db.Decimal(15, 2)
+  currency               WalletCurrency
+  targetMasked           String?
+  costAmount             Decimal?         @db.Decimal(15, 2)
+  providerCommission     Decimal?         @db.Decimal(15, 2)
+  fee                    Decimal?         @db.Decimal(15, 2)
+  margin                 Decimal?         @db.Decimal(15, 2)
+  purchasedCodeEncrypted String?          @db.Text
+  rawResponse            Json?
+  metadata               Json?
+  requeryAttempts        Int              @default(0)
+  lastRequeryAt          DateTime?
+  nextRequeryAt          DateTime?
+  completedAt            DateTime?
+  failedAt               DateTime?
+  createdAt              DateTime         @default(now())
+  updatedAt              DateTime         @updatedAt
 
   transaction Transaction @relation(fields: [transactionId], references: [id])
 
@@ -660,6 +752,27 @@ model VtuOrder {
   @@index([countryCode, serviceType])
   @@index([status, createdAt])
   @@map("vtu_orders")
+}
+
+model VtuWebhookInbox {
+  id                    String    @id @default(uuid())
+  eventKey              String    @unique
+  eventType             String
+  providerRequestId     String
+  providerTransactionId String?
+  providerStatus        String
+  payloadHash           String
+  payload               Json
+  attempts              Int       @default(0)
+  nextAttemptAt         DateTime  @default(now())
+  processedAt           DateTime?
+  lastError             String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  @@index([processedAt, nextAttemptAt])
+  @@index([providerRequestId])
+  @@map("vtu_webhook_inbox")
 }
 
 model VtuPricingRule {
@@ -804,17 +917,20 @@ model KycDocument {
 }
 
 model KycVerification {
-  id           String                  @id @default(uuid())
-  userId       String
-  documentId   String
-  provider     KycVerificationProvider
-  status       KycVerificationStatus   @default(PENDING)
-  reference    String
-  checks       Json?
-  responseHash String?
-  errorMessage String?
-  createdAt    DateTime                @default(now())
-  updatedAt    DateTime                @updatedAt
+  id                String                  @id @default(uuid())
+  userId            String
+  documentId        String
+  provider          KycVerificationProvider
+  status            KycVerificationStatus   @default(PENDING)
+  reference         String
+  checks            Json?
+  responseHash      String?
+  errorMessage      String?
+  consentRecordedAt DateTime?
+  consentVersion    String?                 @db.VarChar(64)
+  consentSource     String?                 @db.VarChar(32)
+  createdAt         DateTime                @default(now())
+  updatedAt         DateTime                @updatedAt
 
   user     User        @relation(fields: [userId], references: [id], onDelete: Cascade)
   document KycDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
@@ -824,6 +940,29 @@ model KycVerification {
   @@index([documentId])
   @@index([provider, status])
   @@map("kyc_verifications")
+}
+
+model KycWebhookInbox {
+  id                String                  @id @default(uuid())
+  provider          KycVerificationProvider
+  eventType         String
+  providerReference String
+  payload           Json
+  payloadHash       String
+  status            ProviderEventStatus     @default(RECEIVED)
+  attemptCount      Int                     @default(0)
+  nextAttemptAt     DateTime?               @default(now())
+  lastError         String?
+  receivedAt        DateTime                @default(now())
+  claimedAt         DateTime?
+  processedAt       DateTime?
+  createdAt         DateTime                @default(now())
+  updatedAt         DateTime                @updatedAt
+
+  @@unique([provider, providerReference, eventType, payloadHash], map: "kyc_webhook_inbox_replay_key")
+  @@index([status, nextAttemptAt])
+  @@index([providerReference])
+  @@map("kyc_webhook_inbox")
 }
 
 model Dispute {

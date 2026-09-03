@@ -155,7 +155,7 @@ class _WithdrawalReceiptScreenState extends State<WithdrawalReceiptScreen> {
       if (choice == _ReceiptExportChoice.pdf) {
         final pdfBytes = await ReceiptExporter.buildPdf(
           jpg,
-          title: 'TRUSTPAY withdrawal receipt',
+          title: 'TrustPay withdrawal receipt',
         );
         await ReceiptExporter.sharePdf(
           bytes: pdfBytes,
@@ -421,7 +421,7 @@ class _WithdrawalReceiptScreenState extends State<WithdrawalReceiptScreen> {
   }
 
   String _shareText(WithdrawalCompletionDetails details) {
-    return 'TRUSTPAY withdrawal receipt - ${details.reference}';
+    return 'TrustPay withdrawal receipt - ${details.reference}';
   }
 }
 

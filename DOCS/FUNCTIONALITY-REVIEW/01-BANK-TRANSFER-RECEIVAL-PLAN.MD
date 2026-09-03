@@ -1,5 +1,7 @@
 # Bank Transfer And Receival Implementation Plan
 
+> Archived plan. Current deposits and withdrawals use Monnify only; see `DOCS/PROVIDER-SOURCE-OF-TRUTH.MD`.
+
 ## Objective
 
 Users should be able to receive money into a provider-assigned virtual account and withdraw wallet funds to a verified bank account without double-crediting, double-refunding, or losing audit traceability.

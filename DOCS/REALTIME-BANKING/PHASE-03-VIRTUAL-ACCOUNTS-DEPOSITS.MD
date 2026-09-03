@@ -1,5 +1,7 @@
 # Phase 03: Virtual Accounts And Deposits
 
+> Archived plan. Use the Monnify-only flow documented in `DOCS/PRODUCTION-GUIDES/03-PAYMENTS-FUNDING.MD`.
+
 ## Goal
 
 Allow verified users to receive wallet funding through provider-backed virtual accounts.

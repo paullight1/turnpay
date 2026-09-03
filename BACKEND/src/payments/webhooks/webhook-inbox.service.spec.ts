@@ -51,6 +51,36 @@ describe('WebhookInboxService', () => {
     });
 
     expect(result).toEqual({ eventId: 'evt-1', duplicate: true });
+    expect(prisma.paymentWebhookInbox.findFirst).toHaveBeenCalledWith({
+      where: {
+        provider: 'MONNIFY',
+        eventType: 'SUCCESSFUL_TRANSACTION',
+        providerReference: 'ref-1',
+        payloadHash: expect.any(String),
+      },
+      select: { id: true },
+    });
+  });
+
+  it('accepts a changed status payload for the same provider reference', async () => {
+    prisma.paymentWebhookInbox.create.mockResolvedValue({ id: 'evt-2' });
+
+    await expect(
+      service.accept({
+        provider: 'MONNIFY',
+        eventType: 'charge.completed',
+        providerReference: 'ref-1',
+        payload: {
+          type: 'charge.completed',
+          data: { reference: 'ref-1', status: 'successful' },
+        },
+      }),
+    ).resolves.toEqual({ eventId: 'evt-2', duplicate: false });
+
+    expect(prisma.paymentWebhookInbox.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ payloadHash: expect.any(String) }),
+      select: { id: true },
+    });
   });
 
   it('claims newly received events once', async () => {

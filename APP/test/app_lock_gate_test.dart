@@ -47,7 +47,7 @@ void main() {
 
     await tester.pumpAndSettle();
 
-    expect(find.text('Unlock TRUSTPAY'), findsOneWidget);
+    expect(find.text('Unlock TrustPay'), findsOneWidget);
     expect(find.text('Enter your transaction PIN to continue.'), findsOneWidget);
 
     for (final digit in ['2', '4', '6', '8']) {
@@ -57,7 +57,7 @@ void main() {
 
     await tester.pumpAndSettle();
 
-    expect(find.text('Unlock TRUSTPAY'), findsNothing);
+    expect(find.text('Unlock TrustPay'), findsNothing);
     expect(find.text('Enter your transaction PIN to continue.'), findsNothing);
   });
 
@@ -94,7 +94,7 @@ void main() {
 
     await tester.pumpAndSettle();
 
-    expect(find.text('Unlock TRUSTPAY'), findsNothing);
+    expect(find.text('Unlock TrustPay'), findsNothing);
     expect(find.text('Enter your transaction PIN to continue.'),
         findsNothing);
     expect(find.text('Protected content'), findsOneWidget);

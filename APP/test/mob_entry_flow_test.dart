@@ -9,7 +9,7 @@ import 'package:trustpay_app/core/widgets/main_shell.dart';
 
 import 'support/trustpay_test_api.dart';
 
-  void main() {
+void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   setUp(() {
@@ -48,7 +48,7 @@ import 'support/trustpay_test_api.dart';
 
     await tester.pumpAndSettle();
 
-    expect(find.text('Welcome back'), findsOneWidget);
+    expect(find.textContaining('Good '), findsOneWidget);
     expect(find.text('Top services'), findsOneWidget);
   });
 
