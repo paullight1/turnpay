@@ -161,7 +161,7 @@ redis-cli -h REDIS_HOST -p REDIS_PORT -a REDIS_PASS --tls \
   SET maintenance_mode true EX 300
 
 # Verify app returns 503
-curl -s -o /dev/null -w "%{http_code}" https://api.trustpay.xyz/api/health
+curl -s -o /dev/null -w "%{http_code}" https://api.trustpayhq.com/api/health
 ```
 
 ### 3. Apply Migrations
@@ -200,13 +200,13 @@ redis-cli -h REDIS_HOST -p REDIS_PORT -a REDIS_PASS --tls \
 
 ```bash
 # Health check
-curl -s https://api.trustpay.xyz/api/health | jq
+curl -s https://api.trustpayhq.com/api/health | jq
 
 # Should return:
 # { "status": "ok", "checks": { "database": "connected", "redis": "connected" } }
 
 # Test a simple authed endpoint
-curl -s https://api.trustpay.xyz/api/wallets \
+curl -s https://api.trustpayhq.com/api/wallets \
   -H "Authorization: Bearer $TEST_TOKEN" | jq
 ```
 
@@ -241,7 +241,7 @@ psql "PROD_DATABASE_URL" -c "SELECT COUNT(*) FROM \"Transaction\""
 redis-cli ... DEL maintenance_mode
 
 # 6. Verify health
-curl -s https://api.trustpay.xyz/api/health | jq
+curl -s https://api.trustpayhq.com/api/health | jq
 ```
 
 ---

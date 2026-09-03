@@ -423,7 +423,7 @@ From `BACKEND/package.json`:
 5. Set `NODE_ENV=production`
 6. Inject secrets (via Doppler or Render env vars)
 7. Set custom domain with auto-cert
-8. Verify: `curl https://api.trustpay.io/api/health` returns 200
+8. Verify: `curl https://api.trustpayhq.com/api/health` returns 200
 
 ---
 
@@ -485,7 +485,7 @@ From `WEBSITE/next.config.ts`:
 
 ```
 # Production (Vercel)
-NEXT_PUBLIC_API_URL=https://api.trustpay.io
+NEXT_PUBLIC_API_URL=https://api.trustpayhq.com
 NEXT_PUBLIC_SUPABASE_URL=https://gkpueopmdlqlfbvrzuqh.supabase.co
 NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=<value>
 NEXT_PUBLIC_SUPABASE_ANON_KEY=<value>
@@ -523,7 +523,7 @@ npm run build  # = next build
 1. Push website code to GitHub (if not already)
 2. Connect GitHub repo to Vercel
 3. Configure production environment variables in Vercel dashboard
-4. Set `NEXT_PUBLIC_API_URL` to production backend URL (e.g. `https://api.trustpay.io`)
+4. Set `NEXT_PUBLIC_API_URL` to production backend URL (`https://api.trustpayhq.com`)
 5. Set custom domain (e.g. `trustpay.io`)
 6. Configure preview deployments for PR branches
 7. Run a smoke test of all 27 routes:

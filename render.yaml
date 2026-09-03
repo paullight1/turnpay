@@ -7,7 +7,7 @@ services:
     branch: main
     autoDeployTrigger: checksPass
     domains:
-      - api.truspayhq.com
+      - api.trustpayhq.com
     dockerfilePath: ./BACKEND/Dockerfile
     dockerContext: ./BACKEND
     healthCheckPath: /api/health/ready
@@ -17,9 +17,9 @@ services:
       - key: RUN_MIGRATIONS_ON_STARTUP
         value: "true" # Free services do not support pre-deploy commands.
       - key: WEB_URL
-        value: "https://www.truspayhq.com"
+        value: "https://www.trustpayhq.com"
       - key: ADMIN_URL
-        value: "https://www.truspayhq.com"
+        value: "https://www.trustpayhq.com"
       - key: SENTRY_DSN
         sync: false # TODO(launch): set Sentry DSN for error monitoring
       - key: PORT
@@ -110,7 +110,7 @@ services:
       - key: MONNIFY_BASE_URL
         value: "https://sandbox.monnify.com"
       - key: MONNIFY_WEBHOOK_URL
-        value: "https://api.truspayhq.com/api/webhooks/monnify"
+        value: "https://api.trustpayhq.com/api/webhooks/monnify"
       - key: MONNIFY_GET_ALL_AVAILABLE_BANKS
         value: "true"
       - key: MONNIFY_RESTRICT_PAYMENT_SOURCE

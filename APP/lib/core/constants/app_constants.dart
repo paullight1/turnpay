@@ -20,7 +20,7 @@ class AppConstants {
   }
 }
 
-const _productionApiBaseUrl = 'https://api.trustpay.xyz';
+const _productionApiBaseUrl = 'https://api.trustpayhq.com';
 const _productionWebsiteBaseUrl = 'https://trustpay.xyz';
 const _localApiPort = '3000';
 const _localWebsitePort = '3001';

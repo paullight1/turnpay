@@ -46,7 +46,7 @@
   - [ ] TLS encryption enabled
 
 - [ ] **DNS configured** (if using custom domain)
-  - [ ] `api.trustpay.xyz` → Fly.io (CNAME to `trustpay-backend.fly.dev`)
+  - [ ] `api.trustpayhq.com` → Fly.io (CNAME to `trustpay-backend.fly.dev`)
   - [ ] SSL certificate auto-provisioned by Fly.io
 
 - [ ] **Dockerfile reviewed**
@@ -121,7 +121,7 @@ fly secrets set MONNIFY_API_KEY="MK_PROD_..."
 fly secrets set MONNIFY_SECRET_KEY="MS_PROD_..."
 fly secrets set MONNIFY_CONTRACT_CODE="..."
 fly secrets set MONNIFY_BASE_URL="https://api.monnify.com"
-fly secrets set MONNIFY_WEBHOOK_URL="https://api.trustpay.example/api/webhooks/monnify"
+fly secrets set MONNIFY_WEBHOOK_URL="https://api.trustpayhq.com/api/webhooks/monnify"
 
 # VTU Provider
 fly secrets set VTPASS_API_KEY="..."
@@ -134,7 +134,7 @@ fly secrets set VTPASS_WEBHOOK_SECRET="..."
 fly secrets set KYC_PROVIDER="youverify"
 fly secrets set YOUVERIFY_API_KEY="..."
 fly secrets set YOUVERIFY_BASE_URL="https://api.youverify.co"
-fly secrets set YOUVERIFY_WEBHOOK_URL="https://api.trustpay.example/api/webhooks/kyc/youverify"
+fly secrets set YOUVERIFY_WEBHOOK_URL="https://api.trustpayhq.com/api/webhooks/kyc/youverify"
 fly secrets set YOUVERIFY_WEBHOOK_SECRET="..."
 
 # Feature Flags
@@ -175,10 +175,10 @@ fly status
 
 ```bash
 # Add custom domain — Fly provisions SSL automatically
-fly certs create api.trustpay.xyz
+fly certs create api.trustpayhq.com
 
 # Verify DNS
-fly certs show api.trustpay.xyz
+fly certs show api.trustpayhq.com
 # Then add the CNAME record in your DNS provider
 ```
 

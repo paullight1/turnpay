@@ -114,7 +114,7 @@ In Vercel dashboard → Settings → Environment Variables:
 
 | Variable | Value | Environment |
 |---|---|---|
-| `NEXT_PUBLIC_API_URL` | `https://api.trustpay.xyz` | Production |
+| `NEXT_PUBLIC_API_URL` | `https://api.trustpayhq.com` | Production |
 | `NEXT_PUBLIC_SUPABASE_URL` | `https://xxx.supabase.co` | Production |
 | `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | `sb_publishable_...` | Production |
 | `NEXT_PUBLIC_MANUAL_EXCHANGE_BANK_NAME` | (optional) | Production |
@@ -235,7 +235,7 @@ vercel logs https://trustpay.xyz
 
 | Setting | Staging | Production |
 |---|---|---|
-| `NEXT_PUBLIC_API_URL` | `https://api-staging.trustpay.xyz` | `https://api.trustpay.xyz` |
+| `NEXT_PUBLIC_API_URL` | `https://api-staging.trustpayhq.com` | `https://api.trustpayhq.com` |
 | `NEXT_PUBLIC_SUPABASE_URL` | Staging Supabase project | Production Supabase project |
 | Vercel domain | `staging.trustpay.xyz` | `trustpay.xyz` |
 | Build on PR | Yes (preview deploy) | N/A |

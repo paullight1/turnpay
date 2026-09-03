@@ -135,7 +135,7 @@ services:
         value: https://api.monnify.com
         scope: RUN_TIME
       - key: MONNIFY_WEBHOOK_URL
-        value: https://api.trustpay.com/api/webhooks/monnify
+        value: https://api.trustpayhq.com/api/webhooks/monnify
         scope: RUN_TIME
 
       # Encryption
@@ -261,7 +261,7 @@ region: lag
 
 # ─── Domains (configure after first deploy) ─────────────────────────────────
 # domains:
-#   - domain: api.trustpay.xyz
+#   - domain: api.trustpayhq.com
 #     type: PRIMARY
 #   - domain: trustpay.xyz
 #     type: PRIMARY

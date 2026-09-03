@@ -124,7 +124,7 @@ export async function refreshSessionWithBackend(
 ) {
   const refreshUrl = apiBaseUrl
     ? `${apiBaseUrl.replace(/\/$/, "")}/api/auth/refresh`
-    : "https://api.trustpay.xyz/api/auth/refresh";
+    : "https://api.trustpayhq.com/api/auth/refresh";
 
   try {
     const response = await fetch(refreshUrl, {

@@ -114,7 +114,7 @@ async function verifyAccessToken(accessToken: string): Promise<boolean> {
   try {
     const bootstrapUrl = apiBaseUrl
       ? `${apiBaseUrl.replace(/\/$/, "")}/api/auth/bootstrap`
-      : "https://api.trustpay.xyz/api/auth/bootstrap";
+      : "https://api.trustpayhq.com/api/auth/bootstrap";
     const res = await fetch(bootstrapUrl, {
       method: "POST",
       headers: { Authorization: `Bearer ${accessToken}` },

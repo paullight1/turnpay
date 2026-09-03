@@ -19,7 +19,7 @@ function resolveHttpOrigin(value: string | undefined, fallback = "") {
 
 const API_ORIGIN = resolveHttpOrigin(
   process.env.NEXT_PUBLIC_API_URL,
-  "https://api.trustpay.xyz",
+  "https://api.trustpayhq.com",
 );
 const SUPABASE_ORIGIN = resolveHttpOrigin(
   process.env.NEXT_PUBLIC_SUPABASE_URL,

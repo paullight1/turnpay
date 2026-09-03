@@ -19,7 +19,7 @@ How to deploy TRUSTPAY to production.
 
 ## Prerequisites
 
-- Domain name (e.g., `api.trustpay.com`, `app.trustpay.com`)
+- Domain name (e.g., `api.trustpayhq.com`, `www.trustpayhq.com`)
 - SSL certificates (Let's Encrypt)
 - PostgreSQL 16+ database
 - Redis 7+ instance
@@ -60,7 +60,7 @@ MONNIFY_BASE_URL=https://api.monnify.com
 MONNIFY_API_KEY=
 MONNIFY_SECRET_KEY=
 MONNIFY_CONTRACT_CODE=
-MONNIFY_WEBHOOK_URL=https://api.trustpay.com/api/webhooks/monnify
+MONNIFY_WEBHOOK_URL=https://api.trustpayhq.com/api/webhooks/monnify
 
 VTU_PROVIDER=vtpass
 VTPASS_BASE_URL=https://vtpass.com/api
@@ -87,7 +87,7 @@ SENTRY_DSN=https://xxx@sentry.io/xxx
 
 ### Frontend `.env.production`
 ```bash
-NEXT_PUBLIC_API_URL=https://api.trustpay.com
+NEXT_PUBLIC_API_URL=https://api.trustpayhq.com
 NEXT_PUBLIC_WEBSITE_URL=https://app.trustpay.com
 ```
 
@@ -260,7 +260,7 @@ services:
 
 ### 1. Verify Health
 ```bash
-curl https://api.trustpay.com/api/health
+curl https://api.trustpayhq.com/api/health
 # Expected: {"status":"ok","checks":{"database":"connected","redis":"connected"}}
 ```
 
@@ -272,12 +272,12 @@ npx prisma migrate deploy
 
 ### 3. Verify Swagger Docs
 ```
-https://api.trustpay.com/api/docs
+https://api.trustpayhq.com/api/docs
 ```
 
 ### 4. Test Webhooks
-- Configure Monnify: `https://api.trustpay.com/api/webhooks/monnify`
-- Configure VTpass: `https://api.trustpay.com/api/webhooks/vtu/vtpass`
+- Configure Monnify: `https://api.trustpayhq.com/api/webhooks/monnify`
+- Configure VTpass: `https://api.trustpayhq.com/api/webhooks/vtu/vtpass`
 - Ninja direct BVN/NIN verification does not require a webhook URL.
 - Verify signatures and duplicate-event idempotency for all three providers
 
@@ -350,10 +350,10 @@ cp /var/lib/redis/dump.rdb /backups/redis-$(date +%Y%m%d).rdb
 ```nginx
 server {
     listen 443 ssl http2;
-    server_name api.trustpay.com;
+    server_name api.trustpayhq.com;
 
-    ssl_certificate /etc/letsencrypt/live/api.trustpay.com/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/api.trustpay.com/privkey.pem;
+    ssl_certificate /etc/letsencrypt/live/api.trustpayhq.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/api.trustpayhq.com/privkey.pem;
 
     location / {
         proxy_pass http://localhost:3000;

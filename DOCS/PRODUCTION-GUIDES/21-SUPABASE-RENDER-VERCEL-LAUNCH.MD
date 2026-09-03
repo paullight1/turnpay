@@ -19,8 +19,8 @@ for production. Local and CI PostgreSQL remain valid for development and tests.
    `sslmode=require&schema=public` to its query string if missing.
 4. If the database password is unknown, reset it in Database Settings and store
    it only in the deployment secret manager.
-5. In Auth URL Configuration, set the site URL to `https://www.truspayhq.com` and
-   allow the staging reset route `https://www.truspayhq.com/reset-password`.
+5. In Auth URL Configuration, set the site URL to `https://www.trustpayhq.com` and
+   allow the staging reset route `https://www.trustpayhq.com/reset-password`.
 6. Configure a production SMTP provider before relying on email confirmation or
    password reset delivery.
 7. Confirm both Storage buckets remain private: `kyc-documents` and
@@ -45,15 +45,15 @@ variables or the Flutter application.
    Vercel or the mobile application.
 7. The free staging container runs `prisma migrate deploy` before starting the
    API because free services do not support pre-deploy commands.
-8. Confirm the Blueprint attaches `api.truspayhq.com`, complete its DNS mapping,
-   and verify `https://api.truspayhq.com/api/health/ready`.
+8. Confirm the Blueprint attaches `api.trustpayhq.com`, complete its DNS mapping,
+   and verify `https://api.trustpayhq.com/api/health/ready`.
 
 If migration deployment fails, the API intentionally does not start. Correct the
 database configuration or migration instead of bypassing the startup check.
 
 ### Spaceship DNS
 
-1. Confirm Render shows the `api.truspayhq.com` custom domain declared by the
+1. Confirm Render shows the `api.trustpayhq.com` custom domain declared by the
    Blueprint. Add it manually only if this is an older service that did not sync
    the updated Blueprint field.
 2. Copy the exact DNS target Render displays.
@@ -68,13 +68,13 @@ database configuration or migration instead of bypassing the startup check.
 1. Import the Git repository and set the project root directory to `WEBSITE`.
 2. Use the production branch `main`.
 3. Set only public browser-safe variables:
-   - `NEXT_PUBLIC_API_URL=https://api.truspayhq.com/api`
+   - `NEXT_PUBLIC_API_URL=https://api.trustpayhq.com/api`
    - `NEXT_PUBLIC_SUPABASE_URL=https://zsewjppvfcssqllfefsm.supabase.co`
    - `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=<publishable key>`
-   - `NEXT_PUBLIC_SITE_URL=https://www.truspayhq.com`
+   - `NEXT_PUBLIC_SITE_URL=https://www.trustpayhq.com`
 4. Do not set `SUPABASE_SERVICE_ROLE_KEY`, `DATABASE_URL`, JWT secrets, payment
    secrets, or encryption keys in `NEXT_PUBLIC_*` variables.
-5. Map `www.truspayhq.com` after the preview deployment passes.
+5. Map `www.trustpayhq.com` after the preview deployment passes.
 
 ## 4. Launch verification gates
 
