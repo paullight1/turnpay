@@ -549,7 +549,11 @@ function VtuContent() {
         >
           <TabsList className="grid grid-cols-4">
             {serviceTypes.map((type) => (
-              <TabsTrigger key={type.id} value={type.id}>
+              <TabsTrigger
+                key={type.id}
+                value={type.id}
+                aria-label={type.label}
+              >
                 <span className="mr-1">{type.icon}</span>
                 <span className="hidden sm:inline">{type.label}</span>
               </TabsTrigger>
