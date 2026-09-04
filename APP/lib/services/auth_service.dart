@@ -361,6 +361,10 @@ String _authSafeMessage(
   }
 
   if (path.contains('/register')) {
+    if (statusCode == 409) {
+      return 'Unable to complete registration. Try signing in or reset your password.';
+    }
+
     return 'Unable to complete registration.';
   }
 
