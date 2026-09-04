@@ -327,6 +327,12 @@ String authErrorMessage(Object error, String fallback) {
   return fallback;
 }
 
+bool isRegistrationConflict(Object error) {
+  return error is DioException &&
+      error.response?.statusCode == 409 &&
+      _extractRequestPath(error)?.contains('/register') == true;
+}
+
 bool _isAuthRequest(String? path) {
   return path != null && path.startsWith('/api/auth/');
 }
@@ -349,7 +355,7 @@ String _authSafeMessage(
   }
 
   if (path.contains('/login')) {
-    return 'Unable to sign in with those credentials';
+    return 'Incorrect email or password. Try again or reset your password.';
   }
 
   if (path.contains('/refresh')) {
@@ -362,7 +368,7 @@ String _authSafeMessage(
 
   if (path.contains('/register')) {
     if (statusCode == 409) {
-      return 'Unable to complete registration. Try signing in or reset your password.';
+      return 'An account already exists with these details. Taking you to log in…';
     }
 
     return 'Unable to complete registration.';

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
+import 'package:dio/dio.dart';
 
 import 'package:trustpay_app/features/auth/screens/register_screen.dart';
 import 'package:trustpay_app/services/auth_service.dart';
@@ -278,6 +279,62 @@ void main() {
     expect(authService.registeredPhone, '+2348012345678');
     expect(find.text('Home'), findsOneWidget);
   });
+
+  testWidgets(
+      'an existing account message is shown before redirecting to login',
+      (tester) async {
+    final router = GoRouter(
+      initialLocation: '/register',
+      routes: [
+        GoRoute(
+          path: '/register',
+          builder: (context, state) => RegisterScreen(
+            authService: _ConflictAuthService(),
+            securityService: _FakeTransactionSecurityService(),
+          ),
+        ),
+        GoRoute(
+          path: '/login',
+          builder: (context, state) => const Scaffold(
+            body: Text('Login destination'),
+          ),
+        ),
+      ],
+    );
+    addTearDown(router.dispose);
+    await tester.pumpWidget(MaterialApp.router(routerConfig: router));
+    await tester.pumpAndSettle();
+
+    const answers = <String>[
+      'John Mensah',
+      'john@example.com',
+      '08012345678',
+      'Password1',
+      'Password1',
+      '1234',
+    ];
+    for (final answer in answers) {
+      await tester.enterText(find.byType(TextFormField), answer);
+      await tapContinue(tester);
+    }
+
+    await tester.tap(find.text('Skip for now'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byType(Checkbox));
+    await tester.tap(find.text('Create account'));
+    await tester.pump();
+
+    expect(
+      find.text(
+        'An account already exists with these details. Taking you to log in…',
+      ),
+      findsOneWidget,
+    );
+
+    await tester.pump(const Duration(seconds: 2));
+    await tester.pumpAndSettle();
+    expect(find.text('Login destination'), findsOneWidget);
+  });
 }
 
 class _RecordingAuthService extends AuthService {
@@ -294,6 +351,27 @@ class _RecordingAuthService extends AuthService {
   }) async {
     registeredPhone = phone;
     return true;
+  }
+}
+
+class _ConflictAuthService extends AuthService {
+  @override
+  Future<bool> register({
+    required String fullName,
+    required String email,
+    required String phone,
+    required String password,
+    required String transactionPin,
+    String? referralCode,
+  }) async {
+    final request = RequestOptions(path: '/api/auth/register');
+    throw DioException(
+      requestOptions: request,
+      response: Response<dynamic>(
+        requestOptions: request,
+        statusCode: 409,
+      ),
+    );
   }
 }
 

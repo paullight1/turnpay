@@ -187,6 +187,13 @@ class _RegisterScreenState extends State<RegisterScreen> {
     } catch (error) {
       if (!mounted) return;
       _showError(authErrorMessage(error, 'Registration failed'));
+
+      if (isRegistrationConflict(error)) {
+        await Future<void>.delayed(const Duration(milliseconds: 1500));
+        if (mounted) {
+          context.go(AppRoutes.login);
+        }
+      }
     } finally {
       if (mounted) {
         setState(() => _isLoading = false);

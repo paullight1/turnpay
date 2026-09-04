@@ -15,7 +15,23 @@ void main() {
 
     expect(
       authErrorMessage(error, 'Registration failed'),
-      'Unable to complete registration. Try signing in or reset your password.',
+      'An account already exists with these details. Taking you to log in…',
+    );
+  });
+
+  test('login rejection offers password recovery without exposing details', () {
+    final request = RequestOptions(path: '/api/auth/login');
+    final error = DioException(
+      requestOptions: request,
+      response: Response<dynamic>(
+        requestOptions: request,
+        statusCode: 401,
+      ),
+    );
+
+    expect(
+      authErrorMessage(error, 'Login failed'),
+      'Incorrect email or password. Try again or reset your password.',
     );
   });
 }
