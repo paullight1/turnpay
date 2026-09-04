@@ -141,6 +141,7 @@ test("shows future markets and completes an idempotent electricity purchase", as
   await page.getByLabel("Meter number").fill("45028701");
   await page.getByRole("button", { name: "Verify customer" }).click();
   await expect(page.getByText("ADA OBI")).toBeVisible();
+  await expect(page.getByText("Customer verified")).toBeHidden();
   await page.getByLabel("Amount (₦)").fill("5000");
   await page.getByLabel("Transaction PIN").fill("1234");
   await page.getByRole("button", { name: "Review Electricity" }).click();

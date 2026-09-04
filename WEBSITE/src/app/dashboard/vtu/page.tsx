@@ -218,7 +218,7 @@ function VtuContent() {
         const customer = response.data as { name: string; address?: string };
         setVerifiedCustomer({ name: customer.name, detail: customer.address });
       }
-      toast.success("Customer verified");
+      toast.success("Customer verified", { duration: 1500 });
     } catch (error) {
       const err = error as { response?: { data?: ApiError } };
       toast.error(
