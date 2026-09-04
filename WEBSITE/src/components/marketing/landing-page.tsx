@@ -257,12 +257,12 @@ function HeroSection() {
 
             <div
               aria-hidden="true"
-              className="relative mt-7 min-h-[13.5rem] overflow-hidden sm:min-h-[15rem] md:min-h-[16rem] lg:min-h-[15.5rem] xl:min-h-[16.5rem]"
+              className="relative mt-7 grid overflow-hidden"
             >
               {heroSlides.map((slide, index) => (
                 <p
                   key={slide.title}
-                  className="trustpay-hero-copy absolute inset-x-0 top-0 max-w-4xl text-[clamp(2.65rem,12vw,3.5rem)] font-bold leading-[0.98] tracking-[-0.045em] text-white sm:text-[4.25rem] md:text-[4.75rem] lg:text-[5rem] xl:text-[5.5rem]"
+                  className="trustpay-hero-copy col-start-1 row-start-1 max-w-4xl text-[clamp(2.65rem,12vw,3.5rem)] font-bold leading-[0.98] tracking-[-0.045em] text-white sm:text-[4.25rem] md:text-[4.75rem] lg:text-[5rem] xl:text-[5.5rem]"
                   style={{ animationDelay: `${index * 5 - 0.6}s` }}
                 >
                   {slide.title}

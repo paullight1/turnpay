@@ -54,6 +54,24 @@ test.describe('TrustPay Landing Page', () => {
     expect(secondaryBox!.y).toBeGreaterThan(primaryBox!.y + primaryBox!.height);
   });
 
+  test('does not reserve empty space below the mobile hero headline', async ({ page }) => {
+    await page.setViewportSize({ width: 398, height: 814 });
+    await page.goto('/');
+
+    const headlineGap = await page.evaluate(() => {
+      const headline = document.querySelector<HTMLElement>('.trustpay-hero-copy');
+      const description = headline?.parentElement?.nextElementSibling;
+      if (!(description instanceof HTMLElement) || !headline) return null;
+
+      return description.getBoundingClientRect().top -
+        headline.getBoundingClientRect().bottom;
+    });
+
+    expect(headlineGap).not.toBeNull();
+    expect(headlineGap!).toBeGreaterThanOrEqual(12);
+    expect(headlineGap!).toBeLessThanOrEqual(40);
+  });
+
   test('keeps legal copy readable on light page surfaces', async ({ page }) => {
     await page.goto('/legal');
 
