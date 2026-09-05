@@ -1,6 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigModule } from '@nestjs/config';
-import { ConflictException } from '@nestjs/common';
+import { ConflictException, ServiceUnavailableException } from '@nestjs/common';
 import { ExchangeService } from './exchange.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { RateService } from './providers/rate.service';
@@ -36,10 +36,13 @@ describe('ExchangeService', () => {
       findUniqueOrThrow: jest.fn(),
     },
     transaction: {
+      findFirst: jest.fn(),
       create: jest.fn(),
       update: jest.fn(),
     },
+    exchangeDepositAllocation: { create: jest.fn() },
     exchangeReceipt: {
+      findFirst: jest.fn(),
       create: jest.fn(),
       findMany: jest.fn(),
       findUnique: jest.fn(),
@@ -51,11 +54,13 @@ describe('ExchangeService', () => {
       updateMany: jest.fn(),
     },
     providerEvent: {
+      findFirst: jest.fn(),
       create: jest.fn(),
       findUnique: jest.fn(),
       findUniqueOrThrow: jest.fn(),
       update: jest.fn(),
     },
+    paymentWebhookInbox: { findFirst: jest.fn() },
     rate: {
       findUnique: jest.fn(),
       upsert: jest.fn(),
@@ -246,6 +251,24 @@ describe('ExchangeService', () => {
       expect(quote.amount).toBe('100.00');
       expect(quote.rate).toBeGreaterThan(0);
       expect(mockRedis.set).toHaveBeenCalled();
+    });
+
+    it('rejects creating a quote when the exchange rate is stale', async () => {
+      mockRateService.getRate.mockResolvedValue({
+        rate: 3.1746,
+        markup: 2.5,
+        isStale: true,
+      });
+
+      await expect(
+        service.createQuote('user-1', {
+          from: 'GHS',
+          to: 'NGN',
+          amount: '100',
+        }),
+      ).rejects.toBeInstanceOf(ServiceUnavailableException);
+
+      expect(mockRedis.set).not.toHaveBeenCalled();
     });
   });
 
@@ -508,6 +531,34 @@ describe('ExchangeService', () => {
       );
     });
 
+    it('rejects a legacy manual receipt when the exchange rate is stale', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue({
+        id: 'user-1',
+        kycStatus: 'VERIFIED',
+        kycTier: 'TIER_2',
+        isSuspended: false,
+        wallets: [{ id: 'wallet-ghs' }],
+      });
+      mockRateService.getRate.mockResolvedValue({
+        rate: 0.315,
+        markup: 2.5,
+        isStale: true,
+      });
+
+      await expect(
+        service.submitManualReceipt('user-1', {
+          amount: '1000',
+          bankReference: 'BANKREF123',
+          senderName: 'Ada Lovelace',
+          senderBankName: 'Test Bank',
+          receiptUrl: 'https://example.com/receipt.png',
+        }),
+      ).rejects.toBeInstanceOf(ServiceUnavailableException);
+
+      expect(mockPrisma.transaction.create).not.toHaveBeenCalled();
+      expect(mockPrisma.exchangeReceipt.create).not.toHaveBeenCalled();
+    });
+
     it('creates a Monnify verified exchange deposit intent without crediting a wallet', async () => {
       mockPrisma.user.findUnique.mockResolvedValue({
         id: 'user-1',
@@ -577,6 +628,42 @@ describe('ExchangeService', () => {
         }),
       );
       expect(mockLedger.creditWallet).not.toHaveBeenCalled();
+    });
+
+    it('rejects a Monnify deposit intent when the exchange rate is stale', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue({
+        id: 'user-1',
+        email: 'ada@example.com',
+        fullName: 'Ada Lovelace',
+        kycStatus: 'VERIFIED',
+        kycTier: 'TIER_2',
+        isSuspended: false,
+        wallets: [{ id: 'wallet-ghs' }],
+      });
+      mockBankingService.getVirtualAccounts.mockResolvedValue([
+        {
+          provider: 'MONNIFY',
+          currency: 'NGN',
+          accountNumberMasked: '******7989',
+          accountName: 'TRUSTPAY ADA',
+          bankName: 'Moniepoint Microfinance Bank',
+          status: 'ACTIVE',
+        },
+      ]);
+      mockRateService.getRate.mockResolvedValue({
+        rate: 0.315,
+        markup: 2.5,
+        isStale: true,
+      });
+
+      await expect(
+        service.createMonnifyExchangeDepositIntent('user-1', {
+          amount: '1000',
+        }),
+      ).rejects.toBeInstanceOf(ServiceUnavailableException);
+
+      expect(mockPrisma.transaction.create).not.toHaveBeenCalled();
+      expect(mockPrisma.exchangeReceipt.create).not.toHaveBeenCalled();
     });
 
     it('marks a Monnify exchange deposit as provider verified without crediting GHS', async () => {
@@ -1085,6 +1172,36 @@ describe('ExchangeService', () => {
       expect(mockRateService.getRate).not.toHaveBeenCalled();
       expect(mockPrisma.transaction.create).not.toHaveBeenCalled();
       expect(mockPrisma.exchangeReceipt.create).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('createPayout', () => {
+    it('rejects creating a payout when the exchange rate is stale', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue({
+        id: 'user-1',
+        kycStatus: 'VERIFIED',
+        kycTier: 'TIER_2',
+        isSuspended: false,
+        wallets: [{ id: 'wallet-ngn' }],
+      });
+      mockRateService.getRate.mockResolvedValue({
+        rate: 0.315,
+        markup: 2.5,
+        isStale: true,
+      });
+
+      await expect(
+        service.createPayout('user-1', {
+          sourceAmount: '1000',
+          destinationBankName: 'Test Bank',
+          destinationAccountNumber: '0123456789',
+          destinationAccountName: 'Ada Lovelace',
+          transactionPin: '1234',
+        }),
+      ).rejects.toBeInstanceOf(ServiceUnavailableException);
+
+      expect(mockPrisma.transaction.create).not.toHaveBeenCalled();
+      expect(mockLedger.debitWallet).not.toHaveBeenCalled();
     });
   });
 });

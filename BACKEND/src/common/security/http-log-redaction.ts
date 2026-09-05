@@ -19,6 +19,11 @@ export const HTTP_LOG_REDACTION_PATHS = [
   'req.body.refreshToken',
   'req.body.token',
   'req.body.secret',
+  'req.body.attemptKey',
+  'req.body.destinationAccount',
+  'req.body.accountNumber',
+  'req.body.objectKey',
+  'req.body.payoutProofObjectKey',
 ] as const;
 
 export const HTTP_LOG_REDACTION_CENSOR = '[REDACTED]';

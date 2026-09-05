@@ -26,6 +26,7 @@ import {
   ProvisionVirtualAccountInput,
 } from './providers/banking-provider.types';
 import { formatKycTier, isKycTierAtLeast } from '../common/utils/kyc-tier';
+import { allocateDepositReference } from '../common/services/deposit-allocation';
 
 type PrismaProvider = 'MONNIFY';
 
@@ -40,7 +41,15 @@ export class BankingService {
   ) {}
 
   async getVirtualAccounts(userId: string) {
-    return this.prisma.virtualAccount.findMany({
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { kycStatus: true, kycTier: true },
+    });
+    const canRevealAccountNumber =
+      user != null &&
+      user.kycStatus === 'VERIFIED' &&
+      isKycTierAtLeast(user.kycTier, 'TIER_2');
+    const accounts = await this.prisma.virtualAccount.findMany({
       where: { userId },
       select: {
         id: true,
@@ -57,6 +66,13 @@ export class BankingService {
       },
       orderBy: { createdAt: 'desc' },
     });
+
+    if (canRevealAccountNumber) return accounts;
+
+    return accounts.map((account) => ({
+      ...account,
+      accountNumber: '',
+    }));
   }
 
   async getTransferStatus(reference: string) {
@@ -370,6 +386,12 @@ export class BankingService {
           );
         }
 
+        await allocateDepositReference(tx, {
+          reference: event.providerReference,
+          settlementId: `funding:${providerEvent.id}`,
+          amount: event.amount,
+          kind: 'FUNDING',
+        });
         const transaction = await tx.transaction.create({
           data: {
             userId: virtualAccount.userId,
@@ -445,6 +467,12 @@ export class BankingService {
 
       return result;
     } catch (error) {
+      const allocation = await this.prisma.exchangeDepositAllocation.findUnique(
+        { where: { reference: event.providerReference.trim().toUpperCase() } },
+      );
+      if (allocation?.settlementId === `funding:${providerEvent.id}`) {
+        return { received: true, processed: false, duplicate: true };
+      }
       await this.prisma.providerEvent.update({
         where: { id: providerEvent.id },
         data: {

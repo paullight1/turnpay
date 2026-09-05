@@ -1,9 +1,11 @@
+import { allocateDepositReference } from '../common/services/deposit-allocation';
 import {
   BadRequestException,
   ConflictException,
   Injectable,
   NotFoundException,
   Optional,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createHash } from 'crypto';
@@ -115,7 +117,7 @@ export class ExchangeService {
       );
     }
 
-    const { rate, markup } = await this.rateService.getRate(dto.from, dto.to);
+    const { rate, markup } = await this.getFreshRate(dto.from, dto.to);
     const effectiveRate = new Decimal(rate).mul(
       new Decimal(1).minus(new Decimal(markup).div(100)),
     );
@@ -417,7 +419,7 @@ export class ExchangeService {
       throw new NotFoundException('GHS wallet not found');
     }
 
-    const { rate, markup } = await this.rateService.getRate('NGN', 'GHS');
+    const { rate, markup } = await this.getFreshRate('NGN', 'GHS');
     const effectiveRate = new Decimal(rate).mul(
       new Decimal(1).minus(new Decimal(markup).div(100)),
     );
@@ -566,7 +568,7 @@ export class ExchangeService {
       ? null
       : await this.resolveUserMonnifyVirtualAccount(userId);
 
-    const { rate, markup } = await this.rateService.getRate('NGN', 'GHS');
+    const { rate, markup } = await this.getFreshRate('NGN', 'GHS');
     const effectiveRate = new Decimal(rate).mul(
       new Decimal(1).minus(new Decimal(markup).div(100)),
     );
@@ -1072,6 +1074,25 @@ export class ExchangeService {
         this.assertExchangeKycEligible(receipt.user, 'credit an exchange');
         this.assertProviderVerificationAllowsCredit(receipt);
 
+        const verification = this.asRecord(receipt.metadata);
+        const verifiedProviderReference =
+          verification.flow === MONNIFY_EXCHANGE_FLOW &&
+          verification.providerVerificationStatus === 'VERIFIED' &&
+          typeof verification.providerReference === 'string'
+            ? verification.providerReference
+            : undefined;
+        await allocateDepositReference(tx, {
+          reference: verifiedProviderReference || receipt.bankReference,
+          settlementId: receipt.id,
+          amount: receipt.amount,
+          kind: 'EXCHANGE',
+          legacyReceiptId: receipt.id,
+          ...(verifiedProviderReference &&
+          typeof verification.providerEventId === 'string'
+            ? { verifiedExchangeProviderEventId: verification.providerEventId }
+            : {}),
+        });
+
         const before = {
           status: receipt.status,
           transactionStatus: receipt.transaction.status,
@@ -1330,7 +1351,7 @@ export class ExchangeService {
       throw new NotFoundException('NGN wallet not found');
     }
 
-    const { rate, markup } = await this.rateService.getRate('NGN', 'GHS');
+    const { rate, markup } = await this.getFreshRate('NGN', 'GHS');
     const effectiveRate = new Decimal(rate).mul(
       new Decimal(1).minus(new Decimal(markup).div(100)),
     );
@@ -2125,6 +2146,16 @@ export class ExchangeService {
       user: receipt.user,
       transaction: receipt.transaction,
     };
+  }
+
+  private async getFreshRate(from: string, to: string) {
+    const result = await this.rateService.getRate(from, to);
+    if (result.isStale) {
+      throw new ServiceUnavailableException(
+        'A fresh exchange rate is required',
+      );
+    }
+    return result;
   }
 
   private calculateFee(amount: Decimal, markupPercent: number): Decimal {

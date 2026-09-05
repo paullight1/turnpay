@@ -37,6 +37,14 @@ const OTP_RESPONSE_MESSAGE =
 const CONFIRMATION_RESPONSE_MESSAGE =
   'If an account exists, a confirmation email was sent';
 const REGISTRATION_GENERIC_MESSAGE = 'Unable to complete registration';
+const REGISTRATION_EMAIL_CONFLICT = {
+  code: 'EMAIL_ALREADY_REGISTERED',
+  message: 'That email is already linked to a TrustPay account.',
+} as const;
+const REGISTRATION_PHONE_CONFLICT = {
+  code: 'PHONE_ALREADY_REGISTERED',
+  message: 'That phone number is already linked to a TrustPay account.',
+} as const;
 const REGISTRATION_RATE_LIMIT_MESSAGE =
   'Registration is temporarily rate limited. Please try again later.';
 const MAX_FAILED_LOGIN_ATTEMPTS = 5;
@@ -68,12 +76,12 @@ export class AuthService {
 
     const existingUser = await this.usersService.findByEmail(email);
     if (existingUser) {
-      throw new ConflictException(REGISTRATION_GENERIC_MESSAGE);
+      throw new ConflictException(REGISTRATION_EMAIL_CONFLICT);
     }
 
     const existingPhone = await this.usersService.findByPhone(phone);
     if (existingPhone) {
-      throw new ConflictException(REGISTRATION_GENERIC_MESSAGE);
+      throw new ConflictException(REGISTRATION_PHONE_CONFLICT);
     }
 
     const { data, error } = await this.supabaseService.authClient.auth.signUp({
@@ -106,8 +114,29 @@ export class AuthService {
         );
       }
 
+      const providerError = error as {
+        code?: unknown;
+        status?: unknown;
+      };
+      if (
+        providerError.code === 'user_already_exists' ||
+        providerError.code === 'email_exists'
+      ) {
+        throw new ConflictException(REGISTRATION_EMAIL_CONFLICT);
+      }
+
       this.logger.warn(
-        { email: registerDto.email, event: 'user_registration_failed' },
+        {
+          event: 'user_registration_failed',
+          providerCode:
+            typeof providerError.code === 'string'
+              ? providerError.code
+              : 'unknown',
+          providerStatus:
+            typeof providerError.status === 'number'
+              ? providerError.status
+              : undefined,
+        },
         'Registration failed',
       );
       throw new BadRequestException(REGISTRATION_GENERIC_MESSAGE);
@@ -488,6 +517,14 @@ export class AuthService {
     if (!user) {
       return { success: true, message: RESET_RESPONSE_MESSAGE };
     }
+
+    await this.supabaseService.ensureRecoveryIdentity({
+      id: user.id,
+      email: user.email,
+      phone: user.phone,
+      fullName: user.fullName,
+      role: user.role === 'ADMIN' ? 'ADMIN' : 'USER',
+    });
 
     const { error } =
       await this.supabaseService.authClient.auth.resetPasswordForEmail(

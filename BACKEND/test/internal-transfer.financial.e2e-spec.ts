@@ -5,6 +5,8 @@ import {
 } from '@nestjs/common';
 import type { PrismaClient } from '@prisma/client';
 import { Decimal } from '@prisma/client/runtime/library';
+import { PaymentAttemptsService } from '../src/payment-attempts/payment-attempts.service';
+import { PrismaService } from '../src/prisma/prisma.service';
 import {
   cleanupFinancialTransferFixture,
   createFinancialTestPrisma,
@@ -185,6 +187,19 @@ describe('Internal transfer financial E2E (real PostgreSQL)', () => {
       request,
       context,
     );
+    const resolver = new PaymentAttemptsService(prisma as PrismaService);
+    expect(
+      await resolver.resolve(fixture.users.sender.id, {
+        operation: 'INTERNAL_TRANSFER',
+        attemptKey: context.idempotencyKey,
+      }),
+    ).toEqual({ state: 'SUCCESS', reference: first.reference });
+    expect(
+      await resolver.resolve(fixture.users.recipientA.id, {
+        operation: 'INTERNAL_TRANSFER',
+        attemptKey: context.idempotencyKey,
+      }),
+    ).toEqual({ state: 'UNKNOWN' });
     const replay = await transfers.sendInternalTransfer(
       fixture.users.sender.id,
       request,

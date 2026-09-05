@@ -17,6 +17,7 @@ import { ExchangeModule } from './exchange/exchange.module';
 import { PaymentsModule } from './payments/payments.module';
 import { VtuModule } from './vtu/vtu.module';
 import { TransactionsModule } from './transactions/transactions.module';
+import { PaymentAttemptsModule } from './payment-attempts/payment-attempts.module';
 import { HealthModule } from './health/health.module';
 import { RedisModule } from './redis/redis.module';
 import { CircuitBreakerModule } from './common/services/circuit-breaker.module';
@@ -181,6 +182,41 @@ const defaultNodeEnv =
         }),
         YOUVERIFY_WEBHOOK_ID: Joi.string().allow('').optional(),
         EXCHANGE_RECEIPT_BUCKET: Joi.string().default('exchange-receipts'),
+        MANUAL_EXCHANGE_ENABLED: Joi.boolean().default(false),
+        MANUAL_EXCHANGE_COLLECTION_BANK_NAME: Joi.when(
+          'MANUAL_EXCHANGE_ENABLED',
+          {
+            is: true,
+            then: Joi.string().trim().max(100).required(),
+            otherwise: Joi.string().allow('').optional(),
+          },
+        ),
+        MANUAL_EXCHANGE_COLLECTION_ACCOUNT_NAME: Joi.when(
+          'MANUAL_EXCHANGE_ENABLED',
+          {
+            is: true,
+            then: Joi.string().trim().max(150).required(),
+            otherwise: Joi.string().allow('').optional(),
+          },
+        ),
+        MANUAL_EXCHANGE_COLLECTION_ACCOUNT_NUMBER: Joi.when(
+          'MANUAL_EXCHANGE_ENABLED',
+          {
+            is: true,
+            then: Joi.string()
+              .pattern(/^\d{10}$/)
+              .required(),
+            otherwise: Joi.string().allow('').optional(),
+          },
+        ),
+        MANUAL_EXCHANGE_COLLECTION_VERSION: Joi.when(
+          'MANUAL_EXCHANGE_ENABLED',
+          {
+            is: true,
+            then: Joi.string().trim().max(100).required(),
+            otherwise: Joi.string().allow('').optional(),
+          },
+        ),
         EXCHANGE_RECEIPT_PROOF_URL_TTL_SECONDS: Joi.number()
           .empty('')
           .min(60)
@@ -418,6 +454,7 @@ const defaultNodeEnv =
     PaymentsModule,
     VtuModule,
     TransactionsModule,
+    PaymentAttemptsModule,
     AdminModule,
     KycModule,
     BankingModule,

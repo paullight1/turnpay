@@ -207,6 +207,10 @@ export async function cleanupFinancialTransferFixture(
 ) {
   const userIds = Object.values(fixture.users).map(({ id }) => id);
   const walletIds = fixture.wallets.map(({ id }) => id);
+  const fundingTransactions = await prisma.transaction.findMany({
+    where: { userId: { in: userIds }, type: 'FUND' },
+    select: { reference: true },
+  });
   const attempts = await prisma.internalTransferAttempt.findMany({
     where: { userId: { in: userIds } },
     select: { id: true, transferReference: true },
@@ -217,6 +221,15 @@ export async function cleanupFinancialTransferFixture(
     .filter((value): value is string => Boolean(value));
 
   await prisma.$transaction([
+    prisma.exchangeDepositAllocation.deleteMany({
+      where: {
+        reference: {
+          in: fundingTransactions.map((row) =>
+            row.reference.trim().toUpperCase(),
+          ),
+        },
+      },
+    }),
     prisma.auditLog.deleteMany({
       where: {
         OR: [

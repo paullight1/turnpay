@@ -72,6 +72,18 @@ export class AllExceptionsFilter implements ExceptionFilter {
         path.includes('/api/auth/register')) &&
       status === 409
     ) {
+      if (
+        typeof rawMessage === 'object' &&
+        !Array.isArray(rawMessage) &&
+        (rawMessage.code === 'EMAIL_ALREADY_REGISTERED' ||
+          rawMessage.code === 'PHONE_ALREADY_REGISTERED') &&
+        typeof rawMessage.message === 'string'
+      ) {
+        return {
+          code: rawMessage.code,
+          message: rawMessage.message,
+        };
+      }
       return 'Unable to complete registration';
     }
 

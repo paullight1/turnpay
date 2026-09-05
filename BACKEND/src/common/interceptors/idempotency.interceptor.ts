@@ -112,7 +112,11 @@ export class IdempotencyInterceptor implements NestInterceptor {
       scope,
       keyDigest,
     };
-    const encryptResponse = authPolicy === 'ENCRYPTED';
+    const encryptResponse =
+      authPolicy === 'ENCRYPTED' ||
+      /^\/api\/admin\/exchange\/manual-orders\/[^/]+\/proof-url$/.test(
+        normalizedPath,
+      );
     const expiresAt = new Date(Date.now() + IDEMPOTENCY_TTL * 1000);
     const cacheKey = `idempotency:${scope}:${keyDigest}`;
     const lockKey = `${cacheKey}:lock`;
@@ -319,7 +323,12 @@ export class IdempotencyInterceptor implements NestInterceptor {
       path === '/api/payments/banks/resolve' ||
       path === '/api/banking/banks/resolve' ||
       path === '/api/transfers/recipient/preview' ||
-      path === '/api/transfers/internal'
+      path === '/api/transfers/internal' ||
+      // These endpoints persist the upload intent themselves and regenerate
+      // expiring credentials on replay. Never cache signed upload tokens.
+      /^\/api\/(?:admin\/)?exchange\/manual-orders\/[^/]+\/upload-url$/.test(
+        path,
+      )
     );
   }
 

@@ -24,6 +24,7 @@ describe('AuthService Supabase integration', () => {
       },
     },
     syncUser: jest.fn(),
+    ensureRecoveryIdentity: jest.fn(),
     createUserScopedClient: jest.fn(() => scopedClient),
     setAuthAppRole: jest.fn(),
   };
@@ -161,9 +162,37 @@ describe('AuthService Supabase integration', () => {
         password: 'Password1',
         transactionPin: '1234',
       }),
-    ).rejects.toThrow('Unable to complete registration');
+    ).rejects.toMatchObject({
+      response: {
+        code: 'PHONE_ALREADY_REGISTERED',
+        message: 'That phone number is already linked to a TrustPay account.',
+      },
+    });
 
     expect(supabase.authClient.auth.signUp).not.toHaveBeenCalled();
+  });
+
+  it('returns an email-specific conflict when Supabase reports a duplicate email', async () => {
+    users.findByEmail.mockResolvedValue(null);
+    users.findByPhone.mockResolvedValue(null);
+    supabase.authClient.auth.signUp.mockResolvedValue({
+      data: {},
+      error: { code: 'email_exists', message: 'User already registered' },
+    });
+
+    await expect(
+      service.register({
+        email: 'new@example.com',
+        phone: '+2348012345678',
+        password: 'Password1',
+        transactionPin: '1234',
+      }),
+    ).rejects.toMatchObject({
+      response: {
+        code: 'EMAIL_ALREADY_REGISTERED',
+        message: 'That email is already linked to a TrustPay account.',
+      },
+    });
   });
 
   it('returns a generic message when Supabase registration fails', async () => {
@@ -171,7 +200,11 @@ describe('AuthService Supabase integration', () => {
     users.findByPhone.mockResolvedValue(null);
     supabase.authClient.auth.signUp.mockResolvedValue({
       data: {},
-      error: { message: 'User already registered' },
+      error: {
+        message: 'User already registered',
+        code: 'email_address_invalid',
+        status: 400,
+      },
     });
 
     await expect(
@@ -185,6 +218,18 @@ describe('AuthService Supabase integration', () => {
 
     expect(transactionPin.setPin).not.toHaveBeenCalled();
     expect(users.findOne).not.toHaveBeenCalled();
+    expect(logger.warn).toHaveBeenCalledWith(
+      {
+        event: 'user_registration_failed',
+        providerCode: 'email_address_invalid',
+        providerStatus: 400,
+      },
+      'Registration failed',
+    );
+    expect(logger.warn).not.toHaveBeenCalledWith(
+      expect.objectContaining({ email: expect.anything() }),
+      expect.any(String),
+    );
   });
 
   it('requires the current password before changing password', async () => {
@@ -385,6 +430,43 @@ describe('AuthService Supabase integration', () => {
       'ada@example.com',
     );
     expect(users.findByEmail).toHaveBeenCalledWith('ada@example.com');
+  });
+
+  it('repairs a missing Supabase identity before requesting password recovery', async () => {
+    users.findByEmail.mockResolvedValue({
+      id: 'local-user-1',
+      email: 'ada@example.com',
+      phone: '+2348012345678',
+      fullName: 'Ada Lovelace',
+      role: 'USER',
+    });
+    supabase.ensureRecoveryIdentity.mockResolvedValue(undefined);
+    supabase.authClient.auth.resetPasswordForEmail.mockResolvedValue({
+      data: {},
+      error: null,
+    });
+
+    await expect(
+      service.sendPasswordResetEmail('ada@example.com'),
+    ).resolves.toEqual({
+      success: true,
+      message:
+        'If an account exists, password reset instructions have been sent',
+    });
+
+    expect(supabase.ensureRecoveryIdentity).toHaveBeenCalledWith({
+      id: 'local-user-1',
+      email: 'ada@example.com',
+      phone: '+2348012345678',
+      fullName: 'Ada Lovelace',
+      role: 'USER',
+    });
+    expect(supabase.authClient.auth.resetPasswordForEmail).toHaveBeenCalledWith(
+      'ada@example.com',
+      {
+        redirectTo: 'http://localhost:3000/reset-password',
+      },
+    );
   });
 
   it('normalizes OTP send identities before throttling and lookup', async () => {

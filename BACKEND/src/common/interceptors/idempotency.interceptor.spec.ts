@@ -218,6 +218,41 @@ describe('IdempotencyInterceptor', () => {
     ).not.toContain('access_token');
   });
 
+  it('encrypts manual proof read credentials and delegates upload replay to durable proof intents', async () => {
+    const interceptor = new IdempotencyInterceptor(
+      redis as any,
+      prisma as any,
+      logger as any,
+      responseCrypto as any,
+    );
+    const proof = { url: 'https://storage.example.invalid/signed-proof' };
+    const response = await interceptor.intercept(
+      makeContext(
+        { kind: 'DEPOSIT' },
+        { path: '/api/admin/exchange/manual-orders/order-1/proof-url' },
+      ),
+      { handle: () => of(proof) },
+    );
+    await expect(lastValueFrom(response)).resolves.toEqual(proof);
+    expect(responseCrypto.encrypt).toHaveBeenCalledWith(
+      proof,
+      expect.anything(),
+    );
+    expect(redis.set).not.toHaveBeenCalled();
+    prisma.idempotencyRecord.create.mockClear();
+    const upload = await interceptor.intercept(
+      makeContext(
+        {},
+        { path: '/api/exchange/manual-orders/order-1/upload-url' },
+      ),
+      { handle: () => of({ signedUrl: 'synthetic' }) },
+    );
+    await expect(lastValueFrom(upload)).resolves.toEqual({
+      signedUrl: 'synthetic',
+    });
+    expect(prisma.idempotencyRecord.create).not.toHaveBeenCalled();
+  });
+
   it('decrypts a persisted token-bearing auth replay without invoking the handler', async () => {
     const interceptor = new IdempotencyInterceptor(
       redis as any,

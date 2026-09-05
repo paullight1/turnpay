@@ -16,6 +16,7 @@ describe('BankingService', () => {
       upsert: jest.fn(),
     },
     transaction: {
+      findFirst: jest.fn(),
       create: jest.fn(),
       update: jest.fn(),
     },
@@ -24,6 +25,8 @@ describe('BankingService', () => {
       create: jest.fn(),
       update: jest.fn(),
     },
+    exchangeReceipt: { findFirst: jest.fn() },
+    exchangeDepositAllocation: { create: jest.fn(), findUnique: jest.fn() },
     auditLog: {
       create: jest.fn(),
     },
@@ -76,10 +79,19 @@ describe('BankingService', () => {
     );
   });
 
-  it('returns full account numbers to the authenticated account owner', async () => {
-    prisma.virtualAccount.findMany.mockResolvedValue([]);
+  it('returns full account numbers only after complete KYC', async () => {
+    prisma.user.findUnique.mockResolvedValue({
+      kycStatus: 'VERIFIED',
+      kycTier: 'TIER_2',
+    });
+    prisma.virtualAccount.findMany.mockResolvedValue([
+      {
+        accountNumber: '3397990020',
+        accountNumberMasked: '******0020',
+      },
+    ]);
 
-    await service.getVirtualAccounts('user-1');
+    const result = await service.getVirtualAccounts('user-1');
 
     expect(prisma.virtualAccount.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -90,6 +102,29 @@ describe('BankingService', () => {
         }),
       }),
     );
+    expect(result[0].accountNumber).toBe('3397990020');
+  });
+
+  it('redacts account numbers until complete KYC', async () => {
+    prisma.user.findUnique.mockResolvedValue({
+      kycStatus: 'PENDING',
+      kycTier: 'TIER_0',
+    });
+    prisma.virtualAccount.findMany.mockResolvedValue([
+      {
+        accountNumber: '3397990020',
+        accountNumberMasked: '******0020',
+      },
+    ]);
+
+    const result = await service.getVirtualAccounts('user-1');
+
+    expect(result).toEqual([
+      expect.objectContaining({
+        accountNumber: '',
+        accountNumberMasked: '******0020',
+      }),
+    ]);
   });
 
   it('requires verified KYC before provisioning a virtual account', async () => {

@@ -7,9 +7,18 @@ import {
 } from '@supabase/supabase-js';
 import { WalletCurrency } from '@prisma/client';
 import { PinoLogger } from 'nestjs-pino';
+import { randomBytes } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 
 type TrustPaySupabaseClient = SupabaseClient<any, any, 'public', any, any>;
+
+type RecoveryIdentityCandidate = {
+  id: string;
+  email: string;
+  phone: string;
+  fullName: string | null;
+  role: 'USER' | 'ADMIN';
+};
 
 @Injectable()
 export class SupabaseService {
@@ -88,6 +97,44 @@ export class SupabaseService {
     }
 
     return this.adminClient;
+  }
+
+  async ensureRecoveryIdentity(candidate: RecoveryIdentityCandidate) {
+    const admin = this.getAdminClient().auth.admin;
+    const { data: legacyIdentity, error: lookupError } =
+      await admin.getUserById(candidate.id);
+
+    if (legacyIdentity.user) {
+      return;
+    }
+
+    if (
+      lookupError &&
+      lookupError.code !== 'user_not_found' &&
+      lookupError.status !== 404
+    ) {
+      throw new Error('Unable to verify password recovery identity');
+    }
+
+    const temporaryPassword = `${randomBytes(32).toString('base64url')}Aa1!`;
+    const { error: createError } = await admin.createUser({
+      email: candidate.email,
+      password: temporaryPassword,
+      email_confirm: true,
+      app_metadata: { role: candidate.role },
+      user_metadata: {
+        phone: candidate.phone,
+        ...(candidate.fullName ? { full_name: candidate.fullName } : {}),
+      },
+    });
+
+    if (
+      createError &&
+      createError.code !== 'user_already_exists' &&
+      createError.code !== 'email_exists'
+    ) {
+      throw new Error('Unable to repair password recovery identity');
+    }
   }
 
   async createSignedUploadUrl(bucket: string, objectKey: string) {

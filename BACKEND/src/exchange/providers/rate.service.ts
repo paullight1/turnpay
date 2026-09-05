@@ -21,6 +21,10 @@ interface CachedRate {
   rate: number;
   markup: number;
   fetchedAt: number;
+  /** Absolute expiry copied from the persisted rate when available. */
+  validUntil?: number | null;
+  /** Fallback rates are display-only and must never be treated as executable. */
+  source?: string;
 }
 
 interface RateResult {
@@ -72,14 +76,15 @@ export class RateService implements OnModuleInit {
 
   /**
    * Get the current exchange rate for a currency pair.
-   * Returns isStale=true when the circuit is open and a fallback rate is served.
+   * Returns isStale=true whenever a rate is outside its execution freshness
+   * window, while still retaining a bounded stale value for display.
    */
   async getRate(from: string, to: string): Promise<RateResult> {
     const key = `${from}_${to}`;
 
     // Check in-memory cache first (fast path)
     const memoryCached = this.memoryCache.get(key);
-    if (memoryCached && this.isFresh(memoryCached.fetchedAt)) {
+    if (memoryCached && this.isFresh(memoryCached)) {
       return {
         rate: memoryCached.rate,
         markup: memoryCached.markup,
@@ -89,7 +94,7 @@ export class RateService implements OnModuleInit {
 
     // Try Redis cache (second layer, survives restarts)
     const redisCached = await this.loadFromRedis(key);
-    if (redisCached && this.isFresh(redisCached.fetchedAt)) {
+    if (redisCached && this.isFresh(redisCached)) {
       this.memoryCache.set(key, redisCached);
       return {
         rate: redisCached.rate,
@@ -100,8 +105,12 @@ export class RateService implements OnModuleInit {
 
     // Try DB stored rate
     const stored = await this.loadStoredRate(from, to);
-    if (stored) {
-      return { rate: stored.rate, markup: stored.markup, isStale: false };
+    if (stored && this.isFresh(stored)) {
+      return {
+        rate: stored.rate,
+        markup: stored.markup,
+        isStale: false,
+      };
     }
 
     // Circuit is open — serve stale rate if available
@@ -124,11 +133,28 @@ export class RateService implements OnModuleInit {
     await this.fetchRates();
 
     const refreshed = this.memoryCache.get(key);
-    if (refreshed) {
+    if (refreshed && this.isFresh(refreshed)) {
       return {
         rate: refreshed.rate,
         markup: refreshed.markup,
-        isStale: this.circuitState !== 'CLOSED',
+        isStale: false,
+      };
+    }
+
+    // A failed fetch can leave a stale DB/cache value in memory even while
+    // the circuit is still closed (before the failure threshold is reached).
+    // Keep that value available for read-only display, but mark it stale so
+    // execution callers can reject it.
+    const staleRate = await this.getStaleRate(key);
+    if (staleRate) {
+      this.logger.warn(
+        { from, to, rate: staleRate.rate },
+        'Serving bounded stale rate after refresh failure',
+      );
+      return {
+        rate: staleRate.rate,
+        markup: staleRate.markup,
+        isStale: true,
       };
     }
 
@@ -176,13 +202,19 @@ export class RateService implements OnModuleInit {
       where: {
         from_to: { from, to },
       },
-      update: { rate: String(rate), markup: String(markup), source: 'admin' },
+      update: {
+        rate: String(rate),
+        markup: String(markup),
+        source: 'admin',
+        validUntil: null,
+      },
       create: {
         from,
         to,
         rate: String(rate),
         markup: String(markup),
         source: 'admin',
+        validUntil: null,
       },
     });
 
@@ -228,6 +260,7 @@ export class RateService implements OnModuleInit {
       rate,
       markup,
       fetchedAt: Date.now(),
+      source: 'admin',
     };
     this.memoryCache.set(`${from}_${to}`, cached);
     await this.saveToRedis(`${from}_${to}`, cached);
@@ -497,35 +530,88 @@ export class RateService implements OnModuleInit {
 
   // ─── Private: Cache Helpers ────────────────────────────────────────
 
-  private isFresh(fetchedAt: number): boolean {
-    return Date.now() - fetchedAt < RATE_FRESHNESS_TTL_MS;
+  private isFresh(cached: CachedRate): boolean {
+    const now = Date.now();
+    const age = now - cached.fetchedAt;
+
+    // fetchedAt is the source timestamp. In particular, it must never be
+    // replaced with the time an old DB row was read into memory.
+    if (!Number.isFinite(cached.fetchedAt) || age < 0) {
+      return false;
+    }
+
+    if (cached.source === 'fallback' || age >= RATE_FRESHNESS_TTL_MS) {
+      return false;
+    }
+
+    if (
+      cached.validUntil !== undefined &&
+      cached.validUntil !== null &&
+      (!Number.isFinite(cached.validUntil) || now >= cached.validUntil)
+    ) {
+      return false;
+    }
+
+    return true;
   }
 
-  private async getStaleRate(
-    key: string,
-  ): Promise<{ rate: number; markup: number } | null> {
+  private isWithinStaleRetention(cached: CachedRate): boolean {
+    const age = Date.now() - cached.fetchedAt;
+    return (
+      Number.isFinite(cached.fetchedAt) &&
+      age >= 0 &&
+      age < RATE_STALE_RETENTION_SECONDS * 1000
+    );
+  }
+
+  private async getStaleRate(key: string): Promise<CachedRate | null> {
     // Try memory cache even if stale
     const memoryCached = this.memoryCache.get(key);
-    if (memoryCached) {
-      return { rate: memoryCached.rate, markup: memoryCached.markup };
+    if (memoryCached && this.isWithinStaleRetention(memoryCached)) {
+      return memoryCached;
     }
 
     // Try Redis (may have longer retention)
     const redisCached = await this.loadFromRedis(key);
-    if (redisCached) {
-      return { rate: redisCached.rate, markup: redisCached.markup };
+    if (redisCached && this.isWithinStaleRetention(redisCached)) {
+      return redisCached;
     }
 
     // Try DB
     const [from, to] = key.split('_');
-    return this.loadStoredRate(from, to);
+    const stored = await this.loadStoredRate(from, to);
+    return stored && this.isWithinStaleRetention(stored) ? stored : null;
   }
 
   private async loadFromRedis(key: string): Promise<CachedRate | null> {
     try {
       const raw = await this.redis.get(`${RATE_CACHE_REDIS_PREFIX}${key}`);
       if (raw) {
-        return JSON.parse(raw) as CachedRate;
+        const parsed = JSON.parse(raw) as Partial<CachedRate>;
+        const rate = Number(parsed.rate);
+        const markup = Number(parsed.markup);
+        const fetchedAt = Number(parsed.fetchedAt);
+        const validUntil =
+          parsed.validUntil === undefined || parsed.validUntil === null
+            ? null
+            : Number(parsed.validUntil);
+
+        if (
+          !Number.isFinite(rate) ||
+          !Number.isFinite(markup) ||
+          !Number.isFinite(fetchedAt) ||
+          (validUntil !== null && !Number.isFinite(validUntil))
+        ) {
+          return null;
+        }
+
+        return {
+          rate,
+          markup,
+          fetchedAt,
+          validUntil,
+          source: parsed.source,
+        };
       }
     } catch {
       // Redis unavailable
@@ -550,7 +636,7 @@ export class RateService implements OnModuleInit {
   private async loadStoredRate(
     from: string,
     to: string,
-  ): Promise<{ rate: number; markup: number } | null> {
+  ): Promise<CachedRate | null> {
     const stored = await this.prisma.rate.findUnique({
       where: { from_to: { from, to } },
     });
@@ -563,11 +649,14 @@ export class RateService implements OnModuleInit {
     const cached: CachedRate = {
       rate: stored.rate.toNumber(),
       markup: stored.markup.toNumber(),
-      fetchedAt: Date.now(),
+      // Keep the source timestamp. Reading an old row must not rejuvenate it.
+      fetchedAt: stored.updatedAt.getTime(),
+      validUntil: stored.validUntil?.getTime() ?? null,
+      source: stored.source,
     };
     this.memoryCache.set(key, cached);
 
-    return { rate: cached.rate, markup: cached.markup };
+    return cached;
   }
 
   private async loadStoredRatesToMemory(): Promise<boolean> {
@@ -580,7 +669,10 @@ export class RateService implements OnModuleInit {
       this.memoryCache.set(`${stored.from}_${stored.to}`, {
         rate: stored.rate.toNumber(),
         markup: stored.markup.toNumber(),
-        fetchedAt: Date.now(),
+        // Keep the source timestamp. Reading an old row must not rejuvenate it.
+        fetchedAt: stored.updatedAt.getTime(),
+        validUntil: stored.validUntil?.getTime() ?? null,
+        source: stored.source,
       });
     }
 
@@ -603,7 +695,9 @@ export class RateService implements OnModuleInit {
         this.memoryCache.set(pair, {
           rate: existing.rate.toNumber(),
           markup: existing.markup.toNumber(),
-          fetchedAt: Date.now(),
+          fetchedAt: existing.updatedAt.getTime(),
+          validUntil: existing.validUntil?.getTime() ?? null,
+          source: existing.source,
         });
         continue;
       }
@@ -624,6 +718,7 @@ export class RateService implements OnModuleInit {
         rate,
         markup,
         fetchedAt: Date.now(),
+        source: 'fallback',
       });
     }
 
@@ -667,7 +762,9 @@ export class RateService implements OnModuleInit {
         this.memoryCache.set(key, {
           rate: existing.rate.toNumber(),
           markup: existing.markup.toNumber(),
-          fetchedAt: Date.now(),
+          fetchedAt: existing.updatedAt.getTime(),
+          validUntil: existing.validUntil?.getTime() ?? null,
+          source: existing.source,
         });
         continue;
       }
@@ -677,15 +774,24 @@ export class RateService implements OnModuleInit {
           ? existing.markup.toNumber()
           : DEFAULT_MARKUP_PERCENT;
 
+      const fetchedAt = Date.now();
+      const validUntil = new Date(fetchedAt + RATE_FRESHNESS_TTL_MS);
+
       await this.prisma.rate.upsert({
         where: { from_to: { from, to } },
-        update: { rate: String(rate), source: 'api', updatedAt: new Date() },
+        update: {
+          rate: String(rate),
+          source: 'api',
+          updatedAt: new Date(fetchedAt),
+          validUntil,
+        },
         create: {
           from,
           to,
           rate: String(rate),
           markup: String(effectiveMarkup),
           source: 'api',
+          validUntil,
         },
       });
 
@@ -693,7 +799,9 @@ export class RateService implements OnModuleInit {
       const cached: CachedRate = {
         rate,
         markup: effectiveMarkup,
-        fetchedAt: Date.now(),
+        fetchedAt,
+        validUntil: validUntil.getTime(),
+        source: 'api',
       };
       this.memoryCache.set(key, cached);
       await this.saveToRedis(key, cached);

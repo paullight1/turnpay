@@ -1,3 +1,9 @@
+import {
+  ManualExchangeController,
+  AdminManualExchangeController,
+} from './manual-exchange.controller';
+import { ManualExchangeService } from './manual-exchange.service';
+import { ManualExchangeReconciliationService } from './manual-exchange-reconciliation.service';
 import { Module } from '@nestjs/common';
 import { HttpModule } from '@nestjs/axios';
 import { ExchangeService } from './exchange.service';
@@ -24,9 +30,16 @@ import { BankingModule } from '../banking/banking.module';
     WalletsModule,
     BankingModule,
   ],
-  controllers: [ExchangeController, AdminExchangeController],
+  controllers: [
+    ExchangeController,
+    AdminExchangeController,
+    ManualExchangeController,
+    AdminManualExchangeController,
+  ],
   providers: [
     ExchangeService,
+    ManualExchangeService,
+    ManualExchangeReconciliationService,
     RateService,
     RateAlertService,
     NotificationService,
