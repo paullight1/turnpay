@@ -15,7 +15,12 @@ import { SupabaseService } from '../supabase/supabase.service';
 import { UsersService } from '../users/users.service';
 import { WalletsService } from '../wallets/wallets.service';
 import { OtpService } from '../otp/otp.service';
-import { LoginDto, RegisterDto, ResetTransactionPinDto } from './dto/auth.dto';
+import {
+  LoginDto,
+  RegisterDto,
+  ResetTransactionPinDto,
+  StaffRegisterDto,
+} from './dto/auth.dto';
 import { PinoLogger } from 'nestjs-pino';
 import type { RequestAuditContext } from '../common/services/request-audit-context';
 import { TransactionPinService } from '../common/services/transaction-pin.service';
@@ -68,6 +73,45 @@ export class AuthService {
     private readonly configService: ConfigService,
     private readonly logger: PinoLogger,
   ) {}
+
+  async registerStaff(dto: StaffRegisterDto) {
+    const email = this.normalizeEmail(dto.email);
+    if (!/^[^@\s]+@trustpayhq\.com$/.test(email)) {
+      throw new BadRequestException(
+        'Staff signup requires a trustpayhq.com email address',
+      );
+    }
+    const { error } = await this.supabaseService.authClient.auth.signUp({
+      email,
+      password: dto.password,
+      options: {
+        data: { ...(dto.fullName ? { full_name: dto.fullName.trim() } : {}) },
+      },
+    });
+    if (error) {
+      if (this.isSupabaseRateLimit(error)) {
+        throw new HttpException(
+          REGISTRATION_RATE_LIMIT_MESSAGE,
+          HttpStatus.TOO_MANY_REQUESTS,
+        );
+      }
+      this.logger.warn(
+        { event: 'staff_signup_failed' },
+        'Supabase staff signup failed',
+      );
+      throw new HttpException(
+        'Staff signup is temporarily unavailable. Please try again shortly.',
+        HttpStatus.SERVICE_UNAVAILABLE,
+      );
+    }
+    // Do not mint a local fallback, confirm an email, or assign an ADMIN role.
+    // The authenticated guard requires Supabase-confirmed domain ownership.
+    this.logger.info(
+      { event: 'staff_signup_requested' },
+      'Staff email verification requested',
+    );
+    return { success: true, requiresEmailConfirmation: true };
+  }
 
   async register(registerDto: RegisterDto, context: SessionContext = {}) {
     const email = this.normalizeEmail(registerDto.email);
@@ -321,7 +365,7 @@ export class AuthService {
     };
   }
 
-  async bootstrap(userId: string) {
+  async bootstrap(userId: string, canAccessAdmin = false) {
     const [user, wallets] = await Promise.all([
       this.usersService.findOne(userId),
       this.walletsService.getWallets(userId),
@@ -332,7 +376,13 @@ export class AuthService {
       'User session bootstrapped',
     );
 
-    return { user, wallets };
+    return {
+      user: {
+        ...user,
+        canAccessAdmin: user.role === 'ADMIN' || canAccessAdmin,
+      },
+      wallets,
+    };
   }
 
   async refreshToken(refreshToken: string, context: SessionContext = {}) {

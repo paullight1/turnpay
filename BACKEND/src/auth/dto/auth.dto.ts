@@ -184,3 +184,28 @@ export class ResetTransactionPinDto {
   })
   otp?: string;
 }
+
+export class StaffRegisterDto {
+  @Transform(({ value }) => normalizeEmail(value))
+  @IsEmail()
+  @MaxLength(254)
+  @Matches(/^[^@\s]+@trustpayhq\.com$/, {
+    message: 'Staff signup requires a trustpayhq.com email address',
+  })
+  email: string;
+
+  @IsString()
+  @MinLength(8)
+  @MaxLength(72)
+  @Matches(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/, {
+    message: 'Password must contain uppercase, lowercase, and number',
+  })
+  password: string;
+
+  @IsOptional()
+  @IsString()
+  @Transform(({ value }) => trimString(value))
+  @MinLength(2)
+  @MaxLength(120)
+  fullName?: string;
+}

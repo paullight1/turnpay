@@ -119,6 +119,40 @@ describe('AuthService Supabase integration', () => {
     prisma.user.updateMany.mockResolvedValue({ count: 0 });
   });
 
+  it('creates a staff verification request without a phone, PIN or local session', async () => {
+    supabase.authClient.auth.signUp.mockResolvedValue({
+      data: {
+        user: { id: 'staff' },
+        session: { access_token: 'must-not-return' },
+      },
+      error: null,
+    });
+    const result = await service.registerStaff({
+      email: 'Support@trustpayhq.com',
+      password: 'StrongPassword123',
+    });
+    expect(result).toEqual({ success: true, requiresEmailConfirmation: true });
+    expect(supabase.authClient.auth.signUp).toHaveBeenCalledWith({
+      email: 'support@trustpayhq.com',
+      password: 'StrongPassword123',
+      options: { data: {} },
+    });
+    expect(users.findByPhone).not.toHaveBeenCalled();
+    expect(transactionPin.setPin).not.toHaveBeenCalled();
+    expect(supabase.setAuthAppRole).not.toHaveBeenCalled();
+    expect(supabase.syncUser).not.toHaveBeenCalled();
+  });
+
+  it('rejects lookalike domains before calling Supabase staff signup', async () => {
+    await expect(
+      service.registerStaff({
+        email: 'staff@trustpayhq.com.evil.test',
+        password: 'StrongPassword123',
+      }),
+    ).rejects.toThrow(BadRequestException);
+    expect(supabase.authClient.auth.signUp).not.toHaveBeenCalled();
+  });
+
   it('registers users with public Supabase auth and stores role in app metadata', async () => {
     users.findByEmail.mockResolvedValue(null);
     users.findByPhone.mockResolvedValue(null);

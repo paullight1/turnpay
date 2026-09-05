@@ -34,6 +34,7 @@ export const AUTH_MUTATION_IDEMPOTENCY_POLICIES: Readonly<
   Record<string, AuthIdempotencyPolicy>
 > = {
   'POST /api/auth/register': 'ENCRYPTED',
+  'POST /api/auth/staff/register': 'STANDARD',
   'POST /api/auth/login': 'ENCRYPTED',
   'POST /api/auth/refresh': 'ENCRYPTED',
   'POST /api/auth/bootstrap': 'STANDARD',

@@ -3,6 +3,7 @@ import type { Request } from 'express';
 export type AuthenticatedUser = {
   userId: string;
   role?: string;
+  canAccessAdmin?: boolean;
 };
 
 export type AuthenticatedRequest = Request & {

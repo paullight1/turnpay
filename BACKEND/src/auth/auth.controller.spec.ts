@@ -113,7 +113,7 @@ describe('AuthController', () => {
 
     const result = await controller.bootstrap(payload);
 
-    expect(authService.bootstrap).toHaveBeenCalledWith('user-1');
+    expect(authService.bootstrap).toHaveBeenCalledWith('user-1', false);
     expect(result).toBe(response);
   });
 

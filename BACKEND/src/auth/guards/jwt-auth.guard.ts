@@ -9,6 +9,7 @@ import { ConfigService } from '@nestjs/config';
 import * as jwt from 'jsonwebtoken';
 import { SupabaseService } from '../../supabase/supabase.service';
 import { PrismaService } from '../../prisma/prisma.service';
+import type { User as SupabaseUser } from '@supabase/supabase-js';
 
 type RequestWithUser = {
   headers: {
@@ -18,6 +19,7 @@ type RequestWithUser = {
     userId: string;
     email: string;
     role: string;
+    canAccessAdmin: boolean;
   };
 };
 
@@ -44,12 +46,14 @@ export class JwtAuthGuard implements CanActivate {
 
     let userId: string;
     let role: string;
+    let verifiedIdentity: SupabaseUser | undefined;
 
     try {
       const supabaseUser = await this.supabaseService.verifyToken(accessToken);
       const user = await this.supabaseService.syncUser(supabaseUser);
       userId = user.id;
       role = user.role;
+      verifiedIdentity = supabaseUser;
     } catch (supabaseError) {
       if (this.canUseLocalAuthFallback()) {
         const localUser = this.verifyLocalToken(accessToken);
@@ -82,6 +86,16 @@ export class JwtAuthGuard implements CanActivate {
       userId: user.id,
       email: user.email,
       role: user.role || role,
+      // Company access is derived only from Supabase's verified current user,
+      // never from JWT/user_metadata claims or an unverified local session.
+      canAccessAdmin:
+        user.role === 'ADMIN' ||
+        Boolean(
+          verifiedIdentity?.email_confirmed_at &&
+          verifiedIdentity.email?.trim().toLowerCase() ===
+            user.email.trim().toLowerCase() &&
+          /^[^@\s]+@trustpayhq\.com$/i.test(verifiedIdentity.email),
+        ),
     };
 
     return true;

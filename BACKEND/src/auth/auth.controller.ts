@@ -17,6 +17,7 @@ import type { Request } from 'express';
 import { AuthService } from './auth.service';
 import {
   RegisterDto,
+  StaffRegisterDto,
   LoginDto,
   LogoutDto,
   ChangePasswordDto,
@@ -48,6 +49,13 @@ export class AuthController {
     );
   }
 
+  @Post('staff/register')
+  @Throttle({ default: { limit: 3, ttl: 3600000 } })
+  @HttpCode(HttpStatus.CREATED)
+  registerStaff(@Body() dto: StaffRegisterDto) {
+    return this.authService.registerStaff(dto);
+  }
+
   @Post('login')
   @Throttle({ default: { limit: 5, ttl: 900000 } })
   @HttpCode(HttpStatus.OK)
@@ -58,8 +66,13 @@ export class AuthController {
   @Post('bootstrap')
   @UseGuards(SupabaseAuthGuard)
   @HttpCode(HttpStatus.OK)
-  async bootstrap(@CurrentUser() user: { userId: string }) {
-    return this.authService.bootstrap(user.userId);
+  async bootstrap(
+    @CurrentUser() user: { userId: string; canAccessAdmin?: boolean },
+  ) {
+    return this.authService.bootstrap(
+      user.userId,
+      user.canAccessAdmin === true,
+    );
   }
 
   @Post('refresh')
