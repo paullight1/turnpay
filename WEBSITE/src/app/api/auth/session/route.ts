@@ -27,7 +27,10 @@ const authSessionSchema = z.object({
       access_token: z.string().min(1),
       refresh_token: z.string().min(1),
       expires_at: z.number().int().positive(),
-      expires_in: z.number().int().positive(),
+      // Supabase can omit expires_in when the session has been serialized by
+      // the backend. expires_at remains the source of truth; we derive the
+      // relative TTL below before storing the cookie.
+      expires_in: z.number().int().positive().optional(),
       token_type: z.string().min(1),
       authMode: z.enum(["supabase", "local"]).optional(),
       user: z.object({}).passthrough(),
@@ -148,7 +151,18 @@ export async function POST(request: Request) {
     );
   }
 
-  const isValid = await verifyAccessToken(parsed.data.session.access_token);
+  const now = Math.floor(Date.now() / 1000);
+  const expiresAt = parsed.data.session.expires_at;
+  const expiresIn =
+    parsed.data.session.expires_in ??
+    Math.max(1, (expiresAt ?? now + 3600) - now);
+  const normalizedSession = {
+    ...parsed.data.session,
+    expires_at: expiresAt ?? now + expiresIn,
+    expires_in: expiresIn,
+  };
+
+  const isValid = await verifyAccessToken(normalizedSession.access_token);
   if (!isValid) {
     return NextResponse.json(
       { message: "Invalid or unverifiable access token" },
@@ -159,12 +173,12 @@ export async function POST(request: Request) {
   const csrfToken = getRequestCookies(request)[CSRF_COOKIE_NAME] || mintCsrfToken();
   const response = NextResponse.json({
     success: true,
-    session: buildClientSession(parsed.data.session),
+    session: buildClientSession(normalizedSession),
     csrfToken,
   });
   response.cookies.set(
     SESSION_COOKIE_NAME,
-    encodeSessionCookie(parsed.data.session),
+    encodeSessionCookie(normalizedSession),
     getSessionCookieOptions(undefined, request.url),
   );
   for (let index = 0; index < LEGACY_CHUNK_COUNT; index += 1) {
