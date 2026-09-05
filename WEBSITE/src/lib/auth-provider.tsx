@@ -6,12 +6,14 @@ import React, {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import { useRouter } from "next/navigation";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase";
 import type { Session, User as SupabaseUser } from "@supabase/supabase-js";
 import { authApi, getAuthDeviceName } from "@/services/api";
+import { hasAdminAccess } from "@/lib/admin-access";
 import {
   clearSupabaseSession,
   readPersistedSupabaseSession,
@@ -25,6 +27,7 @@ type AuthMode = "supabase" | "local";
 type AuthUser = SupabaseUser & {
   appProfile?: TrustPayUser;
   role?: TrustPayUser["role"];
+  canAccessAdmin?: boolean;
 };
 
 type AppSession = Session & {
@@ -64,8 +67,9 @@ function setAuthDebug(state: AuthDebugState) {
     return;
   }
 
-  (window as Window & { __TRUSTPAY_AUTH_DEBUG__?: AuthDebugState }).__TRUSTPAY_AUTH_DEBUG__ =
-    state;
+  (
+    window as Window & { __TRUSTPAY_AUTH_DEBUG__?: AuthDebugState }
+  ).__TRUSTPAY_AUTH_DEBUG__ = state;
 }
 
 interface AuthContextType {
@@ -73,7 +77,11 @@ interface AuthContextType {
   profile: TrustPayUser | null;
   session: AppSession | null;
   isLoading: boolean;
-  signIn: (email: string, password: string) => Promise<void>;
+  signIn: (
+    email: string,
+    password: string,
+    destination?: "/admin" | "/dashboard",
+  ) => Promise<void>;
   signUp: (
     email: string,
     password: string,
@@ -95,6 +103,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [session, setSession] = useState<AppSession | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const router = useRouter();
+  const establishingSession = useRef(false);
+  const sessionGeneration = useRef(0);
   const supabase = useMemo(
     () => (isSupabaseConfigured ? createClient() : null),
     [],
@@ -110,6 +120,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               ...nextSession.user,
               appProfile: nextProfile ?? undefined,
               role: nextProfile?.role ?? nextSession.user.role,
+              canAccessAdmin: nextProfile?.canAccessAdmin === true,
             }
           : null,
       );
@@ -119,6 +130,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const bootstrapSession = useCallback(
     async (nextSession: AppSession) => {
+      const generation = sessionGeneration.current;
       setAuthDebug({
         stage: "bootstrap-start",
         authMode: nextSession.authMode,
@@ -126,7 +138,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       });
       const { data } = await authApi.bootstrap(nextSession.access_token);
       const bootstrap = data as BootstrapResponse;
-      applySession(nextSession, bootstrap.user);
+      if (generation === sessionGeneration.current) {
+        applySession(nextSession, bootstrap.user);
+      }
       setAuthDebug({
         stage: "bootstrap-complete",
         authMode: nextSession.authMode,
@@ -140,7 +154,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const persistAndBootstrapSession = useCallback(
     async (nextSession: AppSession) => {
       await persistSupabaseSession(nextSession);
-      await bootstrapSession(nextSession);
+      return bootstrapSession(nextSession);
     },
     [bootstrapSession],
   );
@@ -153,29 +167,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const persistedSession =
           (await readPersistedSupabaseSession()) as AppSession | null;
 
-        if (supabase) {
-          const {
-            data: { session: currentSession },
-          } = await supabase.auth.getSession();
-          const activeSession =
-            persistedSession ?? (currentSession as AppSession | null);
-
-          if (!isMounted) return;
-
-          applySession(activeSession);
-
-          if (activeSession) {
-            await bootstrapSession(activeSession as AppSession);
-          }
-        } else {
-          if (!isMounted) return;
-
-          applySession(persistedSession);
-
-          if (persistedSession) {
-            await bootstrapSession(persistedSession as AppSession);
-          }
+        if (!isMounted || establishingSession.current) return;
+        applySession(persistedSession);
+        if (persistedSession) {
+          await bootstrapSession(persistedSession);
         }
+      } catch {
+        if (isMounted && !establishingSession.current) applySession(null);
       } finally {
         if (isMounted) {
           setIsLoading(false);
@@ -190,18 +188,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     };
 
     if (supabase) {
-      const result = supabase.auth.onAuthStateChange((_event, currentSession) => {
+      const result = supabase.auth.onAuthStateChange(() => {
+        if (establishingSession.current) return;
         void (async () => {
           const persistedSession =
             (await readPersistedSupabaseSession()) as AppSession | null;
-          const activeSession =
-            persistedSession ?? (currentSession as AppSession | null);
-          applySession(activeSession);
-          setIsLoading(false);
-
+          if (!isMounted || establishingSession.current) return;
+          const activeSession = persistedSession;
           if (activeSession) {
             await bootstrapSession(activeSession).catch(() => undefined);
+          } else {
+            applySession(null);
           }
+          setIsLoading(false);
         })();
       });
       subscription = result.data.subscription;
@@ -217,10 +216,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const handleSessionUpdate = (event: Event) => {
       const customEvent = event as CustomEvent<AppSession | null>;
       const nextSession = customEvent.detail ?? null;
-      applySession(nextSession);
-
       if (nextSession) {
         void bootstrapSession(nextSession).catch(() => undefined);
+      } else {
+        sessionGeneration.current += 1;
+        applySession(null);
       }
     };
 
@@ -247,70 +247,103 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return supabase;
   }, [supabase]);
 
-  const signIn = async (email: string, password: string) => {
-    setAuthDebug({
-      stage: "login-request-start",
-      hasSession: false,
-    });
-
-    let login: LoginResponse;
+  const signIn = async (
+    email: string,
+    password: string,
+    destination: "/admin" | "/dashboard" = "/dashboard",
+  ) => {
+    if (establishingSession.current) return;
+    establishingSession.current = true;
+    sessionGeneration.current += 1;
+    applySession(null);
     try {
-      const { data } = await authApi.login(email, password, getAuthDeviceName());
-      login = data as LoginResponse;
       setAuthDebug({
-        stage: "login-response",
-        authMode: login.authMode,
-        hasSession: Boolean(login.session?.access_token),
+        stage: "login-request-start",
+        hasSession: false,
       });
-    } catch (error) {
-      setAuthDebug({
-        stage: "login-request-error",
-        error: error instanceof Error ? error.message : "Unknown error",
-      });
-      throw error;
-    }
 
-    if (!login.session?.access_token || !login.session.refresh_token) {
-      throw new Error("Invalid login response");
-    }
-
-    if (login.authMode === "local") {
-      setAuthDebug({
-        stage: "local-session-persist-start",
-        authMode: login.authMode,
-        hasSession: true,
-      });
-      await persistSupabaseSession(login.session);
+      let login: LoginResponse;
       try {
-        await bootstrapSession(login.session);
+        const { data } = await authApi.login(
+          email,
+          password,
+          getAuthDeviceName(),
+        );
+        login = data as LoginResponse;
         setAuthDebug({
-          stage: "local-session-persisted",
+          stage: "login-response",
           authMode: login.authMode,
-          hasSession: true,
+          hasSession: Boolean(login.session?.access_token),
         });
       } catch (error) {
         setAuthDebug({
-          stage: "local-bootstrap-failed",
-          authMode: login.authMode,
-          hasSession: true,
+          stage: "login-request-error",
           error: error instanceof Error ? error.message : "Unknown error",
         });
-        await clearSupabaseSession();
         throw error;
       }
-    } else {
-      const authClient = requireSupabase();
-      const { data: sessionData, error } = await authClient.auth.setSession({
-        access_token: login.session.access_token,
-        refresh_token: login.session.refresh_token,
-      });
-      if (error) throw error;
 
-      const sessionToPersist = (sessionData.session ?? login.session) as AppSession;
-      await persistAndBootstrapSession(sessionToPersist);
+      if (!login.session?.access_token || !login.session.refresh_token) {
+        throw new Error("Invalid login response");
+      }
+
+      let staffAccess = false;
+      if (login.authMode === "local") {
+        setAuthDebug({
+          stage: "local-session-persist-start",
+          authMode: login.authMode,
+          hasSession: true,
+        });
+        await persistSupabaseSession(login.session);
+        try {
+          const bootstrap = await bootstrapSession(login.session);
+          staffAccess = hasAdminAccess(bootstrap.user);
+          setAuthDebug({
+            stage: "local-session-persisted",
+            authMode: login.authMode,
+            hasSession: true,
+          });
+        } catch (error) {
+          setAuthDebug({
+            stage: "local-bootstrap-failed",
+            authMode: login.authMode,
+            hasSession: true,
+            error: error instanceof Error ? error.message : "Unknown error",
+          });
+          await clearSupabaseSession();
+          throw error;
+        }
+      } else {
+        const authClient = requireSupabase();
+        const { data: sessionData, error } = await authClient.auth.setSession({
+          access_token: login.session.access_token,
+          refresh_token: login.session.refresh_token,
+        });
+        if (error) throw error;
+
+        const sessionToPersist = (sessionData.session ??
+          login.session) as AppSession;
+        const bootstrap = await persistAndBootstrapSession(sessionToPersist);
+        staffAccess = hasAdminAccess(bootstrap.user);
+      }
+
+      router.replace(
+        staffAccess
+          ? "/admin"
+          : destination === "/admin"
+            ? "/staff"
+            : "/dashboard",
+      );
+    } catch (error) {
+      sessionGeneration.current += 1;
+      await clearSupabaseSession();
+      if (supabase)
+        await supabase.auth.signOut({ scope: "local" }).catch(() => undefined);
+      applySession(null);
+      throw error;
+    } finally {
+      establishingSession.current = false;
     }
-
-    router.push("/dashboard");
   };
 
   const signUp = async (
@@ -362,8 +395,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           refresh_token: registered.session.refresh_token,
         });
         if (error) throw error;
-        const sessionToPersist =
-          (sessionData.session ?? registered.session) as AppSession;
+        const sessionToPersist = (sessionData.session ??
+          registered.session) as AppSession;
         await persistAndBootstrapSession(sessionToPersist);
       }
       router.push("/dashboard");
@@ -374,6 +407,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const signOut = async () => {
+    const destination = hasAdminAccess(profile) ? "/staff" : "/login";
     try {
       if (session) {
         await authApi.logout(session.refresh_token || undefined);
@@ -384,7 +418,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         await supabase.auth.signOut();
       }
       applySession(null);
-      router.push("/login");
+      router.replace(destination);
     }
   };
 

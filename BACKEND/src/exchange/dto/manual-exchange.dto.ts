@@ -16,6 +16,7 @@ import type { ManualAction, SettlementMode } from '../manual-exchange.policy';
 import { MANUAL_ACTIONS, MANUAL_STATUSES } from '../manual-exchange.policy';
 
 export class CreateManualExchangeDto {
+  @IsOptional() @IsIn(['NGN', 'GHS']) sourceCurrency?: 'NGN' | 'GHS';
   @IsString() @Matches(/^\d+(\.\d{1,2})?$/) @MaxLength(14) amount: string;
   @IsIn(['WALLET', 'BANK', 'MOMO']) settlementMode: SettlementMode;
   @ValidateIf(

@@ -197,6 +197,7 @@ class _TransactionSecurityScreenState extends State<TransactionSecurityScreen> {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     return Scaffold(
       backgroundColor: AppColors.background,
       body: SafeArea(
@@ -629,6 +630,7 @@ class _TransactionPinScreenState extends State<TransactionPinScreen> {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     final isCreateConfirm = widget.mode == PinScreenMode.create &&
         !_verifyExistingServerPin &&
         _firstPin != null;
@@ -835,6 +837,7 @@ class _SecurityActionPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     return Container(
       padding: const EdgeInsets.all(AppSpacing.md),
       decoration: BoxDecoration(
@@ -898,6 +901,7 @@ class _BiometricTogglePanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     return Container(
       padding: const EdgeInsets.all(AppSpacing.md),
       decoration: BoxDecoration(
@@ -966,6 +970,7 @@ class _SecurityInfoPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     return Container(
       padding: const EdgeInsets.all(AppSpacing.md),
       decoration: BoxDecoration(
@@ -1005,6 +1010,7 @@ class _PinDot extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     return AnimatedContainer(
       duration: const Duration(milliseconds: 160),
       margin: const EdgeInsets.symmetric(horizontal: AppSpacing.xs),
@@ -1037,6 +1043,7 @@ class _KeypadButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     return Center(
       child: InkWell(
         borderRadius: BorderRadius.circular(AppRadius.full),
@@ -1068,6 +1075,7 @@ class _KeypadIconButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     return Center(
       child: InkWell(
         borderRadius: BorderRadius.circular(AppRadius.full),
@@ -1098,6 +1106,7 @@ class _TopIconButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     return Material(
       color: AppColors.surfaceVariant,
       borderRadius: BorderRadius.circular(AppRadius.sm),

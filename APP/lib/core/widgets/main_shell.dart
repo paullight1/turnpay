@@ -5,7 +5,7 @@ import 'package:flutter/material.dart';
 import '../../core/theme/app_theme.dart';
 import '../../features/home/screens/dashboard_detail_screen.dart';
 import '../../features/home/screens/home_screen.dart';
-import '../../features/home/screens/money_action_screen.dart';
+import '../../features/exchange/screens/manual_exchange_screen.dart';
 import '../../services/home_data_service.dart';
 import 'micro_interactions.dart';
 
@@ -58,27 +58,45 @@ class MainShell extends StatefulWidget {
 
 class _MainShellState extends State<MainShell> {
   int _selectedIndex = 0;
+  bool _exchangeVisited = false;
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     return Scaffold(
       extendBody: true,
       backgroundColor: AppColors.background,
-      body: _screenFor(_selectedIndex),
-      bottomNavigationBar: _TrustPayBottomNav(
-        selectedIndex: _selectedIndex,
-        onTap: (i) => setState(() => _selectedIndex = i),
-      ),
+      body: Stack(children: [
+        if (_exchangeVisited)
+          Offstage(
+            offstage: _selectedIndex != 1,
+            child: TickerMode(
+                enabled: _selectedIndex == 1,
+                child: ManualExchangeScreen(
+                    showBackButton: false, active: _selectedIndex == 1)),
+          ),
+        if (_selectedIndex != 1) _screenFor(_selectedIndex),
+      ]),
+      bottomNavigationBar: MediaQuery.viewInsetsOf(context).bottom > 0
+          ? null
+          : _TrustPayBottomNav(
+              selectedIndex: _selectedIndex,
+              onTap: (i) {
+                if (i == _selectedIndex) return;
+                FocusManager.instance.primaryFocus?.unfocus();
+                setState(() {
+                  _selectedIndex = i;
+                  if (i == 1) _exchangeVisited = true;
+                });
+              },
+            ),
     );
   }
 
   Widget _screenFor(int index) {
     switch (index) {
       case 1:
-        return const MoneyActionScreen(
-          kind: MoneyActionKind.exchange,
-          showBackButton: false,
-        );
+        return const ManualExchangeScreen(showBackButton: false);
       case 2:
         return DashboardDetailScreen(
           kind: DashboardDetailKind.activity,
@@ -106,6 +124,7 @@ class _TrustPayBottomNav extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     return SafeArea(
       top: false,
       minimum: const EdgeInsets.fromLTRB(14, 0, 14, 10),
@@ -155,8 +174,19 @@ class _LiquidGlassPill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     final radius = BorderRadius.circular(AppRadius.full);
     final isDark = AppColors.isDark;
+
+    if (isDark) {
+      return DecoratedBox(
+        decoration: BoxDecoration(
+          borderRadius: radius,
+          color: const Color(0xFF191C24),
+          border: Border.all(color: const Color(0xFF2A2E38)),
+        ),
+      );
+    }
 
     // Derive the "glass" tint from the active theme so the pill reads as frosted
     // light glass in day mode and a softly lit surface in dark mode.
@@ -247,6 +277,7 @@ class _NavBarItem extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     final color = isActive ? AppColors.primary : AppColors.textSecondary;
     final borderRadius = BorderRadius.circular(AppRadius.full);
 

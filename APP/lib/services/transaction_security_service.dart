@@ -39,6 +39,7 @@ class TransactionSecurityService {
   static const _pinValueKey = 'trustpay_tx_pin_value';
   static const _pinLengthKey = 'trustpay_tx_pin_length';
   static const _biometricKey = 'trustpay_tx_biometric_enabled';
+  static const _biometricPromptSeenKey = 'trustpay_tx_biometric_prompt_seen';
   static const _faceIdKey = 'trustpay_tx_face_id_enabled';
   static const _fingerprintKey = 'trustpay_tx_fingerprint_enabled';
   static const _pinFailedAttemptsKey = 'trustpay_tx_pin_failed_attempts';
@@ -184,11 +185,23 @@ class TransactionSecurityService {
 
   Future<void> setBiometricEnabled(bool enabled) async {
     await _storage.write(key: _biometricKey, value: '$enabled');
+    await markBiometricPromptSeen();
     await _storage.delete(key: _faceIdKey);
     await _storage.delete(key: _fingerprintKey);
     if (!enabled) {
       _ephemeralApprovalPin = null;
     }
+  }
+
+  /// Returns whether the one-time biometric setup prompt has already been
+  /// shown on this device. This is intentionally device-local state; it never
+  /// leaves secure storage or becomes part of an API request.
+  Future<bool> hasSeenBiometricPrompt() async {
+    return await _storage.read(key: _biometricPromptSeenKey) == 'true';
+  }
+
+  Future<void> markBiometricPromptSeen() async {
+    await _storage.write(key: _biometricPromptSeenKey, value: 'true');
   }
 
   Future<bool> authenticateBiometric({
@@ -245,6 +258,7 @@ class TransactionSecurityService {
       _pinValueKey,
       _pinLengthKey,
       _biometricKey,
+      _biometricPromptSeenKey,
       _faceIdKey,
       _fingerprintKey,
       _pinFailedAttemptsKey,
@@ -372,14 +386,15 @@ class TransactionSecurityService {
   }
 
   String _biometricLabel(List<BiometricType> available) {
-    if (defaultTargetPlatform == TargetPlatform.iOS) {
-      return 'Face ID';
-    }
     if (available.contains(BiometricType.face)) {
-      return 'Face ID';
+      return defaultTargetPlatform == TargetPlatform.iOS
+          ? 'Face ID'
+          : 'Face recognition';
     }
     if (available.contains(BiometricType.fingerprint)) {
-      return 'Fingerprint';
+      return defaultTargetPlatform == TargetPlatform.iOS
+          ? 'Touch ID'
+          : 'Fingerprint';
     }
     return 'Biometric approval';
   }

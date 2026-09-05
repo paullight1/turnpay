@@ -1,5 +1,7 @@
 "use client";
 
+import { hasAdminAccess } from "@/lib/admin-access";
+
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -7,7 +9,6 @@ import {
   AlertTriangle,
   Loader2,
   Plus,
-  RefreshCw,
   Settings2,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -296,7 +297,7 @@ export default function AdminVtuPage() {
   const { user, profile, isLoading: authLoading } = useAuth();
   const router = useRouter();
   const queryClient = useQueryClient();
-  const isAdmin = user?.role === "ADMIN" || profile?.role === "ADMIN";
+  const isAdmin = hasAdminAccess(user) || hasAdminAccess(profile);
   const [olderThanMinutes, setOlderThanMinutes] = useState(
     DEFAULT_OLDER_THAN_MINUTES,
   );
@@ -329,8 +330,8 @@ export default function AdminVtuPage() {
       !authLoading &&
       user &&
       profile &&
-      user.role !== "ADMIN" &&
-      profile.role !== "ADMIN"
+      !hasAdminAccess(user) &&
+      !hasAdminAccess(profile)
     ) {
       router.push("/dashboard");
     }
@@ -347,6 +348,7 @@ export default function AdminVtuPage() {
     },
     enabled: isAdmin,
     staleTime: 30000,
+    refetchInterval: 30000,
   });
 
   const pricingRulesQuery = useQuery({
@@ -357,6 +359,7 @@ export default function AdminVtuPage() {
     },
     enabled: isAdmin,
     staleTime: 30000,
+    refetchInterval: 60000,
   });
 
   const reconciliationQuery = useQuery({
@@ -370,6 +373,7 @@ export default function AdminVtuPage() {
     },
     enabled: isAdmin,
     staleTime: 30000,
+    refetchInterval: 30000,
   });
 
   const providerHealthQuery = useQuery({
@@ -380,6 +384,7 @@ export default function AdminVtuPage() {
     },
     enabled: isAdmin,
     staleTime: 60000,
+    refetchInterval: 30000,
   });
 
   const orders = useMemo(
@@ -587,18 +592,14 @@ export default function AdminVtuPage() {
           <div>
             <div className="flex flex-wrap items-center gap-2">
               <h1 className="text-3xl font-semibold">VTU operations</h1>
-              <Badge variant="secondary">Stale orders</Badge>
-              <Badge variant="secondary">Reconciliation</Badge>
-              <Badge variant="outline">Manual requery</Badge>
             </div>
             <p className="mt-1 text-sm text-muted-foreground">
-              Monitor pending VTU orders and trigger audited provider requery
-              checks.
+              Monitor provider health and resolve delayed orders.
             </p>
           </div>
           <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
             <div className="w-full sm:w-44">
-              <Label htmlFor="older-than">Older than minutes</Label>
+              <Label htmlFor="older-than">Stale after (minutes)</Label>
               <Input
                 id="older-than"
                 min={1}
@@ -615,80 +616,38 @@ export default function AdminVtuPage() {
                 }
               />
             </div>
-            <Button
-              variant="outline"
-              disabled={
-                staleOrdersQuery.isFetching ||
-                reconciliationQuery.isFetching ||
-                providerHealthQuery.isFetching
-              }
-              onClick={() => {
-                void staleOrdersQuery.refetch();
-                void reconciliationQuery.refetch();
-                void providerHealthQuery.refetch();
-              }}
-            >
-              <RefreshCw
-                className={
-                  staleOrdersQuery.isFetching ||
-                  reconciliationQuery.isFetching ||
-                  providerHealthQuery.isFetching
-                    ? "size-4 animate-spin"
-                    : "size-4"
-                }
-              />
-              Refresh
-            </Button>
           </div>
         </div>
 
         <div className="grid gap-3 md:grid-cols-4">
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium">Total stale</CardTitle>
-            </CardHeader>
-            <CardContent>
+          <Card size="sm">
+            <CardContent className="p-4">
+              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Stale orders</p>
               <p className="text-2xl font-semibold">
                 {staleOrdersQuery.data?.count ?? 0}
               </p>
-              <p className="text-xs text-muted-foreground">
-                Limit {DEFAULT_LIMIT}
-              </p>
+              <p className="text-xs text-muted-foreground">Older than {olderThanMinutes} minutes</p>
             </CardContent>
           </Card>
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium">Pending</CardTitle>
-            </CardHeader>
-            <CardContent>
+          <Card size="sm">
+            <CardContent className="p-4">
+              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Pending</p>
               <p className="text-2xl font-semibold">{summary.pending}</p>
-              <p className="text-xs text-muted-foreground">
-                Provider confirmation open
-              </p>
+              <p className="text-xs text-muted-foreground">Provider confirmation open</p>
             </CardContent>
           </Card>
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium">Processing</CardTitle>
-            </CardHeader>
-            <CardContent>
+          <Card size="sm">
+            <CardContent className="p-4">
+              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Processing</p>
               <p className="text-2xl font-semibold">{summary.processing}</p>
-              <p className="text-xs text-muted-foreground">
-                Awaiting final state
-              </p>
+              <p className="text-xs text-muted-foreground">Awaiting final state</p>
             </CardContent>
           </Card>
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium">
-                Max attempts
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
+          <Card size="sm">
+            <CardContent className="p-4">
+              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Max attempts</p>
               <p className="text-2xl font-semibold">{summary.maxAttempts}</p>
-              <p className="text-xs text-muted-foreground">
-                {summary.unknown} unknown status
-              </p>
+              <p className="text-xs text-muted-foreground">{summary.unknown} unknown status</p>
             </CardContent>
           </Card>
         </div>
@@ -696,27 +655,11 @@ export default function AdminVtuPage() {
         <Card>
           <CardHeader className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div>
-              <CardTitle>Provider health</CardTitle>
+              <CardTitle>Provider status</CardTitle>
               <CardDescription>
-                Generated{" "}
-                {formatDateTime(providerHealthQuery.data?.generatedAt)}.
-                Balances show provider wallet availability, not customer funds.
+                {providerHealthQuery.data?.providers.length ?? 0} provider{providerHealthQuery.data?.providers.length === 1 ? "" : "s"} monitored. Balance checks reflect provider availability.
               </CardDescription>
             </div>
-            <Button
-              variant="outline"
-              disabled={providerHealthQuery.isFetching}
-              onClick={() => void providerHealthQuery.refetch()}
-            >
-              <RefreshCw
-                className={
-                  providerHealthQuery.isFetching
-                    ? "size-4 animate-spin"
-                    : "size-4"
-                }
-              />
-              Refresh health
-            </Button>
           </CardHeader>
           <CardContent>
             {providerHealthQuery.isLoading ? (
@@ -733,7 +676,7 @@ export default function AdminVtuPage() {
                 <p className="max-w-md text-sm text-muted-foreground">
                   {getErrorMessage(
                     providerHealthQuery.error,
-                    "Refresh provider health or try again shortly.",
+                    "Provider health is unavailable. Try again shortly.",
                   )}
                 </p>
                 <Button
@@ -755,8 +698,8 @@ export default function AdminVtuPage() {
                       <TableHead>Provider</TableHead>
                       <TableHead>Status</TableHead>
                       <TableHead>Balance</TableHead>
-                      <TableHead>Checked</TableHead>
-                      <TableHead>Warnings</TableHead>
+                      <TableHead className="hidden xl:table-cell">Checked</TableHead>
+                      <TableHead className="min-w-52">Warnings</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -788,7 +731,7 @@ export default function AdminVtuPage() {
                             </p>
                           </div>
                         </TableCell>
-                        <TableCell className="text-sm text-muted-foreground">
+                        <TableCell className="hidden text-sm text-muted-foreground xl:table-cell">
                           {formatDateTime(provider.balance.checkedAt)}
                         </TableCell>
                         <TableCell>
@@ -801,7 +744,7 @@ export default function AdminVtuPage() {
                               {provider.warnings.slice(0, 3).map((warning) => (
                                 <p
                                   key={warning}
-                                  className="max-w-lg text-sm text-muted-foreground"
+                                  className="max-w-64 truncate text-sm text-muted-foreground"
                                 >
                                   {warning}
                                 </p>
@@ -821,27 +764,11 @@ export default function AdminVtuPage() {
         <Card>
           <CardHeader className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div>
-              <CardTitle>VTU reconciliation</CardTitle>
+              <CardTitle>Reconciliation</CardTitle>
               <CardDescription>
-                Generated{" "}
-                {formatDateTime(reconciliationQuery.data?.generatedAt)};
-                threshold {olderThanMinutes} minutes; limit {DEFAULT_LIMIT}.
+                Find missing debits, reversals, and amount mismatches.
               </CardDescription>
             </div>
-            <Button
-              variant="outline"
-              disabled={reconciliationQuery.isFetching}
-              onClick={() => void reconciliationQuery.refetch()}
-            >
-              <RefreshCw
-                className={
-                  reconciliationQuery.isFetching
-                    ? "size-4 animate-spin"
-                    : "size-4"
-                }
-              />
-              Refresh report
-            </Button>
           </CardHeader>
           <CardContent>
             {reconciliationQuery.isLoading ? (
@@ -858,7 +785,7 @@ export default function AdminVtuPage() {
                 <p className="max-w-md text-sm text-muted-foreground">
                   {getErrorMessage(
                     reconciliationQuery.error,
-                    "Refresh reconciliation or try again shortly.",
+                    "Reconciliation is unavailable. Try again shortly.",
                   )}
                 </p>
                 <Button
@@ -1034,8 +961,8 @@ export default function AdminVtuPage() {
                 </div>
 
                 {reconciliationExceptions.length === 0 ? (
-                  <div className="rounded-md border border-dashed py-8 text-center text-sm text-muted-foreground">
-                    No high-risk reconciliation exceptions in this report.
+                  <div className="rounded-md border border-dashed px-3 py-4 text-sm text-muted-foreground">
+                    No high-risk exceptions in this report.
                   </div>
                 ) : (
                   <div className="overflow-x-auto">
@@ -1166,9 +1093,10 @@ export default function AdminVtuPage() {
                     </Badge>
                   </div>
                   {reconciliationQuery.data.callbackFailures.length === 0 ? (
-                    <p className="py-4 text-center text-sm text-muted-foreground">
-                      No failed callbacks are awaiting retry.
-                    </p>
+                    <div className="flex items-center justify-between gap-3 py-1 text-sm text-muted-foreground">
+                      <span>No failed callbacks awaiting retry.</span>
+                      <Badge variant="outline">Clear</Badge>
+                    </div>
                   ) : (
                     <div className="overflow-x-auto">
                       <Table>
@@ -1219,10 +1147,9 @@ export default function AdminVtuPage() {
 
         <Card>
           <CardHeader className="gap-1">
-            <CardTitle>Stale VTU orders</CardTitle>
+            <CardTitle>Delayed orders</CardTitle>
             <CardDescription>
-              Generated {formatDateTime(staleOrdersQuery.data?.generatedAt)};
-              cutoff {formatDateTime(staleOrdersQuery.data?.cutoff)}.
+              Orders older than {olderThanMinutes} minutes that may need a requery.
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -1240,7 +1167,7 @@ export default function AdminVtuPage() {
                 <p className="max-w-md text-sm text-muted-foreground">
                   {getErrorMessage(
                     staleOrdersQuery.error,
-                    "Refresh the queue or try again shortly.",
+                    "The queue is unavailable. Try again shortly.",
                   )}
                 </p>
                 <Button
@@ -1251,8 +1178,9 @@ export default function AdminVtuPage() {
                 </Button>
               </div>
             ) : orders.length === 0 ? (
-              <div className="py-10 text-center text-sm text-muted-foreground">
-                No stale VTU orders older than {olderThanMinutes} minutes.
+              <div className="flex items-center justify-between gap-3 px-3 py-5 text-sm text-muted-foreground">
+                <span>No delayed orders older than {olderThanMinutes} minutes.</span>
+                <Badge variant="outline">Clear</Badge>
               </div>
             ) : (
               <div className="overflow-x-auto">
@@ -1385,10 +1313,9 @@ export default function AdminVtuPage() {
         <Card>
           <CardHeader className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div>
-              <CardTitle>Pricing rules</CardTitle>
+              <CardTitle>VTU pricing</CardTitle>
               <CardDescription>
-                Configure TrustPay margin by country, service, provider, scope,
-                and amount band.
+                Set margin rules by country, service, provider, and amount band.
               </CardDescription>
             </div>
             <Button onClick={openCreatePricingDialog}>
@@ -1411,7 +1338,7 @@ export default function AdminVtuPage() {
                 <p className="max-w-md text-sm text-muted-foreground">
                   {getErrorMessage(
                     pricingRulesQuery.error,
-                    "Refresh the rules or try again shortly.",
+                    "Pricing rules are unavailable. Try again shortly.",
                   )}
                 </p>
                 <Button
@@ -1422,12 +1349,11 @@ export default function AdminVtuPage() {
                 </Button>
               </div>
             ) : (pricingRulesQuery.data ?? []).length === 0 ? (
-              <div className="flex flex-col items-center gap-3 py-10 text-center text-sm text-muted-foreground">
-                <Settings2 className="size-8" />
-                <p>
-                  No VTU pricing rules yet. Purchases currently run at zero
-                  margin.
-                </p>
+              <div className="flex items-center justify-between gap-3 px-3 py-5 text-sm text-muted-foreground">
+                <div className="flex items-center gap-2">
+                  <Settings2 className="size-4" />
+                  <span>No pricing rules. Purchases currently run at zero margin.</span>
+                </div>
               </div>
             ) : (
               <div className="overflow-x-auto">

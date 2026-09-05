@@ -50,9 +50,9 @@ function isSessionExpiringSoon(session: PersistedSession) {
 }
 
 async function parseSessionRouteResponse(response: Response) {
-  const payload = (await response.json().catch(() => null)) as
-    | SessionRouteResponse
-    | null;
+  const payload = (await response
+    .json()
+    .catch(() => null)) as SessionRouteResponse | null;
 
   if (payload?.csrfToken) {
     inMemoryCsrfToken = payload.csrfToken;
@@ -87,8 +87,8 @@ async function requestSession(method: "GET" | "PUT") {
 export async function persistSupabaseSession(session: Session) {
   const persistedSession = session as PersistedSession;
 
-  inMemorySession = persistedSession;
   if (typeof window === "undefined") {
+    inMemorySession = persistedSession;
     return;
   }
 
@@ -105,6 +105,9 @@ export async function persistSupabaseSession(session: Session) {
       });
 
       if (!response.ok) {
+        if (response.status === 403) {
+          throw new Error('Website access is for staff only. Use the TrustPay mobile app for your customer account.');
+        }
         throw new Error("Unable to create a secure session");
       }
 
@@ -117,6 +120,7 @@ export async function persistSupabaseSession(session: Session) {
       if (confirmedSession?.access_token !== persistedSession.access_token) {
         throw new Error("Unable to confirm the secure session");
       }
+      inMemorySession = confirmedSession;
     } catch (error) {
       inMemorySession = null;
       throw error;

@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
 
 import 'package:trustpay_app/core/router/app_router.dart';
+import 'package:trustpay_app/core/state/wallet_refresh_signal.dart';
 import 'package:trustpay_app/features/home/screens/dashboard_detail_screen.dart';
 import 'package:trustpay_app/features/wallet/screens/receive_money_screen.dart';
 import 'package:trustpay_app/features/wallet/screens/wallet_detail_screen.dart';
@@ -84,5 +85,32 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(find.text('Recent Deposits'), findsOneWidget);
+  });
+
+  testWidgets('receive money focuses on account request before provisioning',
+      (tester) async {
+    final bundle = buildTrustPayTestBundle(
+      includeVirtualAccounts: false,
+      includeDeposits: true,
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ReceiveMoneyScreen(
+          walletService: bundle.walletService,
+          homeDataService: bundle.homeDataService,
+        ),
+      ),
+    );
+    await tester.pump(const Duration(seconds: 1));
+
+    expect(find.text('Request virtual account'), findsOneWidget);
+    expect(find.text('Recent Deposits'), findsNothing);
+    expect(find.text('No deposits yet'), findsNothing);
+    final previousTick = walletRefreshSignal.tick;
+    await tester.tap(find.text('Request virtual account'));
+    await tester.pumpAndSettle();
+    expect(walletRefreshSignal.tick, previousTick);
+    expect(find.byType(DashboardDetailScreen), findsOneWidget);
   });
 }

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { hasAdminAccess } from '@/lib/admin-access';
 import { z } from "zod";
 import {
   buildClientSession,
@@ -14,10 +14,6 @@ import {
   encodeSessionCookie,
 } from "@/lib/server-auth-session";
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const supabaseAnonKey =
-  process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ||
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 const apiBaseUrl = process.env.NEXT_PUBLIC_API_URL;
 const LEGACY_CHUNK_COUNT = 8;
 
@@ -27,10 +23,9 @@ const authSessionSchema = z.object({
       access_token: z.string().min(1),
       refresh_token: z.string().min(1),
       expires_at: z.number().int().positive(),
-      // Supabase can omit expires_in when the session has been serialized by
-      // the backend. expires_at remains the source of truth; we derive the
-      // relative TTL below before storing the cookie.
-      expires_in: z.number().int().positive().optional(),
+      // Supabase setSession computes exp - Date.now()/1000, so this may
+      // contain fractional seconds. Normalize using expires_at below.
+      expires_in: z.number().positive().optional(),
       token_type: z.string().min(1),
       authMode: z.enum(["supabase", "local"]).optional(),
       user: z.object({}).passthrough(),
@@ -96,36 +91,36 @@ function readStoredSession(request: Request) {
   return decodeSessionCookie(cookies[SESSION_COOKIE_NAME]);
 }
 
-// Verifies the submitted access token before we mint a long-lived cookie so we
-// never persist a session for unauthenticated input. Handles both Supabase- and
-// backend-issued ("local" mode) tokens.
-async function verifyAccessToken(accessToken: string): Promise<boolean> {
-  if (supabaseUrl && supabaseAnonKey) {
-    try {
-      const supabase = createClient(supabaseUrl, supabaseAnonKey, {
-        auth: { persistSession: false, autoRefreshToken: false },
-      });
-      const { data, error } = await supabase.auth.getUser(accessToken);
-      if (!error && data.user) {
-        return true;
-      }
-    } catch {
-      // Fall through to backend verification for non-Supabase tokens.
-    }
-  }
-
+// Website sessions require server-verified staff access. Token validity alone
+// is insufficient; customer authentication remains available through the app.
+async function verifyAccessToken(accessToken: string): Promise<200 | 401 | 403> {
   try {
     const bootstrapUrl = apiBaseUrl
       ? `${apiBaseUrl.replace(/\/$/, "")}/api/auth/bootstrap`
       : "https://api.trustpayhq.com/api/auth/bootstrap";
     const res = await fetch(bootstrapUrl, {
       method: "POST",
-      headers: { Authorization: `Bearer ${accessToken}` },
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Idempotency-Key": `bootstrap:${crypto.randomUUID()}`,
+      },
+      cache: "no-store",
     });
-    return res.ok;
+    if (!res.ok) return 401;
+    const data = await res.json();
+    return hasAdminAccess(data?.user) ? 200 : 403;
   } catch {
-    return false;
+    return 401;
   }
+}
+
+function deniedSession(status: 401 | 403, requestUrl: string) {
+  const response = NextResponse.json(status === 403
+    ? { code: 'STAFF_WEB_ONLY', message: 'Customer accounts use the TrustPay mobile app. Website access is for staff only.' }
+    : { message: 'Invalid or unverifiable access token' }, { status });
+  clearSessionCookie(response, requestUrl);
+  clearCsrfCookie(response, requestUrl);
+  return response;
 }
 
 export async function POST(request: Request) {
@@ -153,24 +148,18 @@ export async function POST(request: Request) {
 
   const now = Math.floor(Date.now() / 1000);
   const expiresAt = parsed.data.session.expires_at;
-  const expiresIn =
-    parsed.data.session.expires_in ??
-    Math.max(1, (expiresAt ?? now + 3600) - now);
+  const expiresIn = Math.max(1, expiresAt - now);
   const normalizedSession = {
     ...parsed.data.session,
-    expires_at: expiresAt ?? now + expiresIn,
+    expires_at: expiresAt,
     expires_in: expiresIn,
   };
 
-  const isValid = await verifyAccessToken(normalizedSession.access_token);
-  if (!isValid) {
-    return NextResponse.json(
-      { message: "Invalid or unverifiable access token" },
-      { status: 401 },
-    );
-  }
+  const access = await verifyAccessToken(normalizedSession.access_token);
+  if (access !== 200) return deniedSession(access, request.url);
 
-  const csrfToken = getRequestCookies(request)[CSRF_COOKIE_NAME] || mintCsrfToken();
+  const csrfToken =
+    getRequestCookies(request)[CSRF_COOKIE_NAME] || mintCsrfToken();
   const response = NextResponse.json({
     success: true,
     session: buildClientSession(normalizedSession),
@@ -203,21 +192,33 @@ export async function PUT(request: Request) {
 
   const storedSession = readStoredSession(request);
   if (!storedSession?.refresh_token) {
-    const response = NextResponse.json({ message: "Unauthorized" }, { status: 401 });
+    const response = NextResponse.json(
+      { message: "Unauthorized" },
+      { status: 401 },
+    );
     clearSessionCookie(response, request.url);
     clearCsrfCookie(response, request.url);
     return response;
   }
 
-  const refreshedSession = await refreshSessionWithBackend(storedSession, request);
+  const refreshedSession = await refreshSessionWithBackend(
+    storedSession,
+    request,
+  );
   if (!refreshedSession) {
-    const response = NextResponse.json({ message: "Unauthorized" }, { status: 401 });
+    const response = NextResponse.json(
+      { message: "Unauthorized" },
+      { status: 401 },
+    );
     clearSessionCookie(response, request.url);
     clearCsrfCookie(response, request.url);
     return response;
   }
+  const access = await verifyAccessToken(refreshedSession.access_token);
+  if (access !== 200) return deniedSession(access, request.url);
 
-  const csrfToken = getRequestCookies(request)[CSRF_COOKIE_NAME] || mintCsrfToken();
+  const csrfToken =
+    getRequestCookies(request)[CSRF_COOKIE_NAME] || mintCsrfToken();
   const response = NextResponse.json({
     success: true,
     session: buildClientSession(refreshedSession),
@@ -256,11 +257,21 @@ export async function DELETE(request: Request) {
 
 export async function GET(request: Request) {
   const storedSession = readStoredSession(request);
-  const csrfToken = getRequestCookies(request)[CSRF_COOKIE_NAME] || mintCsrfToken();
+  if (storedSession) {
+    const activeSession = storedSession.expires_at <= Math.floor(Date.now()/1000)
+      ? await refreshSessionWithBackend(storedSession, request) : storedSession;
+    if (!activeSession) return deniedSession(401, request.url);
+    const access = await verifyAccessToken(activeSession.access_token);
+    if (access !== 200) return deniedSession(access, request.url);
+    Object.assign(storedSession, activeSession);
+  }
+  const csrfToken =
+    getRequestCookies(request)[CSRF_COOKIE_NAME] || mintCsrfToken();
   const response = NextResponse.json({
     session: storedSession ? buildClientSession(storedSession) : null,
     csrfToken,
   });
+  if (storedSession) response.cookies.set(SESSION_COOKIE_NAME, encodeSessionCookie(storedSession), getSessionCookieOptions(undefined, request.url));
 
   response.cookies.set(
     CSRF_COOKIE_NAME,

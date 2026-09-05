@@ -95,6 +95,7 @@ class _TpIllustrationState extends State<TpIllustration>
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     final accent = widget.accent ?? AppColors.primary;
     return Semantics(
       label: widget.semanticLabel ?? _defaultLabel(widget.variant),
@@ -319,7 +320,9 @@ class _IllustrationPainter extends CustomPainter {
       final frac = i == 0 ? 1.0 : (i.isEven ? 0.55 : 0.8);
       canvas.drawRRect(
         _rrect(Rect.fromLTWH(lineX, y, lineW * frac, h * 0.022), 6),
-        _fill(i == 0 ? accent.withValues(alpha: 0.85) : textHint.withValues(alpha: 0.4)),
+        _fill(i == 0
+            ? accent.withValues(alpha: 0.85)
+            : textHint.withValues(alpha: 0.4)),
       );
     }
     // Magnifier accent when it's an "empty" search-ish state.
@@ -341,8 +344,8 @@ class _IllustrationPainter extends CustomPainter {
       canvas.drawCircle(c, r, _fillSurface);
       canvas.drawCircle(c, r, _stroke(border, 1.4));
       // head
-      canvas.drawCircle(
-          c.translate(0, -r * 0.28), r * 0.30, _fill(col.withValues(alpha: alpha)));
+      canvas.drawCircle(c.translate(0, -r * 0.28), r * 0.30,
+          _fill(col.withValues(alpha: alpha)));
       // shoulders
       final body = Path();
       final bc = c.translate(0, r * 0.5);
@@ -359,10 +362,10 @@ class _IllustrationPainter extends CustomPainter {
     // plus badge
     final badge = Offset(w * 0.75, h * 0.62);
     canvas.drawCircle(badge, w * 0.09, _fill(success));
-    canvas.drawLine(badge.translate(-w * 0.035, 0), badge.translate(w * 0.035, 0),
-        _stroke(Colors.white, 3));
-    canvas.drawLine(badge.translate(0, -w * 0.035), badge.translate(0, w * 0.035),
-        _stroke(Colors.white, 3));
+    canvas.drawLine(badge.translate(-w * 0.035, 0),
+        badge.translate(w * 0.035, 0), _stroke(Colors.white, 3));
+    canvas.drawLine(badge.translate(0, -w * 0.035),
+        badge.translate(0, w * 0.035), _stroke(Colors.white, 3));
   }
 
   void _paintWallet(Canvas canvas, Size size) {
@@ -371,7 +374,8 @@ class _IllustrationPainter extends CustomPainter {
     _softShadow(canvas, rect, 18);
     canvas.drawRRect(_rrect(rect, 16), _fill(accent));
     canvas.drawRRect(
-      _rrect(Rect.fromLTWH(rect.left, rect.top, rect.width, rect.height * 0.42), 16),
+      _rrect(Rect.fromLTWH(rect.left, rect.top, rect.width, rect.height * 0.42),
+          16),
       _fill(Colors.white.withValues(alpha: 0.18)),
     );
     // clasp / button
@@ -380,9 +384,11 @@ class _IllustrationPainter extends CustomPainter {
     canvas.drawRRect(_rrect(clasp, 10), _fill(surface));
     canvas.drawCircle(clasp.center, w * 0.022, _fill(accent));
     // floating coin
-    final coin = Offset(w * 0.5, h * 0.26 + math.sin(t * 2 * math.pi) * h * 0.02);
+    final coin =
+        Offset(w * 0.5, h * 0.26 + math.sin(t * 2 * math.pi) * h * 0.02);
     canvas.drawCircle(coin, w * 0.075, _fill(warning));
-    canvas.drawCircle(coin, w * 0.075, _stroke(Colors.white.withValues(alpha: 0.6), 2));
+    canvas.drawCircle(
+        coin, w * 0.075, _stroke(Colors.white.withValues(alpha: 0.6), 2));
     _centeredGlyph(canvas, coin, w * 0.075, '₦', Colors.white);
   }
 
@@ -410,15 +416,21 @@ class _IllustrationPainter extends CustomPainter {
       ..cubicTo(cx + w * 0.16, top + h * 0.02, cx + w * 0.17, top + h * 0.22,
           cx + w * 0.19, top + h * 0.3)
       ..lineTo(cx - w * 0.19, top + h * 0.3)
-      ..cubicTo(cx - w * 0.17, top + h * 0.22, cx - w * 0.16, top + h * 0.02, cx,
-          top);
+      ..cubicTo(cx - w * 0.17, top + h * 0.22, cx - w * 0.16, top + h * 0.02,
+          cx, top);
     canvas.drawPath(path, _fill(accent));
     canvas.drawRRect(
-      _rrect(Rect.fromCenter(center: Offset(cx, top + h * 0.31), width: w * 0.44, height: h * 0.03), 8),
+      _rrect(
+          Rect.fromCenter(
+              center: Offset(cx, top + h * 0.31),
+              width: w * 0.44,
+              height: h * 0.03),
+          8),
       _fill(accent),
     );
     canvas.drawCircle(Offset(cx, top + h * 0.37), w * 0.03, _fill(accent));
-    canvas.drawCircle(Offset(cx, top), w * 0.03, _fill(textHint.withValues(alpha: 0.6)));
+    canvas.drawCircle(
+        Offset(cx, top), w * 0.03, _fill(textHint.withValues(alpha: 0.6)));
   }
 
   void _paintSuccess(Canvas canvas, Size size) {
@@ -436,8 +448,8 @@ class _IllustrationPainter extends CustomPainter {
     for (var i = 0; i < 6; i++) {
       final ang = i * math.pi / 3 + t * 2 * math.pi;
       final p = c + Offset(math.cos(ang), math.sin(ang)) * r * 2.1;
-      canvas.drawCircle(
-          p, w * 0.015, _fill([accent, warning, success][i % 3].withValues(alpha: 0.8)));
+      canvas.drawCircle(p, w * 0.015,
+          _fill([accent, warning, success][i % 3].withValues(alpha: 0.8)));
     }
   }
 
@@ -522,7 +534,9 @@ class _IllustrationPainter extends CustomPainter {
     // motion trail
     for (var i = 0; i < 3; i++) {
       final x = c.dx - w * 0.24 - i * w * 0.06 + drift;
-      canvas.drawLine(Offset(x, c.dy + i * h * 0.04), Offset(x - w * 0.05, c.dy + i * h * 0.04),
+      canvas.drawLine(
+          Offset(x, c.dy + i * h * 0.04),
+          Offset(x - w * 0.05, c.dy + i * h * 0.04),
           _stroke(accent.withValues(alpha: 0.4 - i * 0.1), 3));
     }
   }
@@ -572,13 +586,20 @@ class _IllustrationPainter extends CustomPainter {
     final pc = Offset(rect.left + w * 0.13, rect.center.dy);
     canvas.drawCircle(pc, w * 0.07, _fill(accent.withValues(alpha: 0.85)));
     canvas.drawCircle(pc.translate(0, -w * 0.02), w * 0.025, _fill(surface));
-    canvas.drawArc(Rect.fromCircle(center: pc.translate(0, w * 0.05), radius: w * 0.045),
-        math.pi, math.pi, false, _fill(surface));
+    canvas.drawArc(
+        Rect.fromCircle(center: pc.translate(0, w * 0.05), radius: w * 0.045),
+        math.pi,
+        math.pi,
+        false,
+        _fill(surface));
     // detail lines
     for (var i = 0; i < 3; i++) {
       final y = rect.top + h * 0.09 + i * h * 0.08;
       canvas.drawRRect(
-        _rrect(Rect.fromLTWH(rect.left + w * 0.24, y, w * 0.24 * (1 - i * 0.2), h * 0.02), 5),
+        _rrect(
+            Rect.fromLTWH(
+                rect.left + w * 0.24, y, w * 0.24 * (1 - i * 0.2), h * 0.02),
+            5),
         _fill(textHint.withValues(alpha: 0.4)),
       );
     }
@@ -603,7 +624,8 @@ class _IllustrationPainter extends CustomPainter {
     );
   }
 
-  void _centeredGlyph(Canvas canvas, Offset center, double r, String glyph, Color color) {
+  void _centeredGlyph(
+      Canvas canvas, Offset center, double r, String glyph, Color color) {
     final tp = TextPainter(
       text: TextSpan(
         text: glyph,

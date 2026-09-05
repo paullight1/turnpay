@@ -6,9 +6,6 @@ import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { footerGroups, navItems } from "@/lib/marketing";
 
-const whatsappUrl =
-  "https://wa.me/233555507240?text=Hello%20TrustPay%2C%20I%20want%20to%20get%20started.";
-
 function BrandMark() {
   return <TrustPayLogo imageClassName="size-9 rounded-lg" textClassName="text-lg font-bold text-foreground" />;
 }
@@ -48,17 +45,14 @@ export function MarketingShell({ children }: { children: React.ReactNode }) {
           </nav>
 
           <div className="hidden items-center gap-2 md:flex">
-            <Button variant="ghost" asChild className="text-muted-foreground hover:bg-accent hover:text-accent-foreground">
-              <a href={whatsappUrl} target="_blank" rel="noreferrer">Sign In</a>
-            </Button>
             <Button
               asChild
               className="rounded-full bg-primary px-4 text-primary-foreground hover:bg-primary/90"
             >
-              <a href={whatsappUrl} target="_blank" rel="noreferrer">
-                Get Started
+              <Link href="/download">
+                Download app
                 <ArrowRight data-icon="inline-end" aria-hidden="true" />
-              </a>
+              </Link>
             </Button>
           </div>
 
@@ -83,22 +77,12 @@ export function MarketingShell({ children }: { children: React.ReactNode }) {
                     {item.label}
                   </Link>
                 ))}
-                <a
-                  href={whatsappUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="rounded-lg px-3 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:ring-3 focus-visible:ring-primary/50"
-                >
-                  Sign In
-                </a>
-                <a
-                  href={whatsappUrl}
-                  target="_blank"
-                  rel="noreferrer"
+                <Link
+                  href="/download"
                   className="mt-1 rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:ring-3 focus-visible:ring-primary/50"
                 >
-                  Get Started
-                </a>
+                  Download app
+                </Link>
               </nav>
             </details>
           </div>

@@ -31,6 +31,14 @@ export function createMoneyAttemptIdempotencyKey(scope: MoneyAttemptScope) {
   return `${scope}:${randomUuid()}`;
 }
 
+/**
+ * Manual exchange's backend validates keys as URL/header-safe identifier
+ * characters and intentionally does not accept the shared helper's colon.
+ */
+export function createManualExchangeIdempotencyKey() {
+  return `manual-exchange-${randomUuid()}`;
+}
+
 export function withIdempotencyKey(idempotencyKey?: string) {
   return idempotencyKey
     ? { headers: { "Idempotency-Key": idempotencyKey } }

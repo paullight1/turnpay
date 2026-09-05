@@ -1,5 +1,7 @@
 "use client";
 
+import { hasAdminAccess } from "@/lib/admin-access";
+
 import {
   Suspense,
   useDeferredValue,
@@ -14,7 +16,6 @@ import {
   RefreshCw,
   ScrollText,
   ShieldCheck,
-  UsersRound,
   WalletCards,
   type LucideIcon,
 } from "lucide-react";
@@ -261,15 +262,15 @@ function AdminAuditContent() {
   const [selectedLogId, setSelectedLogId] = useState<string | null>(null);
   const deferredSearch = useDeferredValue(search.trim());
 
-  const isAdmin = user?.role === "ADMIN" || profile?.role === "ADMIN";
+  const isAdmin = hasAdminAccess(user) || hasAdminAccess(profile);
 
   useEffect(() => {
     if (
       !authLoading &&
       user &&
       profile &&
-      user.role !== "ADMIN" &&
-      profile.role !== "ADMIN"
+      !hasAdminAccess(user) &&
+      !hasAdminAccess(profile)
     ) {
       router.push("/dashboard");
     }
@@ -366,16 +367,12 @@ function AdminAuditContent() {
     const financialActions = logs.filter((log) =>
       FINANCIAL_TARGETS.has(log.targetType),
     ).length;
-    const customerActions = logs.filter((log) =>
-      CUSTOMER_TARGETS.has(log.targetType),
-    ).length;
     const latestAt = logs[0]?.createdAt ?? null;
 
     return {
       total: logs.length,
       uniqueAdmins: uniqueAdmins.size,
       financialActions,
-      customerActions,
       latestAt,
     };
   }, [logs]);
@@ -423,8 +420,8 @@ function AdminAuditContent() {
         <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
           <div>
             <h1 className="text-3xl font-semibold">Audit trail</h1>
-            <p className="mt-1 text-muted-foreground">
-              Review every logged admin action, who made it, and what changed.
+            <p className="mt-1 text-sm text-muted-foreground">
+              Track who changed what and when.
             </p>
           </div>
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
@@ -454,187 +451,90 @@ function AdminAuditContent() {
             >
               Export CSV
             </Button>
-            <Button variant="outline" onClick={() => void logsQuery.refetch()}>
-              <RefreshCw className="mr-2 size-4" />
-              Refresh
-            </Button>
           </div>
         </div>
 
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle>Quick filters</CardTitle>
-            <CardDescription>
-              Search across actions, targets, reasons, and actor identity.
-            </CardDescription>
+        <Card className="overflow-hidden">
+          <CardHeader className="border-b border-border/60 pb-4">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <CardTitle>Filter events</CardTitle>
+                <CardDescription>Start with a search, action, or target.</CardDescription>
+              </div>
+              <Badge variant="outline">{logsQuery.isFetching ? "Updating" : `${logs.length} loaded`}</Badge>
+            </div>
           </CardHeader>
-          <CardContent>
-            <div className="grid gap-3 xl:grid-cols-[1.2fr_0.9fr_0.95fr_0.95fr_1fr_0.8fr_0.8fr_auto]">
+          <CardContent className="space-y-3 p-4">
+            <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_12rem_12rem_auto]">
               <div className="flex flex-col gap-2">
-                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                  Search
-                </p>
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Search</p>
                 <Input
                   value={search}
                   onChange={(event) => setSearch(event.target.value)}
-                  placeholder="Action, actor, reason, target, or reference"
+                  placeholder="Action, actor, reason, or reference"
+                  aria-label="Search audit events"
                 />
               </div>
               <div className="flex flex-col gap-2">
-                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                  Action
-                </p>
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Action</p>
                 <Select value={actionFilter} onValueChange={setActionFilter}>
-                  <SelectTrigger className="w-full">
-                    <SelectValue placeholder="All actions" />
-                  </SelectTrigger>
+                  <SelectTrigger aria-label="Filter by action"><SelectValue placeholder="All actions" /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="ALL">All actions</SelectItem>
-                    {availableActions.map((option) => (
-                      <SelectItem key={option} value={option}>
-                        {humanizeLabel(option)}
-                      </SelectItem>
-                    ))}
+                    {availableActions.map((option) => <SelectItem key={option} value={option}>{humanizeLabel(option)}</SelectItem>)}
                   </SelectContent>
                 </Select>
               </div>
               <div className="flex flex-col gap-2">
-                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                  Actor
-                </p>
-                <Select value={adminFilter} onValueChange={setAdminFilter}>
-                  <SelectTrigger className="w-full">
-                    <SelectValue placeholder="All actors" />
-                  </SelectTrigger>
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Target</p>
+                <Select value={targetType} onValueChange={(value) => setTargetType(value as (typeof TARGET_TYPE_OPTIONS)[number])}>
+                  <SelectTrigger aria-label="Filter by target"><SelectValue placeholder="All targets" /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="ALL">All actors</SelectItem>
-                    {availableActors.map((option) => (
-                      <SelectItem key={option.id} value={option.id}>
-                        {option.label}
-                      </SelectItem>
-                    ))}
+                    {TARGET_TYPE_OPTIONS.map((option) => <SelectItem key={option} value={option}>{option === "ALL" ? "All targets" : humanizeLabel(option)}</SelectItem>)}
                   </SelectContent>
                 </Select>
               </div>
-              <div className="flex flex-col gap-2">
-                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                  Target type
-                </p>
-                <Select
-                  value={targetType}
-                  onValueChange={(value) =>
-                    setTargetType(value as (typeof TARGET_TYPE_OPTIONS)[number])
-                  }
-                >
-                  <SelectTrigger className="w-full">
-                    <SelectValue placeholder="All targets" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {TARGET_TYPE_OPTIONS.map((option) => (
-                      <SelectItem key={option} value={option}>
-                        {option === "ALL"
-                          ? "All targets"
-                          : humanizeLabel(option)}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="flex flex-col gap-2">
-                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                  Target ID
-                </p>
-                <Input
-                  value={targetId}
-                  onChange={(event) => setTargetId(event.target.value)}
-                  placeholder="User ID, transaction ID, or payout ID"
-                />
-              </div>
-              <div className="flex flex-col gap-2">
-                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                  From
-                </p>
-                <Input
-                  type="date"
-                  value={fromDate}
-                  onChange={(event) => setFromDate(event.target.value)}
-                />
-              </div>
-              <div className="flex flex-col gap-2">
-                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                  To
-                </p>
-                <Input
-                  type="date"
-                  value={toDate}
-                  onChange={(event) => setToDate(event.target.value)}
-                />
-              </div>
-              <div className="flex items-end gap-2">
-                <Button
-                  variant="ghost"
-                  onClick={clearFilters}
-                  className="w-full"
-                >
-                  Clear
-                </Button>
+              <div className="flex items-end">
+                <Button variant="ghost" onClick={clearFilters} className="w-full">Clear</Button>
               </div>
             </div>
-            <div className="mt-4 grid gap-3 border-t border-border/60 pt-4 md:grid-cols-2 xl:grid-cols-4">
-              <div className="flex flex-col gap-2">
-                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                  Transfer reference
-                </p>
-                <Input
-                  value={reference}
-                  onChange={(event) => setReference(event.target.value)}
-                  placeholder="IT-… or ITR-…"
-                />
+
+            <details className="group rounded-lg border border-border/70 bg-muted/10">
+              <summary className="cursor-pointer list-none px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground [&::-webkit-details-marker]:hidden">
+                More filters <span className="ml-1 text-xs group-open:hidden">＋</span><span className="ml-1 hidden text-xs group-open:inline">−</span>
+              </summary>
+              <div className="grid gap-3 border-t border-border/60 p-3 sm:grid-cols-2 lg:grid-cols-4">
+                <div className="flex flex-col gap-2">
+                  <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Actor</p>
+                  <Select value={adminFilter} onValueChange={setAdminFilter}>
+                    <SelectTrigger aria-label="Filter by actor"><SelectValue placeholder="All actors" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="ALL">All actors</SelectItem>
+                      {availableActors.map((option) => <SelectItem key={option.id} value={option.id}>{option.label}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="flex flex-col gap-2"><p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Target ID</p><Input value={targetId} onChange={(event) => setTargetId(event.target.value)} placeholder="User or transaction ID" /></div>
+                <div className="flex flex-col gap-2"><p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Transfer reference</p><Input value={reference} onChange={(event) => setReference(event.target.value)} placeholder="IT-… or ITR-…" /></div>
+                <div className="flex flex-col gap-2"><p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Request ID</p><Input value={requestId} onChange={(event) => setRequestId(event.target.value)} placeholder="Correlation ID" /></div>
+                <div className="flex flex-col gap-2"><p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">User ID</p><Input value={userId} onChange={(event) => setUserId(event.target.value)} placeholder="Exact user UUID" /></div>
+                <div className="flex flex-col gap-2"><p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">From</p><Input type="date" value={fromDate} onChange={(event) => setFromDate(event.target.value)} /></div>
+                <div className="flex flex-col gap-2"><p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">To</p><Input type="date" value={toDate} onChange={(event) => setToDate(event.target.value)} /></div>
+                <div className="flex flex-col gap-2">
+                  <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Reversal state</p>
+                  <Select value={reversalState} onValueChange={setReversalState}>
+                    <SelectTrigger aria-label="Filter by reversal state"><SelectValue placeholder="All states" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="ALL">All states</SelectItem><SelectItem value="PENDING_APPROVAL">Pending approval</SelectItem><SelectItem value="COMPLETED">Completed</SelectItem><SelectItem value="REJECTED">Rejected</SelectItem><SelectItem value="BLOCKED">Blocked</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
-              <div className="flex flex-col gap-2">
-                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                  Request ID
-                </p>
-                <Input
-                  value={requestId}
-                  onChange={(event) => setRequestId(event.target.value)}
-                  placeholder="Request correlation ID"
-                />
-              </div>
-              <div className="flex flex-col gap-2">
-                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                  User ID
-                </p>
-                <Input
-                  value={userId}
-                  onChange={(event) => setUserId(event.target.value)}
-                  placeholder="Exact user UUID"
-                />
-              </div>
-              <div className="flex flex-col gap-2">
-                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                  Reversal state
-                </p>
-                <Select value={reversalState} onValueChange={setReversalState}>
-                  <SelectTrigger className="w-full">
-                    <SelectValue placeholder="All reversal states" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="ALL">All reversal states</SelectItem>
-                    <SelectItem value="PENDING_APPROVAL">
-                      Pending approval
-                    </SelectItem>
-                    <SelectItem value="COMPLETED">Completed</SelectItem>
-                    <SelectItem value="REJECTED">Rejected</SelectItem>
-                    <SelectItem value="BLOCKED">Blocked</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
+            </details>
           </CardContent>
         </Card>
 
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <div className="grid gap-3 md:grid-cols-3">
           <AuditStatCard
             label="Logged actions"
             value={String(auditStats.total)}
@@ -646,12 +546,6 @@ function AdminAuditContent() {
             value={String(auditStats.uniqueAdmins)}
             detail="Unique admins visible in this slice"
             icon={ShieldCheck}
-          />
-          <AuditStatCard
-            label="Customer actions"
-            value={String(auditStats.customerActions)}
-            detail="User-facing events such as review, update, or support actions"
-            icon={UsersRound}
           />
           <AuditStatCard
             label="Financial actions"
@@ -858,31 +752,21 @@ function AdminAuditContent() {
                     </div>
                   </div>
 
-                  <div className="grid gap-3">
-                    <div>
-                      <p className="mb-2 text-xs uppercase tracking-wide text-muted-foreground">
-                        Before
-                      </p>
-                      <pre className="max-h-52 overflow-auto rounded-lg border border-border bg-background/80 p-3 text-xs leading-relaxed text-foreground">
-                        {safeJson(selectedLog.before)}
-                      </pre>
-                    </div>
-                    <div>
-                      <p className="mb-2 text-xs uppercase tracking-wide text-muted-foreground">
-                        After
-                      </p>
-                      <pre className="max-h-52 overflow-auto rounded-lg border border-border bg-background/80 p-3 text-xs leading-relaxed text-foreground">
-                        {safeJson(selectedLog.after)}
-                      </pre>
-                    </div>
-                    <div>
-                      <p className="mb-2 text-xs uppercase tracking-wide text-muted-foreground">
-                        Metadata
-                      </p>
-                      <pre className="max-h-52 overflow-auto rounded-lg border border-border bg-background/80 p-3 text-xs leading-relaxed text-foreground">
-                        {safeJson(selectedLog.metadata)}
-                      </pre>
-                    </div>
+                  <div className="space-y-2">
+                    {[
+                      ["Before state", selectedLog.before],
+                      ["After state", selectedLog.after],
+                      ["Metadata", selectedLog.metadata],
+                    ].map(([label, value]) => (
+                      <details key={String(label)} className="rounded-lg border border-border bg-muted/10">
+                        <summary className="cursor-pointer list-none px-3 py-2 text-sm font-medium text-muted-foreground hover:text-foreground [&::-webkit-details-marker]:hidden">
+                          {String(label)}
+                        </summary>
+                        <pre className="max-h-52 overflow-auto border-t border-border px-3 py-3 text-xs leading-relaxed text-foreground">
+                          {safeJson(value)}
+                        </pre>
+                      </details>
+                    ))}
                   </div>
                 </div>
               )}

@@ -54,7 +54,7 @@ class AppColors {
     primaryDark: Color(0xFFC23620),
     textPrimary: Color(0xFFFFFFFF),
     textSecondary: Color(0xFFA0A3B8),
-    textHint: Color(0xFF6B6E87),
+    textHint: Color(0xFF9B9FB4),
     textLink: Color(0xFFE8472A),
     border: Color(0xFF2A2D45),
     divider: Color(0xFF1E2035),
@@ -75,7 +75,7 @@ class AppColors {
     primaryDark: Color(0xFFC23620),
     textPrimary: Color(0xFF12131A),
     textSecondary: Color(0xFF5F6478),
-    textHint: Color(0xFF8B90A4),
+    textHint: Color(0xFF686E82),
     textLink: Color(0xFFE8472A),
     border: Color(0xFFD8DCEA),
     divider: Color(0xFFE7EAF3),
@@ -91,6 +91,13 @@ class AppColors {
   /// Whether the currently active palette is the dark one.
   static bool isDark = false;
 
+  /// Register the widget's dependency on the inherited theme before reading
+  /// shared palette/text getters. This also updates already-open routes and
+  /// const child widgets when appearance changes, without resetting state.
+  static void watch(BuildContext context) {
+    applyBrightness(Theme.of(context).brightness);
+  }
+
   /// Apply a resolved [Brightness]. This is the source of truth used by every
   /// static color getter below, so it must be called with the *effective*
   /// brightness (system mode already resolved) before the subtree builds.
@@ -102,7 +109,8 @@ class AppColors {
   /// Backwards-compatible helper. Prefer [applyBrightness] with a resolved
   /// brightness so that [ThemeMode.system] follows the device correctly.
   static void applyThemeMode(ThemeMode mode) {
-    applyBrightness(mode == ThemeMode.dark ? Brightness.dark : Brightness.light);
+    applyBrightness(
+        mode == ThemeMode.dark ? Brightness.dark : Brightness.light);
   }
 
   static Color get background => _active.background;
@@ -269,13 +277,10 @@ class AppTheme {
       colorScheme: ColorScheme(
         brightness: brightness,
         primary: palette.primary,
-        onPrimary: brightness == Brightness.dark
-            ? Colors.white
-            : Colors.white,
+        onPrimary: brightness == Brightness.dark ? Colors.white : Colors.white,
         secondary: palette.primaryLight,
-        onSecondary: brightness == Brightness.dark
-            ? Colors.white
-            : Colors.white,
+        onSecondary:
+            brightness == Brightness.dark ? Colors.white : Colors.white,
         error: palette.error,
         onError: Colors.white,
         surface: palette.surface,
@@ -309,8 +314,7 @@ class AppTheme {
           borderSide: BorderSide(color: palette.error, width: 1.5),
         ),
         hintStyle: AppTextStyles.bodyM.copyWith(color: palette.textHint),
-        labelStyle:
-            AppTextStyles.bodyM.copyWith(color: palette.textSecondary),
+        labelStyle: AppTextStyles.bodyM.copyWith(color: palette.textSecondary),
         errorStyle: AppTextStyles.bodyS.copyWith(color: palette.error),
       ),
       elevatedButtonTheme: ElevatedButtonThemeData(

@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter/services.dart';
 import 'package:trustpay_app/features/home/screens/money_action_screen.dart';
 
 void main() {
@@ -10,11 +11,43 @@ void main() {
       expect(result.error, isNull);
     });
 
+    test('accepts display amounts with thousands separators', () {
+      final result = MoneyActionFormValidator.validateAmount('1,000,000.5');
+
+      expect(result.value, '1000000.50');
+      expect(result.error, isNull);
+    });
+
     test('rejects invalid raw amount input', () {
       final result = MoneyActionFormValidator.validateAmount('10.999');
 
       expect(result.value, isNull);
       expect(result.error, 'Enter an amount with up to 2 decimal places.');
+    });
+
+    test('formats exchange amounts without losing the decimal portion', () {
+      final formatter = ThousandsSeparatorInputFormatter();
+      final formatted = formatter.formatEditUpdate(
+        TextEditingValue.empty,
+        const TextEditingValue(
+          text: '1000000.50',
+          selection: TextSelection.collapsed(offset: 10),
+        ),
+      );
+
+      expect(formatted.text, '1,000,000.50');
+    });
+
+    test('describes exchange amounts in words', () {
+      expect(
+        exchangeAmountInWords('1,200,000', 'NGN'),
+        'One million, two hundred thousand naira',
+      );
+      expect(
+        exchangeAmountInWords('2500.50', 'GHS'),
+        'Two thousand, five hundred cedis and fifty pesewas',
+      );
+      expect(exchangeAmountInWords('0', 'NGN'), isNull);
     });
 
     test('requires send recipient email before submission', () {

@@ -2,6 +2,8 @@
     <!-- Required so release builds can reach the TrustPay API. The debug
          manifest also declares this, but release/profile need it here. -->
     <uses-permission android:name="android.permission.INTERNET"/>
+    <!-- Required by local_auth for Android biometric authentication. -->
+    <uses-permission android:name="android.permission.USE_BIOMETRIC"/>
     <application
         android:label="TrustPay"
         android:name="${applicationName}"

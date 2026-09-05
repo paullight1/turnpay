@@ -136,7 +136,8 @@ if [ "${NODE_ENV:-development}" = "production" ]; then
 
   if is_truthy "${BANKING_ENABLED:-false}" ||
     is_truthy "${VIRTUAL_ACCOUNTS_ENABLED:-false}" ||
-    is_truthy "${WITHDRAWALS_ENABLED:-false}"; then
+    is_truthy "${WITHDRAWALS_ENABLED:-false}" ||
+    is_truthy "${MONNIFY_KYC_SYNC_ENABLED:-false}"; then
     require_env MONNIFY_API_KEY
     require_env MONNIFY_SECRET_KEY
     require_env MONNIFY_CONTRACT_CODE

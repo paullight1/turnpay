@@ -56,6 +56,8 @@ const CONTENT_SECURITY_POLICY = [
   .trim();
 
 const nextConfig: NextConfig = {
+  // Separate local QA output lets browser tests run without restarting admin.
+  distDir: process.env.TRUSTPAY_NEXT_DIST_DIR || '.next',
   allowedDevOrigins: ["127.0.0.1"],
   turbopack: {
     root: process.cwd(),

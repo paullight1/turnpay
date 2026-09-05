@@ -45,6 +45,7 @@ class _TapScaleState extends State<TapScale> {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     final content = GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTapDown: (_) => _setPressed(true),
@@ -113,6 +114,7 @@ class _StaggeredEntranceState extends State<StaggeredEntrance> {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     return AnimatedOpacity(
       duration: widget.duration,
       curve: Curves.easeOutCubic,
@@ -143,6 +145,7 @@ class AnimatedValueText extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     return AnimatedSwitcher(
       duration: const Duration(milliseconds: 220),
       switchInCurve: Curves.easeOutCubic,
@@ -208,6 +211,7 @@ class _ShimmerBlockState extends State<ShimmerBlock>
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     return AnimatedBuilder(
       animation: _controller,
       builder: (context, _) {

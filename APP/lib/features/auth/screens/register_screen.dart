@@ -242,6 +242,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
         ) ??
         false;
 
+    await _securityService.markBiometricPromptSeen();
     if (!shouldEnable) return;
 
     final approved = await _securityService.authenticateBiometric(
@@ -391,6 +392,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     return Scaffold(
       backgroundColor: AppColors.background,
       body: SafeArea(
@@ -780,6 +782,7 @@ class _PhoneNumberField extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     final normalizedPhone = country.normalize(controller.text);
 
     return Column(
@@ -894,6 +897,7 @@ class _StepCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     return SizedBox(
       width: double.infinity,
       child: Column(
@@ -950,6 +954,7 @@ class _VisibilityToggle extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     return GestureDetector(
       onTap: onTap,
       child: Icon(
@@ -972,6 +977,7 @@ class _TermsCheckbox extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [

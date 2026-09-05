@@ -280,10 +280,10 @@ function HeroSection() {
                 asChild
                 className="h-13 w-full rounded-full bg-red-600 px-7 text-base font-semibold text-white shadow-lg shadow-red-600/30 transition-all hover:bg-red-700 hover:shadow-xl hover:shadow-red-600/40 sm:w-auto"
               >
-                <a href="https://wa.me/233555507240?text=Hello%20TrustPay%2C%20I%20want%20to%20get%20started." target="_blank" rel="noreferrer">
-                  Get Started Free
+                <Link href="/download">
+                  Download the app
                   <ArrowRight data-icon="inline-end" aria-hidden="true" className="size-5" />
-                </a>
+                </Link>
               </Button>
               <Button
                 asChild
@@ -858,10 +858,10 @@ function CtaSection() {
             asChild
             className="rounded-full border-2 border-white bg-white px-6 text-red-700 transition-all hover:bg-transparent hover:text-white"
           >
-            <a href="https://wa.me/233555507240?text=Hello%20TrustPay%2C%20I%20want%20to%20get%20started." target="_blank" rel="noreferrer">
-              Create Free Account
+            <Link href="/download">
+              Download the app
               <ArrowRight data-icon="inline-end" aria-hidden="true" className="size-4" />
-            </a>
+            </Link>
           </Button>
           <Button
             asChild

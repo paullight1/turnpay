@@ -9,6 +9,7 @@ import {
   IsUrl,
   Max,
   MaxLength,
+  Min,
   MinLength,
   ValidateIf,
 } from 'class-validator';
@@ -90,27 +91,27 @@ export class AdminUpdateRateDto {
   to: (typeof SUPPORTED_CURRENCIES)[number];
 
   // Absolute sanity ceiling. NGN/GHS pairs sit near 0.3–3.2; a value beyond
-  // this can only be a fat-finger or abuse. The effective-rate deviation guard
-  // in the controller still routes anything >5% off market to dual approval.
+  // this can only be a fat-finger or abuse. Admin changes are applied directly
+  // and remain recorded in the audit log.
   @IsNumber()
   @Type(() => Number)
   @IsPositive()
   @Max(100_000)
   rate: number;
 
-  // Markup is a spread percentage (default 2.5). It is intentionally bounded:
-  // it feeds the effective rate (rate * (1 - markup/100)) and therefore every
-  // exchange credit, so an unbounded value is a direct money-loss lever.
+  // Markup remains supported for older clients, but the admin UI now writes
+  // the customer-facing rate directly with a zero markup.
+  @IsOptional()
   @IsNumber()
   @Type(() => Number)
-  @IsPositive()
+  @Min(0)
   @Max(50)
-  markup: number;
+  markup?: number;
 
+  @IsOptional()
   @IsString()
-  @MinLength(10)
   @MaxLength(500)
-  reason: string;
+  reason?: string;
 }
 
 export class AdminApproveRateOverrideDto {

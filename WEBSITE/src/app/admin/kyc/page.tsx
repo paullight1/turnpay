@@ -1,5 +1,7 @@
 "use client";
 
+import { hasAdminAccess } from "@/lib/admin-access";
+
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-provider";
@@ -89,7 +91,7 @@ function verificationLine(doc: AdminKycDocument) {
 export default function AdminKycPage() {
   const { user, profile, isLoading: authLoading } = useAuth();
   const router = useRouter();
-  const isAdmin = user?.role === "ADMIN" || profile?.role === "ADMIN";
+  const isAdmin = hasAdminAccess(user) || hasAdminAccess(profile);
   const [page, setPage] = useState(1);
   const [selectedDoc, setSelectedDoc] = useState<AdminKycDocument | null>(null);
   const [reviewDocumentUrl, setReviewDocumentUrl] = useState<string | null>(null);
@@ -103,8 +105,8 @@ export default function AdminKycPage() {
       !authLoading &&
       user &&
       profile &&
-      user.role !== "ADMIN" &&
-      profile.role !== "ADMIN"
+      !hasAdminAccess(user) &&
+      !hasAdminAccess(profile)
     ) {
       router.push("/dashboard");
     }
@@ -120,6 +122,7 @@ export default function AdminKycPage() {
     },
     enabled: isAdmin,
     staleTime: 30000,
+    refetchInterval: 30000,
   });
 
   const reviewMutation = useMutation({
@@ -223,7 +226,7 @@ export default function AdminKycPage() {
               Pending KYC Documents ({kycData?.total || 0})
               {isFetching && !isLoading && (
                 <span className="text-xs font-normal text-muted-foreground">
-                  Refreshing…
+                  Updating…
                 </span>
               )}
             </CardTitle>

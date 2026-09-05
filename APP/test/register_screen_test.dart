@@ -295,8 +295,10 @@ void main() {
         ),
         GoRoute(
           path: '/login',
-          builder: (context, state) => const Scaffold(
-            body: Text('Login destination'),
+          builder: (context, state) => Scaffold(
+            body: Text(
+              'Login destination ${(state.extra as Map<String, dynamic>?)?['email'] ?? ''}',
+            ),
           ),
         ),
       ],
@@ -326,14 +328,14 @@ void main() {
 
     expect(
       find.text(
-        'An account already exists with these details. Taking you to log in…',
+        'An account already uses that email or phone number. Sign in with the email already linked to your account.',
       ),
       findsOneWidget,
     );
 
     await tester.pump(const Duration(seconds: 2));
     await tester.pumpAndSettle();
-    expect(find.text('Login destination'), findsOneWidget);
+    expect(find.text('Login destination '), findsOneWidget);
   });
 }
 

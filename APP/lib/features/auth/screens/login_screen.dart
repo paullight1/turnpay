@@ -11,7 +11,12 @@ import '../widgets/auth_text_field.dart';
 import '../widgets/tp_button.dart';
 
 class LoginScreen extends StatefulWidget {
-  const LoginScreen({super.key});
+  final String initialEmail;
+
+  const LoginScreen({
+    super.key,
+    this.initialEmail = '',
+  });
 
   @override
   State<LoginScreen> createState() => _LoginScreenState();
@@ -19,7 +24,7 @@ class LoginScreen extends StatefulWidget {
 
 class _LoginScreenState extends State<LoginScreen> {
   final _formKey = GlobalKey<FormState>();
-  final _emailController = TextEditingController();
+  late final TextEditingController _emailController;
   final _passwordController = TextEditingController();
   final _authService = AuthService();
   bool _obscurePassword = true;
@@ -29,6 +34,9 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   void initState() {
     super.initState();
+    _emailController = TextEditingController(
+      text: widget.initialEmail.trim().toLowerCase(),
+    );
     // If we landed here because the session expired, surface a message once.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || _expiredNoticeShown) return;
@@ -83,6 +91,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     return Scaffold(
       backgroundColor: AppColors.background,
       body: SafeArea(
@@ -173,7 +182,12 @@ class _LoginScreenState extends State<LoginScreen> {
                 Align(
                   alignment: Alignment.centerRight,
                   child: GestureDetector(
-                    onTap: () => context.push(AppRoutes.forgotPassword),
+                    onTap: () => context.push(
+                      AppRoutes.forgotPassword,
+                      extra: {
+                        'email': _emailController.text.trim().toLowerCase(),
+                      },
+                    ),
                     child: Text(
                       'Forgot password?',
                       style: AppTextStyles.link,
@@ -199,8 +213,7 @@ class _LoginScreenState extends State<LoginScreen> {
                       style: AppTextStyles.bodyM,
                     ),
                     GestureDetector(
-                      onTap: () =>
-                          context.pushReplacement(AppRoutes.register),
+                      onTap: () => context.pushReplacement(AppRoutes.register),
                       child: Text(
                         'Sign up',
                         style: AppTextStyles.link.copyWith(

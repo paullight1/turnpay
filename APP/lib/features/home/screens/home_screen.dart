@@ -1,11 +1,12 @@
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/router/app_router.dart';
+import '../../../core/money/money_value.dart';
 import '../../../core/state/wallet_refresh_signal.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/haptics.dart';
@@ -30,6 +31,7 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   late Future<HomeDashboardData> _dashboardFuture;
   bool _showBalances = true;
+  bool _refreshing = false;
 
   @override
   void initState() {
@@ -51,21 +53,32 @@ class _HomeScreenState extends State<HomeScreen> {
     setState(() => _showBalances = !_showBalances);
   }
 
-  void _refreshDashboard() {
+  Future<void> _refreshDashboard() async {
+    if (_refreshing || !mounted) return;
     setState(() {
+      _refreshing = true;
       _dashboardFuture = widget.homeDataService.fetchDashboard();
     });
+    try {
+      await _dashboardFuture;
+    } catch (_) {
+      // The builder presents the failed refresh rather than hiding it.
+    } finally {
+      if (mounted) setState(() => _refreshing = false);
+    }
   }
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     return Scaffold(
       backgroundColor: AppColors.background,
       body: SafeArea(
         child: FutureBuilder<HomeDashboardData>(
           future: _dashboardFuture,
           builder: (context, snapshot) {
-            if (snapshot.connectionState == ConnectionState.waiting) {
+            if (snapshot.connectionState == ConnectionState.waiting &&
+                !snapshot.hasData) {
               return const _HomeLoadingState();
             }
 
@@ -80,10 +93,12 @@ class _HomeScreenState extends State<HomeScreen> {
             }
 
             final data = snapshot.data!;
+            final hasNgnAccount =
+                _hasActiveAccount(data.virtualAccounts, 'NGN');
             return RefreshIndicator(
               color: AppColors.primary,
               backgroundColor: AppColors.surface,
-              onRefresh: () async => _refreshDashboard(),
+              onRefresh: _refreshDashboard,
               child: ListView(
                 physics: const AlwaysScrollableScrollPhysics(
                   parent: BouncingScrollPhysics(),
@@ -95,13 +110,27 @@ class _HomeScreenState extends State<HomeScreen> {
                   88,
                 ),
                 children: [
+                  if (_refreshing) ...[
+                    const LinearProgressIndicator(minHeight: 2),
+                    const Text('Updating balances…'),
+                  ],
                   _HomeTopBar(user: data.user),
                   const SizedBox(height: AppSpacing.md),
                   _BalancePanel(
                     data: data,
                     showBalances: _showBalances,
                     onToggleBalances: _toggleBalances,
+                    onSend: hasNgnAccount
+                        ? () => context.push(AppRoutes.send)
+                        : () => context.push(AppRoutes.receiveMoney),
                   ),
+                  if (data.virtualAccounts.isEmpty ||
+                      !_hasActiveAccount(data.virtualAccounts, 'NGN')) ...[
+                    const SizedBox(height: AppSpacing.md),
+                    _AccountSetupBanner(
+                      onRequest: () => context.push(AppRoutes.receiveMoney),
+                    ),
+                  ],
                   const SizedBox(height: AppSpacing.lg),
                   const _QuickActionsGrid(),
                   const SizedBox(height: AppSpacing.lg),
@@ -149,6 +178,7 @@ class _HomeTopBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     return Row(
       children: [
         Container(
@@ -214,6 +244,7 @@ class _BalancePanel extends StatefulWidget {
   final HomeDashboardData data;
   final bool showBalances;
   final VoidCallback onToggleBalances;
+  final VoidCallback onSend;
 
   const _BalancePanel({
     // Retained for widget identity compatibility while the panel is private.
@@ -222,6 +253,7 @@ class _BalancePanel extends StatefulWidget {
     required this.data,
     required this.showBalances,
     required this.onToggleBalances,
+    required this.onSend,
   });
 
   @override
@@ -229,6 +261,9 @@ class _BalancePanel extends StatefulWidget {
 }
 
 class _BalancePanelState extends State<_BalancePanel> {
+  static const _storage = FlutterSecureStorage();
+  Set<String> _currencies = {'NGN', 'GHS'};
+  String get _preferenceKey => 'dashboard-currencies-${widget.data.user.id}';
   late final ScrollController _scrollController;
   int _currentPage = 0;
   double _cardExtent = 1;
@@ -237,6 +272,82 @@ class _BalancePanelState extends State<_BalancePanel> {
   void initState() {
     super.initState();
     _scrollController = ScrollController()..addListener(_handleCarouselScroll);
+    _loadCurrencies();
+  }
+
+  Future<void> _loadCurrencies() async {
+    try {
+      final saved = await _storage.read(key: _preferenceKey);
+      final selected = saved?.split(',').where({'NGN', 'GHS'}.contains).toSet();
+      if (mounted && selected != null && selected.isNotEmpty) {
+        setState(() => _currencies = selected);
+      }
+    } catch (_) {
+      // Keep the default cards if device preferences are unavailable.
+    }
+  }
+
+  Future<void> _editCurrencies() async {
+    final selected = Set<String>.of(_currencies);
+    final result = await showModalBottomSheet<Set<String>>(
+      context: context,
+      backgroundColor: AppColors.surface,
+      showDragHandle: true,
+      builder: (context) => StatefulBuilder(builder: (context, update) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.all(AppSpacing.lg),
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              Text('Your currencies', style: AppTextStyles.headingM),
+              const SizedBox(height: AppSpacing.sm),
+              for (final currency in ['NGN', 'GHS'])
+                CheckboxListTile(
+                  title: Text(currency == 'NGN'
+                      ? 'NGN · Nigerian naira'
+                      : 'GHS · Ghana cedi'),
+                  subtitle: Text(
+                      _hasActiveAccount(widget.data.virtualAccounts, currency)
+                          ? 'Account ready'
+                          : currency == 'NGN'
+                              ? 'Request an account to get started'
+                              : 'Account unavailable now'),
+                  value: selected.contains(currency),
+                  onChanged: (value) => update(() {
+                    if (value == true) {
+                      selected.add(currency);
+                    } else {
+                      selected.remove(currency);
+                    }
+                  }),
+                ),
+              const SizedBox(height: AppSpacing.md),
+              SizedBox(
+                  width: double.infinity,
+                  child: FilledButton(
+                    onPressed: selected.isEmpty
+                        ? null
+                        : () => Navigator.pop(context, selected),
+                    child: const Text('Save'),
+                  )),
+            ]),
+          ),
+        );
+      }),
+    );
+    if (!mounted || result == null) return;
+    setState(() {
+      _currencies = result;
+      _currentPage = 0;
+    });
+    if (_scrollController.hasClients) _scrollController.jumpTo(0);
+    try {
+      await _storage.write(key: _preferenceKey, value: result.join(','));
+    } catch (_) {
+      if (mounted) {
+        showTpSnackbar(context,
+            'Cards updated. Could not save this preference on your device.');
+      }
+    }
   }
 
   @override
@@ -249,8 +360,10 @@ class _BalancePanelState extends State<_BalancePanel> {
 
   void _handleCarouselScroll() {
     if (!_scrollController.hasClients || _cardExtent <= 0) return;
-    final nextPage =
-        (_scrollController.offset / _cardExtent).round().clamp(0, 1).toInt();
+    final nextPage = (_scrollController.offset / _cardExtent)
+        .round()
+        .clamp(0, _currencies.length - 1)
+        .toInt();
     if (nextPage != _currentPage) {
       setState(() => _currentPage = nextPage);
     }
@@ -267,8 +380,11 @@ class _BalancePanelState extends State<_BalancePanel> {
 
   @override
   Widget build(BuildContext context) {
-    final ngnBalance = widget.data.walletFor('NGN')?.balance ?? 0;
-    final ghsBalance = widget.data.walletFor('GHS')?.balance ?? 0;
+    AppColors.watch(context);
+    final ngnBalance =
+        widget.data.walletFor('NGN')?.balanceDecimalString ?? '0.00';
+    final ghsBalance =
+        widget.data.walletFor('GHS')?.balanceDecimalString ?? '0.00';
     final ngnAccount = _accountForCurrency(widget.data.virtualAccounts, 'NGN');
     final ghsAccount = _accountForCurrency(widget.data.virtualAccounts, 'GHS');
     final pageWidth = MediaQuery.sizeOf(context).width;
@@ -278,7 +394,7 @@ class _BalancePanelState extends State<_BalancePanel> {
     final cards = [
       _BalanceCardData(
         currency: 'NGN',
-        balance: ngnBalance,
+        balanceDecimalString: ngnBalance,
         account: ngnAccount,
         colors: [
           AppColors.primaryDark,
@@ -288,7 +404,7 @@ class _BalancePanelState extends State<_BalancePanel> {
       ),
       _BalanceCardData(
         currency: 'GHS',
-        balance: ghsBalance,
+        balanceDecimalString: ghsBalance,
         account: ghsAccount,
         colors: const [
           Color(0xFF0E7490),
@@ -296,11 +412,19 @@ class _BalancePanelState extends State<_BalancePanel> {
           Color(0xFF34D399),
         ],
       ),
-    ];
+    ].where((card) => _currencies.contains(card.currency)).toList();
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        Row(children: [
+          Expanded(child: Text('Your wallets', style: AppTextStyles.labelL)),
+          IconButton(
+            tooltip: 'Edit currencies',
+            onPressed: _editCurrencies,
+            icon: const Icon(Icons.add_rounded),
+          ),
+        ]),
         SizedBox(
           height: 184,
           child: OverflowBox(
@@ -329,8 +453,14 @@ class _BalancePanelState extends State<_BalancePanel> {
                       data: card,
                       showBalances: widget.showBalances,
                       onToggleBalances: widget.onToggleBalances,
-                      onSend: () => context.push(AppRoutes.send),
-                      onReceive: () => context.push(AppRoutes.receiveMoney),
+                      onSend: card.currency == 'GHS' && card.account == null
+                          ? () => showTpSnackbar(
+                              context, 'Ghana accounts are unavailable now.')
+                          : widget.onSend,
+                      onReceive: card.currency == 'GHS' && card.account == null
+                          ? () => showTpSnackbar(
+                              context, 'Ghana accounts are unavailable now.')
+                          : () => context.push(AppRoutes.receiveMoney),
                     ),
                   );
                 },
@@ -379,16 +509,43 @@ class _CarouselScrollBehavior extends MaterialScrollBehavior {
 
 class _BalanceCardData {
   final String currency;
-  final double balance;
+  final String balanceDecimalString;
   final HomeVirtualAccount? account;
   final List<Color> colors;
 
   const _BalanceCardData({
     required this.currency,
-    required this.balance,
+    required this.balanceDecimalString,
     required this.account,
     required this.colors,
   });
+}
+
+class _AccountSetupBanner extends StatelessWidget {
+  final VoidCallback onRequest;
+  const _AccountSetupBanner({required this.onRequest});
+
+  @override
+  Widget build(BuildContext context) {
+    AppColors.watch(context);
+    return Container(
+      padding: const EdgeInsets.all(AppSpacing.md),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(AppRadius.md),
+        border: Border.all(color: AppColors.primary.withValues(alpha: .35)),
+      ),
+      child: Row(children: [
+        Icon(Icons.account_balance_rounded, color: AppColors.primary),
+        const SizedBox(width: AppSpacing.sm),
+        Expanded(
+            child: Text(
+                'Request an account number to fund your wallet and start transacting.',
+                style: AppTextStyles.bodyS)),
+        TextButton(onPressed: onRequest, child: const Text('Request')),
+      ]),
+    );
+  }
 }
 
 class _CurrencyBalanceCard extends StatelessWidget {
@@ -408,12 +565,20 @@ class _CurrencyBalanceCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final visibleAmount =
-        showBalances ? _walletCardAmount(data.balance) : '******';
+    AppColors.watch(context);
+    final hasAccount = data.account != null;
+    final visibleAmount = hasAccount && showBalances
+        ? _walletCardAmount(data.balanceDecimalString)
+        : '******';
     final accountNumber = data.account?.accountNumber.trim() ?? '';
+    final canRequestAccount = data.currency == 'NGN' && accountNumber.isEmpty;
+    final showAccountChip =
+        accountNumber.isNotEmpty || canRequestAccount || data.currency == 'GHS';
     final accountChipLabel = accountNumber.isNotEmpty
         ? _formatAccountNumber(accountNumber)
-        : 'Request account';
+        : canRequestAccount
+            ? 'Request account'
+            : 'Account unavailable';
     final accountChip = Container(
       constraints: const BoxConstraints(maxWidth: 198, minHeight: 34),
       padding: const EdgeInsets.symmetric(
@@ -493,17 +658,20 @@ class _CurrencyBalanceCard extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Expanded(
-                      child: Align(
-                        alignment: Alignment.centerLeft,
-                        child: accountNumber.isEmpty
-                            ? TapScale(
-                                onTap: onReceive,
-                                borderRadius:
-                                    BorderRadius.circular(AppRadius.full),
-                                child: accountChip,
-                              )
-                            : accountChip,
-                      ),
+                      child: showAccountChip
+                          ? Align(
+                              alignment: Alignment.centerLeft,
+                              child: canRequestAccount
+                                  ? TapScale(
+                                      onTap: onReceive,
+                                      borderRadius: BorderRadius.circular(
+                                        AppRadius.full,
+                                      ),
+                                      child: accountChip,
+                                    )
+                                  : accountChip,
+                            )
+                          : const SizedBox.shrink(),
                     ),
                     const SizedBox(width: AppSpacing.sm),
                     TapScale(
@@ -572,7 +740,6 @@ class _CurrencyBalanceCard extends StatelessWidget {
                         label: 'Send money',
                         icon: Icons.near_me_rounded,
                         onTap: onSend,
-                        isPrimary: true,
                       ),
                     ),
                     const SizedBox(width: AppSpacing.sm),
@@ -608,6 +775,7 @@ class _VirtualAccountSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     final displayAccountNumber = account?.displayAccountNumber ?? '';
     final normalizedAccountNumber = displayAccountNumber.trim();
 
@@ -771,6 +939,7 @@ class _NoVirtualAccountHomeCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(AppSpacing.md),
@@ -847,17 +1016,16 @@ class _BalanceCtaButton extends StatelessWidget {
   final String label;
   final IconData icon;
   final VoidCallback onTap;
-  final bool isPrimary;
 
   const _BalanceCtaButton({
     required this.label,
     required this.icon,
     required this.onTap,
-    this.isPrimary = false,
   });
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     return TapScale(
       onTap: onTap,
       semanticLabel: label,
@@ -866,28 +1034,18 @@ class _BalanceCtaButton extends StatelessWidget {
       child: Container(
         height: 48,
         decoration: BoxDecoration(
-          color:
-              isPrimary ? Colors.white : Colors.white.withValues(alpha: 0.13),
+          color: Colors.white.withValues(alpha: 0.13),
           borderRadius: BorderRadius.circular(15),
           border: Border.all(
-            color: Colors.white.withValues(alpha: isPrimary ? 0.72 : 0.28),
+            color: Colors.white.withValues(alpha: 0.28),
           ),
-          boxShadow: isPrimary
-              ? [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.12),
-                    blurRadius: 12,
-                    offset: const Offset(0, 6),
-                  ),
-                ]
-              : null,
         ),
         child: Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Icon(
               icon,
-              color: isPrimary ? AppColors.primary : Colors.white,
+              color: Colors.white,
               size: 18,
             ),
             const SizedBox(width: AppSpacing.xs),
@@ -895,7 +1053,7 @@ class _BalanceCtaButton extends StatelessWidget {
               child: Text(
                 label,
                 style: AppTextStyles.labelS.copyWith(
-                  color: isPrimary ? AppColors.primary : Colors.white,
+                  color: Colors.white,
                   fontWeight: FontWeight.w900,
                   letterSpacing: 0,
                 ),
@@ -917,6 +1075,7 @@ class _KycStatusBanner extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     final isVerified = status.toUpperCase() == 'VERIFIED';
     final color = isVerified ? AppColors.success : AppColors.warning;
     final message = isVerified
@@ -976,22 +1135,18 @@ class _KycStatusBanner extends StatelessWidget {
 class _PromoBanner extends StatelessWidget {
   const _PromoBanner();
 
-  Future<void> _openPromo() async {
-    final uri = Uri.parse('https://trustpay.xyz');
-    await launchUrl(uri, mode: LaunchMode.externalApplication);
-  }
-
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     return TapScale(
-      onTap: _openPromo,
+      onTap: () => context.push(AppRoutes.exchange),
       borderRadius: BorderRadius.circular(16),
       child: Container(
-        constraints: const BoxConstraints(minHeight: 96),
+        constraints: const BoxConstraints(minHeight: 120),
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(16),
           border: Border.all(
-            color: AppColors.primary.withValues(alpha: 0.22),
+            color: Colors.white.withValues(alpha: 0.16),
           ),
           boxShadow: [
             BoxShadow(
@@ -1001,7 +1156,9 @@ class _PromoBanner extends StatelessWidget {
             ),
           ],
           image: const DecorationImage(
-            image: AssetImage('assets/images/onboarding_transfer.jpg'),
+            image: AssetImage(
+              'assets/images/feature_cards/exchange-services-banner.png',
+            ),
             fit: BoxFit.cover,
             alignment: Alignment.center,
           ),
@@ -1014,9 +1171,9 @@ class _PromoBanner extends StatelessWidget {
               begin: Alignment.centerLeft,
               end: Alignment.centerRight,
               colors: [
-                Colors.black.withValues(alpha: 0.62),
-                Colors.black.withValues(alpha: 0.28),
-                Colors.black.withValues(alpha: 0.12),
+                AppColors.background.withValues(alpha: 0.90),
+                AppColors.background.withValues(alpha: 0.56),
+                AppColors.background.withValues(alpha: 0.18),
               ],
             ),
           ),
@@ -1028,25 +1185,26 @@ class _PromoBanner extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'Featured offer',
+                      'EXCHANGE SERVICES',
                       style: AppTextStyles.caption.copyWith(
-                        color: Colors.white.withValues(alpha: 0.86),
-                        fontWeight: FontWeight.w700,
+                        color: AppColors.primaryLight,
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: 1.1,
                       ),
                     ),
                     const SizedBox(height: 3),
                     Text(
-                      'Move between GHS and NGN faster',
+                      'Exchange NGN to GHS',
                       style: AppTextStyles.labelM.copyWith(
                         color: Colors.white,
                         fontWeight: FontWeight.w900,
                       ),
-                      maxLines: 1,
+                      maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                     ),
                     const SizedBox(height: 3),
                     Text(
-                      'Tap to see the live TrustPay exchange experience.',
+                      'Upload your receipt. Receive GHS after deposit confirmation.',
                       style: AppTextStyles.bodyS.copyWith(
                         color: Colors.white.withValues(alpha: 0.86),
                         height: 1.3,
@@ -1076,6 +1234,7 @@ class _QuickActionsGrid extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     final actions = [
       const _ActionItem(
         'Airtime',
@@ -1181,6 +1340,7 @@ class _QuickActionTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     return TapScale(
       onTap: () => _openAction(context),
       semanticLabel: action.label,
@@ -1255,6 +1415,7 @@ class _BeneficiaryStrip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     final visible = beneficiaries.take(6).toList(growable: false);
 
     return Column(
@@ -1287,7 +1448,8 @@ class _BeneficiaryStrip extends StatelessWidget {
                   scrollDirection: Axis.horizontal,
                   physics: const BouncingScrollPhysics(),
                   itemCount: visible.length,
-                  separatorBuilder: (_, __) => const SizedBox(width: AppSpacing.sm),
+                  separatorBuilder: (_, __) =>
+                      const SizedBox(width: AppSpacing.sm),
                   itemBuilder: (context, index) {
                     return _BeneficiaryCard(beneficiary: visible[index]);
                   },
@@ -1305,6 +1467,7 @@ class _EmptyBeneficiaryCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     return TapScale(
       onTap: onTap,
       borderRadius: BorderRadius.circular(16),
@@ -1367,6 +1530,7 @@ class _BeneficiaryCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     final label = beneficiary.accountName.isEmpty
         ? beneficiary.bankName
         : beneficiary.accountName;
@@ -1454,6 +1618,7 @@ class _WalletSummaryRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     final walletByCurrency = {
       for (final wallet in wallets) wallet.currency.toUpperCase(): wallet,
     };
@@ -1470,12 +1635,13 @@ class _WalletSummaryRow extends StatelessWidget {
         icon: template.icon,
         colors: template.colors,
         isUnlocked: isUnlocked,
-        balance: isUnlocked ? wallet?.balance ?? 0 : 0,
+        balanceDecimalString:
+            isUnlocked ? wallet?.balanceDecimalString ?? '0.00' : '0.00',
       );
     }).toList(growable: false);
 
     return SizedBox(
-      height: 124,
+      height: 96,
       child: ListView.separated(
         clipBehavior: Clip.none,
         scrollDirection: Axis.horizontal,
@@ -1485,14 +1651,15 @@ class _WalletSummaryRow extends StatelessWidget {
         itemBuilder: (context, index) {
           final item = items[index];
           return SizedBox(
-            width: 154,
+            width: 120,
             child: _WalletCard(
+              key: ValueKey('wallet-summary-${item.currency}'),
               item: item,
               balance: item.isUnlocked
                   ? showBalances
-                      ? _compactMoney(item.balance)
+                      ? _compactMoney(item.balanceDecimalString)
                       : '••••'
-                  : '****',
+                  : 'Coming soon',
             ),
           );
         },
@@ -1526,7 +1693,7 @@ class _WalletDisplayItem {
   final IconData icon;
   final List<Color> colors;
   final bool isUnlocked;
-  final double balance;
+  final String balanceDecimalString;
 
   const _WalletDisplayItem({
     required this.currency,
@@ -1535,7 +1702,7 @@ class _WalletDisplayItem {
     required this.icon,
     required this.colors,
     required this.isUnlocked,
-    required this.balance,
+    required this.balanceDecimalString,
   });
 }
 
@@ -1595,15 +1762,17 @@ class _WalletCard extends StatelessWidget {
   final String balance;
 
   const _WalletCard({
+    super.key,
     required this.item,
     required this.balance,
   });
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     final contentOpacity = item.isUnlocked ? 1.0 : 0.74;
     return Container(
-      constraints: const BoxConstraints(minHeight: 116),
+      constraints: const BoxConstraints(minHeight: 96),
       clipBehavior: Clip.antiAlias,
       decoration: BoxDecoration(
         gradient: LinearGradient(
@@ -1636,29 +1805,31 @@ class _WalletCard extends StatelessWidget {
               ),
             ),
           ),
-          Positioned(
-            right: 10,
-            top: 10,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.18),
-                borderRadius: BorderRadius.circular(AppRadius.full),
-                border: Border.all(color: Colors.white.withValues(alpha: 0.18)),
-              ),
-              child: Text(
-                item.isUnlocked ? 'Active' : '****',
-                style: AppTextStyles.caption.copyWith(
-                  color: Colors.white,
-                  fontSize: 9,
-                  fontWeight: FontWeight.w900,
-                  height: 1,
+          if (item.isUnlocked)
+            Positioned(
+              right: 10,
+              top: 10,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.18),
+                  borderRadius: BorderRadius.circular(AppRadius.full),
+                  border:
+                      Border.all(color: Colors.white.withValues(alpha: 0.18)),
+                ),
+                child: Text(
+                  'Active',
+                  style: AppTextStyles.caption.copyWith(
+                    color: Colors.white,
+                    fontSize: 9,
+                    fontWeight: FontWeight.w900,
+                    height: 1,
+                  ),
                 ),
               ),
             ),
-          ),
           Padding(
-            padding: const EdgeInsets.all(AppSpacing.md),
+            padding: const EdgeInsets.all(AppSpacing.sm),
             child: Opacity(
               opacity: contentOpacity,
               child: Column(
@@ -1667,8 +1838,8 @@ class _WalletCard extends StatelessWidget {
                   Row(
                     children: [
                       Container(
-                        width: 30,
-                        height: 30,
+                        width: 24,
+                        height: 24,
                         alignment: Alignment.center,
                         decoration: BoxDecoration(
                           color: Colors.white.withValues(alpha: 0.18),
@@ -1690,7 +1861,10 @@ class _WalletCard extends StatelessWidget {
                   const Spacer(),
                   Text(
                     balance,
-                    style: AppTextStyles.headingM.copyWith(
+                    style: (item.isUnlocked
+                            ? AppTextStyles.headingM
+                            : AppTextStyles.caption)
+                        .copyWith(
                       color: Colors.white,
                       letterSpacing: 0,
                       fontWeight: FontWeight.w900,
@@ -1731,6 +1905,7 @@ class _RecentTransactionsSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     final items = transactions.map(_activityFromTransaction).take(4).toList();
 
     return Column(
@@ -1750,18 +1925,20 @@ class _RecentTransactionsSection extends StatelessWidget {
               horizontal: AppSpacing.md,
             ),
             decoration: BoxDecoration(
-              color: AppColors.surfaceVariant,
+              color: AppColors.isDark
+                  ? const Color(0xFF13151C)
+                  : AppColors.surfaceVariant,
               borderRadius: BorderRadius.circular(AppRadius.lg),
               border: Border.all(color: AppColors.border),
             ),
             child: Column(
               children: [
-                const TpIllustration(
-                  variant: TpIllustrationVariant.emptyTransactions,
-                  size: 116,
-                  semanticLabel: 'No transactions yet',
+                Icon(
+                  Icons.receipt_long_outlined,
+                  size: 28,
+                  color: AppColors.textSecondary,
                 ),
-                const SizedBox(height: AppSpacing.xs),
+                const SizedBox(height: AppSpacing.sm),
                 Text(
                   'No transactions yet',
                   style: AppTextStyles.labelM,
@@ -1790,6 +1967,7 @@ class _ActivityList extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     final items = transactions.map(_activityFromTransaction).take(4).toList();
 
     return Column(
@@ -1815,6 +1993,7 @@ class _ActivityRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     return TapScale(
       onTap: () => context.push(item.route),
       borderRadius: BorderRadius.circular(12),
@@ -1883,6 +2062,7 @@ class _SectionTitle extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     return Row(
       children: [
         Expanded(
@@ -1924,6 +2104,7 @@ class _IconButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     return Tooltip(
       message: tooltip,
       child: TapScale(
@@ -1987,6 +2168,7 @@ class _HomeLoadingState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     return SizedBox.expand(
       child: Center(
         child: Column(
@@ -2023,6 +2205,7 @@ class _HomeErrorState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     return Padding(
       padding: const EdgeInsets.all(AppSpacing.lg),
       child: Center(
@@ -2079,7 +2262,7 @@ class _HomeErrorState extends StatelessWidget {
 _ActivityItem _activityFromTransaction(HomeTransaction transaction) {
   final type = transaction.type.replaceAll('_', ' ').toLowerCase();
   final title = '${_titleCase(type)} ${transaction.status.toLowerCase()}';
-  final amount = _money(transaction.currency, transaction.amount);
+  final amount = _money(transaction.currency, transaction.amountDecimalString);
   final date = transaction.createdAt == null
       ? 'recently'
       : DateFormat('MMM d, HH:mm').format(transaction.createdAt!.toLocal());
@@ -2124,30 +2307,88 @@ Color _transactionColor(String status) {
   }
 }
 
-String _money(String currency, double amount) {
-  return '$currency ${_decimal(amount)}';
+String _money(String currency, String decimalString) {
+  return '$currency ${_formatExactAmount(decimalString)}';
 }
 
-String _compactMoney(double amount) {
-  final absolute = amount.abs();
-  if (absolute >= 1000000) {
-    return '${(amount / 1000000).toStringAsFixed(2)}M';
+String _compactMoney(String decimalString) {
+  final value = MoneyValue.parse(decimalString);
+  final absoluteMinorUnits = value.minorUnits.abs();
+  final thousandMinorUnits = BigInt.from(100000);
+  final millionMinorUnits = BigInt.from(100000000);
+
+  if (absoluteMinorUnits >= millionMinorUnits) {
+    return _compactScaled(
+      value,
+      unitMinorUnits: millionMinorUnits,
+      decimalPlaces: 2,
+      suffix: 'M',
+    );
   }
-  if (absolute >= 1000) {
-    return '${(amount / 1000).toStringAsFixed(1)}K';
+  if (absoluteMinorUnits >= thousandMinorUnits) {
+    return _compactScaled(
+      value,
+      unitMinorUnits: thousandMinorUnits,
+      decimalPlaces: 1,
+      suffix: 'K',
+    );
   }
-  return _decimal(amount);
+  return _formatExactAmount(value.decimalString);
 }
 
-String _walletCardAmount(double amount) {
-  if (amount == amount.truncateToDouble()) {
-    return NumberFormat('#,##0').format(amount);
-  }
-  return NumberFormat('#,##0.00').format(amount);
+String _compactScaled(
+  MoneyValue value, {
+  required BigInt unitMinorUnits,
+  required int decimalPlaces,
+  required String suffix,
+}) {
+  final scale = BigInt.from(10).pow(decimalPlaces);
+  final rounded =
+      (value.minorUnits.abs() * scale + unitMinorUnits ~/ BigInt.from(2)) ~/
+          unitMinorUnits;
+  final whole = rounded ~/ scale;
+  final fraction = (rounded % scale).toString().padLeft(decimalPlaces, '0');
+  final sign = value.isNegative ? '-' : '';
+  return '$sign$whole.$fraction$suffix';
 }
 
-String _decimal(double amount) {
-  return NumberFormat('#,##0.00').format(amount);
+String _walletCardAmount(String decimalString) {
+  final value = MoneyValue.parse(decimalString);
+  final formatted = _formatExactAmount(value.decimalString);
+  if (value.minorUnits % BigInt.from(100) == BigInt.zero) {
+    return formatted.substring(0, formatted.length - 3);
+  }
+  return formatted;
+}
+
+bool _hasActiveAccount(List<HomeVirtualAccount> accounts, String currency) {
+  final target = currency.toUpperCase();
+  return accounts.any((account) =>
+      account.currency.toUpperCase() == target &&
+      account.accountNumber.trim().isNotEmpty &&
+      !{'FAILED', 'REJECTED', 'CANCELLED'}
+          .contains(account.status.toUpperCase()));
+}
+
+String _formatExactAmount(String decimalString) {
+  final parts = decimalString.split('.');
+  final rawWhole = parts.first;
+  final isNegative = rawWhole.startsWith('-');
+  var whole = isNegative ? rawWhole.substring(1) : rawWhole;
+  while (whole.length > 1 && whole.startsWith('0')) {
+    whole = whole.substring(1);
+  }
+
+  final grouped = StringBuffer();
+  for (var index = 0; index < whole.length; index++) {
+    if (index > 0 && (whole.length - index) % 3 == 0) {
+      grouped.write(',');
+    }
+    grouped.write(whole[index]);
+  }
+
+  final fraction = parts.length > 1 ? parts[1].padRight(2, '0') : '00';
+  return '${isNegative ? '-' : ''}$grouped.${fraction.substring(0, 2)}';
 }
 
 String _titleCase(String value) {
@@ -2172,7 +2413,10 @@ HomeVirtualAccount? _accountForCurrency(
 ) {
   final targetCurrency = currency.toUpperCase();
   for (final account in accounts) {
-    final hasNumber = account.displayAccountNumber.trim().isNotEmpty;
+    // A masked placeholder is useful for status messaging, but it must not
+    // unlock balances or account actions. Only a generated account number is
+    // considered usable here.
+    final hasNumber = account.accountNumber.trim().isNotEmpty;
     final isUsable = !{'FAILED', 'REJECTED', 'CANCELLED'}.contains(
       account.status.toUpperCase(),
     );

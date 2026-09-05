@@ -15,6 +15,7 @@
 
 # next.js
 /.next/
+/.next-admin-qa/
 /out/
 
 # production

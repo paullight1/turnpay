@@ -22,6 +22,9 @@ import '../../features/security/screens/transaction_security_screen.dart';
 import '../../features/wallet/screens/wallet_detail_screen.dart';
 import '../../features/wallet/screens/receive_money_screen.dart';
 import '../../features/transactions/screens/transaction_detail_screen.dart';
+import '../../features/exchange/screens/manual_exchange_order_screen.dart';
+import '../../features/exchange/screens/manual_exchange_screen.dart';
+import '../../features/exchange/services/manual_exchange_service.dart';
 
 // ─── ROUTE NAMES ──────────────────────────────────────────────────────────────
 class AppRoutes {
@@ -44,6 +47,7 @@ class AppRoutes {
   static const withdrawReceipt = '/withdraw/receipt/:reference';
   static const exchange = '/exchange';
   static const exchangeSettlement = '/exchange/settlement';
+  static const exchangeOrder = '/exchange/orders/:id';
   static const airtime = '/airtime';
   static const data = '/data';
   static const cable = '/cable';
@@ -73,6 +77,10 @@ class AppRoutes {
 
   static String transactionDetailFor(String reference) {
     return '/transaction/${Uri.encodeComponent(reference)}';
+  }
+
+  static String exchangeOrderFor(String id) {
+    return '/exchange/orders/${Uri.encodeComponent(id)}';
   }
 
   static String withdrawAuthorizeFor(String reference) {
@@ -259,7 +267,19 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         path: AppRoutes.exchange,
         pageBuilder: (context, state) => _slideTransition(
           state,
-          const MoneyActionScreen(kind: MoneyActionKind.exchange),
+          const ManualExchangeScreen(),
+        ),
+      ),
+      GoRoute(
+        path: AppRoutes.exchangeOrder,
+        pageBuilder: (context, state) => _slideTransition(
+          state,
+          ManualExchangeOrderScreen(
+            orderId: Uri.decodeComponent(state.pathParameters['id'] ?? ''),
+            initialOrder: state.extra is ManualExchangeOrder
+                ? state.extra as ManualExchangeOrder
+                : null,
+          ),
         ),
       ),
       GoRoute(
@@ -350,7 +370,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         path: AppRoutes.login,
         pageBuilder: (context, state) => _slideTransition(
           state,
-          const LoginScreen(),
+          LoginScreen(initialEmail: _emailFromExtra(state.extra)),
         ),
       ),
       GoRoute(
@@ -377,7 +397,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         path: AppRoutes.forgotPassword,
         pageBuilder: (context, state) => _slideTransition(
           state,
-          const ForgotPasswordScreen(),
+          ForgotPasswordScreen(initialEmail: _emailFromExtra(state.extra)),
         ),
       ),
       GoRoute(
@@ -412,6 +432,12 @@ final appRouterProvider = Provider<GoRouter>((ref) {
     ],
   );
 });
+
+String _emailFromExtra(Object? extra) {
+  if (extra is! Map<String, dynamic>) return '';
+  final email = extra['email'];
+  return email is String ? email.trim().toLowerCase() : '';
+}
 
 // ─── PAGE TRANSITION HELPERS ──────────────────────────────────────────────────
 CustomTransitionPage<void> _fadeTransition(

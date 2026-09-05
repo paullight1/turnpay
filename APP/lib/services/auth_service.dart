@@ -297,6 +297,19 @@ String authErrorMessage(Object error, String fallback) {
   if (error is DioException) {
     final data = error.response?.data;
     if (_isAuthRequest(path)) {
+      if (error.response == null) {
+        return error.type == DioExceptionType.cancel
+            ? fallback
+            : 'Could not connect to TrustPay. Check your connection and try again.';
+      }
+      if ((error.response?.statusCode ?? 0) >= 500) {
+        return 'TrustPay is temporarily unavailable. Please try again shortly.';
+      }
+      if (path?.contains('/register') == true &&
+          error.response?.statusCode == 409) {
+        final conflictMessage = _registrationConflictMessage(data);
+        if (conflictMessage != null) return conflictMessage;
+      }
       return _authSafeMessage(
         fallback,
         path,
@@ -325,6 +338,20 @@ String authErrorMessage(Object error, String fallback) {
   }
 
   return fallback;
+}
+
+String? _registrationConflictMessage(Object? data) {
+  if (data is! Map<String, dynamic>) return null;
+  final message = data['message'];
+  if (message is! Map<String, dynamic>) return null;
+
+  return switch (message['code']) {
+    'EMAIL_ALREADY_REGISTERED' =>
+      'That email is already linked to a TrustPay account. Sign in with that email or reset your password.',
+    'PHONE_ALREADY_REGISTERED' =>
+      'That phone number is already linked to a TrustPay account. Use a different phone number or sign in with the linked email.',
+    _ => null,
+  };
 }
 
 bool isRegistrationConflict(Object error) {
@@ -358,17 +385,17 @@ String _authSafeMessage(
     return 'Incorrect email or password. Try again or reset your password.';
   }
 
-  if (path.contains('/refresh')) {
+  if (path.contains('/refresh') && statusCode == 401) {
     return 'Your session has expired. Please sign in again.';
   }
 
-  if (path.contains('/bootstrap')) {
+  if (path.contains('/bootstrap') && statusCode == 401) {
     return 'Your session has expired. Please sign in again.';
   }
 
   if (path.contains('/register')) {
     if (statusCode == 409) {
-      return 'An account already exists with these details. Taking you to log in…';
+      return 'An account already uses that email or phone number. Sign in with the email already linked to your account.';
     }
 
     return 'Unable to complete registration.';

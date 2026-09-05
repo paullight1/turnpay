@@ -36,6 +36,8 @@ class KycService {
     required String idNumber,
     required String dateOfBirth,
     required bool consentAccepted,
+    String? firstName,
+    String? lastName,
     String country = 'NG',
     String type = 'BVN',
   }) async {
@@ -46,6 +48,10 @@ class KycService {
       'idNumber': idNumber,
       'dateOfBirth': dateOfBirth,
       'consentAccepted': consentAccepted,
+      if (firstName != null && firstName.trim().isNotEmpty)
+        'firstName': firstName.trim(),
+      if (lastName != null && lastName.trim().isNotEmpty)
+        'lastName': lastName.trim(),
     };
 
     final response = await _apiClient.client.post<dynamic>(
@@ -77,6 +83,8 @@ class KycService {
 }
 
 class KycOverview {
+  final String? firstName;
+  final String? lastName;
   final String status;
   final String tier;
   final String provider;
@@ -87,6 +95,8 @@ class KycOverview {
   final List<KycDocumentSummary> documents;
 
   const KycOverview({
+    this.firstName,
+    this.lastName,
     required this.status,
     required this.tier,
     required this.provider,
@@ -99,6 +109,13 @@ class KycOverview {
 
   factory KycOverview.fromJson(Map<String, dynamic> json) {
     final user = _asMap(json['user']);
+    final fullName =
+        _firstString([json['fullName'], user['fullName']], fallback: '');
+    final nameParts = fullName
+        .trim()
+        .split(RegExp(r'\s+'))
+        .where((part) => part.isNotEmpty)
+        .toList();
     final kyc = _asMap(json['kyc']);
     final latest = _asMap(
       json['latestVerification'] ?? json['verification'] ?? json['session'],
@@ -108,6 +125,8 @@ class KycOverview {
         : _asList(kyc['documents']);
 
     return KycOverview(
+      firstName: nameParts.isNotEmpty ? nameParts.first : null,
+      lastName: nameParts.length > 1 ? nameParts.last : null,
       status: _normalizedStatus(
         _firstString([
           latest['status'],

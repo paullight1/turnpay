@@ -155,39 +155,28 @@ export class ExchangeController {
     @CurrentUser() user: { userId: string },
     @Body() dto: AdminUpdateRateDto,
   ) {
-    const deviation = await this.rateService.getDeviationFromMarket(
-      dto.from,
-      dto.to,
-      dto.rate,
-      dto.markup,
-    );
-
-    if (deviation.requiresDualApproval) {
-      // Create pending rate override for dual approval
-      const pending = await this.exchangeService.createPendingRateOverride(
-        user.userId,
-        dto,
-        deviation.deviationPercent,
-      );
-      return {
-        success: true,
-        requiresApproval: true,
-        deviationPercent: deviation.deviationPercent,
-        overrideId: pending.id,
-        message: `Rate override requires second admin approval (${deviation.deviationPercent}% deviation from market)`,
-      };
-    }
-
-    // Apply immediately — deviation within 5%
+    // Admin rates are applied immediately. The audit log still records the
+    // actor and before/after values, while the customer-facing rate remains a
+    // single, predictable value that operators can update as markets move.
+    const markup = dto.markup ?? 0;
     await this.rateService.setManualRate(
       dto.from,
       dto.to,
       dto.rate,
-      dto.markup,
+      markup,
       user.userId,
-      dto.reason,
+      dto.reason?.trim() || undefined,
     );
-    return { success: true, message: `Rate updated for ${dto.from}/${dto.to}` };
+    const effectiveRate = dto.rate * (1 - markup / 100);
+    return {
+      success: true,
+      from: dto.from,
+      to: dto.to,
+      rate: dto.rate,
+      markup,
+      effectiveRate,
+      message: `Rate updated for ${dto.from}/${dto.to}`,
+    };
   }
 
   @Post('payouts')

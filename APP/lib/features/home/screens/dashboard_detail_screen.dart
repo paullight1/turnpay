@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:dio/dio.dart';
 
+import '../../../core/money/money_value.dart';
 import '../../../core/router/app_router.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/theme/theme_controller.dart';
@@ -110,6 +111,7 @@ class _VtuOrderDetailScreenState extends State<VtuOrderDetailScreen> {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     return Scaffold(
       backgroundColor: AppColors.background,
       body: SafeArea(
@@ -185,13 +187,26 @@ class _VtuOrderDetailScreenState extends State<VtuOrderDetailScreen> {
   }
 }
 
-class _DashboardDetailScreenState extends State<DashboardDetailScreen> {
+class _DashboardDetailScreenState extends State<DashboardDetailScreen>
+    with WidgetsBindingObserver {
   late Future<HomeDashboardData> _future;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _future = widget.homeDataService.fetchDashboard();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) _reload();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
   }
 
   void _reload() {
@@ -202,6 +217,7 @@ class _DashboardDetailScreenState extends State<DashboardDetailScreen> {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     final config = _configFor(widget.kind);
 
     return Scaffold(
@@ -294,6 +310,7 @@ class _DashboardProfileScreenState extends State<DashboardProfileScreen> {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     return Scaffold(
       backgroundColor: AppColors.background,
       body: SafeArea(
@@ -450,6 +467,7 @@ class _ProfileActionScreenState extends State<ProfileActionScreen> {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     final config = _profileConfigFor(widget.kind);
 
     return Scaffold(
@@ -524,6 +542,7 @@ class _DashboardTransactionsScreenState
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     if (_sessionExpired) {
       return _SessionExpiredScreen(
         onLogin: () => context.go(AppRoutes.login),
@@ -566,6 +585,7 @@ class TransactionsDetailScaffold extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     return Scaffold(
       backgroundColor: AppColors.background,
       body: SafeArea(
@@ -635,6 +655,7 @@ class DashboardDetailScaffold extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     return Scaffold(
       backgroundColor: AppColors.background,
       body: SafeArea(
@@ -748,12 +769,12 @@ _DetailConfig _configFor(DashboardDetailKind kind) {
     case DashboardDetailKind.wallets:
       return const _DetailConfig(
         title: 'Wallets',
-        subtitle: 'Live balances from your TrustPay backend account.',
+        subtitle: 'Your money, all in one place.',
       );
     case DashboardDetailKind.virtualAccount:
       return const _DetailConfig(
         title: 'Virtual account',
-        subtitle: 'Provider-assigned bank accounts for receiving transfers.',
+        subtitle: 'Receive bank transfers directly into your wallet.',
       );
     case DashboardDetailKind.activity:
       return const _DetailConfig(
@@ -768,7 +789,8 @@ _DetailConfig _configFor(DashboardDetailKind kind) {
     case DashboardDetailKind.notifications:
       return const _DetailConfig(
         title: 'Notifications',
-        subtitle: 'Account, security, and transaction alerts.',
+        subtitle:
+            'Recent account status. Refresh for updates; dismissals last for this visit.',
       );
   }
 }
@@ -811,6 +833,7 @@ class _SecurityLimitsBody extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     final tier = user.kycTier.toUpperCase();
     final verified = user.kycStatus.toUpperCase() == 'VERIFIED';
 
@@ -892,6 +915,7 @@ class _TierStatusCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     return _DataPanel(
       child: InkWell(
         onTap: onTap,
@@ -956,6 +980,7 @@ class _AccountDetailsBodyState extends State<_AccountDetailsBody> {
   bool _isSavingProfile = false;
   bool _isRequestingDeletion = false;
   bool _isLoadingTransactions = false;
+  late Future<List<SupportTicket>> _closureRequests;
   String? _message;
 
   @override
@@ -964,6 +989,7 @@ class _AccountDetailsBodyState extends State<_AccountDetailsBody> {
     _user = widget.data.user;
     _accounts = widget.data.virtualAccounts;
     _transactions = widget.data.transactions;
+    _closureRequests = widget.homeDataService.fetchSupportTickets(limit: 100);
     _fullNameController.text = _user.fullName;
     _yearOfBirthController.text = _user.yearOfBirth?.toString() ?? '';
     _countryController.text = _user.country.isEmpty ? 'NG' : _user.country;
@@ -1076,14 +1102,17 @@ class _AccountDetailsBodyState extends State<_AccountDetailsBody> {
     });
 
     try {
-      await widget.homeDataService.createSupportTicket(
+      final ticket = await widget.homeDataService.createSupportTicket(
         category: 'ACCOUNT',
         description:
             'Account deletion requested from mobile profile. Please review wallet, KYC, transaction retention, and closure requirements.',
       );
       if (!mounted) return;
       setState(() {
-        _message = 'Account deletion request sent to support.';
+        _message =
+            'Closure request ${ticket.id}: ${ticket.status}. Your account has not been deleted.';
+        _closureRequests =
+            widget.homeDataService.fetchSupportTickets(limit: 100);
       });
     } catch (error) {
       if (!mounted) return;
@@ -1176,6 +1205,7 @@ class _AccountDetailsBodyState extends State<_AccountDetailsBody> {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     final primaryAccount = _accounts.isEmpty ? null : _accounts.first;
     final canEdit = _user.canEditProfileDetails;
 
@@ -1217,6 +1247,48 @@ class _AccountDetailsBodyState extends State<_AccountDetailsBody> {
           isRequesting: _isRequestingDeletion,
           onRequest: _requestAccountDeletion,
         ),
+        FutureBuilder<List<SupportTicket>>(
+          future: _closureRequests,
+          builder: (context, snapshot) {
+            if (snapshot.connectionState == ConnectionState.waiting) {
+              return const Padding(
+                  padding: EdgeInsets.all(16),
+                  child: Text('Checking closure requests…'));
+            }
+            if (snapshot.hasError) {
+              return _ErrorPanel(
+                  message: 'Closure request status is unavailable.',
+                  onRetry: () => setState(() {
+                        _closureRequests = widget.homeDataService
+                            .fetchSupportTickets(limit: 100);
+                      }));
+            }
+            final requests = (snapshot.data ?? [])
+                .where((ticket) =>
+                    ticket.type == 'ACCOUNT' &&
+                    ticket.description
+                        .toLowerCase()
+                        .contains('account deletion'))
+                .toList();
+            return Column(children: [
+              for (final request in requests)
+                _DataPanel(
+                    child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                      Text('Closure request ${request.id}',
+                          style: AppTextStyles.labelM),
+                      Text('Support status: ${request.status}',
+                          style: AppTextStyles.bodyM),
+                      if (request.resolution.isNotEmpty)
+                        Text(request.resolution, style: AppTextStyles.bodyM),
+                      Text(
+                          'A support status does not by itself confirm account deletion.',
+                          style: AppTextStyles.bodyS),
+                    ])),
+            ]);
+          },
+        ),
       ],
     );
   }
@@ -1245,6 +1317,7 @@ class _ProfileIdentityPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     if (!canEdit) {
       return _DataPanel(
         child: Column(
@@ -1343,6 +1416,7 @@ class _ProfileCountryPicker extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     final current = _supportedProfileCountries.contains(
       controller.text.trim().toUpperCase(),
     )
@@ -1411,6 +1485,7 @@ class _ProfileTextField extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     return TextField(
       controller: controller,
       enabled: enabled,
@@ -1446,6 +1521,7 @@ class _DeleteAccountPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     return _DataPanel(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1500,6 +1576,7 @@ class _CompactInfoLine extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: AppSpacing.xs),
       child: Row(
@@ -1534,6 +1611,7 @@ class _VirtualAccountSummaryCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     final current = account;
 
     return _DataPanel(
@@ -1567,7 +1645,7 @@ class _VirtualAccountSummaryCard extends StatelessWidget {
           const SizedBox(height: AppSpacing.md),
           if (current == null) ...[
             Text(
-              'Generate a provider-assigned account number for bank transfers into your TrustPay wallet.',
+              'Get an account number for receiving bank transfers into your wallet.',
               style: AppTextStyles.bodyM,
             ),
             const SizedBox(height: AppSpacing.md),
@@ -1616,6 +1694,7 @@ class _TransactionVolumeSummary extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     final volumes = _transactionVolumes(transactions);
 
     return _DataPanel(
@@ -1643,7 +1722,7 @@ class _TransactionVolumeSummary extends StatelessWidget {
           Text(
             transactions.isEmpty
                 ? 'No transaction volume recorded yet.'
-                : 'Calculated from backend transaction records.',
+                : 'Based on your recent activity.',
             style: AppTextStyles.bodyS,
           ),
           const SizedBox(height: AppSpacing.md),
@@ -1688,8 +1767,8 @@ class _TransactionVolumeSummary extends StatelessWidget {
 }
 
 class _TransactionVolume {
-  final double credit;
-  final double debit;
+  final MoneyValue credit;
+  final MoneyValue debit;
 
   const _TransactionVolume({required this.credit, required this.debit});
 }
@@ -1699,6 +1778,7 @@ class _AppearanceSettingsPanel extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    AppColors.watch(context);
     final themeMode = ref.watch(themeModeProvider);
     final controller = ref.read(themeModeProvider.notifier);
 
@@ -1773,6 +1853,7 @@ class _ProfileThemeQuickToggle extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    AppColors.watch(context);
     ref.watch(themeModeProvider);
     final controller = ref.read(themeModeProvider.notifier);
     // Reflect what the user is actually looking at (handles system mode too).
@@ -1833,6 +1914,7 @@ class _SupportTicketPanelState extends State<_SupportTicketPanel> {
   late Future<List<SupportTicket>> _ticketsFuture;
   String _category = 'TRANSACTION';
   bool _submitting = false;
+  bool _openingChat = false;
   String? _message;
 
   static const _categories = [
@@ -1908,6 +1990,7 @@ class _SupportTicketPanelState extends State<_SupportTicketPanel> {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     return Column(
       children: [
         _DataPanel(
@@ -1933,16 +2016,26 @@ class _SupportTicketPanelState extends State<_SupportTicketPanel> {
               Text('Contact support', style: AppTextStyles.headingM),
               const SizedBox(height: AppSpacing.xs),
               Text(
-                'Chat with customer care through Tawk.to for quick account, wallet, and KYC questions.',
+                'Chat with customer care for account, wallet, and verification questions.',
                 style: AppTextStyles.bodyM,
               ),
               const SizedBox(height: AppSpacing.md),
               SizedBox(
                 width: double.infinity,
                 child: FilledButton.icon(
-                  onPressed: openTawkChat,
+                  onPressed: _openingChat
+                      ? null
+                      : () async {
+                          setState(() => _openingChat = true);
+                          try {
+                            await openTawkChat(context);
+                          } finally {
+                            if (mounted) setState(() => _openingChat = false);
+                          }
+                        },
                   icon: const Icon(Icons.chat_bubble_outline_rounded),
-                  label: const Text('Open live chat'),
+                  label: Text(
+                      _openingChat ? 'Opening support…' : 'Open live chat'),
                 ),
               ),
             ],
@@ -1960,7 +2053,11 @@ class _SupportTicketPanelState extends State<_SupportTicketPanel> {
                     .map(
                       (item) => DropdownMenuItem(
                         value: item,
-                        child: Text(item.replaceAll('_', ' ')),
+                        child: Text(switch (item) {
+                          'KYC' => 'Identity verification',
+                          'VTU' => 'Bill payment',
+                          _ => '${item[0]}${item.substring(1).toLowerCase()}',
+                        }),
                       ),
                     )
                     .toList(),
@@ -2137,6 +2234,7 @@ class _InviteFriendPanelState extends State<_InviteFriendPanel> {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     return FutureBuilder<ReferralDashboard>(
       future: _future,
       builder: (context, snapshot) {
@@ -2178,7 +2276,7 @@ class _InviteFriendPanelState extends State<_InviteFriendPanel> {
                   Text('Earn NGN 100', style: AppTextStyles.headingL),
                   const SizedBox(height: AppSpacing.xs),
                   Text(
-                    'Invite friends to TrustPay. You get ${_money(data.rewardCurrency, data.rewardAmount)} for each eligible friend who signs up with your code.',
+                    'Invite friends to TrustPay. You get ${_money(data.rewardCurrency, data.exactRewardAmount)} for each eligible friend who signs up with your code.',
                     style: AppTextStyles.bodyM,
                   ),
                   const SizedBox(height: AppSpacing.md),
@@ -2235,14 +2333,14 @@ class _InviteFriendPanelState extends State<_InviteFriendPanel> {
                 Expanded(
                   child: _ReferralMetricCard(
                     label: 'Pending',
-                    value: _money('NGN', data.pendingAmount),
+                    value: _money('NGN', data.exactPendingAmount),
                   ),
                 ),
                 const SizedBox(width: AppSpacing.sm),
                 Expanded(
                   child: _ReferralMetricCard(
                     label: 'Paid',
-                    value: _money('NGN', data.paidAmount),
+                    value: _money('NGN', data.exactPaidAmount),
                   ),
                 ),
               ],
@@ -2308,7 +2406,7 @@ class _InviteFriendPanelState extends State<_InviteFriendPanel> {
                         ),
                       ),
                       Text(
-                        _money(reward.currency, reward.amount),
+                        _money(reward.currency, reward.exactAmount),
                         style: AppTextStyles.labelM,
                       ),
                     ],
@@ -2333,6 +2431,7 @@ class _ReferralMetricCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     return _DataPanel(
       padding: const EdgeInsets.all(AppSpacing.sm),
       child: Column(
@@ -2362,6 +2461,7 @@ class _ReferralStep extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     return Padding(
       padding: const EdgeInsets.only(bottom: AppSpacing.sm),
       child: Row(
@@ -2403,6 +2503,7 @@ class _FaqPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     return _DataPanel(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -2428,6 +2529,7 @@ class _SupportTicketCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     final date = ticket.createdAt == null
         ? 'Pending'
         : DateFormat('MMM d, y').format(ticket.createdAt!);
@@ -2473,6 +2575,7 @@ class _SupportStatusPill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     final color = switch (status) {
       'RESOLVED' => AppColors.success,
       'ESCALATED' || 'UNDER_REVIEW' => AppColors.warning,
@@ -2530,6 +2633,7 @@ class _ThemeModeChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     final foreground = active ? Colors.white : AppColors.textSecondary;
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
@@ -2584,6 +2688,7 @@ class _WalletsBody extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     final activeCurrencies =
         wallets.map((wallet) => wallet.currency.toUpperCase()).toSet();
     const supportedCurrencies = ['NGN', 'GHS'];
@@ -2643,6 +2748,7 @@ class _WalletManageCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     final currency = wallet.currency.toUpperCase();
     final gradientColors = _walletGradient(currency);
 
@@ -2711,7 +2817,7 @@ class _WalletManageCard extends StatelessWidget {
                   ),
                 ),
                 Text(
-                  _money(currency, wallet.balance),
+                  _money(currency, wallet.exactBalance),
                   style: AppTextStyles.headingM.copyWith(letterSpacing: 0),
                 ),
               ],
@@ -2734,6 +2840,7 @@ class _WalletAddSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     final hasAddable = addableCurrencies.isNotEmpty;
 
     return Column(
@@ -2743,8 +2850,8 @@ class _WalletAddSection extends StatelessWidget {
         const SizedBox(height: AppSpacing.xs),
         Text(
           hasAddable
-              ? 'Create another supported currency wallet for this account.'
-              : 'All currently supported currency wallets are already active.',
+              ? 'Add another wallet when it becomes available.'
+              : 'More currency wallets are coming soon.',
           style: AppTextStyles.bodyM,
         ),
         const SizedBox(height: AppSpacing.md),
@@ -2757,7 +2864,7 @@ class _WalletAddSection extends StatelessWidget {
               onTap: () => ScaffoldMessenger.of(context).showSnackBar(
                 SnackBar(
                   content: Text(
-                    '$currency wallet creation needs a backend endpoint before it can be activated.',
+                    '$currency wallet is not available yet.',
                   ),
                 ),
               ),
@@ -2772,7 +2879,7 @@ class _WalletAddSection extends StatelessWidget {
         ...plannedCurrencies.map((currency) {
           return _WalletCurrencyOption(
             currency: currency,
-            status: 'Provider setup required',
+            status: 'Coming soon',
             enabled: false,
           );
         }),
@@ -2796,6 +2903,7 @@ class _WalletCurrencyOption extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     return Material(
       color: AppColors.surfaceVariant.withValues(alpha: enabled ? 1 : 0.62),
       borderRadius: BorderRadius.circular(AppRadius.sm),
@@ -2847,6 +2955,7 @@ class _VirtualAccountBody extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     if (accounts.isEmpty) {
       final verified = kycStatus.toUpperCase() == 'VERIFIED';
       return _EmptyPanel(
@@ -2856,8 +2965,8 @@ class _VirtualAccountBody extends StatelessWidget {
             : TrustPayAnimationVariant.loading,
         title: verified ? 'Ready to provision' : 'KYC required',
         detail: verified
-            ? 'Provisioning will create a partner bank account through the backend provider flow.'
-            : 'Complete KYC before creating a provider-assigned virtual account.',
+            ? 'Your account number will appear here when it is ready.'
+            : 'Complete your verification to unlock this feature.',
       );
     }
 
@@ -2898,6 +3007,7 @@ class _ActivityBody extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     return _TransactionsHistoryBody(
       transactions: transactions,
       compactTopSpacing: true,
@@ -2919,6 +3029,7 @@ class _NotificationsBodyState extends State<_NotificationsBody> {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     final items = _notificationItems(widget.data)
         .where((item) => !_dismissedIds.contains(item.id))
         .toList();
@@ -2970,6 +3081,7 @@ class _NotificationCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     return Container(
       margin: const EdgeInsets.only(bottom: AppSpacing.sm),
       child: Material(
@@ -3040,6 +3152,7 @@ class _NotificationDismissBackground extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     return Container(
       alignment: alignment,
       margin: const EdgeInsets.only(bottom: AppSpacing.sm),
@@ -3070,6 +3183,7 @@ class _VtuOrderBody extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     final statusTone = _statusTone(order.orderStatus);
 
     return Column(
@@ -3168,6 +3282,7 @@ class _TransactionsHistoryBody extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -3189,11 +3304,12 @@ class _TransactionHistoryCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     final tone = _transactionTone(transaction);
     final date = transaction.createdAt == null
         ? 'Pending'
         : DateFormat('dd.MM.yyyy').format(transaction.createdAt!.toLocal());
-    final amountText = _money(transaction.currency, transaction.amount);
+    final amountText = _money(transaction.currency, transaction.exactAmount);
     final signedAmount =
         '${_isCreditType(transaction.type) ? '+' : '-'} $amountText';
     final canTrackVtu = _isVtuTransaction(transaction);
@@ -3283,6 +3399,7 @@ class _HistoryEmptyState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: AppSpacing.md),
       child: Row(
@@ -3335,19 +3452,25 @@ class _NotificationItem {
 
 List<_NotificationItem> _notificationItems(HomeDashboardData data) {
   return [
-    _NotificationItem(
-      id: 'wallets-live',
-      title: 'Wallets are live',
-      detail: 'Balances are loaded from your backend account.',
-      icon: Icons.account_balance_wallet_outlined,
-      color: AppColors.success,
-      route: AppRoutes.wallets,
-    ),
+    for (final transaction in data.transactions)
+      _NotificationItem(
+        id: 'transaction-${transaction.reference}-${transaction.status}',
+        title:
+            '${transaction.type.replaceAll('_', ' ')} · ${transaction.status.replaceAll('_', ' ')}',
+        detail: 'Reference: ${transaction.reference}',
+        icon: Icons.receipt_long_outlined,
+        color: transaction.status == 'SUCCESS'
+            ? AppColors.success
+            : AppColors.textSecondary,
+        route: AppRoutes.activity,
+      ),
     if (data.user.kycStatus.toUpperCase() != 'VERIFIED')
       _NotificationItem(
         id: 'kyc-pending',
-        title: 'KYC pending',
-        detail: 'Submit identity details before withdrawals.',
+        title: data.user.kycStatus.toUpperCase() == 'PENDING'
+            ? 'KYC pending'
+            : 'KYC: ${data.user.kycStatus}',
+        detail: 'Open verification to check your current requirements.',
         icon: Icons.assignment_ind_outlined,
         color: AppColors.warning,
         route: AppRoutes.kyc,
@@ -3355,8 +3478,9 @@ List<_NotificationItem> _notificationItems(HomeDashboardData data) {
     if (data.transactions.isEmpty)
       _NotificationItem(
         id: 'no-transactions',
-        title: 'No transactions yet',
-        detail: 'Fund your wallet to start moving money.',
+        title: 'No recent activity',
+        detail:
+            'Refresh to check for account updates. Dismissals apply only to this visit.',
         icon: Icons.history_rounded,
         color: AppColors.textSecondary,
         route: AppRoutes.activity,
@@ -3371,6 +3495,7 @@ class _KycBody extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     final verified = status.toUpperCase() == 'VERIFIED';
     return _DataPanel(
       child: Column(
@@ -3411,6 +3536,7 @@ class _InfoRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     return _DataPanel(
       child: Row(
         children: [
@@ -3446,6 +3572,7 @@ class _ProfileActionRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     return Padding(
       padding: const EdgeInsets.only(bottom: AppSpacing.sm),
       child: Material(
@@ -3513,6 +3640,7 @@ class _DataPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     return Container(
       width: double.infinity,
       margin: const EdgeInsets.only(bottom: AppSpacing.sm),
@@ -3532,6 +3660,7 @@ class _ActiveSessionsPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     return Container(
       width: double.infinity,
       margin: const EdgeInsets.only(bottom: AppSpacing.sm),
@@ -3583,6 +3712,7 @@ class _EmptyPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     return _DataPanel(
       child: Column(
         children: [
@@ -3609,6 +3739,7 @@ class _LoadingPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     return _DataPanel(
       child: Row(
         children: [
@@ -3632,7 +3763,7 @@ class _LoadingPanel extends StatelessWidget {
                 Text('Loading details', style: AppTextStyles.headingM),
                 const SizedBox(height: AppSpacing.xs),
                 Text(
-                  'Fetching your latest account settings.',
+                  'Fetching the latest information.',
                   style: AppTextStyles.bodyM,
                 ),
               ],
@@ -3649,6 +3780,7 @@ class _ProfileSkeletonPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     Widget line(double width, {double height = 12}) {
       return Container(
         width: width,
@@ -3706,6 +3838,7 @@ class _ErrorPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     return _DataPanel(
       child: Column(
         children: [
@@ -3739,6 +3872,7 @@ class _UnauthorizedPanelState extends State<_UnauthorizedPanel> {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     return _DataPanel(
       child: Column(
         children: [
@@ -3780,6 +3914,7 @@ class _SessionExpiredScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     return Scaffold(
       backgroundColor: AppColors.background,
       body: SafeArea(
@@ -3822,6 +3957,7 @@ class _StatusPill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     return Container(
       padding: const EdgeInsets.symmetric(
         horizontal: AppSpacing.sm,
@@ -3843,8 +3979,29 @@ class _DetailConfig {
   const _DetailConfig({required this.title, required this.subtitle});
 }
 
-String _money(String currency, double amount) {
-  return '$currency ${NumberFormat('#,##0.00').format(amount)}';
+String _money(String currency, MoneyValue amount) {
+  return '$currency ${_formatExactAmount(amount.decimalString)}';
+}
+
+String _formatExactAmount(String decimalString) {
+  final parts = decimalString.split('.');
+  final rawWhole = parts.first;
+  final isNegative = rawWhole.startsWith('-');
+  var whole = isNegative ? rawWhole.substring(1) : rawWhole;
+  while (whole.length > 1 && whole.startsWith('0')) {
+    whole = whole.substring(1);
+  }
+
+  final grouped = StringBuffer();
+  for (var index = 0; index < whole.length; index++) {
+    if (index > 0 && (whole.length - index) % 3 == 0) {
+      grouped.write(',');
+    }
+    grouped.write(whole[index]);
+  }
+
+  final fraction = parts.length > 1 ? parts[1].padRight(2, '0') : '00';
+  return '${isNegative ? '-' : ''}$grouped.${fraction.substring(0, 2)}';
 }
 
 _NameParts? _nameParts(String fullName) {
@@ -3863,33 +4020,39 @@ _NameParts? _nameParts(String fullName) {
 Map<String, _TransactionVolume> _transactionVolumes(
   List<HomeTransaction> transactions,
 ) {
-  final totals = <String, ({double credit, double debit})>{};
+  final totals = <String, _TransactionVolume>{};
 
   for (final transaction in transactions) {
     final status = transaction.status.toUpperCase();
     if (status == 'FAILED' || status == 'REVERSED') continue;
 
     final currency = transaction.currency.toUpperCase();
-    final current = totals[currency] ?? (credit: 0.0, debit: 0.0);
+    final current = totals[currency] ??
+        _TransactionVolume(
+          credit: MoneyValue.fromMinorUnits(
+            BigInt.zero,
+            currency: currency,
+          ),
+          debit: MoneyValue.fromMinorUnits(
+            BigInt.zero,
+            currency: currency,
+          ),
+        );
+    final amount = transaction.exactAmount.withCurrency(currency);
     if (_isCreditType(transaction.type)) {
-      totals[currency] = (
-        credit: current.credit + transaction.amount,
+      totals[currency] = _TransactionVolume(
+        credit: current.credit + amount,
         debit: current.debit,
       );
     } else {
-      totals[currency] = (
+      totals[currency] = _TransactionVolume(
         credit: current.credit,
-        debit: current.debit + transaction.amount,
+        debit: current.debit + amount,
       );
     }
   }
 
-  return totals.map(
-    (currency, value) => MapEntry(
-      currency,
-      _TransactionVolume(credit: value.credit, debit: value.debit),
-    ),
-  );
+  return totals;
 }
 
 String? _readDioErrorMessage(DioException error) {

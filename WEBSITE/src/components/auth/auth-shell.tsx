@@ -11,6 +11,7 @@ type AuthShellProps = {
   maxWidth?: string;
   showHero?: boolean;
   mobileCardless?: boolean;
+  showHelp?: boolean;
 };
 
 export function AuthShell({
@@ -20,6 +21,7 @@ export function AuthShell({
   maxWidth = "max-w-md",
   showHero = true,
   mobileCardless = false,
+  showHelp = true,
 }: AuthShellProps) {
   const hasHero = showHero && Boolean(title || subtitle);
   const cardClassName = mobileCardless
@@ -35,7 +37,7 @@ export function AuthShell({
         <Link href="/" aria-label="TrustPay home">
           <TrustPayLogo imageClassName="size-11" textClassName="text-xl font-black" />
         </Link>
-        <TawkHelpButton />
+        {showHelp && <TawkHelpButton />}
       </header>
 
       <div

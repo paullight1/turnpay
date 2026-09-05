@@ -38,6 +38,7 @@ class TpEmptyState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     return Center(
       child: SingleChildScrollView(
         physics: const NeverScrollableScrollPhysics(),

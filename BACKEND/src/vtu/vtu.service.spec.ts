@@ -466,6 +466,27 @@ describe('VtuService purchase ledger handling', () => {
     expect(vtuApi.purchase).not.toHaveBeenCalled();
   });
 
+  it('rejects renewal verification without a provider price but permits package selection', async () => {
+    vtuApi.validateSmartCard.mockResolvedValue({
+      name: 'Test customer',
+      status: 'active',
+    });
+    const dto = {
+      provider: 'dstv' as const,
+      smartCardNumber: '1212121212',
+      contactPhone: '+2348011111111',
+      subscriptionType: 'renew' as const,
+    };
+    await expect(service.validateSmartCard(dto)).rejects.toThrow(
+      'Choose Change package',
+    );
+    await expect(
+      service.validateSmartCard({ ...dto, subscriptionType: 'change' }),
+    ).resolves.toEqual({ name: 'Test customer', status: 'active' });
+    expect(ledger.debitWallet).not.toHaveBeenCalled();
+    expect(vtuApi.purchase).not.toHaveBeenCalled();
+  });
+
   it('uses the verified renewal amount for cable renewals', async () => {
     walletsService.getWallet.mockResolvedValue({
       id: 'wallet-1',
@@ -818,6 +839,12 @@ describe('VtuService purchase ledger handling', () => {
   });
 
   it('finalizes a VTpass webhook success through the existing VTU order path', async () => {
+    vtuApi.requery.mockResolvedValue({
+      reference: 'TX-1',
+      providerTransactionId: 'TX-1',
+      providerRequestId: 'REQ-1',
+      status: 'success',
+    });
     prisma.webhookLog.findUnique.mockResolvedValue({
       id: 'webhook-log-1',
       reference: 'vtpass:transaction-update:REQ-1:TX-1:delivered',
@@ -873,6 +900,57 @@ describe('VtuService purchase ledger handling', () => {
         nextRequeryAt: null,
       }),
     });
+  });
+
+  it.each(['success', 'failed', 'reversed'] as const)(
+    'ignores callback %s when authenticated requery says pending',
+    async (status) => {
+      prisma.vtuOrder.findFirst.mockResolvedValue({
+        id: 'order-1',
+        transactionId: 'tx-1',
+        providerRequestId: 'REQ-1',
+        transaction: { id: 'tx-1', status: 'PENDING', metadata: {} },
+      });
+      vtuApi.requery.mockResolvedValue({
+        reference: 'VERIFIED-TX',
+        providerRequestId: 'REQ-1',
+        status: 'pending',
+      });
+      await expect(
+        service.processVtpassWebhookEvent({
+          eventType: 'transaction-update',
+          providerRequestId: 'REQ-1',
+          providerReference: 'UNTRUSTED-TX',
+          status,
+        }),
+      ).resolves.toMatchObject({ status: 'pending' });
+      expect(vtuApi.requery).toHaveBeenCalledWith('REQ-1');
+      expect(prisma.vtuOrder.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { provider: 'VTPASS', providerRequestId: 'REQ-1' },
+        }),
+      );
+      expect(prisma.transaction.updateMany).not.toHaveBeenCalled();
+      expect(ledger.creditWallet).not.toHaveBeenCalled();
+    },
+  );
+
+  it('leaves money unchanged and propagates provider errors for inbox retry', async () => {
+    prisma.vtuOrder.findFirst.mockResolvedValue({
+      id: 'order-1',
+      providerRequestId: 'REQ-1',
+      transaction: { status: 'PENDING' },
+    });
+    vtuApi.requery.mockRejectedValueOnce(new Error('Provider unavailable'));
+    await expect(
+      service.processVtpassWebhookEvent({
+        eventType: 'transaction-update',
+        providerRequestId: 'REQ-1',
+        status: 'failed',
+      }),
+    ).rejects.toThrow('Provider unavailable');
+    expect(prisma.transaction.updateMany).not.toHaveBeenCalled();
+    expect(ledger.creditWallet).not.toHaveBeenCalled();
   });
 
   it('does not overwrite a terminal transaction when a late callback arrives', async () => {
@@ -933,16 +1011,8 @@ describe('VtuService purchase ledger handling', () => {
       code: '099',
     });
 
-    expect(prisma.vtuOrder.updateMany).toHaveBeenCalledWith({
-      where: {
-        id: 'order-1',
-        status: { in: ['PENDING', 'PROCESSING', 'UNKNOWN'] },
-      },
-      data: expect.objectContaining({
-        status: 'PENDING',
-        providerStatus: 'pending',
-      }),
-    });
+    expect(prisma.vtuOrder.updateMany).not.toHaveBeenCalled();
+    expect(vtuApi.requery).not.toHaveBeenCalled();
     expect(prisma.vtuOrder.update).not.toHaveBeenCalled();
     expect(ledger.creditWallet).not.toHaveBeenCalled();
   });

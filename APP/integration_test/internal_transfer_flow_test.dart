@@ -40,11 +40,30 @@ void registerInternalTransferFlowTests({bool useIntegrationBinding = true}) {
     expect(find.text('Tolu A. • t***@example.com'), findsOneWidget);
   }
 
+  Future<void> waitForText(
+    WidgetTester tester,
+    String text, {
+    bool settle = true,
+  }) async {
+    final finder = find.text(text);
+    for (var attempt = 0; attempt < 40; attempt++) {
+      await tester.pump(const Duration(milliseconds: 50));
+      if (finder.evaluate().isNotEmpty) {
+        if (settle) await tester.pumpAndSettle();
+        return;
+      }
+    }
+    fail('Timed out waiting for "$text"');
+  }
+
   Future<void> openReview(WidgetTester tester) async {
     final submit = find.widgetWithText(FilledButton, 'Send transfer');
     await tester.ensureVisible(submit);
     await tester.tap(submit);
-    await tester.pumpAndSettle();
+    // The action screen contains an intentionally repeating loading animation
+    // while recipient/KYC checks complete, so settling the whole tree can
+    // wait forever. Wait only for the review action to mount.
+    await waitForText(tester, 'Continue', settle: false);
   }
 
   Future<void> enterExistingPin(WidgetTester tester) async {
@@ -53,18 +72,6 @@ void registerInternalTransferFlowTests({bool useIntegrationBinding = true}) {
       await tester.pump();
     }
     await tester.pumpAndSettle();
-  }
-
-  Future<void> waitForText(WidgetTester tester, String text) async {
-    final finder = find.text(text);
-    for (var attempt = 0; attempt < 40; attempt++) {
-      await tester.pump(const Duration(milliseconds: 50));
-      if (finder.evaluate().isNotEmpty) {
-        await tester.pumpAndSettle();
-        return;
-      }
-    }
-    fail('Timed out waiting for "$text"');
   }
 
   testWidgets('fresh device is routed to server PIN setup after exact review', (
@@ -99,7 +106,9 @@ void registerInternalTransferFlowTests({bool useIntegrationBinding = true}) {
     expect(bundle.adapter.internalTransferIdempotencyKeys, isEmpty);
   });
 
-  testWidgets('existing PIN retry reuses the attempt key and renders receipt', (
+  testWidgets(
+      'uncertain transfer resolves the original attempt without a duplicate debit',
+      (
     tester,
   ) async {
     await useProductionPhoneViewport(tester);
@@ -126,29 +135,34 @@ void registerInternalTransferFlowTests({bool useIntegrationBinding = true}) {
 
     expect(find.text('Approve send money'), findsOneWidget);
     await enterExistingPin(tester);
-    await waitForText(tester, 'Retry');
-    expect(find.text('Retry'), findsOneWidget);
+    await waitForText(tester, 'Payment recovery');
     expect(bundle.adapter.internalTransferIdempotencyKeys, hasLength(1));
+    final originalAttemptKey =
+        bundle.adapter.internalTransferIdempotencyKeys.single;
+    expect(originalAttemptKey, isNotEmpty);
 
-    await tester.tap(find.text('Retry'));
+    final checkStatus = find.widgetWithText(TextButton, 'Check status');
+    expect(checkStatus, findsOneWidget);
+    await tester.tap(checkStatus);
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Continue'));
-    await waitForText(tester, 'Approve send money');
-    await enterExistingPin(tester);
-    await waitForText(tester, 'Money sent');
-
-    expect(find.text('Money sent'), findsOneWidget);
-    expect(find.text('NGN 25.50'), findsOneWidget);
-    expect(find.text('Fee'), findsOneWidget);
-    expect(find.text('Total debit'), findsOneWidget);
-    expect(find.text('IT-INTEGRATION-001'), findsOneWidget);
-    expect(find.text('974.50'), findsOneWidget);
-    expect(bundle.adapter.internalTransferIdempotencyKeys, hasLength(2));
-    expect(
-      bundle.adapter.internalTransferIdempotencyKeys[1],
-      bundle.adapter.internalTransferIdempotencyKeys[0],
+    await waitForText(
+      tester,
+      'Payment confirmed. Reference: IT-INTEGRATION-001. No second payment was sent.',
     );
-    expect(bundle.adapter.internalTransferIdempotencyKeys.first, isNotEmpty);
+    expect(
+        find.textContaining('Reference: IT-INTEGRATION-001'), findsOneWidget);
+    expect(
+      bundle.adapter.internalTransferIdempotencyKeys,
+      [originalAttemptKey],
+    );
+    expect(bundle.adapter.internalTransferMutationCount, 1);
+    expect(bundle.adapter.paymentResolverAttemptKeys, [originalAttemptKey]);
+    expect(bundle.adapter.paymentResolverOperations, ['INTERNAL_TRANSFER']);
+    expect(bundle.adapter.paymentResolverIdempotencyKeys, hasLength(1));
+    expect(
+      bundle.adapter.paymentResolverIdempotencyKeys.single,
+      isNot(originalAttemptKey),
+    );
   });
 }
 

@@ -1,24 +1,48 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/semantics.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../services/api_client.dart';
 import '../../services/auth_service.dart';
 import '../../services/transaction_security_service.dart';
+import '../auth/auth_state.dart';
 import '../router/app_router.dart';
 import '../theme/app_theme.dart';
+
+typedef AppLockClock = DateTime Function();
+
+/// Signals user activity to [AppLockGate]. The gate also observes pointer
+/// activity in its child, while this signal lets tests and app-level activity
+/// sources use the same inactivity policy without depending on wall-clock
+/// delays.
+class AppLockActivitySignal extends ChangeNotifier {
+  void markActivity() => notifyListeners();
+}
 
 class AppLockGate extends ConsumerStatefulWidget {
   final Widget child;
   final TransactionSecurityService securityService;
+  final AuthService authService;
+  final AppLockClock clock;
+  final AppLockActivitySignal activitySignal;
+  final Duration inactivityTimeout;
 
   AppLockGate({
     super.key,
     required this.child,
     TransactionSecurityService? securityService,
-  }) : securityService = securityService ?? TransactionSecurityService();
+    AuthService? authService,
+    AppLockClock? clock,
+    AppLockActivitySignal? activitySignal,
+    this.inactivityTimeout = const Duration(minutes: 15),
+  })  : securityService = securityService ?? TransactionSecurityService(),
+        authService = authService ?? AuthService(),
+        clock = clock ?? DateTime.now,
+        activitySignal = activitySignal ?? AppLockActivitySignal();
 
   @override
   ConsumerState<AppLockGate> createState() => _AppLockGateState();
@@ -26,25 +50,46 @@ class AppLockGate extends ConsumerStatefulWidget {
 
 class _AppLockGateState extends ConsumerState<AppLockGate>
     with WidgetsBindingObserver {
+  static const _privacyChannel = MethodChannel('trustpay/app_privacy');
+
   final _apiClient = ApiClient();
-  final _authService = AuthService();
   bool _locked = false;
+  bool _ready = false;
   bool _checkingLock = false;
   bool _verifying = false;
   bool _lockOnResume = false;
+  bool _isForeground = true;
+  bool _biometricPromptInProgress = false;
+  bool _lockCheckQueued = false;
   String _pin = '';
   String? _error;
   TransactionSecurityConfig? _config;
+  DateTime? _lastActivityAt;
+  Timer? _inactivityTimer;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    WidgetsBinding.instance.addPostFrameCallback((_) => _maybeLock());
+    authStateNotifier.addListener(_handleAuthStateChanged);
+    widget.activitySignal.addListener(_handleActivitySignal);
+    SemanticsBinding.instance
+        .addSemanticsActionListener(_handleSemanticsActivity);
+    HardwareKeyboard.instance.addHandler(_handleKeyboardActivity);
+    _lastActivityAt = widget.clock();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      unawaited(_maybeLock());
+    });
   }
 
   @override
   void dispose() {
+    authStateNotifier.removeListener(_handleAuthStateChanged);
+    widget.activitySignal.removeListener(_handleActivitySignal);
+    SemanticsBinding.instance
+        .removeSemanticsActionListener(_handleSemanticsActivity);
+    HardwareKeyboard.instance.removeHandler(_handleKeyboardActivity);
+    _inactivityTimer?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
@@ -53,30 +98,105 @@ class _AppLockGateState extends ConsumerState<AppLockGate>
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.paused ||
         state == AppLifecycleState.inactive ||
-        state == AppLifecycleState.hidden) {
-      unawaited(widget.securityService.clearEphemeralTransactionApproval());
-      _lockOnResume = true;
+        state == AppLifecycleState.hidden ||
+        state == AppLifecycleState.detached) {
+      _isForeground = false;
+      _inactivityTimer?.cancel();
+      unawaited(_clearEphemeralApprovalSafely());
+      unawaited(_notifyNativePrivacy('show'));
+
+      final promptInProgress = _biometricPromptInProgress;
+      _lockOnResume = !promptInProgress;
+      if (mounted) {
+        setState(() {
+          _ready = false;
+          if (!promptInProgress) {
+            _locked = true;
+            _pin = '';
+            _error = null;
+          }
+        });
+      }
       return;
     }
 
-    if (state == AppLifecycleState.resumed && _lockOnResume) {
-      _lockOnResume = false;
-      // Lock synchronously before awaiting any storage/biometric checks so the
-      // protected content never flashes unlocked on resume. If it turns out no
-      // PIN is configured (or there is no session), _maybeLock releases it.
-      if (mounted && !_locked) {
-        setState(() {
-          _locked = true;
-          _pin = '';
-          _error = null;
-        });
+    if (state == AppLifecycleState.resumed) {
+      _isForeground = true;
+      if (_biometricPromptInProgress) return;
+
+      final resumedFromBackground = _lockOnResume;
+      if (resumedFromBackground) {
+        _lockOnResume = false;
+        // Lock synchronously before awaiting any storage/biometric checks so
+        // protected content never flashes unlocked on resume. If it turns out
+        // no PIN is configured (or there is no session), _maybeLock releases
+        // it after the readiness check completes.
+        if (mounted) {
+          setState(() {
+            _ready = false;
+            _locked = true;
+            _pin = '';
+            _error = null;
+          });
+        }
+        unawaited(_notifyNativePrivacy('show'));
       }
-      _maybeLock();
+
+      // The first post-frame check is already in flight when the binding
+      // reports its initial resumed state. Avoid queueing a duplicate check;
+      // a real background/resume pair still forces one even if another check
+      // is currently running.
+      if (!_ready && (resumedFromBackground || !_checkingLock)) {
+        _requestLockCheck();
+      }
+    }
+  }
+
+  void _handleSemanticsActivity(SemanticsActionEvent event) {
+    _handleActivitySignal();
+  }
+
+  bool _handleKeyboardActivity(KeyEvent event) {
+    _handleActivitySignal();
+    return false; // Observe activity without consuming the user's keystroke.
+  }
+
+  void _requestLockCheck() {
+    if (_checkingLock) {
+      _lockCheckQueued = true;
+      return;
+    }
+    unawaited(_maybeLock());
+  }
+
+  void _handleAuthStateChanged() {
+    if (!mounted || !authStateNotifier.sessionExpired) return;
+
+    _inactivityTimer?.cancel();
+    _inactivityTimer = null;
+    final foreground = _isForeground;
+    setState(() {
+      // A server-confirmed session revocation must reach the login route even
+      // when the app was sitting behind the lock screen. The router handles
+      // the redirect; this gate must not leave a stale PIN prompt above it.
+      _locked = false;
+      _ready = foreground;
+      _verifying = false;
+      _config = null;
+      _pin = '';
+      _error = null;
+    });
+    if (foreground) {
+      unawaited(_notifyNativePrivacy('ready'));
     }
   }
 
   Future<void> _maybeLock() async {
-    if (!mounted || _checkingLock) return;
+    if (!mounted) return;
+    if (_checkingLock) {
+      _lockCheckQueued = true;
+      return;
+    }
     setState(() => _checkingLock = true);
 
     try {
@@ -86,7 +206,26 @@ class _AppLockGateState extends ConsumerState<AppLockGate>
           : await widget.securityService.getConfig();
       if (!mounted) return;
 
+      if (authStateNotifier.sessionExpired) {
+        _handleAuthStateChanged();
+        return;
+      }
+
       final shouldLock = config != null && config.hasPin;
+      var shouldOfferBiometricSetup = false;
+      if (shouldLock) {
+        shouldOfferBiometricSetup = config.canUseBiometrics &&
+            config.hasBiometric &&
+            !config.biometricEnabled &&
+            !(await widget.securityService.hasSeenBiometricPrompt());
+      }
+      if (!mounted) return;
+
+      if (authStateNotifier.sessionExpired) {
+        _handleAuthStateChanged();
+        return;
+      }
+
       setState(() {
         _config = config;
         // Release the pre-emptive lock if this session has no PIN to enter.
@@ -100,11 +239,133 @@ class _AppLockGateState extends ConsumerState<AppLockGate>
           _error = null;
         }
       });
+
+      if (shouldOfferBiometricSetup && mounted && _isForeground) {
+        await _offerBiometricSetup(config!);
+      }
+
+      if (authStateNotifier.sessionExpired) {
+        _handleAuthStateChanged();
+        return;
+      }
+
+      // A resume can queue a fresh read while this one is awaiting secure
+      // storage. Do not publish this older result as ready or the protected
+      // child could flash before the queued read completes.
+      if (mounted && _isForeground && !_lockCheckQueued) {
+        _markLockStateReady();
+      }
+    } catch (_) {
+      // A storage or local-auth readiness error must fail closed. Keep the
+      // logout action available so the user can leave a session that cannot be
+      // safely unlocked, while avoiding a false unlock on an exception.
+      if (mounted) {
+        if (authStateNotifier.sessionExpired) {
+          _handleAuthStateChanged();
+          return;
+        }
+        setState(() {
+          _locked = true;
+          _ready = _isForeground && !_lockCheckQueued;
+          _pin = '';
+          _error = 'Unable to verify app security. Log out and try again.';
+        });
+        if (_isForeground && !_lockCheckQueued) {
+          unawaited(_notifyNativePrivacy('ready'));
+        }
+      }
     } finally {
       if (mounted) {
         setState(() => _checkingLock = false);
       }
+      if (_lockCheckQueued && mounted && _isForeground) {
+        _lockCheckQueued = false;
+        unawaited(_maybeLock());
+      }
     }
+  }
+
+  void _markLockStateReady() {
+    if (!mounted || !_isForeground) return;
+    _lastActivityAt ??= widget.clock();
+    setState(() => _ready = true);
+    unawaited(_notifyNativePrivacy('ready'));
+    _scheduleInactivityCheck();
+  }
+
+  void _handleActivitySignal() {
+    if (!mounted || !_isForeground || !_ready || _locked) return;
+
+    final now = widget.clock();
+    final lastActivity = _lastActivityAt;
+    if (lastActivity != null && _hasExpired(now, lastActivity)) {
+      _lockForInactivity();
+      return;
+    }
+
+    _lastActivityAt = now;
+    _scheduleInactivityCheck();
+  }
+
+  bool _hasExpired(DateTime now, DateTime lastActivity) {
+    final elapsed = now.difference(lastActivity);
+    return !elapsed.isNegative && elapsed >= widget.inactivityTimeout;
+  }
+
+  void _scheduleInactivityCheck() {
+    _inactivityTimer?.cancel();
+    _inactivityTimer = null;
+
+    if (!mounted ||
+        !_isForeground ||
+        !_ready ||
+        _locked ||
+        _config?.hasPin != true ||
+        _lastActivityAt == null) {
+      return;
+    }
+
+    final now = widget.clock();
+    final elapsed = now.difference(_lastActivityAt!);
+    if (!elapsed.isNegative && elapsed >= widget.inactivityTimeout) {
+      _lockForInactivity();
+      return;
+    }
+
+    final remaining = elapsed.isNegative
+        ? widget.inactivityTimeout
+        : widget.inactivityTimeout - elapsed;
+    _inactivityTimer = Timer(remaining, _handleInactivityTimer);
+  }
+
+  void _handleInactivityTimer() {
+    _inactivityTimer = null;
+    if (!mounted || !_isForeground || !_ready || _locked) return;
+
+    final lastActivity = _lastActivityAt;
+    if (lastActivity == null) return;
+    final now = widget.clock();
+    if (_hasExpired(now, lastActivity)) {
+      _lockForInactivity();
+    } else {
+      _scheduleInactivityCheck();
+    }
+  }
+
+  void _lockForInactivity() {
+    if (!mounted || _locked || !_ready || _config?.hasPin != true) return;
+    _inactivityTimer?.cancel();
+    _inactivityTimer = null;
+    setState(() {
+      _locked = true;
+      _pin = '';
+      _error = null;
+    });
+  }
+
+  void _markSuccessfulActivity() {
+    _lastActivityAt = widget.clock();
+    _scheduleInactivityCheck();
   }
 
   void _appendDigit(String digit) {
@@ -140,27 +401,42 @@ class _AppLockGateState extends ConsumerState<AppLockGate>
     }
 
     setState(() => _verifying = true);
-    final result = await widget.securityService.verifyPinWithLockout(_pin);
-    if (!mounted) return;
+    try {
+      final result = await widget.securityService.verifyPinWithLockout(_pin);
+      if (!mounted) return;
+      if (authStateNotifier.sessionExpired) {
+        _handleAuthStateChanged();
+        return;
+      }
 
-    if (result.approved) {
+      if (result.approved) {
+        setState(() {
+          _locked = false;
+          _verifying = false;
+          _pin = '';
+          _error = null;
+        });
+        _markSuccessfulActivity();
+        return;
+      }
+
+      final lockoutMessage = result.lockedUntil == null
+          ? null
+          : 'Too many incorrect attempts. Try again after ${TimeOfDay.fromDateTime(result.lockedUntil!.toLocal()).format(context)}.';
       setState(() {
-        _locked = false;
-        _verifying = false;
         _pin = '';
-        _error = null;
+        _verifying = false;
+        _error = lockoutMessage ?? 'Incorrect PIN. Try again.';
       });
-      return;
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _locked = true;
+        _pin = '';
+        _verifying = false;
+        _error = 'Unable to verify your PIN. Try again or log out.';
+      });
     }
-
-    final lockoutMessage = result.lockedUntil == null
-        ? null
-        : 'Too many incorrect attempts. Try again after ${TimeOfDay.fromDateTime(result.lockedUntil!.toLocal()).format(context)}.';
-    setState(() {
-      _pin = '';
-      _verifying = false;
-      _error = lockoutMessage ?? 'Incorrect PIN. Try again.';
-    });
   }
 
   Future<void> _useBiometric() async {
@@ -172,10 +448,34 @@ class _AppLockGateState extends ConsumerState<AppLockGate>
     setState(() => _verifying = true);
     // App-unlock only needs proof of presence — it never needs the plaintext
     // PIN, so use a pass/fail biometric prompt rather than revealing the PIN.
-    final approved = await widget.securityService.authenticateBiometric(
-      reason: 'Unlock TrustPay with ${config.biometricLabel}',
-    );
+    var approved = false;
+    try {
+      approved = await _authenticateBiometric(
+        reason: 'Unlock TrustPay with ${config.biometricLabel}',
+      );
+    } catch (_) {
+      approved = false;
+    }
     if (!mounted) return;
+    if (authStateNotifier.sessionExpired) {
+      _handleAuthStateChanged();
+      return;
+    }
+
+    if (!_isForeground) {
+      // A biometric dialog can outlive the scene transition that opened it.
+      // Keep the protected content covered and require the normal resume
+      // check before exposing either the lock or the child.
+      _lockOnResume = true;
+      setState(() {
+        _locked = true;
+        _ready = false;
+        _verifying = false;
+        _pin = '';
+        _error = approved ? null : 'Biometric check was not completed.';
+      });
+      return;
+    }
 
     setState(() {
       _locked = !approved;
@@ -183,39 +483,236 @@ class _AppLockGateState extends ConsumerState<AppLockGate>
       _pin = '';
       _error = approved ? null : 'Biometric check was not completed.';
     });
+    if (approved) {
+      _markSuccessfulActivity();
+    }
+    _markLockStateReady();
   }
 
-  Future<void> _logout() async {
-    await _authService.logout();
+  Future<void> _offerBiometricSetup(TransactionSecurityConfig config) async {
+    var dontRemindAgain = false;
+    final shouldEnable = await showDialog<bool>(
+          context: context,
+          barrierDismissible: false,
+          builder: (dialogContext) {
+            return AlertDialog(
+              backgroundColor: AppColors.surface,
+              title: Text(
+                'Unlock faster with ${config.biometricLabel}',
+                style: AppTextStyles.headingM,
+              ),
+              content: StatefulBuilder(builder: (context, update) {
+                return Column(mainAxisSize: MainAxisSize.min, children: [
+                  Text(
+                    'Use your device’s ${config.biometricLabel} to unlock TrustPay. You can always use your PIN or change this in Device Security.',
+                    style: AppTextStyles.bodyM,
+                  ),
+                  const SizedBox(height: AppSpacing.sm),
+                  CheckboxListTile(
+                    contentPadding: EdgeInsets.zero,
+                    controlAffinity: ListTileControlAffinity.leading,
+                    title: const Text('Don’t remind me again'),
+                    value: dontRemindAgain,
+                    onChanged: (value) =>
+                        update(() => dontRemindAgain = value ?? false),
+                  ),
+                ]);
+              }),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(dialogContext).pop(false),
+                  child: Text(
+                    'Not now',
+                    style: AppTextStyles.labelM.copyWith(
+                      color: AppColors.textSecondary,
+                    ),
+                  ),
+                ),
+                FilledButton(
+                  onPressed: () => Navigator.of(dialogContext).pop(true),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: AppColors.primary,
+                    foregroundColor: Colors.white,
+                  ),
+                  child: Text('Enable ${config.biometricLabel}'),
+                ),
+              ],
+            );
+          },
+        ) ??
+        false;
+
     if (!mounted) return;
+    if (authStateNotifier.sessionExpired) {
+      _handleAuthStateChanged();
+      return;
+    }
+    if (dontRemindAgain) {
+      await widget.securityService.markBiometricPromptSeen();
+    }
+    if (!shouldEnable) return;
+
+    final approved = await _authenticateBiometric(
+      reason: 'Enable ${config.biometricLabel} for TrustPay',
+    );
+    if (!mounted) return;
+    if (authStateNotifier.sessionExpired) {
+      _handleAuthStateChanged();
+      return;
+    }
+
+    if (!approved) {
+      setState(() => _error =
+          '${config.biometricLabel} setup was not completed. You can continue with your PIN.');
+      return;
+    }
+
+    await widget.securityService.setBiometricEnabled(true);
+    final refreshedConfig = await widget.securityService.getConfig();
+    if (!mounted) return;
+
+    if (!_isForeground) {
+      _lockOnResume = true;
+      setState(() {
+        _config = refreshedConfig;
+        _locked = true;
+        _ready = false;
+        _verifying = false;
+        _pin = '';
+        _error = null;
+      });
+      return;
+    }
+
     setState(() {
+      _config = refreshedConfig;
       _locked = false;
+      _verifying = false;
       _pin = '';
       _error = null;
     });
+    _markSuccessfulActivity();
+  }
+
+  Future<void> _logout() async {
+    if (_verifying) return;
+    setState(() => _verifying = true);
+    try {
+      await widget.authService.logout();
+    } catch (_) {
+      if (!mounted) return;
+      // Keep the gate locked and the action enabled. A secure-storage failure
+      // must not turn a failed cleanup into an apparent sign-out.
+      setState(() {
+        _verifying = false;
+        _locked = true;
+        _error = 'Could not log out securely. Try again.';
+      });
+      return;
+    }
+
+    if (!mounted) return;
+    _inactivityTimer?.cancel();
+    setState(() {
+      _locked = false;
+      _ready = true;
+      _verifying = false;
+      _config = null;
+      _pin = '';
+      _error = null;
+    });
+    unawaited(_notifyNativePrivacy('ready'));
     ref.read(appRouterProvider).go(AppRoutes.login);
   }
 
   @override
   Widget build(BuildContext context) {
-    return Stack(
-      children: [
-        widget.child,
-        if (_locked)
-          Positioned.fill(
-            child: _LockOverlay(
-              config: _config,
-              pinLength: _config?.pinLength ?? 4,
-              pinLengthEntered: _pin.length,
-              error: _error,
-              verifying: _verifying,
-              onDigit: _appendDigit,
-              onDelete: _deleteDigit,
-              onBiometric: _useBiometric,
-              onLogout: _logout,
+    AppColors.watch(context);
+    return Listener(
+      behavior: HitTestBehavior.translucent,
+      onPointerDown: (_) => _handleActivitySignal(),
+      onPointerMove: (_) => _handleActivitySignal(),
+      child: Stack(
+        children: [
+          ExcludeSemantics(
+            excluding: !_ready || _locked,
+            child: ExcludeFocus(
+              excluding: !_ready || _locked,
+              child: IgnorePointer(
+                ignoring: !_ready || _locked,
+                child: widget.child,
+              ),
             ),
           ),
-      ],
+          if (!_ready)
+            const Positioned.fill(child: _AppLockReadinessCover())
+          else if (_locked)
+            Positioned.fill(
+              child: _LockOverlay(
+                config: _config,
+                pinLength: _config?.pinLength ?? 4,
+                pinLengthEntered: _pin.length,
+                error: _error,
+                verifying: _verifying,
+                onDigit: _appendDigit,
+                onDelete: _deleteDigit,
+                onBiometric: _useBiometric,
+                onLogout: _logout,
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Future<bool> _authenticateBiometric({required String reason}) async {
+    _biometricPromptInProgress = true;
+    try {
+      return await widget.securityService.authenticateBiometric(
+        reason: reason,
+      );
+    } finally {
+      _biometricPromptInProgress = false;
+    }
+  }
+
+  Future<void> _clearEphemeralApprovalSafely() async {
+    try {
+      await widget.securityService.clearEphemeralTransactionApproval();
+    } catch (_) {
+      // Leaving the in-memory approval uncleared is handled by the service's
+      // next auth boundary; this lifecycle callback must not crash the app.
+    }
+  }
+
+  Future<void> _notifyNativePrivacy(String method) async {
+    if (kIsWeb) return;
+    try {
+      await _privacyChannel.invokeMethod<void>(method);
+    } on MissingPluginException {
+      // Android uses FLAG_SECURE and does not register the iOS privacy channel.
+    } on PlatformException {
+      // A native cover failure must never be treated as an auth success.
+    }
+  }
+}
+
+class _AppLockReadinessCover extends StatelessWidget {
+  const _AppLockReadinessCover();
+
+  @override
+  Widget build(BuildContext context) {
+    AppColors.watch(context);
+    return Material(
+      key: const ValueKey('app-lock-readiness-cover'),
+      color: AppColors.background,
+      child: Center(
+        child: Icon(
+          Icons.lock_outline_rounded,
+          size: 54,
+          color: AppColors.primary,
+        ),
+      ),
     );
   }
 }
@@ -245,6 +742,7 @@ class _LockOverlay extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     final biometricIcon = config?.biometricLabel == 'Face ID'
         ? Icons.face_retouching_natural_rounded
         : Icons.fingerprint_rounded;
@@ -288,7 +786,11 @@ class _LockOverlay extends StatelessWidget {
               ),
               const SizedBox(height: AppSpacing.sm),
               Text(
-                'Enter your transaction PIN to continue.',
+                config == null
+                    ? 'App security could not be verified. Log out and try again.'
+                    : allowBiometric
+                        ? 'Use ${config!.biometricLabel} or enter your transaction PIN.'
+                        : 'Enter your transaction PIN to continue.',
                 style: AppTextStyles.bodyM,
                 textAlign: TextAlign.center,
               ),
@@ -354,6 +856,9 @@ class _LockOverlay extends StatelessWidget {
                         allowBiometric ? biometricIcon : Icons.circle_outlined,
                     enabled: allowBiometric && !verifying,
                     onTap: onBiometric,
+                    tooltip: allowBiometric
+                        ? 'Unlock with ${config!.biometricLabel}'
+                        : null,
                   ),
                   _LockKeyButton(
                     label: '0',
@@ -388,6 +893,7 @@ class _LockKeyButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     return TextButton(
       onPressed: enabled ? onTap : null,
       child: Text(
@@ -404,17 +910,21 @@ class _LockIconButton extends StatelessWidget {
   final IconData icon;
   final bool enabled;
   final VoidCallback onTap;
+  final String? tooltip;
 
   const _LockIconButton({
     required this.icon,
     required this.enabled,
     required this.onTap,
+    this.tooltip,
   });
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     return IconButton(
       onPressed: enabled ? onTap : null,
+      tooltip: tooltip,
       icon: Icon(
         icon,
         color: enabled ? AppColors.textPrimary : AppColors.textHint,

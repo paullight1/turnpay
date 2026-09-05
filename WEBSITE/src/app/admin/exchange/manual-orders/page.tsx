@@ -1,0 +1,1295 @@
+"use client";
+
+import { hasAdminAccess } from "@/lib/admin-access";
+
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { useAuth } from "@/lib/auth-provider";
+import { getErrorMessage } from "@/lib/errors";
+import { createManualExchangeIdempotencyKey } from "@/lib/idempotency";
+import { maskAccountNumber } from "@/lib/privacy";
+import {
+  adminManualExchangeApi,
+  type AdminManualExchangeOrder,
+  type AdminManualExchangeReviewAction,
+  type AdminManualExchangeReviewInput,
+  type ManualExchangeProofKind,
+} from "@/services/api";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  ArrowLeftRight,
+  CheckCircle2,
+  CircleAlert,
+  Clock3,
+  Eye,
+  FileCheck2,
+  Info,
+  Landmark,
+  LoaderCircle,
+  LockKeyhole,
+  ShieldCheck,
+  Upload,
+  WalletCards,
+  XCircle,
+} from "lucide-react";
+import { z } from "zod";
+import DashboardLayout from "@/components/layout/dashboard-layout";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { toast } from "sonner";
+
+const ORDER_STATUS_FILTERS = [
+  "ALL",
+  "AWAITING_TRANSFER",
+  "AWAITING_CONFIRMATION",
+  "NEEDS_MORE_INFO",
+  "CREDITED",
+  "PAYOUT_PENDING",
+  "PAYOUT_PROCESSING",
+  "PAYOUT_SENT",
+  "COMPLETED",
+  "REJECTED",
+] as const;
+
+const ALLOWED_UPLOAD_TYPES = new Set([
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  "application/pdf",
+]);
+const MAX_UPLOAD_SIZE = 8 * 1024 * 1024;
+
+const reasonSchema = z
+  .string()
+  .trim()
+  .min(10, "Enter a reason of at least 10 characters")
+  .max(500, "Reason must be 500 characters or fewer");
+const referenceSchema = z
+  .string()
+  .trim()
+  .regex(
+    /^[A-Za-z0-9._-]{4,100}$/,
+    "Use 4–100 letters, numbers, dots, underscores, or hyphens",
+  );
+const amountSchema = z
+  .string()
+  .trim()
+  .regex(/^\d+(?:\.\d{1,2})?$/, "Enter a valid amount with up to 2 decimals")
+  .max(14, "Amount must be 14 characters or fewer")
+  .refine(
+    (value) => value.replace(".", "").split("").some((digit) => digit !== "0"),
+    "Amount must be greater than zero",
+  );
+
+type ActionPanel =
+  | "CREDIT_WALLET"
+  | "CONFIRM_DEPOSIT"
+  | "REQUEST_INFO"
+  | "REJECT"
+  | "CLAIM_PAYOUT"
+  | "MARK_SENT"
+  | "COMPLETE";
+
+type AttemptIdentity = {
+  orderId: string;
+  action: string;
+};
+
+function humanize(value: string) {
+  return value
+    .replaceAll("_", " ")
+    .toLowerCase()
+    .replace(/\b\w/g, (character) => character.toUpperCase());
+}
+
+function statusLabel(value: string) {
+  switch (value) {
+    case "AWAITING_CONFIRMATION":
+      return "Awaiting Confirmation";
+    case "CREDITED":
+      return "Credited to Wallet";
+    case "PAYOUT_PENDING":
+      return "Deposit Confirmed — Payout Pending";
+    case "PAYOUT_PROCESSING":
+      return "Payout Being Processed";
+    case "PAYOUT_SENT":
+      return "Payout Sent";
+    case "NEEDS_MORE_INFO":
+      return "More Information Needed";
+    case "COMPLETED":
+      return "Completed";
+    case "REJECTED":
+      return "Rejected";
+    case "AWAITING_TRANSFER":
+      return "Awaiting Transfer";
+    default:
+      return humanize(value);
+  }
+}
+
+function formatMoney(value: string, currency: string) {
+  const normalized = value.trim();
+  const match = normalized.match(/^(\d+)(?:\.(\d+))?$/);
+  if (!match) return `${currency} ${value}`;
+
+  const whole = (match[1] ?? "0").replace(/^0+(?=\d)/, "") || "0";
+  const groupedWhole = whole.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  const fraction = match[2] ?? "";
+  const displayFraction = fraction.length === 0
+    ? "00"
+    : fraction.length === 1
+      ? `${fraction}0`
+      : fraction;
+  return `${currency} ${groupedWhole}.${displayFraction}`;
+}
+
+function formatDate(value: string) {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime())
+    ? "Unknown date"
+    : date.toLocaleString("en-NG", {
+        dateStyle: "medium",
+        timeStyle: "short",
+      });
+}
+
+function statusVariant(status: string) {
+  if (["CREDITED", "COMPLETED"].includes(status)) return "default" as const;
+  if (status === "REJECTED") return "destructive" as const;
+  if (status === "NEEDS_MORE_INFO") return "secondary" as const;
+  return "outline" as const;
+}
+
+function statusTone(status: string) {
+  if (["CREDITED", "COMPLETED"].includes(status)) {
+    return "border-emerald-500/25 bg-emerald-500/10";
+  }
+  if (status === "REJECTED") return "border-red-500/25 bg-red-500/10";
+  if (["PAYOUT_PENDING", "PAYOUT_PROCESSING"].includes(status)) {
+    return "border-amber-500/25 bg-amber-500/10";
+  }
+  return "border-border bg-muted/30";
+}
+
+function isDepositReviewStatus(status: string) {
+  return status === "AWAITING_CONFIRMATION" || status === "NEEDS_MORE_INFO";
+}
+
+function isOrderExpired(order: AdminManualExchangeOrder) {
+  const expiresAt = new Date(order.expiresAt).getTime();
+  return Number.isFinite(expiresAt) && expiresAt < Date.now();
+}
+
+function actionLabel(action: ActionPanel) {
+  switch (action) {
+    case "CREDIT_WALLET":
+      return "Approve and credit wallet";
+    case "CONFIRM_DEPOSIT":
+      return "Confirm deposit and queue payout";
+    case "REQUEST_INFO":
+      return "Request more information";
+    case "REJECT":
+      return "Reject order";
+    case "CLAIM_PAYOUT":
+      return "Claim payout";
+    case "MARK_SENT":
+      return "Mark payout as sent";
+    case "COMPLETE":
+      return "Complete settlement";
+  }
+}
+
+function reviewSuccessMessage(action: AdminManualExchangeReviewAction) {
+  switch (action) {
+    case "CREDIT_WALLET":
+      return "Wallet credited and order completed";
+    case "CONFIRM_DEPOSIT":
+      return "Deposit confirmed; payout is pending";
+    case "REQUEST_INFO":
+      return "More information requested";
+    case "REJECT":
+      return "Order rejected";
+    case "CLAIM_PAYOUT":
+      return "Payout claimed for this admin";
+    case "MARK_SENT":
+      return "Payout marked as sent";
+    case "COMPLETE":
+      return "Settlement completed";
+  }
+}
+
+function sanitizeFileName(value: string) {
+  const sanitized = value
+    .trim()
+    .replace(/[^a-zA-Z0-9._() -]/g, "")
+    .slice(0, 120);
+  return sanitized || "payout-proof";
+}
+
+function validateUpload(file: File) {
+  if (!ALLOWED_UPLOAD_TYPES.has(file.type)) {
+    return "Use a JPEG, PNG, WebP, or PDF file.";
+  }
+  if (file.size <= 0 || file.size > MAX_UPLOAD_SIZE) {
+    return "The proof file must be smaller than 8 MiB.";
+  }
+  return null;
+}
+
+function destinationPreview(order: AdminManualExchangeOrder) {
+  return (
+    order.destinationAccountMasked ??
+    (order.destinationAccount ? maskAccountNumber(order.destinationAccount) : null)
+  );
+}
+
+function DetailValue({
+  label,
+  value,
+  mono = false,
+}: {
+  label: string;
+  value: string;
+  mono?: boolean;
+}) {
+  return (
+    <div className="min-w-0">
+      <dt className="text-xs uppercase tracking-[0.12em] text-muted-foreground">
+        {label}
+      </dt>
+      <dd className={mono ? "mt-1 break-all font-mono text-sm" : "mt-1 text-sm font-medium"}>
+        {value}
+      </dd>
+    </div>
+  );
+}
+
+export default function AdminManualExchangeOrdersPage() {
+  const { user, profile, isLoading: authLoading } = useAuth();
+  const router = useRouter();
+  const queryClient = useQueryClient();
+  const [statusFilter, setStatusFilter] = useState<(typeof ORDER_STATUS_FILTERS)[number]>("ALL");
+  const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
+  const [actionPanel, setActionPanel] = useState<ActionPanel | null>(null);
+  const [reason, setReason] = useState("");
+  const [depositReference, setDepositReference] = useState("");
+  const [actualAmount, setActualAmount] = useState("");
+  const [acceptExpiredQuote, setAcceptExpiredQuote] = useState(false);
+  const [payoutReference, setPayoutReference] = useState("");
+  const [payoutProofFile, setPayoutProofFile] = useState<File | null>(null);
+  const [payoutProofObjectKey, setPayoutProofObjectKey] = useState<string | null>(null);
+  const [formError, setFormError] = useState<string | null>(null);
+  const [proofLoading, setProofLoading] = useState<ManualExchangeProofKind | null>(null);
+  const [isForeground, setIsForeground] = useState(true);
+  const attemptKeysRef = useRef<Map<string, string>>(new Map());
+
+  const isAdmin = hasAdminAccess(user) || hasAdminAccess(profile);
+
+  useEffect(() => {
+    const updateVisibility = () => {
+      setIsForeground(document.visibilityState === "visible");
+    };
+    updateVisibility();
+    document.addEventListener("visibilitychange", updateVisibility);
+    return () => document.removeEventListener("visibilitychange", updateVisibility);
+  }, []);
+
+  useEffect(() => {
+    if (
+      !authLoading &&
+      user &&
+      profile &&
+      !hasAdminAccess(user) &&
+      !hasAdminAccess(profile)
+    ) {
+      router.push("/dashboard");
+    }
+  }, [authLoading, profile, router, user]);
+
+  const getAttemptKey = useCallback(
+    ({ orderId, action }: AttemptIdentity) => {
+      const accountId = user?.id ?? "admin";
+      const identity = `${accountId}:${orderId}:${action}`;
+      const storageKey = `trustpay:manual-exchange:${identity}`;
+      const memoryKey = attemptKeysRef.current.get(identity);
+      if (memoryKey) return memoryKey;
+
+      if (typeof window !== "undefined") {
+        try {
+          const persistedKey = window.sessionStorage.getItem(storageKey);
+          if (persistedKey) {
+            attemptKeysRef.current.set(identity, persistedKey);
+            return persistedKey;
+          }
+        } catch {
+          // Session storage may be unavailable in a restricted browser context.
+        }
+      }
+
+      const nextKey = createManualExchangeIdempotencyKey();
+      attemptKeysRef.current.set(identity, nextKey);
+      if (typeof window !== "undefined") {
+        try {
+          window.sessionStorage.setItem(storageKey, nextKey);
+        } catch {
+          // The in-memory key still protects a retry during this page session.
+        }
+      }
+      return nextKey;
+    },
+    [user?.id],
+  );
+
+  const clearAttemptKey = useCallback(
+    ({ orderId, action }: AttemptIdentity) => {
+      const accountId = user?.id ?? "admin";
+      const identity = `${accountId}:${orderId}:${action}`;
+      attemptKeysRef.current.delete(identity);
+      if (typeof window !== "undefined") {
+        try {
+          window.sessionStorage.removeItem(`trustpay:manual-exchange:${identity}`);
+        } catch {
+          // There is no sensitive data to recover if storage is unavailable.
+        }
+      }
+    },
+    [user?.id],
+  );
+
+  const ordersQuery = useQuery({
+    queryKey: ["admin-manual-exchange-orders", statusFilter],
+    queryFn: async () => {
+      const response = await adminManualExchangeApi.list(statusFilter);
+      return response.data;
+    },
+    enabled: isAdmin,
+    staleTime: 10_000,
+    refetchInterval: isForeground ? 15_000 : false,
+  });
+
+  const reconciliationQuery = useQuery({
+    queryKey: ["admin-manual-exchange-reconciliation"],
+    queryFn: async () => {
+      const response = await adminManualExchangeApi.getReconciliation();
+      return response.data;
+    },
+    enabled: isAdmin,
+    staleTime: 30_000,
+    refetchInterval: isForeground ? 60_000 : false,
+  });
+
+  const orders = useMemo(() => ordersQuery.data ?? [], [ordersQuery.data]);
+  const latestReconciliation = reconciliationQuery.data?.[0] ?? null;
+  const selectedOrder = orders.find((order) => order.id === selectedOrderId) ?? null;
+
+  const queueCounts = useMemo(
+    () => ({
+      needsReview: orders.filter((order) =>
+        ["AWAITING_CONFIRMATION", "NEEDS_MORE_INFO"].includes(order.status),
+      ).length,
+      payouts: orders.filter((order) =>
+        ["PAYOUT_PENDING", "PAYOUT_PROCESSING", "PAYOUT_SENT"].includes(order.status),
+      ).length,
+      completed: orders.filter((order) =>
+        ["CREDITED", "COMPLETED"].includes(order.status),
+      ).length,
+    }),
+    [orders],
+  );
+
+  const resetActionState = () => {
+    setActionPanel(null);
+    setReason("");
+    setDepositReference("");
+    setActualAmount("");
+    setAcceptExpiredQuote(false);
+    setPayoutReference("");
+    setPayoutProofFile(null);
+    setPayoutProofObjectKey(null);
+    setFormError(null);
+  };
+
+  const reviewMutation = useMutation({
+    mutationFn: ({
+      orderId,
+      input,
+      idempotencyKey,
+    }: {
+      orderId: string;
+      input: AdminManualExchangeReviewInput;
+      idempotencyKey: string;
+    }) => adminManualExchangeApi.review(orderId, input, idempotencyKey),
+    onSuccess: async (response, variables) => {
+      clearAttemptKey({
+        orderId: variables.orderId,
+        action: `review:${variables.input.action}`,
+      });
+      resetActionState();
+      queryClient.setQueryData<AdminManualExchangeOrder[]>(
+        ["admin-manual-exchange-orders", statusFilter],
+        (current) =>
+          current?.map((order) =>
+            order.id === response.data.id ? response.data : order,
+          ),
+      );
+      await queryClient.invalidateQueries({
+        queryKey: ["admin-manual-exchange-orders"],
+      });
+      toast.success(reviewSuccessMessage(variables.input.action));
+    },
+    onError: (error: unknown) => {
+      const message = getErrorMessage(error, "Could not save the manual exchange action");
+      setFormError(message);
+      toast.error(message);
+    },
+  });
+
+  const uploadProofMutation = useMutation({
+    mutationFn: async ({ orderId, file }: { orderId: string; file: File }) => {
+      const idempotencyKey = getAttemptKey({
+        orderId,
+        action: "upload:payout-proof",
+      });
+      const response = await adminManualExchangeApi.createUploadUrl(
+        orderId,
+        {
+          fileName: sanitizeFileName(file.name),
+          contentType: file.type,
+          fileSize: file.size,
+        },
+        idempotencyKey,
+      );
+      const upload = response.data;
+      const putResponse = await fetch(upload.signedUrl, {
+        method: "PUT",
+        headers: { "Content-Type": file.type },
+        body: file,
+        credentials: "omit",
+        redirect: "error",
+        cache: "no-store",
+      });
+
+      if (!putResponse.ok) {
+        throw new Error("The proof upload was not accepted by storage.");
+      }
+
+      clearAttemptKey({ orderId, action: "upload:payout-proof" });
+      return { objectKey: upload.objectKey };
+    },
+    onSuccess: ({ objectKey }) => {
+      setPayoutProofObjectKey(objectKey);
+      setFormError(null);
+      toast.success("Payout proof uploaded securely");
+    },
+    onError: (error: unknown) => {
+      const message = getErrorMessage(error, "Could not upload payout proof");
+      setFormError(message);
+      toast.error(message);
+    },
+  });
+
+  const openAction = (action: ActionPanel) => {
+    resetActionState();
+    setActionPanel(action);
+  };
+
+  const selectOrder = (orderId: string) => {
+    resetActionState();
+    setSelectedOrderId(orderId);
+  };
+
+  const submitReview = () => {
+    if (!selectedOrder || !actionPanel) return;
+
+    const reasonResult = reasonSchema.safeParse(reason);
+    if (!reasonResult.success) {
+      setFormError(reasonResult.error.issues[0]?.message ?? "Enter a valid reason");
+      return;
+    }
+
+    const input: AdminManualExchangeReviewInput = {
+      action: actionPanel,
+      reason: reasonResult.data,
+    };
+
+    if (["CREDIT_WALLET", "CONFIRM_DEPOSIT"].includes(actionPanel)) {
+      const depositResult = referenceSchema.safeParse(depositReference);
+      const amountResult = amountSchema.safeParse(actualAmount);
+      if (!depositResult.success) {
+        setFormError(depositResult.error.issues[0]?.message ?? "Enter a deposit reference");
+        return;
+      }
+      if (!amountResult.success) {
+        setFormError(amountResult.error.issues[0]?.message ?? "Enter the actual deposit amount");
+        return;
+      }
+      input.depositReference = depositResult.data;
+      input.actualAmount = amountResult.data;
+      if (isOrderExpired(selectedOrder)) {
+        if (!acceptExpiredQuote) {
+          setFormError(
+            "Confirm that you are honoring the original quoted terms for this expired order",
+          );
+          return;
+        }
+        input.acceptExpiredQuote = true;
+      }
+    }
+
+    if (actionPanel === "MARK_SENT") {
+      const payoutResult = referenceSchema.safeParse(payoutReference);
+      if (!payoutResult.success) {
+        setFormError(payoutResult.error.issues[0]?.message ?? "Enter a payout reference");
+        return;
+      }
+      if (!payoutProofObjectKey) {
+        setFormError("Upload the protected payout proof before marking the payout as sent");
+        return;
+      }
+      input.payoutReference = payoutResult.data;
+      input.payoutProofObjectKey = payoutProofObjectKey;
+    }
+
+    const idempotencyKey = getAttemptKey({
+      orderId: selectedOrder.id,
+      action: `review:${actionPanel}`,
+    });
+    setFormError(null);
+    reviewMutation.mutate({
+      orderId: selectedOrder.id,
+      input,
+      idempotencyKey,
+    });
+  };
+
+  const uploadPayoutProof = () => {
+    if (!selectedOrder || !payoutProofFile) {
+      setFormError("Choose a payout proof file first");
+      return;
+    }
+    const fileError = validateUpload(payoutProofFile);
+    if (fileError) {
+      setFormError(fileError);
+      return;
+    }
+    setFormError(null);
+    uploadProofMutation.mutate({
+      orderId: selectedOrder.id,
+      file: payoutProofFile,
+    });
+  };
+
+  const openProtectedProof = async (
+    order: AdminManualExchangeOrder,
+    kind: ManualExchangeProofKind,
+  ) => {
+    setProofLoading(kind);
+    const action = `proof-view:${kind}`;
+    const idempotencyKey = getAttemptKey({ orderId: order.id, action });
+    try {
+      const response = await adminManualExchangeApi.getProofUrl(
+        order.id,
+        kind,
+        idempotencyKey,
+      );
+      const url = response.data.url;
+      const parsed = new URL(url);
+      if (!["https:", "http:"].includes(parsed.protocol)) {
+        throw new Error("The protected proof link is invalid");
+      }
+      window.open(url, "_blank", "noopener,noreferrer");
+      clearAttemptKey({ orderId: order.id, action });
+    } catch (error: unknown) {
+      const message = getErrorMessage(error, "Could not open the protected proof");
+      toast.error(message);
+    } finally {
+      setProofLoading(null);
+    }
+  };
+
+  if (authLoading || !user || !profile) {
+    return (
+      <DashboardLayout>
+        <Skeleton className="h-72 w-full" />
+      </DashboardLayout>
+    );
+  }
+
+  if (!isAdmin) return null;
+
+  const canReviewDeposit = selectedOrder
+    ? isDepositReviewStatus(selectedOrder.status)
+    : false;
+  const selectedOrderExpired = selectedOrder ? isOrderExpired(selectedOrder) : false;
+  const canClaimPayout = selectedOrder?.status === "PAYOUT_PENDING";
+  const ownsPayoutClaim =
+    Boolean(user.id) && selectedOrder?.payoutClaimedBy === user.id;
+  const canMarkSent =
+    selectedOrder?.status === "PAYOUT_PROCESSING" && ownsPayoutClaim;
+  const canComplete = selectedOrder?.status === "PAYOUT_SENT";
+  const reviewDisabled = reviewMutation.isPending || uploadProofMutation.isPending;
+
+  return (
+    <DashboardLayout>
+      <div className="mx-auto flex max-w-[1600px] flex-col gap-6">
+        <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-end">
+          <div>
+            <div className="flex flex-wrap items-center gap-2">
+              <h1 className="text-3xl font-semibold tracking-tight">
+                Exchange requests
+              </h1>
+              <Badge variant="secondary">NGN → GHS</Badge>
+            </div>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Verify the deposit, then release the payout.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button variant="outline" asChild>
+              <Link href="/admin?tab=exchange">
+                <ArrowLeftRight className="size-4" />
+                Rates & settlement
+              </Link>
+            </Button>
+          </div>
+        </div>
+
+        <div className="grid gap-3 sm:grid-cols-3">
+          <Card size="sm">
+            <CardContent className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Needs review</p>
+                <p className="mt-1 text-2xl font-semibold">{queueCounts.needsReview}</p>
+              </div>
+              <FileCheck2 className="size-5 text-amber-400" />
+            </CardContent>
+          </Card>
+          <Card size="sm">
+            <CardContent className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Payout lane</p>
+                <p className="mt-1 text-2xl font-semibold">{queueCounts.payouts}</p>
+              </div>
+              <Landmark className="size-5 text-red-400" />
+            </CardContent>
+          </Card>
+          <Card size="sm">
+            <CardContent className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Settled in view</p>
+                <p className="mt-1 text-2xl font-semibold">{queueCounts.completed}</p>
+              </div>
+              <CheckCircle2 className="size-5 text-emerald-400" />
+            </CardContent>
+          </Card>
+        </div>
+        <div className="-mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+          <ShieldCheck
+            className={
+              latestReconciliation?.mismatchCount
+                ? "size-4 text-amber-400"
+                : "size-4 text-emerald-400"
+            }
+          />
+          <span>
+            Reconciliation: {reconciliationQuery.isLoading
+              ? "checking…"
+              : latestReconciliation
+                ? `${latestReconciliation.checkedCount} checked · ${latestReconciliation.mismatchCount} mismatches`
+                : "not run yet"}
+          </span>
+        </div>
+        <div className="grid min-w-0 gap-6 2xl:grid-cols-[minmax(0,1.12fr)_minmax(360px,0.88fr)]">
+          <Card className="min-w-0">
+            <CardHeader className="gap-3 border-b border-border/80 pb-4">
+              <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start">
+                <div>
+                  <CardTitle>Review queue</CardTitle>
+                  <CardDescription>
+                    Select an order to view evidence and take action.
+                  </CardDescription>
+                </div>
+                <Select
+                  value={statusFilter}
+                  onValueChange={(value) => {
+                    setStatusFilter(value as (typeof ORDER_STATUS_FILTERS)[number]);
+                    resetActionState();
+                    setSelectedOrderId(null);
+                  }}
+                >
+                  <SelectTrigger className="w-full sm:w-52" aria-label="Filter manual exchange orders">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {ORDER_STATUS_FILTERS.map((status) => (
+                      <SelectItem key={status} value={status}>
+                        {status === "ALL" ? "All statuses" : statusLabel(status)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </CardHeader>
+            <CardContent className="p-0">
+              {ordersQuery.isLoading ? (
+                <div className="space-y-3 p-4">
+                  {[1, 2, 3, 4].map((item) => (
+                    <Skeleton key={item} className="h-16 w-full" />
+                  ))}
+                </div>
+              ) : ordersQuery.isError ? (
+                <div className="flex flex-col items-center gap-3 px-4 py-12 text-center">
+                  <CircleAlert className="size-6 text-red-400" />
+                  <p className="text-sm text-muted-foreground">
+                    Could not load the manual exchange queue.
+                  </p>
+                  <Button variant="outline" onClick={() => void ordersQuery.refetch()}>
+                    Retry
+                  </Button>
+                </div>
+              ) : orders.length === 0 ? (
+                <div className="flex flex-col items-center gap-3 px-4 py-12 text-center">
+                  <Clock3 className="size-6 text-muted-foreground" />
+                  <p className="text-sm font-medium">No orders in this view</p>
+                  <p className="max-w-sm text-sm text-muted-foreground">
+                    Try another status filter or wait for the queue to update.
+                  </p>
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Order</TableHead>
+                        <TableHead>User</TableHead>
+                        <TableHead>Path</TableHead>
+                        <TableHead>Amount</TableHead>
+                        <TableHead>Status</TableHead>
+                        <TableHead className="text-right">Review</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {orders.map((order) => {
+                        const selected = order.id === selectedOrderId;
+                        return (
+                          <TableRow
+                            key={order.id}
+                            data-state={selected ? "selected" : undefined}
+                            className={selected ? "bg-primary/5" : undefined}
+                          >
+                            <TableCell className="min-w-40">
+                              <p className="font-mono text-xs font-medium">{order.reference}</p>
+                              <p className="mt-1 text-xs text-muted-foreground">
+                                {formatDate(order.createdAt)}
+                              </p>
+                            </TableCell>
+                            <TableCell className="min-w-28">
+                              <p className="font-mono text-xs">{order.userId.slice(0, 10)}…</p>
+                              {order.destinationInstitution && (
+                                <p className="mt-1 text-xs text-muted-foreground">
+                                  {order.destinationInstitution}
+                                </p>
+                              )}
+                            </TableCell>
+                            <TableCell>
+                              <Badge variant="outline">{order.settlementMode}</Badge>
+                              {destinationPreview(order) && (
+                                <p className="mt-1 font-mono text-xs text-muted-foreground">
+                                  {destinationPreview(order)}
+                                </p>
+                              )}
+                            </TableCell>
+                            <TableCell className="whitespace-nowrap">
+                              <p className="font-medium">{formatMoney(order.amount, order.sourceCurrency)}</p>
+                              <p className="mt-1 text-xs text-muted-foreground">
+                                → {formatMoney(order.targetAmount, order.targetCurrency)}
+                              </p>
+                            </TableCell>
+                            <TableCell>
+                              <Badge variant={statusVariant(order.status)}>
+                                {statusLabel(order.status)}
+                              </Badge>
+                            </TableCell>
+                            <TableCell className="text-right">
+                              <Button
+                                size="sm"
+                                variant={selected ? "default" : "outline"}
+                                onClick={() => selectOrder(order.id)}
+                                aria-label={`Review ${order.reference}`}
+                              >
+                                {selected ? "Selected" : "Review"}
+                              </Button>
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card className="min-w-0 self-start 2xl:sticky 2xl:top-24">
+            {!selectedOrder ? (
+              <CardContent className="flex min-h-80 flex-col items-center justify-center gap-3 text-center">
+                <WalletCards className="size-8 text-muted-foreground" />
+                <p className="font-medium">Select an order to review</p>
+                <p className="max-w-sm text-sm text-muted-foreground">
+                  Deposit evidence, payout details, and actions will appear here.
+                </p>
+              </CardContent>
+            ) : (
+              <>
+                <CardHeader className="border-b border-border/80 pb-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <CardTitle className="truncate font-mono text-base">{selectedOrder.reference}</CardTitle>
+                      <CardDescription className="mt-1">User {selectedOrder.userId}</CardDescription>
+                    </div>
+                    <Badge variant={statusVariant(selectedOrder.status)} className="shrink-0">
+                      {statusLabel(selectedOrder.status)}
+                    </Badge>
+                  </div>
+                </CardHeader>
+                <CardContent className="space-y-5 pt-5">
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div className={`rounded-xl border p-3 ${statusTone(selectedOrder.status)}`}>
+                      <p className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Deposit</p>
+                      <p className="mt-1 text-lg font-semibold">
+                        {formatMoney(selectedOrder.amount, selectedOrder.sourceCurrency)}
+                      </p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        Expected {formatMoney(selectedOrder.targetAmount, selectedOrder.targetCurrency)}
+                      </p>
+                    </div>
+                    <div className="rounded-xl border border-border bg-muted/20 p-3">
+                      <p className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Rate (GHS per NGN)</p>
+                      <p className="mt-1 text-lg font-semibold">{selectedOrder.rate}</p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        Fee {formatMoney(selectedOrder.fee, selectedOrder.sourceCurrency)}
+                      </p>
+                    </div>
+                  </div>
+
+                  {selectedOrderExpired && canReviewDeposit && (
+                    <div className="flex items-start gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-100">
+                      <CircleAlert className="mt-0.5 size-4 shrink-0" />
+                      <p>
+                        This order is past its quoted expiry. Deposit confirmation requires an explicit attestation to honor the original frozen terms.
+                      </p>
+                    </div>
+                  )}
+
+                  <dl className="grid gap-4 rounded-xl border border-border bg-muted/10 p-4 sm:grid-cols-2">
+                    <DetailValue label="Settlement mode" value={humanize(selectedOrder.settlementMode)} />
+                    <DetailValue label="Expires" value={formatDate(selectedOrder.expiresAt)} />
+                    <DetailValue label="Created" value={formatDate(selectedOrder.createdAt)} />
+                    <DetailValue label="Collection bank" value={selectedOrder.collectionAccount.bankName} />
+                    <DetailValue
+                      label="Collection account"
+                      value={`${selectedOrder.collectionAccount.accountName} · ${selectedOrder.collectionAccount.accountNumber}`}
+                      mono
+                    />
+                    {selectedOrder.destinationInstitution && (
+                      <DetailValue label="Destination institution" value={selectedOrder.destinationInstitution} />
+                    )}
+                    {selectedOrder.destinationAccount && (
+                      <DetailValue
+                        label="Destination account"
+                        value={selectedOrder.destinationAccount}
+                        mono
+                      />
+                    )}
+                    {selectedOrder.destinationName && (
+                      <DetailValue label="Destination name" value={selectedOrder.destinationName} />
+                    )}
+                    {selectedOrder.bankReference && (
+                      <DetailValue label="Customer bank reference" value={selectedOrder.bankReference} mono />
+                    )}
+                    {selectedOrder.depositReference && (
+                      <DetailValue label="Verified deposit reference" value={selectedOrder.depositReference} mono />
+                    )}
+                    {selectedOrder.payoutReference && (
+                      <DetailValue label="Payout reference" value={selectedOrder.payoutReference} mono />
+                    )}
+                  </dl>
+
+                  <div className="rounded-xl border border-border p-4">
+                    <div className="flex items-start gap-3">
+                      <LockKeyhole className="mt-0.5 size-4 shrink-0 text-emerald-400" />
+                      <div>
+                        <p className="text-sm font-medium">Protected evidence</p>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          Links expire and are fetched only after this admin request. Object keys and signed URLs are never shown in the queue.
+                        </p>
+                      </div>
+                    </div>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {selectedOrder.hasProof ? (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => void openProtectedProof(selectedOrder, "DEPOSIT")}
+                          disabled={proofLoading !== null}
+                        >
+                          {proofLoading === "DEPOSIT" ? (
+                            <LoaderCircle className="size-4 animate-spin" />
+                          ) : (
+                            <Eye className="size-4" />
+                          )}
+                          View deposit receipt
+                        </Button>
+                      ) : (
+                        <Badge variant="outline">No deposit receipt attached</Badge>
+                      )}
+                      {selectedOrder.hasPayoutProof && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => void openProtectedProof(selectedOrder, "PAYOUT")}
+                          disabled={proofLoading !== null}
+                        >
+                          {proofLoading === "PAYOUT" ? (
+                            <LoaderCircle className="size-4 animate-spin" />
+                          ) : (
+                            <Eye className="size-4" />
+                          )}
+                          View payout proof
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="rounded-xl border border-border p-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="text-sm font-medium">Audit timeline</p>
+                      <Badge variant="outline">{selectedOrder.events.length} events</Badge>
+                    </div>
+                    <div className="mt-3 space-y-3">
+                      {selectedOrder.events.length === 0 ? (
+                        <p className="text-sm text-muted-foreground">No events recorded yet.</p>
+                      ) : (
+                        selectedOrder.events.map((event, index) => (
+                          <div key={`${event.createdAt}-${event.status}-${index}`} className="flex gap-3 text-sm">
+                            <div className="mt-1 flex size-5 shrink-0 items-center justify-center rounded-full bg-muted">
+                              {index === selectedOrder.events.length - 1 ? (
+                                <Clock3 className="size-3 text-primary" />
+                              ) : (
+                                <CheckCircle2 className="size-3 text-emerald-400" />
+                              )}
+                            </div>
+                            <div className="min-w-0">
+                              <p className="font-medium">{statusLabel(event.status)}</p>
+                              <p className="mt-0.5 text-xs text-muted-foreground">{event.reason}</p>
+                              <p className="mt-0.5 text-xs text-muted-foreground">{formatDate(event.createdAt)}</p>
+                            </div>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+
+                  {selectedOrder.reviewReason && (
+                    <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm">
+                      <div className="flex items-start gap-2">
+                        <Info className="mt-0.5 size-4 shrink-0 text-amber-300" />
+                        <div>
+                          <p className="font-medium">Latest review reason</p>
+                          <p className="mt-1 text-muted-foreground">{selectedOrder.reviewReason}</p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="space-y-2">
+                    <p className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Available actions</p>
+                    <div className="flex flex-wrap gap-2">
+                      {canReviewDeposit && (
+                        <>
+                          <Button
+                            onClick={() =>
+                              openAction(
+                                selectedOrder.settlementMode === "WALLET"
+                                  ? "CREDIT_WALLET"
+                                  : "CONFIRM_DEPOSIT",
+                              )
+                            }
+                            disabled={reviewDisabled}
+                          >
+                            {selectedOrder.settlementMode === "WALLET"
+                              ? "Approve & credit wallet"
+                              : "Confirm deposit"}
+                          </Button>
+                          <Button
+                            variant="outline"
+                            onClick={() => openAction("REQUEST_INFO")}
+                            disabled={reviewDisabled}
+                          >
+                            Request info
+                          </Button>
+                          <Button
+                            variant="destructive"
+                            onClick={() => openAction("REJECT")}
+                            disabled={reviewDisabled}
+                          >
+                            Reject
+                          </Button>
+                        </>
+                      )}
+                      {canClaimPayout && (
+                        <Button onClick={() => openAction("CLAIM_PAYOUT")} disabled={reviewDisabled}>
+                          Claim payout
+                        </Button>
+                      )}
+                      {selectedOrder.status === "PAYOUT_PROCESSING" && !ownsPayoutClaim && (
+                        <div className="flex items-start gap-2 rounded-lg border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-xs text-amber-100">
+                          <CircleAlert className="mt-0.5 size-4 shrink-0" />
+                          <span>
+                            {selectedOrder.payoutClaimedBy
+                              ? "This payout is claimed by another admin. The owner must continue it."
+                              : "Claim ownership is required before sending evidence."}
+                          </span>
+                        </div>
+                      )}
+                      {canMarkSent && (
+                        <Button onClick={() => openAction("MARK_SENT")} disabled={reviewDisabled}>
+                          Mark sent
+                        </Button>
+                      )}
+                      {canComplete && (
+                        <Button onClick={() => openAction("COMPLETE")} disabled={reviewDisabled}>
+                          Complete
+                        </Button>
+                      )}
+                      {!canReviewDeposit && !canClaimPayout && !canMarkSent && !canComplete && selectedOrder.status !== "PAYOUT_PROCESSING" && (
+                        <p className="text-sm text-muted-foreground">No action is available for this status.</p>
+                      )}
+                    </div>
+                  </div>
+
+                  {actionPanel && (
+                    <form
+                      className="space-y-4 rounded-xl border border-primary/30 bg-primary/5 p-4"
+                      onSubmit={(event) => {
+                        event.preventDefault();
+                        submitReview();
+                      }}
+                    >
+                      <div>
+                        <p className="text-sm font-medium">{actionLabel(actionPanel)}</p>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          This action is recorded in the append-only order timeline. Network errors leave the same idempotency key ready for retry.
+                        </p>
+                      </div>
+
+                      {["CREDIT_WALLET", "CONFIRM_DEPOSIT"].includes(actionPanel) && (
+                        <div className="grid gap-3 sm:grid-cols-2">
+                          <div className="space-y-2">
+                            <Label htmlFor="manual-deposit-reference">Actual deposit reference</Label>
+                            <Input
+                              id="manual-deposit-reference"
+                              value={depositReference}
+                              onChange={(event) => setDepositReference(event.target.value)}
+                              placeholder="Reference from bank or Monnify statement"
+                              maxLength={120}
+                              disabled={reviewMutation.isPending}
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <Label htmlFor="manual-actual-amount">Actual deposit amount</Label>
+                            <Input
+                              id="manual-actual-amount"
+                              inputMode="decimal"
+                              value={actualAmount}
+                              onChange={(event) => setActualAmount(event.target.value)}
+                              placeholder={`Exact ${selectedOrder.sourceCurrency} inflow`}
+                              maxLength={40}
+                              disabled={reviewMutation.isPending}
+                            />
+                          </div>
+                        </div>
+                      )}
+
+                      {["CREDIT_WALLET", "CONFIRM_DEPOSIT"].includes(actionPanel) &&
+                        selectedOrderExpired && (
+                          <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm">
+                            <input
+                              type="checkbox"
+                              checked={acceptExpiredQuote}
+                              onChange={(event) =>
+                                setAcceptExpiredQuote(event.target.checked)
+                              }
+                              disabled={reviewMutation.isPending}
+                              className="mt-0.5 size-4 shrink-0 accent-amber-500"
+                            />
+                            <span>
+                              <span className="flex items-center gap-1.5 font-medium text-amber-100">
+                                <CircleAlert className="size-4" />
+                                Honor the original quoted amount for this expired order
+                              </span>
+                              <span className="mt-1 block text-xs text-amber-100/75">
+                                Record the actual deposit and preserve the frozen rate. This does not reprice the order.
+                              </span>
+                            </span>
+                          </label>
+                        )}
+
+                      {actionPanel === "MARK_SENT" && (
+                        <div className="space-y-4">
+                          <div className="space-y-2">
+                            <Label htmlFor="manual-payout-reference">Actual payout reference</Label>
+                            <Input
+                              id="manual-payout-reference"
+                              value={payoutReference}
+                              onChange={(event) => setPayoutReference(event.target.value)}
+                              placeholder="Reference from the external transfer"
+                              maxLength={120}
+                              disabled={reviewMutation.isPending || uploadProofMutation.isPending}
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <Label htmlFor="manual-payout-proof">Protected payout proof</Label>
+                            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                              <Input
+                                id="manual-payout-proof"
+                                type="file"
+                                accept="image/jpeg,image/png,image/webp,application/pdf"
+                                onChange={(event) => {
+                                  const file = event.target.files?.[0] ?? null;
+                                  if (
+                                    selectedOrder &&
+                                    payoutProofFile &&
+                                    file &&
+                                    (payoutProofFile.name !== file.name ||
+                                      payoutProofFile.type !== file.type ||
+                                      payoutProofFile.size !== file.size ||
+                                      payoutProofFile.lastModified !== file.lastModified)
+                                  ) {
+                                    clearAttemptKey({
+                                      orderId: selectedOrder.id,
+                                      action: "upload:payout-proof",
+                                    });
+                                  }
+                                  setPayoutProofFile(file);
+                                  setPayoutProofObjectKey(null);
+                                  setFormError(file ? validateUpload(file) : null);
+                                }}
+                                disabled={reviewMutation.isPending || uploadProofMutation.isPending}
+                                className="h-auto py-1.5 text-xs"
+                              />
+                              <Button
+                                type="button"
+                                variant="outline"
+                                onClick={uploadPayoutProof}
+                                disabled={!payoutProofFile || uploadProofMutation.isPending || reviewMutation.isPending}
+                                className="shrink-0"
+                              >
+                                {uploadProofMutation.isPending ? (
+                                  <LoaderCircle className="size-4 animate-spin" />
+                                ) : (
+                                  <Upload className="size-4" />
+                                )}
+                                {payoutProofObjectKey ? "Uploaded" : "Upload proof"}
+                              </Button>
+                            </div>
+                            <p className="text-xs text-muted-foreground">
+                              JPEG, PNG, WebP, or PDF up to 8 MiB. The signed upload request carries no API bearer token.
+                            </p>
+                            {payoutProofObjectKey && (
+                              <p className="flex items-center gap-1.5 text-xs text-emerald-300">
+                                <CheckCircle2 className="size-3.5" />
+                                Proof uploaded and ready to attach to this action.
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="space-y-2">
+                        <Label htmlFor="manual-review-reason">Reason</Label>
+                        <textarea
+                          id="manual-review-reason"
+                          value={reason}
+                          onChange={(event) => setReason(event.target.value)}
+                          placeholder="Record what you verified and why this action is approved."
+                          minLength={10}
+                          maxLength={500}
+                          rows={4}
+                          disabled={reviewMutation.isPending}
+                          className="flex min-h-24 w-full rounded-lg border border-input bg-transparent px-3 py-2 text-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-input/30"
+                        />
+                        <div className="flex justify-between gap-3 text-xs text-muted-foreground">
+                          <span>10–500 characters</span>
+                          <span>{reason.length}/500</span>
+                        </div>
+                      </div>
+
+                      {formError && (
+                        <p role="alert" className="flex items-start gap-2 text-sm text-red-300">
+                          <XCircle className="mt-0.5 size-4 shrink-0" />
+                          {formError}
+                        </p>
+                      )}
+
+                      <div className="flex flex-wrap justify-end gap-2">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={() => setActionPanel(null)}
+                          disabled={reviewMutation.isPending || uploadProofMutation.isPending}
+                        >
+                          Cancel
+                        </Button>
+                        <Button
+                          type="submit"
+                          variant={actionPanel === "REJECT" ? "destructive" : "default"}
+                          disabled={reviewMutation.isPending || uploadProofMutation.isPending}
+                        >
+                          {reviewMutation.isPending ? (
+                            <LoaderCircle className="size-4 animate-spin" />
+                          ) : actionPanel === "REJECT" ? (
+                            <XCircle className="size-4" />
+                          ) : (
+                            <CheckCircle2 className="size-4" />
+                          )}
+                          {reviewMutation.isPending ? "Saving…" : actionLabel(actionPanel)}
+                        </Button>
+                      </div>
+                    </form>
+                  )}
+                </CardContent>
+              </>
+            )}
+          </Card>
+        </div>
+      </div>
+    </DashboardLayout>
+  );
+}

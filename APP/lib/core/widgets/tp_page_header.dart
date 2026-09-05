@@ -47,6 +47,7 @@ class TpPageHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     final width = MediaQuery.sizeOf(context).width;
     final handleBack = _resolveBackAction(context);
 
@@ -174,6 +175,7 @@ class TpAppHeader extends StatelessWidget implements PreferredSizeWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     return Material(
       color: AppColors.primary,
       child: SafeArea(
@@ -202,6 +204,7 @@ class _HeaderIconButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     return Tooltip(
       message: tooltip,
       child: Material(

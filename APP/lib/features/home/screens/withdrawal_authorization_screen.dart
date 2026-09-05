@@ -307,6 +307,7 @@ class _WithdrawalAuthorizationScreenState
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     return FutureBuilder<Map<String, dynamic>>(
       future: _withdrawalFuture,
       builder: (context, snapshot) {
@@ -551,6 +552,7 @@ class _WithdrawalCompletionScreenState
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     final details = _details;
     final status = details?.status.toUpperCase() ?? 'PENDING';
     final isSuccess = status == 'SUCCESS';
@@ -718,6 +720,7 @@ class _SummaryCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     final amount = NumberFormat('#,##0.00').format(
       double.tryParse(details.amount) ?? 0,
     );
@@ -801,6 +804,7 @@ class _StatusLine extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -833,6 +837,7 @@ class _InfoPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(AppSpacing.md),
@@ -864,6 +869,7 @@ class _WithdrawalActions extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     final resendButton = OutlinedButton.icon(
       style: OutlinedButton.styleFrom(
         minimumSize: const Size.fromHeight(54),
@@ -946,6 +952,7 @@ class _CompletionActions extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     final receiptButton = FilledButton.icon(
       style: FilledButton.styleFrom(
         minimumSize: const Size.fromHeight(54),
@@ -1008,6 +1015,7 @@ class _WithdrawalErrorState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(AppSpacing.lg),

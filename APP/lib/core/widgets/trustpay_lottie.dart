@@ -43,6 +43,7 @@ class TrustPayLottie extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     if (variant == TrustPayAnimationVariant.loading) {
       return Semantics(
         label: semanticsLabel ?? _label,
@@ -117,6 +118,7 @@ class TrustPayAnimatedState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     if (variant == TrustPayAnimationVariant.loading) {
       return Center(
         child: TrustPayLottie(

@@ -165,6 +165,17 @@ void main() {
         isNull,
       );
     });
+
+    test('persists whether the first-time biometric setup prompt was seen',
+        () async {
+      final dynamic service = TransactionSecurityService();
+
+      expect(await service.hasSeenBiometricPrompt(), isFalse);
+
+      await service.markBiometricPromptSeen();
+
+      expect(await service.hasSeenBiometricPrompt(), isTrue);
+    });
   });
 }
 

@@ -31,6 +31,10 @@ describe('manual exchange financial boundaries (real PostgreSQL)', () => {
     MANUAL_EXCHANGE_COLLECTION_ACCOUNT_NAME: 'Test Collection',
     MANUAL_EXCHANGE_COLLECTION_ACCOUNT_NUMBER: '0001112223',
     MANUAL_EXCHANGE_COLLECTION_VERSION: 'test-v1',
+    MANUAL_EXCHANGE_GHS_COLLECTION_BANK_NAME: 'Test MoMo',
+    MANUAL_EXCHANGE_GHS_COLLECTION_ACCOUNT_NAME: 'Synthetic Collection',
+    MANUAL_EXCHANGE_GHS_COLLECTION_ACCOUNT_NUMBER: '0240000000',
+    MANUAL_EXCHANGE_GHS_COLLECTION_VERSION: 'test-ghs-v1',
   });
   const makeService = (ledger?: LedgerService) =>
     new ManualExchangeService(
@@ -160,6 +164,23 @@ describe('manual exchange financial boundaries (real PostgreSQL)', () => {
       })
     ).balance;
   }
+
+  it('freezes GHS collection and credits NGN exactly once for reverse exchange', async () => {
+    const before = await prisma.wallet.findUniqueOrThrow({ where: { userId_currency: { userId: user(), currency: 'NGN' } } });
+    const key = randomUUID();
+    const created = await service.create(user(), { sourceCurrency: 'GHS', amount: '100.00', settlementMode: 'WALLET', transactionPin: '2468' }, key);
+    expect(created.sourceCurrency).toBe('GHS');
+    expect(created.targetCurrency).toBe('NGN');
+    expect(created.collectionAccount).toMatchObject({ currency: 'GHS', bankName: 'Test MoMo' });
+    await expect(service.create(user(), { amount: '100.00', settlementMode: 'WALLET', transactionPin: '2468' }, key)).rejects.toThrow('different exchange details');
+    await attach(created.id);
+    const reviewKey = randomUUID();
+    const review = confirm('GHS-DEP-' + randomUUID());
+    await service.review(created.id, admin(), review, reviewKey);
+    await service.review(created.id, admin(), review, reviewKey);
+    const after = await prisma.wallet.findUniqueOrThrow({ where: { userId_currency: { userId: user(), currency: 'NGN' } } });
+    expect(after.balance.minus(before.balance).toFixed(2)).toBe(created.targetAmount);
+  });
 
   it('requires explicit approval of expired frozen terms, then reconciliation detects damaged credit evidence', async () => {
     const created = await order();

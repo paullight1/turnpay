@@ -1,17 +1,18 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
+import 'package:go_router/go_router.dart';
 
+import '../../../core/router/app_router.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/haptics.dart';
 import '../../../core/widgets/micro_interactions.dart';
 import '../../../core/widgets/tp_illustration.dart';
 import '../../../core/widgets/tp_page_header.dart';
 import '../../../core/widgets/tp_snackbar.dart';
-import '../../../services/api_client.dart';
-import '../../../services/auth_service.dart';
 import '../../../services/home_data_service.dart';
 import '../../../services/wallet_service.dart';
+import '../../home/screens/dashboard_detail_screen.dart';
 
 class ReceiveMoneyScreen extends StatefulWidget {
   final WalletService walletService;
@@ -29,10 +30,8 @@ class ReceiveMoneyScreen extends StatefulWidget {
 }
 
 class _ReceiveMoneyScreenState extends State<ReceiveMoneyScreen> {
-  final _accountRequestAttempt = MoneyAttemptIdempotency();
   late Future<List<VirtualAccountData>> _accountsFuture;
   late Future<List<DepositRecord>> _depositsFuture;
-  bool _isRequestingAccount = false;
 
   @override
   void initState() {
@@ -43,6 +42,12 @@ class _ReceiveMoneyScreenState extends State<ReceiveMoneyScreen> {
   void _loadData() {
     _accountsFuture = widget.walletService.fetchVirtualAccounts();
     _depositsFuture = widget.walletService.fetchRecentDeposits(limit: 20);
+    // The deposit FutureBuilder is mounted only after accounts load. Observe
+    // failures immediately so a fast failed request is not unhandled before
+    // that nested builder can render its unavailable state.
+    _depositsFuture.catchError((Object _, StackTrace __) {
+      return <DepositRecord>[];
+    });
   }
 
   void _refresh() {
@@ -51,50 +56,9 @@ class _ReceiveMoneyScreenState extends State<ReceiveMoneyScreen> {
     });
   }
 
-  Future<void> _requestVirtualAccount() async {
-    if (_isRequestingAccount) return;
-
-    setState(() => _isRequestingAccount = true);
-
-    try {
-      final dashboard = await widget.homeDataService.fetchDashboard();
-      final names = _virtualAccountNameParts(dashboard.user);
-
-      await widget.homeDataService.provisionVirtualAccount(
-        firstName: names.firstName,
-        lastName: names.lastName,
-        middleName: names.middleName,
-        idempotencyKey:
-            _accountRequestAttempt.keyFor('receive-account|monnify|NGN'),
-      );
-      _accountRequestAttempt.markFinalOutcome();
-
-      if (!mounted) return;
-      showTpSnackbar(
-        context,
-        'Virtual account requested successfully.',
-        type: TpSnackbarType.success,
-      );
-      _refresh();
-    } catch (error) {
-      if (!mounted) return;
-      showTpSnackbar(
-        context,
-        authErrorMessage(
-          error,
-          'Could not request your virtual account. Complete KYC and try again.',
-        ),
-        type: TpSnackbarType.error,
-      );
-    } finally {
-      if (mounted) {
-        setState(() => _isRequestingAccount = false);
-      }
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: TpAppHeader(
@@ -132,6 +96,55 @@ class _ReceiveMoneyScreenState extends State<ReceiveMoneyScreen> {
 
             final accounts = accountsSnapshot.data ?? [];
             final hasAccount = accounts.isNotEmpty;
+            final hasShareableAccount = accounts.any(
+              (account) => account.accountNumber.trim().isNotEmpty,
+            );
+
+            // Until a receiving account exists, keep this screen focused on
+            // the one action available: requesting the account. Deposit
+            // history is only meaningful after an account can receive funds.
+            if (!hasAccount) {
+              return CustomScrollView(
+                physics: const AlwaysScrollableScrollPhysics(
+                  parent: BouncingScrollPhysics(),
+                ),
+                slivers: [
+                  SliverPadding(
+                    padding: const EdgeInsets.fromLTRB(
+                      AppSpacing.lg,
+                      AppSpacing.md,
+                      AppSpacing.lg,
+                      AppSpacing.xxl,
+                    ),
+                    sliver: SliverToBoxAdapter(
+                      child: _NoVirtualAccountCard(
+                        isRequesting: false,
+                        onRequest: () => Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => DashboardDetailScreen(
+                              kind: DashboardDetailKind.virtualAccount,
+                              homeDataService: widget.homeDataService,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              );
+            }
+
+            if (!hasShareableAccount) {
+              return ListView(
+                physics: const AlwaysScrollableScrollPhysics(),
+                padding: const EdgeInsets.all(AppSpacing.lg),
+                children: [
+                  _KycAccountNumberNotice(
+                    onCompleteKyc: () => context.push(AppRoutes.kyc),
+                  ),
+                ],
+              );
+            }
 
             return FutureBuilder<List<DepositRecord>>(
               future: _depositsFuture,
@@ -159,19 +172,28 @@ class _ReceiveMoneyScreenState extends State<ReceiveMoneyScreen> {
                                 ),
                                 child: _VirtualAccountCard(
                                   account: account,
+                                  onCompleteKyc: () =>
+                                      context.push(AppRoutes.kyc),
                                 ),
                               );
                             })
                           else
                             _NoVirtualAccountCard(
-                              isRequesting: _isRequestingAccount,
-                              onRequest: _requestVirtualAccount,
+                              isRequesting: false,
+                              onRequest: () => Navigator.of(context).push(
+                                MaterialPageRoute(
+                                  builder: (_) => DashboardDetailScreen(
+                                    kind: DashboardDetailKind.virtualAccount,
+                                    homeDataService: widget.homeDataService,
+                                  ),
+                                ),
+                              ),
                             ),
 
                           // "How to receive money" refers to the account number
                           // shown above, so only render it once the user has an
                           // account to share.
-                          if (hasAccount) ...[
+                          if (hasShareableAccount) ...[
                             const SizedBox(height: AppSpacing.md),
 
                             // Deposit instructions
@@ -231,20 +253,20 @@ class _ReceiveMoneyScreenState extends State<ReceiveMoneyScreen> {
                             ),
                           ],
 
-                          const SizedBox(height: AppSpacing.xl),
-
-                          // Recent deposits header
-                          Text(
-                            'Recent Deposits',
-                            style: AppTextStyles.headingM,
-                          ),
-                          const SizedBox(height: AppSpacing.md),
+                          if (depositsSnapshot.data?.isNotEmpty ?? false) ...[
+                            const SizedBox(height: AppSpacing.lg),
+                            Text('Recent Deposits',
+                                style: AppTextStyles.headingM),
+                            const SizedBox(height: AppSpacing.md),
+                          ],
                         ],
                       ),
                     ),
 
                     // Deposits section (loading / error / empty / list)
-                    _buildDepositsSliver(depositsSnapshot),
+                    if (depositsSnapshot.hasError ||
+                        (depositsSnapshot.data?.isNotEmpty ?? false))
+                      _buildDepositsSliver(depositsSnapshot),
                   ],
                 );
               },
@@ -275,7 +297,7 @@ class _ReceiveMoneyScreenState extends State<ReceiveMoneyScreen> {
 
     // Error: the fetch failed and we have no cached history. Show a retry
     // affordance instead of a misleading "no deposits yet" empty state.
-    if (snapshot.hasError && !snapshot.hasData) {
+    if (snapshot.hasError || !snapshot.hasData) {
       return SliverPadding(
         padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
         sliver: SliverToBoxAdapter(
@@ -284,7 +306,7 @@ class _ReceiveMoneyScreenState extends State<ReceiveMoneyScreen> {
       );
     }
 
-    final deposits = snapshot.data ?? [];
+    final deposits = snapshot.data!;
 
     // Genuinely empty history.
     if (deposits.isEmpty) {
@@ -337,44 +359,17 @@ class _ReceiveMoneyScreenState extends State<ReceiveMoneyScreen> {
   }
 }
 
-_VirtualAccountNameParts _virtualAccountNameParts(HomeUser user) {
-  final source = user.fullName.trim().isNotEmpty
-      ? user.fullName.trim()
-      : user.email.split('@').first.trim();
-  final parts = source
-      .split(RegExp(r'\s+|[._-]+'))
-      .where((part) => part.trim().isNotEmpty)
-      .toList();
-
-  return _VirtualAccountNameParts(
-    firstName: parts.isNotEmpty ? parts.first : 'TrustPay',
-    lastName: parts.length > 1 ? parts.last : 'User',
-    middleName:
-        parts.length > 2 ? parts.sublist(1, parts.length - 1).join(' ') : null,
-  );
-}
-
-class _VirtualAccountNameParts {
-  final String firstName;
-  final String lastName;
-  final String? middleName;
-
-  const _VirtualAccountNameParts({
-    required this.firstName,
-    required this.lastName,
-    this.middleName,
-  });
-}
-
 class _VirtualAccountCard extends StatelessWidget {
   final VirtualAccountData account;
+  final VoidCallback onCompleteKyc;
 
-  const _VirtualAccountCard({required this.account});
+  const _VirtualAccountCard({
+    required this.account,
+    required this.onCompleteKyc,
+  });
 
   String get _displayAccountNumber {
-    final fullNumber = account.accountNumber.trim();
-    if (fullNumber.isNotEmpty) return fullNumber;
-    return account.accountNumberMasked.trim();
+    return account.accountNumber.trim();
   }
 
   Future<void> _copyAccountNumber(BuildContext context) async {
@@ -393,8 +388,13 @@ class _VirtualAccountCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     final isActive = account.status.toUpperCase() == 'ACTIVE';
     final accountNumber = _displayAccountNumber;
+
+    if (accountNumber.isEmpty) {
+      return _KycAccountNumberNotice(onCompleteKyc: onCompleteKyc);
+    }
 
     return Container(
       width: double.infinity,
@@ -429,7 +429,9 @@ class _VirtualAccountCard extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      account.bankName.isEmpty ? 'Bank account' : account.bankName,
+                      account.bankName.isEmpty
+                          ? 'Bank account'
+                          : account.bankName,
                       style: AppTextStyles.labelM.copyWith(
                         color: AppColors.textPrimary,
                         fontWeight: FontWeight.w900,
@@ -451,7 +453,9 @@ class _VirtualAccountCard extends StatelessWidget {
                         const SizedBox(width: AppSpacing.xs),
                         Flexible(
                           child: Text(
-                            isActive ? 'Active receiving account' : account.status,
+                            isActive
+                                ? 'Active receiving account'
+                                : account.status,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: AppTextStyles.caption.copyWith(
@@ -488,56 +492,115 @@ class _VirtualAccountCard extends StatelessWidget {
           const SizedBox(height: AppSpacing.md),
           _AccountDetailRow(
             label: 'Account name',
-            value: account.accountName.isEmpty ? 'TrustPay user' : account.accountName,
+            value: account.accountName.isEmpty
+                ? 'TrustPay user'
+                : account.accountName,
           ),
           const SizedBox(height: AppSpacing.sm),
-          TapScale(
-            onTap: () => _copyAccountNumber(context),
-            borderRadius: BorderRadius.circular(AppRadius.sm),
-            child: Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(AppSpacing.md),
-              decoration: BoxDecoration(
-                color: AppColors.surface,
-                borderRadius: BorderRadius.circular(AppRadius.sm),
-                border: Border.all(color: AppColors.border),
-              ),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: _AccountDetailRow(
-                      label: 'Account number',
-                      value: accountNumber.isEmpty ? 'Not available' : accountNumber,
-                      isLarge: true,
+          if (accountNumber.isEmpty)
+            _KycAccountNumberNotice(onCompleteKyc: onCompleteKyc)
+          else ...[
+            TapScale(
+              onTap: () => _copyAccountNumber(context),
+              borderRadius: BorderRadius.circular(AppRadius.sm),
+              child: Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(AppSpacing.md),
+                decoration: BoxDecoration(
+                  color: AppColors.surface,
+                  borderRadius: BorderRadius.circular(AppRadius.sm),
+                  border: Border.all(color: AppColors.border),
+                ),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: _AccountDetailRow(
+                        label: 'Account number',
+                        value: accountNumber,
+                        isLarge: true,
+                      ),
                     ),
-                  ),
-                  const SizedBox(width: AppSpacing.sm),
-                  Icon(
-                    Icons.copy_rounded,
-                    color: AppColors.primary,
-                    size: 20,
-                  ),
-                ],
+                    const SizedBox(width: AppSpacing.sm),
+                    Icon(
+                      Icons.copy_rounded,
+                      color: AppColors.primary,
+                      size: 20,
+                    ),
+                  ],
+                ),
               ),
+            ),
+            const SizedBox(height: AppSpacing.md),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: () => _copyAccountNumber(context),
+                icon: const Icon(Icons.copy_rounded, size: 18),
+                label: const Text('Copy account number'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: AppColors.primary,
+                  side: BorderSide(
+                    color: AppColors.primary.withValues(alpha: 0.35),
+                  ),
+                  minimumSize: const Size.fromHeight(44),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(AppRadius.full),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _KycAccountNumberNotice extends StatelessWidget {
+  final VoidCallback onCompleteKyc;
+
+  const _KycAccountNumberNotice({required this.onCompleteKyc});
+
+  @override
+  Widget build(BuildContext context) {
+    AppColors.watch(context);
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(AppSpacing.md),
+      decoration: BoxDecoration(
+        color: AppColors.background,
+        borderRadius: BorderRadius.circular(AppRadius.sm),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.lock_outline_rounded, color: AppColors.primary),
+              const SizedBox(width: AppSpacing.sm),
+              Expanded(
+                child: Text(
+                  'Verify your identity',
+                  style: AppTextStyles.labelM,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: AppSpacing.xs),
+          Text(
+            'Complete KYC to get your receiving account details.',
+            style: AppTextStyles.bodyS.copyWith(
+              color: AppColors.textSecondary,
             ),
           ),
           const SizedBox(height: AppSpacing.md),
           SizedBox(
             width: double.infinity,
-            child: OutlinedButton.icon(
-              onPressed: () => _copyAccountNumber(context),
-              icon: const Icon(Icons.copy_rounded, size: 18),
-              label: const Text('Copy account number'),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: AppColors.primary,
-                side: BorderSide(
-                  color: AppColors.primary.withValues(alpha: 0.35),
-                ),
-                minimumSize: const Size.fromHeight(44),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(AppRadius.full),
-                ),
-              ),
+            child: FilledButton.icon(
+              onPressed: onCompleteKyc,
+              icon: const Icon(Icons.verified_user_rounded, size: 18),
+              label: const Text('Complete KYC'),
             ),
           ),
         ],
@@ -559,6 +622,7 @@ class _AccountDetailRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -597,6 +661,7 @@ class _NoVirtualAccountCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(AppSpacing.xl),
@@ -650,6 +715,7 @@ class _ReceiveMoneyLoadingState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     return ListView(
       physics: const AlwaysScrollableScrollPhysics(
         parent: BouncingScrollPhysics(),
@@ -701,6 +767,7 @@ class _ReceiveMoneyErrorState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     // Scrollable so pull-to-refresh still works even in the error state.
     return ListView(
       physics: const AlwaysScrollableScrollPhysics(
@@ -750,6 +817,7 @@ class _DepositsErrorCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     return Container(
       padding: const EdgeInsets.all(AppSpacing.xl),
       decoration: BoxDecoration(
@@ -765,12 +833,12 @@ class _DepositsErrorCard extends StatelessWidget {
           ),
           const SizedBox(height: AppSpacing.sm),
           Text(
-            'Could not load deposits',
+            'Deposit history unavailable',
             style: AppTextStyles.labelM,
           ),
           const SizedBox(height: AppSpacing.xs),
           Text(
-            'Something went wrong while loading your deposit history.',
+            'We could not load your deposit history. Try again when you are online.',
             style: AppTextStyles.bodyS,
             textAlign: TextAlign.center,
           ),
@@ -807,6 +875,7 @@ class _InstructionStep extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -842,8 +911,9 @@ class _DepositRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     final symbol = deposit.currency == 'NGN' ? '₦' : 'GH₵';
-    final formatted = NumberFormat('#,##0.00').format(deposit.amount);
+    final formatted = _formatExactAmount(deposit.amountDecimalString);
     final dateFormatted = deposit.createdAt != null
         ? DateFormat('MMM d, HH:mm').format(deposit.createdAt!.toLocal())
         : 'recently';
@@ -910,4 +980,25 @@ class _DepositRow extends StatelessWidget {
       ),
     );
   }
+}
+
+String _formatExactAmount(String decimalString) {
+  final parts = decimalString.split('.');
+  final rawWhole = parts.first;
+  final isNegative = rawWhole.startsWith('-');
+  var whole = isNegative ? rawWhole.substring(1) : rawWhole;
+  while (whole.length > 1 && whole.startsWith('0')) {
+    whole = whole.substring(1);
+  }
+
+  final grouped = StringBuffer();
+  for (var index = 0; index < whole.length; index++) {
+    if (index > 0 && (whole.length - index) % 3 == 0) {
+      grouped.write(',');
+    }
+    grouped.write(whole[index]);
+  }
+
+  final fraction = parts.length > 1 ? parts[1].padRight(2, '0') : '00';
+  return '${isNegative ? '-' : ''}$grouped.${fraction.substring(0, 2)}';
 }

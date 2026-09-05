@@ -118,6 +118,37 @@ export class MonnifyVirtualAccountProvider {
   private accessToken?: string;
   private tokenExpiresAt = 0;
 
+  async updateReservedAccountKyc(
+    accountReference: string,
+    identifiers: { bvn: string; nin: string },
+  ): Promise<void> {
+    if (
+      !/^\d{11}$/.test(identifiers.bvn) ||
+      !/^\d{11}$/.test(identifiers.nin)
+    ) {
+      throw new BadRequestException('Verified BVN and NIN are required');
+    }
+    const token = await this.getAccessToken();
+    const response = await this.fetchMonnify<{ requestSuccessful: boolean }>(
+      firstValueFrom(
+        this.httpService.put(
+          `${this.baseUrl}/api/v1/bank-transfer/reserved-accounts/${encodeURIComponent(accountReference)}/kyc-info`,
+          identifiers,
+          {
+            headers: {
+              Authorization: `Bearer ${token}`,
+              'Content-Type': 'application/json',
+            },
+          },
+        ),
+      ),
+      'Could not update reserved account KYC',
+    );
+    if (!response.data.requestSuccessful) {
+      throw new BadRequestException('Could not update reserved account KYC');
+    }
+  }
+
   constructor(
     private readonly httpService: HttpService,
     private readonly configService: ConfigService,

@@ -1,12 +1,11 @@
 // Repository-contained gate for launch-time mobile hardening that still
 // depends on platform adapters or operator-managed trust material.
 //
-// This file intentionally does NOT invent certificate pins, root-detection
-// heuristics, or provider secrets. Production enforcement should be wired only
-// after the app has:
-// 1. A platform HTTP adapter that can bind to SPKI/certificate pins.
-// 2. A vetted Android/iOS device-integrity implementation.
-// 3. An operational rotation runbook for replacing pins without downtime.
+// This unconfigured implementation remains a safe sentinel for callers that
+// have no adapter. The actual API transport now uses secure_transport_factory
+// (SHA256 leaf certificate DER pins, not SPKI) and device_integrity_service
+// (local signals, not server attestation). Deployment trust material, rotation
+// and physical-device evidence must still be verified independently.
 
 enum DeviceIntegrityRisk {
   unavailable,

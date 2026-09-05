@@ -17,8 +17,6 @@ const PUBLIC_ROUTES = [
   "/security",
   "/support",
   "/vtu",
-  "/login",
-  "/register",
 ];
 
 export default function sitemap(): MetadataRoute.Sitemap {

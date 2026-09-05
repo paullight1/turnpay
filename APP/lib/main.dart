@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'core/widgets/keyboard_visibility_guard.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/foundation.dart' show kIsWeb, kReleaseMode;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -12,11 +13,14 @@ import 'core/theme/app_theme.dart';
 import 'core/theme/theme_controller.dart';
 import 'core/router/app_router.dart';
 import 'core/widgets/app_lock_gate.dart';
+import 'core/widgets/startup_gate.dart';
+import 'core/constants/app_constants.dart';
+import 'services/secure_transport_factory.dart';
 
 /// Crash-reporting DSN. Provide it at build time with
 /// `--dart-define=SENTRY_DSN=...`. When empty (debug/dev), Sentry stays a
 /// no-op and errors are only logged — the app still runs.
-// TODO(launch): supply the production SENTRY_DSN via the CI/build pipeline.
+// The protected release workflow supplies this public reporting endpoint.
 const _sentryDsn = String.fromEnvironment('SENTRY_DSN');
 
 void main() {
@@ -35,9 +39,6 @@ void main() {
           );
         }
       };
-
-      await _bootstrapCrashReporting();
-      await _bootstrapSupabase();
 
       // Force portrait orientation for mobile fintech apps (not on web)
       if (!kIsWeb) {
@@ -62,8 +63,27 @@ void main() {
       }
 
       runApp(
-        const ProviderScope(
-          child: TrustPayApp(),
+        ProviderScope(
+          child: StartupGate(
+            initialize: () async {
+              if (kReleaseMode && _sentryDsn.isEmpty) {
+                throw StateError('SENTRY_DSN is required for release builds.');
+              }
+              final transport = SecureTransportConfiguration.fromEnvironment(
+                  baseUrl: AppConstants.apiBaseUrl, releaseMode: kReleaseMode);
+              final error = transport.releaseValidationError(
+                  nativePinningSupported: !kIsWeb);
+              if (error != null) throw StateError(error);
+              await _bootstrapCrashReporting();
+              await _bootstrapSupabase();
+            },
+            onError: (error, stack) {
+              if (_sentryDsn.isNotEmpty) {
+                Sentry.captureException(error, stackTrace: stack);
+              }
+            },
+            builder: (_) => const TrustPayApp(),
+          ),
         ),
       );
     },
@@ -87,7 +107,8 @@ Future<void> _bootstrapCrashReporting() async {
 
   await SentryFlutter.init((options) {
     options.dsn = _sentryDsn;
-    options.environment = kReleaseMode ? 'production' : 'development';
+    options.environment = const String.fromEnvironment('SENTRY_ENVIRONMENT',
+        defaultValue: kReleaseMode ? 'production' : 'development');
     // Keep PII out of crash reports for a fintech app.
     options.sendDefaultPii = false;
   });
@@ -135,6 +156,7 @@ class TrustPayApp extends ConsumerWidget {
           SystemChrome.setSystemUIOverlayStyle(
             SystemUiOverlayStyle(
               statusBarColor: Colors.transparent,
+              statusBarBrightness: isLight ? Brightness.light : Brightness.dark,
               statusBarIconBrightness:
                   isLight ? Brightness.dark : Brightness.light,
               systemNavigationBarColor: Colors.transparent,
@@ -144,7 +166,9 @@ class TrustPayApp extends ConsumerWidget {
           );
         }
 
-        return AppLockGate(child: child ?? const SizedBox.shrink());
+        return KeyboardVisibilityGuard(
+          child: AppLockGate(child: child ?? const SizedBox.shrink()),
+        );
       },
       debugShowCheckedModeBanner: false,
     );

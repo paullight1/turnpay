@@ -17,6 +17,7 @@ class SocialAuthButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     return GestureDetector(
       onTap: onTap,
       child: Container(
@@ -39,4 +40,3 @@ class SocialAuthButton extends StatelessWidget {
     );
   }
 }
-

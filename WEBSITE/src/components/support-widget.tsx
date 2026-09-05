@@ -18,6 +18,8 @@ declare global {
 export function SupportWidget() {
   const pathname = usePathname();
   const isProtectedRoute =
+    pathname === "/staff" ||
+    pathname.startsWith("/staff/") ||
     pathname === "/dashboard" ||
     pathname.startsWith("/dashboard/") ||
     pathname === "/admin" ||

@@ -33,8 +33,10 @@ TrustPayTestBundle buildTrustPayTestBundle({
   bool refreshSucceeds = true,
   bool includeTransactions = true,
   bool includeDeposits = true,
+  bool includeVirtualAccounts = true,
   bool includeReferralRewards = true,
   bool transactionPinConfigured = true,
+  bool includeVtuProviders = false,
   int internalTransferFailuresBeforeSuccess = 0,
 }) {
   final adapter = FakeTrustPayApiAdapter(
@@ -42,7 +44,9 @@ TrustPayTestBundle buildTrustPayTestBundle({
     refreshSucceeds: refreshSucceeds,
     includeTransactions: includeTransactions,
     includeDeposits: includeDeposits,
+    includeVirtualAccounts: includeVirtualAccounts,
     includeReferralRewards: includeReferralRewards,
+    includeVtuProviders: includeVtuProviders,
     transactionPinConfigured: transactionPinConfigured,
     internalTransferFailuresBeforeSuccess:
         internalTransferFailuresBeforeSuccess,
@@ -82,10 +86,19 @@ class FakeTrustPayApiAdapter implements HttpClientAdapter {
   final bool refreshSucceeds;
   final bool includeTransactions;
   final bool includeDeposits;
+  final bool includeVirtualAccounts;
+  bool _accountProvisioned = false;
   final bool includeReferralRewards;
+  final bool includeVtuProviders;
   bool transactionPinConfigured;
   int internalTransferFailuresBeforeSuccess;
   final List<String> internalTransferIdempotencyKeys = [];
+  final List<String> paymentResolverIdempotencyKeys = [];
+  final List<String> paymentResolverAttemptKeys = [];
+  final List<String> paymentResolverOperations = [];
+  int internalTransferMutationCount = 0;
+  String? _committedInternalTransferAttemptKey;
+  String? _committedInternalTransferReference;
   final List<Uri> requestedUris = [];
 
   FakeTrustPayApiAdapter({
@@ -93,7 +106,9 @@ class FakeTrustPayApiAdapter implements HttpClientAdapter {
     required this.refreshSucceeds,
     required this.includeTransactions,
     required this.includeDeposits,
+    required this.includeVirtualAccounts,
     required this.includeReferralRewards,
+    required this.includeVtuProviders,
     this.transactionPinConfigured = true,
     this.internalTransferFailuresBeforeSuccess = 0,
   });
@@ -152,6 +167,37 @@ class FakeTrustPayApiAdapter implements HttpClientAdapter {
       });
     }
 
+    if (method == 'GET' && path == '/api/vtu/providers') {
+      final type = '${options.queryParameters['type'] ?? ''}';
+      if (includeVtuProviders && type == 'airtime') {
+        return _jsonResponse([
+          {
+            'id': 'mtn',
+            'name': 'MTN',
+            'type': 'airtime',
+            'isActive': true,
+          },
+          {
+            'id': 'airtel',
+            'name': 'Airtel',
+            'type': 'airtime',
+            'isActive': true,
+          },
+        ]);
+      }
+      if (includeVtuProviders && type == 'cable') {
+        return _jsonResponse([
+          {
+            'id': 'dstv',
+            'name': 'DStv',
+            'type': 'cable',
+            'isActive': true,
+          },
+        ]);
+      }
+      return _jsonResponse(const []);
+    }
+
     if (method == 'GET' && path == '/api/banking/accounts') {
       return _jsonResponse(_virtualAccounts());
     }
@@ -173,6 +219,7 @@ class FakeTrustPayApiAdapter implements HttpClientAdapter {
     }
 
     if (method == 'POST' && path == '/api/banking/accounts/provision') {
+      _accountProvisioned = true;
       return _jsonResponse(_virtualAccounts().first);
     }
 
@@ -213,8 +260,14 @@ class FakeTrustPayApiAdapter implements HttpClientAdapter {
       final idempotencyKey =
           '${options.headers['Idempotency-Key'] ?? options.headers['idempotency-key'] ?? ''}';
       internalTransferIdempotencyKeys.add(idempotencyKey);
+      internalTransferMutationCount++;
       if (internalTransferFailuresBeforeSuccess > 0) {
         internalTransferFailuresBeforeSuccess--;
+        // Model a committed backend mutation whose response was lost at the
+        // transport boundary. The resolver must be able to recover this exact
+        // original attempt without allowing a second debit.
+        _committedInternalTransferAttemptKey = idempotencyKey;
+        _committedInternalTransferReference = 'IT-INTEGRATION-001';
         return _jsonResponse({
           'message': 'Distributed controls unavailable',
         }, statusCode: 503);
@@ -233,6 +286,23 @@ class FakeTrustPayApiAdapter implements HttpClientAdapter {
         },
         'createdAt': '2026-09-01T12:00:00.000Z',
       });
+    }
+
+    if (method == 'POST' && path == '/api/payment-attempts/resolve') {
+      final resolverKey =
+          '${options.headers['Idempotency-Key'] ?? options.headers['idempotency-key'] ?? ''}';
+      final data = Map<String, dynamic>.from(options.data as Map);
+      paymentResolverIdempotencyKeys.add(resolverKey);
+      paymentResolverAttemptKeys.add('${data['attemptKey'] ?? ''}');
+      paymentResolverOperations.add('${data['operation'] ?? ''}');
+      final attemptKey = '${data['attemptKey'] ?? ''}';
+      if (attemptKey == _committedInternalTransferAttemptKey) {
+        return _jsonResponse({
+          'state': 'SUCCESS',
+          'reference': _committedInternalTransferReference,
+        });
+      }
+      return _jsonResponse({'state': 'UNKNOWN'});
     }
 
     if (method == 'GET' && path == '/api/support/tickets') {
@@ -369,6 +439,8 @@ class FakeTrustPayApiAdapter implements HttpClientAdapter {
   }
 
   List<Map<String, dynamic>> _virtualAccounts() {
+    if (!includeVirtualAccounts && !_accountProvisioned) return [];
+
     return [
       {
         'provider': 'monnify',

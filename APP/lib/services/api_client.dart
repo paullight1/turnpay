@@ -8,6 +8,8 @@ import 'package:uuid/uuid.dart';
 import '../core/auth/auth_state.dart';
 import '../core/constants/app_constants.dart';
 import 'transaction_security_service.dart';
+import 'device_integrity_service.dart';
+import 'secure_transport_factory.dart';
 
 class ApiClient {
   static const _accessTokenKey = 'trustpay_access_token';
@@ -21,7 +23,7 @@ class ApiClient {
 
   ApiClient({Dio? dio})
       : _dio = dio ??
-            Dio(
+            createApiDio(
               BaseOptions(
                 baseUrl: AppConstants.apiBaseUrl,
                 connectTimeout: AppConstants.apiTimeout,
@@ -34,6 +36,16 @@ class ApiClient {
     _dio.interceptors.add(
       InterceptorsWrapper(
         onRequest: (options, handler) async {
+          try {
+            await const DeviceIntegrityService()
+                .requireForRequest(options.method, options.uri.path);
+          } catch (error) {
+            return handler.reject(DioException(
+                requestOptions: options,
+                error: error,
+                message:
+                    'Device security could not be verified. Contact support if this continues.'));
+          }
           final accessToken = await _storage.read(key: _accessTokenKey);
 
           if (accessToken != null && accessToken.isNotEmpty) {
@@ -135,7 +147,7 @@ class ApiClient {
       return null;
     }
 
-    final refreshClient = Dio(
+    final refreshClient = createApiDio(
       BaseOptions(
         baseUrl: AppConstants.apiBaseUrl,
         connectTimeout: AppConstants.apiTimeout,

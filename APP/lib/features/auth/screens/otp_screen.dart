@@ -195,6 +195,7 @@ class _OtpScreenState extends State<OtpScreen> {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     final maskedPhone = _maskPhone(widget.phone);
     final heading = widget.purpose == 'reset'
         ? 'Check your\nphone.'
@@ -337,6 +338,7 @@ class _OtpBox extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     final hasValue = controller.text.isNotEmpty;
     final isFocused = focusNode.hasFocus;
     final borderColor =

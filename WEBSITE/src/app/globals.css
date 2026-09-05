@@ -384,6 +384,32 @@
   animation: trustpay-reveal-up 640ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
+.trustpay-admin-console {
+  --background: #0c1015;
+  --card: #131920;
+  --border: #29323d;
+  --muted: #1b2430;
+  --muted-foreground: #a7b4c4;
+  --radius: 0.75rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.trustpay-admin-console h1 { letter-spacing: -0.035em; font-size: clamp(1.5rem, 3vw, 2rem); }
+.trustpay-admin-console [data-slot="card"] { box-shadow: none; border-radius: 12px; }
+.trustpay-admin-console .trustpay-dashboard-motion [data-slot="card"]:hover {
+  transform: none;
+  box-shadow: none;
+  border-color: var(--border);
+}
+.trustpay-admin-console [data-slot="table-head"] {
+  color: #a7b4c4;
+  font-size: 0.75rem;
+  letter-spacing: 0.025em;
+}
+.trustpay-admin-console [data-slot="table-cell"] { padding-block: 1rem; }
+.trustpay-admin-console [data-slot="tabs-list"] { flex-wrap: wrap; height: auto; gap: 0.25rem; }
+.trustpay-admin-console [data-slot="tabs-trigger"] { min-height: 2.5rem; }
+
 .trustpay-dashboard-motion [data-slot="card"],
 .trustpay-motion-root [data-slot="card"],
 .trustpay-surface-card {
@@ -407,6 +433,12 @@
 .dark .trustpay-motion-root [data-slot="card"]:hover,
 .dark .trustpay-surface-card:hover {
   box-shadow: 0 18px 44px rgba(0, 0, 0, 0.2);
+}
+
+@keyframes nav-progress {
+  0% { transform: translateX(-120%); }
+  50% { transform: translateX(180%); }
+  100% { transform: translateX(340%); }
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -20,6 +20,7 @@ class WalletBalanceCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     final formatted = NumberFormat.currency(
       locale: 'en_GH',
       symbol: 'GH₵ ',

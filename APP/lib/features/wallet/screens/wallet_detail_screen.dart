@@ -38,6 +38,12 @@ class _WalletDetailScreenState extends State<WalletDetailScreen> {
   void _loadData() {
     _walletFuture = widget.walletService.fetchWallet(widget.currency);
     _depositsFuture = widget.walletService.fetchRecentDeposits();
+    // Deposit history is rendered after the wallet future. Attach an early
+    // observer so a fast failed history request is still delivered to the
+    // later FutureBuilder without becoming an unhandled asynchronous error.
+    _depositsFuture.catchError((Object _, StackTrace __) {
+      return <DepositRecord>[];
+    });
   }
 
   void _refresh() {
@@ -48,6 +54,7 @@ class _WalletDetailScreenState extends State<WalletDetailScreen> {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: TpAppHeader(
@@ -85,8 +92,6 @@ class _WalletDetailScreenState extends State<WalletDetailScreen> {
             return FutureBuilder<List<DepositRecord>>(
               future: _depositsFuture,
               builder: (context, depositSnapshot) {
-                final deposits = depositSnapshot.data ?? [];
-
                 return CustomScrollView(
                   physics: const AlwaysScrollableScrollPhysics(
                     parent: BouncingScrollPhysics(),
@@ -104,7 +109,7 @@ class _WalletDetailScreenState extends State<WalletDetailScreen> {
                           // Balance card
                           _BalanceHero(
                             currency: wallet.currency,
-                            balance: wallet.balance,
+                            balanceDecimalString: wallet.balanceDecimalString,
                           ),
                           const SizedBox(height: AppSpacing.lg),
 
@@ -169,64 +174,10 @@ class _WalletDetailScreenState extends State<WalletDetailScreen> {
                       ),
                     ),
 
-                    // Deposits list
-                    if (deposits.isEmpty)
-                      SliverPadding(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: AppSpacing.lg,
-                        ),
-                        sliver: SliverToBoxAdapter(
-                          child: Container(
-                            padding: const EdgeInsets.all(AppSpacing.xl),
-                            decoration: BoxDecoration(
-                              color: AppColors.surfaceVariant,
-                              borderRadius: BorderRadius.circular(AppRadius.md),
-                            ),
-                            child: Column(
-                              children: [
-                                const TpIllustration(
-                                  variant:
-                                      TpIllustrationVariant.emptyTransactions,
-                                  size: 128,
-                                  semanticLabel: 'No transactions yet',
-                                ),
-                                const SizedBox(height: AppSpacing.sm),
-                                Text(
-                                  'No transactions yet',
-                                  style: AppTextStyles.labelM,
-                                ),
-                                const SizedBox(height: AppSpacing.xs),
-                                Text(
-                                  'Your transactions will appear here',
-                                  style: AppTextStyles.bodyS,
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      )
-                    else
-                      SliverPadding(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: AppSpacing.lg,
-                        ),
-                        sliver: SliverList.separated(
-                          itemCount: deposits.length,
-                          separatorBuilder: (_, __) =>
-                              const SizedBox(height: AppSpacing.sm),
-                          itemBuilder: (context, index) {
-                            final deposit = deposits[index];
-                            return _TransactionRow(
-                              reference: deposit.reference,
-                              amount: deposit.amount,
-                              currency: deposit.currency,
-                              status: deposit.status,
-                              type: 'FUND',
-                              date: deposit.createdAt,
-                            );
-                          },
-                        ),
-                      ),
+                    // Deposit history keeps loading, empty, and unavailable
+                    // states distinct so a failed refresh never looks like a
+                    // successful empty collection.
+                    _buildDepositHistorySliver(depositSnapshot),
                   ],
                 );
               },
@@ -236,21 +187,105 @@ class _WalletDetailScreenState extends State<WalletDetailScreen> {
       ),
     );
   }
+
+  Widget _buildDepositHistorySliver(
+    AsyncSnapshot<List<DepositRecord>> snapshot,
+  ) {
+    if (snapshot.connectionState == ConnectionState.waiting &&
+        !snapshot.hasData) {
+      return SliverPadding(
+        padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
+        sliver: SliverList.separated(
+          itemCount: 3,
+          separatorBuilder: (_, __) => const SizedBox(height: AppSpacing.sm),
+          itemBuilder: (context, index) => ShimmerBlock(
+            width: double.infinity,
+            height: 68,
+            borderRadius: BorderRadius.circular(AppRadius.sm),
+          ),
+        ),
+      );
+    }
+
+    if (snapshot.hasError || !snapshot.hasData) {
+      return SliverPadding(
+        padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
+        sliver: SliverToBoxAdapter(
+          child: _DepositHistoryErrorState(onRetry: _refresh),
+        ),
+      );
+    }
+
+    final deposits = snapshot.data!;
+    if (deposits.isEmpty) {
+      return SliverPadding(
+        padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
+        sliver: SliverToBoxAdapter(
+          child: Container(
+            padding: const EdgeInsets.all(AppSpacing.xl),
+            decoration: BoxDecoration(
+              color: AppColors.surfaceVariant,
+              borderRadius: BorderRadius.circular(AppRadius.md),
+            ),
+            child: Column(
+              children: [
+                const TpIllustration(
+                  variant: TpIllustrationVariant.emptyTransactions,
+                  size: 128,
+                  semanticLabel: 'No deposits yet',
+                ),
+                const SizedBox(height: AppSpacing.sm),
+                Text(
+                  'No deposits yet',
+                  style: AppTextStyles.labelM,
+                ),
+                const SizedBox(height: AppSpacing.xs),
+                Text(
+                  'Your deposit history will appear here',
+                  style: AppTextStyles.bodyS,
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    return SliverPadding(
+      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
+      sliver: SliverList.separated(
+        itemCount: deposits.length,
+        separatorBuilder: (_, __) => const SizedBox(height: AppSpacing.sm),
+        itemBuilder: (context, index) {
+          final deposit = deposits[index];
+          return _TransactionRow(
+            reference: deposit.reference,
+            amountDecimalString: deposit.amountDecimalString,
+            currency: deposit.currency,
+            status: deposit.status,
+            type: 'FUND',
+            date: deposit.createdAt,
+          );
+        },
+      ),
+    );
+  }
 }
 
 class _BalanceHero extends StatelessWidget {
   final String currency;
-  final double balance;
+  final String balanceDecimalString;
 
   const _BalanceHero({
     required this.currency,
-    required this.balance,
+    required this.balanceDecimalString,
   });
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     final symbol = currency == 'NGN' ? '₦' : 'GH₵';
-    final formatted = NumberFormat('#,##0.00').format(balance);
+    final formatted = _formatExactAmount(balanceDecimalString);
     final isLight = Theme.of(context).brightness == Brightness.light;
 
     return Container(
@@ -372,6 +407,7 @@ class _ActionButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     return TapScale(
       onTap: onTap,
       borderRadius: BorderRadius.circular(AppRadius.md),
@@ -431,6 +467,7 @@ class _VirtualAccountSectionState extends State<_VirtualAccountSection> {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     return FutureBuilder<List<VirtualAccountData>>(
       future: _accountsFuture,
       builder: (context, snapshot) {
@@ -496,6 +533,7 @@ class _ActiveVirtualAccountCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     return Container(
       padding: const EdgeInsets.all(AppSpacing.md),
       decoration: BoxDecoration(
@@ -582,6 +620,7 @@ class _AccountDetailRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     return Row(
       children: [
         SizedBox(
@@ -606,7 +645,7 @@ class _AccountDetailRow extends StatelessWidget {
 
 class _TransactionRow extends StatelessWidget {
   final String reference;
-  final double amount;
+  final String amountDecimalString;
   final String currency;
   final String status;
   final String type;
@@ -614,7 +653,7 @@ class _TransactionRow extends StatelessWidget {
 
   const _TransactionRow({
     required this.reference,
-    required this.amount,
+    required this.amountDecimalString,
     required this.currency,
     required this.status,
     required this.type,
@@ -650,8 +689,9 @@ class _TransactionRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     final symbol = currency == 'NGN' ? '₦' : 'GH₵';
-    final formatted = NumberFormat('#,##0.00').format(amount);
+    final formatted = _formatExactAmount(amountDecimalString);
     final dateFormatted = date != null
         ? DateFormat('MMM d, HH:mm').format(date!.toLocal())
         : 'recently';
@@ -760,6 +800,7 @@ class _WalletDetailLoadingState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     return ListView(
       padding: const EdgeInsets.fromLTRB(
         AppSpacing.lg,
@@ -822,6 +863,7 @@ class _WalletDetailErrorState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     return Center(
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -845,4 +887,79 @@ class _WalletDetailErrorState extends StatelessWidget {
       ),
     );
   }
+}
+
+class _DepositHistoryErrorState extends StatelessWidget {
+  final VoidCallback onRetry;
+
+  const _DepositHistoryErrorState({required this.onRetry});
+
+  @override
+  Widget build(BuildContext context) {
+    AppColors.watch(context);
+    return Container(
+      padding: const EdgeInsets.all(AppSpacing.xl),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceVariant,
+        borderRadius: BorderRadius.circular(AppRadius.md),
+      ),
+      child: Column(
+        children: [
+          Icon(
+            Icons.cloud_off_rounded,
+            color: AppColors.primary,
+            size: 40,
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          Text(
+            'Deposit history unavailable',
+            style: AppTextStyles.labelM,
+          ),
+          const SizedBox(height: AppSpacing.xs),
+          Text(
+            'We could not load your deposit history. Try again when you are online.',
+            style: AppTextStyles.bodyS,
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: AppSpacing.md),
+          OutlinedButton.icon(
+            onPressed: onRetry,
+            icon: const Icon(Icons.refresh_rounded, size: 18),
+            label: const Text('Retry'),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: AppColors.primary,
+              side: BorderSide(
+                color: AppColors.primary.withValues(alpha: 0.35),
+              ),
+              minimumSize: const Size.fromHeight(44),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(AppRadius.full),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+String _formatExactAmount(String decimalString) {
+  final parts = decimalString.split('.');
+  final rawWhole = parts.first;
+  final isNegative = rawWhole.startsWith('-');
+  var whole = isNegative ? rawWhole.substring(1) : rawWhole;
+  while (whole.length > 1 && whole.startsWith('0')) {
+    whole = whole.substring(1);
+  }
+
+  final grouped = StringBuffer();
+  for (var index = 0; index < whole.length; index++) {
+    if (index > 0 && (whole.length - index) % 3 == 0) {
+      grouped.write(',');
+    }
+    grouped.write(whole[index]);
+  }
+
+  final fraction = parts.length > 1 ? parts[1].padRight(2, '0') : '00';
+  return '${isNegative ? '-' : ''}$grouped.${fraction.substring(0, 2)}';
 }

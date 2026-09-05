@@ -65,6 +65,7 @@ export class ManualExchangeService {
       enabled: this.enabled(),
       sourceCurrency: 'NGN',
       targetCurrency: 'GHS',
+      supportedSourceCurrencies: ['NGN', 'GHS'],
     };
   }
   private enabled() {
@@ -99,25 +100,26 @@ export class ManualExchangeService {
     )
       throw new ForbiddenException('KYC Tier 2 is required for exchange');
   }
-  private collection() {
+  private collection(currency: 'NGN' | 'GHS' = 'NGN') {
+    const prefix = currency === 'NGN' ? 'MANUAL_EXCHANGE_COLLECTION_' : 'MANUAL_EXCHANGE_GHS_COLLECTION_';
     const values = {
       bankName: this.config.get<string>(
-        'MANUAL_EXCHANGE_COLLECTION_BANK_NAME',
+        `${prefix}BANK_NAME`,
         '',
       ),
       accountName: this.config.get<string>(
-        'MANUAL_EXCHANGE_COLLECTION_ACCOUNT_NAME',
+        `${prefix}ACCOUNT_NAME`,
         '',
       ),
       accountNumber: this.config.get<string>(
-        'MANUAL_EXCHANGE_COLLECTION_ACCOUNT_NUMBER',
+        `${prefix}ACCOUNT_NUMBER`,
         '',
       ),
       version: this.config.get<string>(
-        'MANUAL_EXCHANGE_COLLECTION_VERSION',
+        `${prefix}VERSION`,
         '',
       ),
-      currency: 'NGN',
+      currency,
     };
     if (
       !values.bankName.trim() ||
@@ -137,20 +139,23 @@ export class ManualExchangeService {
     auditContext?: RequestAuditContext,
   ) {
     this.requireEnabled();
+    const sourceCurrency = dto.sourceCurrency ?? 'NGN';
+    const targetCurrency = sourceCurrency === 'NGN' ? 'GHS' : 'NGN';
     await this.eligible(userId);
     if (
       dto.settlementMode === 'WALLET' &&
       !(await this.prisma.wallet.findUnique({
-        where: { userId_currency: { userId, currency: 'GHS' } },
+        where: { userId_currency: { userId, currency: targetCurrency } },
         select: { id: true },
       }))
     )
       throw new ConflictException(
-        'Set up your GHS wallet before creating a wallet exchange',
+        `Set up your ${targetCurrency} wallet before creating a wallet exchange`,
       );
     await this.pin.verifyRequired(userId, dto.transactionPin);
     const keyHash = this.key(key);
     const business = {
+      ...(sourceCurrency === 'GHS' ? { sourceCurrency } : {}),
       amount: dto.amount,
       settlementMode: dto.settlementMode,
       destinationInstitution: dto.destinationInstitution,
@@ -178,7 +183,7 @@ export class ManualExchangeService {
       throw new BadRequestException(
         'Wallet settlement cannot include external account details',
       );
-    const collection = this.collection();
+    const collection = this.collection(sourceCurrency);
     // A receiving address that auto-funds a user wallet would settle the deposit twice.
     if (
       await this.prisma.virtualAccount.findFirst({
@@ -189,7 +194,7 @@ export class ManualExchangeService {
       throw new ServiceUnavailableException(
         'Exchange requires a dedicated collection account',
       );
-    const live = await this.rateService.getRate('NGN', 'GHS');
+    const live = await this.rateService.getRate(sourceCurrency, targetCurrency);
     if (live.isStale)
       throw new ServiceUnavailableException(
         'A fresh exchange rate is required',
@@ -207,7 +212,7 @@ export class ManualExchangeService {
             data: {
               userId,
               type: 'EXCHANGE',
-              currency: 'NGN',
+              currency: sourceCurrency,
               amount: quote.amount,
               fee: quote.fee,
               reference,
@@ -215,7 +220,7 @@ export class ManualExchangeService {
                 flow: 'MANUAL_EXCHANGE',
                 ...auditContext,
                 settlementMode: dto.settlementMode,
-                targetCurrency: 'GHS',
+                targetCurrency,
                 targetAmount: quote.targetAmount,
               },
             },
@@ -229,6 +234,8 @@ export class ManualExchangeService {
               createRequestHash: fingerprint,
               settlementMode: dto.settlementMode,
               ...quote,
+              sourceCurrency,
+              targetCurrency,
               collectionAccount: collection,
               destinationInstitution: dto.destinationInstitution?.trim(),
               destinationAccount: dto.destinationAccount?.trim(),
@@ -551,7 +558,7 @@ export class ManualExchangeService {
         await this.ledger.creditWallet(
           {
             userId: row.userId,
-            currency: 'GHS',
+            currency: row.targetCurrency,
             amount: new Decimal(row.targetAmount),
             transactionId: row.transactionId,
             reference: row.reference,

@@ -15,6 +15,7 @@ class HomeHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     return Row(
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
@@ -89,4 +90,3 @@ class HomeHeader extends StatelessWidget {
     );
   }
 }
-

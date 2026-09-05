@@ -1,5 +1,7 @@
 "use client";
 
+import { hasAdminAccess } from "@/lib/admin-access";
+
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import DashboardLayout from "@/components/layout/dashboard-layout";
@@ -52,7 +54,7 @@ export default function AdminSupportPage() {
   const { user, profile, isLoading: authLoading } = useAuth();
   const router = useRouter();
   const queryClient = useQueryClient();
-  const isAdmin = user?.role === "ADMIN" || profile?.role === "ADMIN";
+  const isAdmin = hasAdminAccess(user) || hasAdminAccess(profile);
   const [status, setStatus] = useState("OPEN");
   const [selectedTicket, setSelectedTicket] = useState<SupportTicket | null>(null);
   const [actionStatus, setActionStatus] = useState<(typeof actionStatuses)[number]>("RESOLVED");
@@ -64,8 +66,8 @@ export default function AdminSupportPage() {
       !authLoading &&
       user &&
       profile &&
-      user.role !== "ADMIN" &&
-      profile.role !== "ADMIN"
+      !hasAdminAccess(user) &&
+      !hasAdminAccess(profile)
     ) {
       router.push("/dashboard");
     }
@@ -83,6 +85,7 @@ export default function AdminSupportPage() {
     },
     enabled: isAdmin,
     staleTime: 30000,
+    refetchInterval: 30000,
   });
 
   const resolveMutation = useMutation({
@@ -122,7 +125,7 @@ export default function AdminSupportPage() {
       <div className="flex flex-col gap-6">
         <div className="flex flex-col justify-between gap-3 md:flex-row md:items-end">
           <div>
-            <h1 className="text-3xl font-semibold">Support queue</h1>
+            <h1 className="text-3xl font-semibold">Customer support</h1>
             <p className="mt-1 text-muted-foreground">
               Review customer care cases for payments, VTU, exchange, KYC, and account access.
             </p>
@@ -150,7 +153,7 @@ export default function AdminSupportPage() {
               Cases ({data?.total ?? 0})
               {isFetching && !isLoading && (
                 <span className="text-xs font-normal text-muted-foreground">
-                  Refreshing…
+                  Updating…
                 </span>
               )}
             </CardTitle>

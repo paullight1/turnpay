@@ -39,6 +39,7 @@ class _RecentTransactionsListState extends State<RecentTransactionsList> {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     return Column(
       children: [
         Row(
@@ -105,6 +106,7 @@ class _TransactionsLoadingState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     return const TrustPayAnimatedState(
       variant: TrustPayAnimationVariant.loading,
       title: 'Loading recent activity',
@@ -131,6 +133,7 @@ class _TransactionsMessage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(AppSpacing.lg),
@@ -173,6 +176,7 @@ class _TransactionRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     final isCredit = tx.type.toUpperCase() == 'FUND';
     final normalizedType = tx.type.toUpperCase();
     final color = _iconColor(normalizedType, isCredit);

@@ -1,6 +1,8 @@
 import 'package:dio/dio.dart';
 
 import '../core/constants/app_constants.dart';
+import '../core/money/money_value.dart';
+import '../core/state/resource_state.dart';
 import 'api_client.dart';
 
 class HomeDataService {
@@ -10,20 +12,18 @@ class HomeDataService {
   final ApiClient _apiClient;
 
   Future<HomeDashboardData> fetchDashboard() async {
-    final bootstrapResponse =
-        await _apiClient.client.post('/api/auth/bootstrap');
-
-    final optionalResponses = await Future.wait<dynamic>([
+    final responses = await Future.wait<dynamic>([
+      _apiClient.client.post('/api/auth/bootstrap'),
       _fetchTransactionsForDashboard(),
       _fetchVirtualAccountsForDashboard(),
       _fetchBeneficiariesForDashboard(),
     ]);
 
     return HomeDashboardData.fromResponses(
-      bootstrap: bootstrapResponse.data,
-      transactions: optionalResponses[0],
-      virtualAccounts: optionalResponses[1],
-      beneficiaries: optionalResponses[2],
+      bootstrap: (responses[0] as Response).data,
+      transactions: responses[1],
+      virtualAccounts: responses[2],
+      beneficiaries: responses[3],
     );
   }
 
@@ -35,12 +35,20 @@ class HomeDataService {
         options: _freshRequestOptions(),
       );
       final data = response.data;
-      if (data is Map<String, dynamic>) return data;
-    } on DioException {
-      return const {'transactions': []};
+      if (data is Map<String, dynamic>) {
+        _requiredList(data, 'transactions');
+        return data;
+      }
+    } on DioException catch (error) {
+      // A missing optional collection is a genuine empty state.  An outage,
+      // timeout, or auth rejection must fail the dashboard load visibly.
+      if (_isNotFound(error)) return const {'transactions': []};
+      rethrow;
     }
 
-    return const {'transactions': []};
+    throw const FormatException(
+      'Invalid dashboard transactions response: expected an object.',
+    );
   }
 
   Future<List<dynamic>> _fetchVirtualAccountsForDashboard() async {
@@ -51,11 +59,14 @@ class HomeDataService {
       );
       final data = response.data;
       if (data is List) return data;
-    } on DioException {
-      return const [];
+    } on DioException catch (error) {
+      if (_isNotFound(error)) return const [];
+      rethrow;
     }
 
-    return const [];
+    throw const FormatException(
+      'Invalid dashboard virtual accounts response: expected a list.',
+    );
   }
 
   Future<List<dynamic>> _fetchBeneficiariesForDashboard() async {
@@ -66,43 +77,84 @@ class HomeDataService {
       );
       final data = response.data;
       if (data is List) return data;
-      if (data is Map<String, dynamic>) return _asList(data['beneficiaries']);
-    } on DioException {
-      return const [];
+      if (data is Map<String, dynamic>) {
+        return _requiredList(data, 'beneficiaries');
+      }
+    } on DioException catch (error) {
+      if (_isNotFound(error)) return const [];
+      rethrow;
     }
 
-    return const [];
+    throw const FormatException(
+      'Invalid dashboard beneficiaries response: expected a list or object.',
+    );
   }
 
   Future<List<HomeTransaction>> fetchTransactions({int limit = 20}) async {
-    final response = await _apiClient.client.get(
-      '/api/transactions',
-      queryParameters: {'limit': limit},
-    );
+    late final dynamic responseData;
+    try {
+      final response = await _apiClient.client.get(
+        '/api/transactions',
+        queryParameters: {'limit': limit},
+      );
+      responseData = response.data;
+    } on DioException catch (error) {
+      if (_isNotFound(error)) return const [];
+      rethrow;
+    }
 
-    final data = response.data is Map<String, dynamic>
-        ? response.data as Map<String, dynamic>
-        : <String, dynamic>{};
+    final data = responseData;
+    if (data is! Map<String, dynamic>) {
+      throw const FormatException(
+        'Invalid transactions response: expected an object.',
+      );
+    }
 
-    return _asList(data['transactions'])
+    return _requiredList(data, 'transactions')
         .map((item) => HomeTransaction.fromJson(_asMap(item)))
         .toList();
   }
 
   Future<List<HomeBeneficiary>> fetchBeneficiaries() async {
-    final response = await _apiClient.client.get('/api/banking/beneficiaries');
-    final data = response.data is List
-        ? response.data as List
-        : (response.data is Map<String, dynamic>
-            ? _asList((response.data as Map<String, dynamic>)['beneficiaries'])
-            : const []);
+    late final dynamic responseData;
+    try {
+      final response =
+          await _apiClient.client.get('/api/banking/beneficiaries');
+      responseData = response.data;
+    } on DioException catch (error) {
+      if (_isNotFound(error)) return const [];
+      rethrow;
+    }
+
+    final data = responseData is List
+        ? responseData
+        : (responseData is Map<String, dynamic>
+            ? _requiredList(
+                responseData,
+                'beneficiaries',
+              )
+            : throw const FormatException(
+                'Invalid beneficiaries response: expected a list or object.',
+              ));
 
     return data.map((item) => HomeBeneficiary.fromJson(_asMap(item))).toList();
   }
 
   Future<List<HomeVirtualAccount>> fetchVirtualAccounts() async {
-    final response = await _apiClient.client.get('/api/banking/accounts');
-    final accounts = response.data is List ? response.data as List : const [];
+    late final dynamic responseData;
+    try {
+      final response = await _apiClient.client.get('/api/banking/accounts');
+      responseData = response.data;
+    } on DioException catch (error) {
+      if (_isNotFound(error)) return const [];
+      rethrow;
+    }
+
+    final accounts = responseData is List
+        ? responseData
+        : throw const FormatException(
+            'Invalid virtual accounts response: expected a list.',
+          );
 
     return accounts
         .map((item) => HomeVirtualAccount.fromJson(_asMap(item)))
@@ -194,6 +246,173 @@ class HomeDataService {
 
     return ReferralDashboard.fromJson(_asMap(response.data));
   }
+
+  Future<ResourceState<HomeDashboardData>> fetchDashboardState({
+    DateTime? refreshedAt,
+    HomeDashboardData? previousValue,
+    DateTime? lastUpdated,
+  }) async {
+    try {
+      final dashboard = await fetchDashboard();
+      return ResourceState<HomeDashboardData>.value(
+        dashboard,
+        refreshedAt: refreshedAt,
+      );
+    } on DioException catch (error, stackTrace) {
+      return _resourceStateForError(
+        error,
+        previousValue: previousValue,
+        lastUpdated: lastUpdated,
+        stackTrace: stackTrace,
+      );
+    } on FormatException catch (error, stackTrace) {
+      return ResourceState<HomeDashboardData>.error(
+        error,
+        previousValue: previousValue,
+        lastUpdated: lastUpdated,
+        stackTrace: stackTrace,
+      );
+    }
+  }
+
+  Future<ResourceState<List<HomeTransaction>>> fetchTransactionsState({
+    int limit = 20,
+    DateTime? refreshedAt,
+    List<HomeTransaction>? previousValue,
+    DateTime? lastUpdated,
+  }) async {
+    try {
+      final transactions = await fetchTransactions(limit: limit);
+      return resourceValueOrEmpty(
+        transactions,
+        isEmpty: transactions.isEmpty,
+        refreshedAt: refreshedAt,
+      );
+    } on DioException catch (error, stackTrace) {
+      return _resourceStateForError(
+        error,
+        previousValue: previousValue,
+        lastUpdated: lastUpdated,
+        stackTrace: stackTrace,
+      );
+    } on FormatException catch (error, stackTrace) {
+      return ResourceState<List<HomeTransaction>>.error(
+        error,
+        previousValue: previousValue,
+        lastUpdated: lastUpdated,
+        stackTrace: stackTrace,
+      );
+    }
+  }
+
+  Future<ResourceState<List<HomeBeneficiary>>> fetchBeneficiariesState({
+    DateTime? refreshedAt,
+    List<HomeBeneficiary>? previousValue,
+    DateTime? lastUpdated,
+  }) async {
+    try {
+      final beneficiaries = await fetchBeneficiaries();
+      return resourceValueOrEmpty(
+        beneficiaries,
+        isEmpty: beneficiaries.isEmpty,
+        refreshedAt: refreshedAt,
+      );
+    } on DioException catch (error, stackTrace) {
+      return _resourceStateForError(
+        error,
+        previousValue: previousValue,
+        lastUpdated: lastUpdated,
+        stackTrace: stackTrace,
+      );
+    } on FormatException catch (error, stackTrace) {
+      return ResourceState<List<HomeBeneficiary>>.error(
+        error,
+        previousValue: previousValue,
+        lastUpdated: lastUpdated,
+        stackTrace: stackTrace,
+      );
+    }
+  }
+
+  Future<ResourceState<List<HomeVirtualAccount>>> fetchVirtualAccountsState({
+    DateTime? refreshedAt,
+    List<HomeVirtualAccount>? previousValue,
+    DateTime? lastUpdated,
+  }) async {
+    try {
+      final accounts = await fetchVirtualAccounts();
+      return resourceValueOrEmpty(
+        accounts,
+        isEmpty: accounts.isEmpty,
+        refreshedAt: refreshedAt,
+      );
+    } on DioException catch (error, stackTrace) {
+      return _resourceStateForError(
+        error,
+        previousValue: previousValue,
+        lastUpdated: lastUpdated,
+        stackTrace: stackTrace,
+      );
+    } on FormatException catch (error, stackTrace) {
+      return ResourceState<List<HomeVirtualAccount>>.error(
+        error,
+        previousValue: previousValue,
+        lastUpdated: lastUpdated,
+        stackTrace: stackTrace,
+      );
+    }
+  }
+}
+
+bool _isNotFound(DioException error) => error.response?.statusCode == 404;
+
+Map<String, dynamic> _requiredMap(dynamic value, String fieldName) {
+  if (value is! Map<String, dynamic>) {
+    throw FormatException(
+      'Invalid response: expected "$fieldName" to be an object.',
+    );
+  }
+  return value;
+}
+
+List<dynamic> _requiredList(dynamic source, String fieldName) {
+  final value = source is Map<String, dynamic> ? source[fieldName] : source;
+  if (value is! List) {
+    throw FormatException(
+      'Invalid response: expected "$fieldName" to be a list.',
+    );
+  }
+  return value;
+}
+
+ResourceState<T> _resourceStateForError<T>(
+  DioException error, {
+  T? previousValue,
+  DateTime? lastUpdated,
+  StackTrace? stackTrace,
+}) {
+  if (ApiClient.isAuthRejection(error)) {
+    return ResourceState<T>.authRequired(
+      error: error,
+      previousValue: previousValue,
+      lastUpdated: lastUpdated,
+      stackTrace: stackTrace,
+    );
+  }
+  if (previousValue != null) {
+    return ResourceState<T>.stale(
+      previousValue,
+      error: error,
+      lastUpdated: lastUpdated,
+      stackTrace: stackTrace,
+    );
+  }
+  return ResourceState<T>.unavailable(
+    error,
+    previousValue: previousValue,
+    lastUpdated: lastUpdated,
+    stackTrace: stackTrace,
+  );
 }
 
 Options _freshRequestOptions() {
@@ -243,6 +462,13 @@ class KycGatePolicy {
     return _isTier2OrHigher(kycTier);
   }
 
+  static bool canRevealVirtualAccount({
+    required String status,
+    required String kycTier,
+  }) {
+    return _isVerified(status) && _isTier2OrHigher(kycTier);
+  }
+
   static bool _isVerified(String status) {
     return status.toUpperCase() == 'VERIFIED';
   }
@@ -278,18 +504,18 @@ class HomeDashboardData {
     required dynamic virtualAccounts,
     dynamic beneficiaries = const [],
   }) {
-    final bootstrapMap = bootstrap is Map<String, dynamic> ? bootstrap : {};
-    final transactionMap =
-        transactions is Map<String, dynamic> ? transactions : {};
-    final accountsList = virtualAccounts is List ? virtualAccounts : const [];
-    final beneficiaryList = beneficiaries is List ? beneficiaries : const [];
+    final bootstrapMap = _requiredMap(bootstrap, 'bootstrap');
+    final userMap = _requiredMap(bootstrapMap['user'], 'user');
+    final transactionMap = _requiredMap(transactions, 'transactions response');
+    final accountsList = _requiredList(virtualAccounts, 'virtual accounts');
+    final beneficiaryList = _requiredList(beneficiaries, 'beneficiaries');
 
     return HomeDashboardData(
-      user: HomeUser.fromJson(_asMap(bootstrapMap['user'])),
-      wallets: _asList(bootstrapMap['wallets'])
+      user: HomeUser.fromJson(userMap),
+      wallets: _requiredList(bootstrapMap, 'wallets')
           .map((item) => HomeWallet.fromJson(_asMap(item)))
           .toList(),
-      transactions: _asList(transactionMap['transactions'])
+      transactions: _requiredList(transactionMap, 'transactions')
           .map((item) => HomeTransaction.fromJson(_asMap(item)))
           .toList(),
       virtualAccounts: accountsList
@@ -368,23 +594,38 @@ class HomeWallet {
   final String id;
   final String currency;
   final double balance;
+
+  /// Exact API value retained alongside the legacy double getter.
+  final MoneyValue? balanceValue;
   final DateTime? updatedAt;
 
   const HomeWallet({
     required this.id,
     required this.currency,
     required this.balance,
+    this.balanceValue,
     this.updatedAt,
   });
 
   factory HomeWallet.fromJson(Map<String, dynamic> json) {
+    final currency = _asString(json['currency']).toUpperCase();
+    final exactBalance = _asMoney(
+      json['balance'],
+      fieldName: 'balance',
+      currency: currency,
+    );
     return HomeWallet(
       id: _asString(json['id']),
-      currency: _asString(json['currency']).toUpperCase(),
-      balance: _asDouble(json['balance']),
+      currency: currency,
+      balance: exactBalance.toDouble(),
+      balanceValue: exactBalance,
       updatedAt: _asDate(json['updatedAt']),
     );
   }
+
+  MoneyValue get exactBalance =>
+      balanceValue ?? _asMoney(balance, fieldName: 'balance');
+  String get balanceDecimalString => exactBalance.decimalString;
 }
 
 class HomeTransaction {
@@ -393,6 +634,7 @@ class HomeTransaction {
   final String reference;
   final String currency;
   final double amount;
+  final MoneyValue? amountValue;
   final DateTime? createdAt;
 
   const HomeTransaction({
@@ -401,19 +643,31 @@ class HomeTransaction {
     required this.reference,
     required this.currency,
     required this.amount,
+    this.amountValue,
     this.createdAt,
   });
 
   factory HomeTransaction.fromJson(Map<String, dynamic> json) {
+    final currency = _asString(json['currency'], fallback: 'NGN');
+    final exactAmount = _asMoney(
+      json['amount'],
+      fieldName: 'amount',
+      currency: currency,
+    );
     return HomeTransaction(
       type: _asString(json['type'], fallback: 'TRANSACTION'),
       status: _asString(json['status'], fallback: 'PENDING'),
       reference: _asString(json['reference']),
-      currency: _asString(json['currency'], fallback: 'NGN'),
-      amount: _asDouble(json['amount']),
+      currency: currency,
+      amount: exactAmount.toDouble(),
+      amountValue: exactAmount,
       createdAt: _asDate(json['createdAt']),
     );
   }
+
+  MoneyValue get exactAmount =>
+      amountValue ?? _asMoney(amount, fieldName: 'amount');
+  String get amountDecimalString => exactAmount.decimalString;
 }
 
 class HomeBeneficiary {
@@ -529,6 +783,9 @@ class ReferralDashboard {
   final int invites;
   final double pendingAmount;
   final double paidAmount;
+  final MoneyValue? rewardAmountValue;
+  final MoneyValue? pendingAmountValue;
+  final MoneyValue? paidAmountValue;
   final List<ReferralReward> referrals;
 
   const ReferralDashboard({
@@ -538,30 +795,64 @@ class ReferralDashboard {
     required this.invites,
     required this.pendingAmount,
     required this.paidAmount,
+    this.rewardAmountValue,
+    this.pendingAmountValue,
+    this.paidAmountValue,
     required this.referrals,
   });
 
   factory ReferralDashboard.fromJson(Map<String, dynamic> json) {
     final reward = _asMap(json['reward']);
     final summary = _asMap(json['summary']);
+    final rewardCurrency = _asString(reward['currency'], fallback: 'NGN');
+    final exactReward = _asMoney(
+      reward['amount'],
+      fieldName: 'reward.amount',
+      currency: rewardCurrency,
+    );
+    final exactPending = _asMoney(
+      summary['pending'],
+      fieldName: 'summary.pending',
+      currency: rewardCurrency,
+    );
+    final exactPaid = _asMoney(
+      summary['paid'],
+      fieldName: 'summary.paid',
+      currency: rewardCurrency,
+    );
     return ReferralDashboard(
       code: _asString(json['code']),
-      rewardAmount: _asDouble(reward['amount']),
-      rewardCurrency: _asString(reward['currency'], fallback: 'NGN'),
+      rewardAmount: exactReward.toDouble(),
+      rewardCurrency: rewardCurrency,
       invites: _asNullableInt(summary['invites']) ?? 0,
-      pendingAmount: _asDouble(summary['pending']),
-      paidAmount: _asDouble(summary['paid']),
+      pendingAmount: exactPending.toDouble(),
+      paidAmount: exactPaid.toDouble(),
+      rewardAmountValue: exactReward,
+      pendingAmountValue: exactPending,
+      paidAmountValue: exactPaid,
       referrals: _asList(json['referrals'])
           .map((item) => ReferralReward.fromJson(_asMap(item)))
           .toList(),
     );
   }
+
+  MoneyValue get exactRewardAmount =>
+      rewardAmountValue ?? _asMoney(rewardAmount, fieldName: 'reward.amount');
+  MoneyValue get exactPendingAmount =>
+      pendingAmountValue ??
+      _asMoney(pendingAmount, fieldName: 'summary.pending');
+  MoneyValue get exactPaidAmount =>
+      paidAmountValue ?? _asMoney(paidAmount, fieldName: 'summary.paid');
+  String get rewardAmountDecimalString => exactRewardAmount.decimalString;
+  String get pendingAmountDecimalString => exactPendingAmount.decimalString;
+  String get paidAmountDecimalString => exactPaidAmount.decimalString;
 }
 
 class ReferralReward {
   final String id;
   final String referredName;
   final double amount;
+  final MoneyValue? amountValue;
   final String currency;
   final String status;
   final DateTime? createdAt;
@@ -570,21 +861,33 @@ class ReferralReward {
     required this.id,
     required this.referredName,
     required this.amount,
+    this.amountValue,
     required this.currency,
     required this.status,
     required this.createdAt,
   });
 
   factory ReferralReward.fromJson(Map<String, dynamic> json) {
+    final currency = _asString(json['currency'], fallback: 'NGN');
+    final exactAmount = _asMoney(
+      json['amount'],
+      fieldName: 'amount',
+      currency: currency,
+    );
     return ReferralReward(
       id: _asString(json['id']),
       referredName: _asString(json['referredName'], fallback: 'Friend'),
-      amount: _asDouble(json['amount']),
-      currency: _asString(json['currency'], fallback: 'NGN'),
+      amount: exactAmount.toDouble(),
+      amountValue: exactAmount,
+      currency: currency,
       status: _asString(json['status'], fallback: 'PENDING'),
       createdAt: _asDate(json['createdAt']),
     );
   }
+
+  MoneyValue get exactAmount =>
+      amountValue ?? _asMoney(amount, fieldName: 'amount');
+  String get amountDecimalString => exactAmount.decimalString;
 }
 
 Map<String, dynamic> _asMap(dynamic value) {
@@ -601,15 +904,25 @@ String _asString(dynamic value, {String fallback = ''}) {
   return text.isEmpty ? fallback : text;
 }
 
-double _asDouble(dynamic value) {
-  if (value is num) return value.toDouble();
-  return double.tryParse(value?.toString() ?? '') ?? 0;
-}
-
 int? _asNullableInt(dynamic value) {
   if (value is int) return value;
   if (value is num) return value.toInt();
   return int.tryParse(value?.toString() ?? '');
+}
+
+MoneyValue _asMoney(
+  dynamic value, {
+  required String fieldName,
+  String? currency,
+}) {
+  try {
+    return MoneyValue.fromJson(value, currency: currency);
+  } on FormatException catch (error) {
+    throw FormatException(
+      'Invalid $fieldName: ${error.message}',
+      value,
+    );
+  }
 }
 
 DateTime? _asDate(dynamic value) {

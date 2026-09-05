@@ -78,5 +78,29 @@ void main() {
         false,
       );
     });
+
+    test('only reveals virtual account numbers after complete KYC', () {
+      expect(
+        KycGatePolicy.canRevealVirtualAccount(
+          status: 'PENDING',
+          kycTier: 'TIER_0',
+        ),
+        false,
+      );
+      expect(
+        KycGatePolicy.canRevealVirtualAccount(
+          status: 'VERIFIED',
+          kycTier: 'TIER_1',
+        ),
+        false,
+      );
+      expect(
+        KycGatePolicy.canRevealVirtualAccount(
+          status: 'VERIFIED',
+          kycTier: 'TIER_2',
+        ),
+        true,
+      );
+    });
   });
 }

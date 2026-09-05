@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { RefreshCw, RotateCcw, ShieldAlert } from "lucide-react";
+import { RotateCcw, ShieldAlert } from "lucide-react";
 import { toast } from "sonner";
 import { getErrorMessage } from "@/lib/errors";
 import { createMoneyAttemptIdempotencyKey } from "@/lib/idempotency";
@@ -165,15 +165,6 @@ export function InternalTransferReversalQueue() {
             <RotateCcw className="size-5" />
             Internal transfer reversals
           </CardTitle>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => void reversalsQuery.refetch()}
-            disabled={reversalsQuery.isFetching}
-          >
-            <RefreshCw className={reversalsQuery.isFetching ? "animate-spin" : ""} />
-            Refresh
-          </Button>
         </div>
         <p className="text-sm text-muted-foreground">
           Full, append-only reversals require a second administrator. Original ledger entries never change.

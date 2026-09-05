@@ -1,3 +1,4 @@
+import { hasAdminAccess } from "@/lib/admin-access";
 import type { Metadata } from "next";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
@@ -43,7 +44,10 @@ async function verifyAdminRole(accessToken: string): Promise<boolean> {
 
     const res = await fetch(bootstrapUrl, {
       method: "POST",
-      headers: { Authorization: `Bearer ${accessToken}` },
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Idempotency-Key": `bootstrap:${crypto.randomUUID()}`,
+      },
       cache: "no-store",
     });
 
@@ -51,10 +55,10 @@ async function verifyAdminRole(accessToken: string): Promise<boolean> {
       return false;
     }
 
-    const data = (await res.json().catch(() => null)) as
-      | { user?: { role?: string } }
-      | null;
-    return data?.user?.role === "ADMIN";
+    const data = (await res.json().catch(() => null)) as {
+      user?: { role?: string; canAccessAdmin?: boolean };
+    } | null;
+    return hasAdminAccess(data?.user);
   } catch {
     return false;
   }
@@ -91,12 +95,12 @@ export default async function AdminLayout({
   }
 
   if (!candidateToken) {
-    redirect("/login");
+    redirect("/staff");
   }
 
   const isAdmin = await verifyAdminRole(candidateToken);
   if (!isAdmin) {
-    redirect("/dashboard");
+    redirect("/staff");
   }
 
   return <>{children}</>;

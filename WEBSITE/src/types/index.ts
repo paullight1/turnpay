@@ -4,6 +4,7 @@ export interface User {
   phone: string;
   fullName?: string | null;
   role: string;
+  canAccessAdmin?: boolean;
   kycStatus: string;
   kycTier?: string | number | null;
   isSuspended?: boolean;

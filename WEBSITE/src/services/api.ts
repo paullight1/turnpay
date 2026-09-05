@@ -235,6 +235,8 @@ apiClient.interceptors.response.use(
 );
 
 export const authApi = {
+  registerStaff: (data: { email: string; password: string; fullName?: string }, idempotencyKey: string) =>
+    apiClient.post("/api/auth/staff/register", data, { headers: { "Idempotency-Key": idempotencyKey } }),
   bootstrap: (accessToken?: string) =>
     apiClient.post(
       "/api/auth/bootstrap",
@@ -464,6 +466,138 @@ export const adminExchangeApi = {
     apiClient.post(`/api/admin/exchange/receipts/${receiptId}/proof-url`, {}),
 };
 
+export type ManualExchangeSettlementMode = "WALLET" | "BANK" | "MOMO";
+
+export type ManualExchangeOrderEvent = {
+  status: string;
+  reason: string;
+  createdAt: string;
+};
+
+export type AdminManualExchangeOrder = {
+  id: string;
+  reference: string;
+  status: string;
+  settlementMode: ManualExchangeSettlementMode;
+  sourceCurrency: string;
+  targetCurrency: string;
+  amount: string;
+  targetAmount: string;
+  rate: string;
+  fee: string;
+  collectionAccount: {
+    bankName: string;
+    accountName: string;
+    accountNumber: string;
+    currency: string;
+    version: string;
+  };
+  expiresAt: string;
+  createdAt: string;
+  updatedAt: string;
+  reviewReason: string | null;
+  userId: string;
+  destinationInstitution: string | null;
+  destinationAccountMasked: string | null;
+  destinationAccount: string | null;
+  destinationName: string | null;
+  bankReference: string | null;
+  depositReference: string | null;
+  payoutReference: string | null;
+  payoutClaimedBy: string | null;
+  hasProof: boolean;
+  hasPayoutProof: boolean;
+  events: ManualExchangeOrderEvent[];
+};
+
+export type AdminManualExchangeReviewAction =
+  | "CREDIT_WALLET"
+  | "CONFIRM_DEPOSIT"
+  | "REQUEST_INFO"
+  | "REJECT"
+  | "CLAIM_PAYOUT"
+  | "MARK_SENT"
+  | "COMPLETE";
+
+export type AdminManualExchangeReviewInput = {
+  action: AdminManualExchangeReviewAction;
+  reason: string;
+  depositReference?: string;
+  actualAmount?: string;
+  acceptExpiredQuote?: boolean;
+  payoutReference?: string;
+  payoutProofObjectKey?: string;
+};
+
+export type AdminManualExchangeReconciliationRun = {
+  id: string;
+  status: string;
+  startedAt: string;
+  completedAt: string | null;
+  checkedCount: number;
+  mismatchCount: number;
+  mismatchDetails: Array<{ reference: string; code: string }>;
+};
+
+export type ManualExchangeUploadRequest = {
+  fileName: string;
+  contentType: string;
+  fileSize: number;
+};
+
+export type ManualExchangeUploadResponse = {
+  signedUrl: string;
+  objectKey: string;
+  token: string;
+};
+
+export type ManualExchangeProofKind = "DEPOSIT" | "PAYOUT";
+
+export const adminManualExchangeApi = {
+  list: (status?: string) => {
+    const params = new URLSearchParams();
+    if (status && status !== "ALL") params.set("status", status);
+    const query = params.toString();
+    return apiClient.get<AdminManualExchangeOrder[]>(
+      `/api/admin/exchange/manual-orders${query ? `?${query}` : ""}`,
+    );
+  },
+  getReconciliation: () =>
+    apiClient.get<AdminManualExchangeReconciliationRun[]>(
+      "/api/admin/exchange/manual-orders/reconciliation",
+    ),
+  review: (
+    orderId: string,
+    data: AdminManualExchangeReviewInput,
+    idempotencyKey: string,
+  ) =>
+    apiClient.post<AdminManualExchangeOrder>(
+      `/api/admin/exchange/manual-orders/${encodeURIComponent(orderId)}/review`,
+      data,
+      withIdempotencyKey(idempotencyKey),
+    ),
+  createUploadUrl: (
+    orderId: string,
+    data: ManualExchangeUploadRequest,
+    idempotencyKey: string,
+  ) =>
+    apiClient.post<ManualExchangeUploadResponse>(
+      `/api/admin/exchange/manual-orders/${encodeURIComponent(orderId)}/upload-url`,
+      data,
+      withIdempotencyKey(idempotencyKey),
+    ),
+  getProofUrl: (
+    orderId: string,
+    kind: ManualExchangeProofKind,
+    idempotencyKey: string,
+  ) =>
+    apiClient.post<{ url: string }>(
+      `/api/admin/exchange/manual-orders/${encodeURIComponent(orderId)}/proof-url`,
+      { kind },
+      withIdempotencyKey(idempotencyKey),
+    ),
+};
+
 export const adminExchangeRateApi = {
   getRate: (from: string, to: string) =>
     apiClient.get(
@@ -474,25 +608,13 @@ export const adminExchangeRateApi = {
       from: string;
       to: string;
       rate: number;
-      markup: number;
-      reason: string;
+      markup?: number;
+      reason?: string;
     },
     idempotencyKey?: string,
   ) =>
     apiClient.post(
       "/api/exchange/rates",
-      data,
-      withIdempotencyKey(idempotencyKey),
-    ),
-  getPendingOverrides: () =>
-    apiClient.get("/api/admin/exchange/rates/pending-overrides"),
-  reviewOverride: (
-    overrideId: string,
-    data: { status: "APPROVED" | "REJECTED"; reason: string },
-    idempotencyKey?: string,
-  ) =>
-    apiClient.post(
-      `/api/admin/exchange/rates/pending-overrides/${overrideId}/review`,
       data,
       withIdempotencyKey(idempotencyKey),
     ),

@@ -1,6 +1,8 @@
 "use client";
 
-import { Suspense, useDeferredValue, useEffect, useMemo, useState } from "react";
+import { hasAdminAccess } from "@/lib/admin-access";
+
+import { Suspense, useDeferredValue, useEffect, useMemo, useState, useTransition } from "react";
 import { useAuth } from "@/lib/auth-provider";
 import { getErrorMessage } from "@/lib/errors";
 import { createMoneyAttemptIdempotencyKey } from "@/lib/idempotency";
@@ -14,7 +16,6 @@ import {
   Banknote,
   CircleDollarSign,
   Landmark,
-  RefreshCw,
   Search,
   ShieldCheck,
   Smartphone,
@@ -47,7 +48,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Tabs, TabsContent } from "@/components/ui/tabs";
 import type {
   AdminVtuReconciliationResponse,
   AdminVtuProviderHealthResponse,
@@ -610,29 +611,6 @@ const currencyRoadmap = [
     label: "Canadian dollar",
     rail: "Treasury review",
     status: "COMING SOON",
-  },
-];
-
-const manualExchangeStages = [
-  {
-    label: "Receipt submitted",
-    owner: "Customer",
-    status: "LIVE",
-  },
-  {
-    label: "Statement matched",
-    owner: "Finance",
-    status: "LIVE",
-  },
-  {
-    label: "GHS wallet credited",
-    owner: "Finance",
-    status: "LIVE",
-  },
-  {
-    label: "Audit record locked",
-    owner: "System",
-    status: "LIVE",
   },
 ];
 
@@ -1603,24 +1581,30 @@ function UserDrilldownCard({
   );
 }
 
-const ADMIN_TABS = ["ops", "finance", "users", "exchange", "currencies"];
+const ADMIN_TABS = ["ops", "finance", "users", "exchange", "currencies", "reports"];
 
 function AdminPageContent() {
   const { user, profile, isLoading: authLoading } = useAuth();
   const router = useRouter();
   const searchParams = useSearchParams();
   const queryClient = useQueryClient();
-  const isAdmin = user?.role === "ADMIN" || profile?.role === "ADMIN";
-  const [adminTab, setAdminTab] = useState(() => {
-    const requested = searchParams.get("tab");
-    return requested && ADMIN_TABS.includes(requested) ? requested : "ops";
-  });
+  const isAdmin = hasAdminAccess(user) || hasAdminAccess(profile);
+  const requestedTab = searchParams.get("tab");
+  const adminTab = requestedTab && ADMIN_TABS.includes(requestedTab) ? requestedTab : "ops";
+  // Keep the console shell responsive: only the active section fetches its
+  // data. React Query retains each section's cache when switching tabs.
+  const isOpsTab = adminTab === "ops";
+  const isReportsTab = adminTab === "reports";
+  const isFinanceTab = adminTab === "finance";
+  const isUsersTab = adminTab === "users";
+  const isExchangeTab = adminTab === "exchange";
+  const isCurrenciesTab = adminTab === "currencies";
+  const [isTabPending, startTabTransition] = useTransition();
 
   const changeAdminTab = (value: string) => {
-    setAdminTab(value);
     const params = new URLSearchParams(searchParams.toString());
     params.set("tab", value);
-    router.replace(`/admin?${params.toString()}`, { scroll: false });
+    startTabTransition(() => router.replace(`/admin?${params.toString()}`, { scroll: false }));
   };
   const [transactionType, setTransactionType] = useState("ALL");
   const [kycStatus, setKycStatus] = useState("ALL");
@@ -1718,8 +1702,8 @@ function AdminPageContent() {
       !authLoading &&
       user &&
       profile &&
-      user.role !== "ADMIN" &&
-      profile.role !== "ADMIN"
+      !hasAdminAccess(user) &&
+      !hasAdminAccess(profile)
     ) {
       router.push("/dashboard");
     }
@@ -1731,7 +1715,7 @@ function AdminPageContent() {
       const res = await apiClient.get("/api/admin/stats");
       return res.data as AdminStats;
     },
-    enabled: isAdmin,
+    enabled: isAdmin && isOpsTab,
     staleTime: 60000,
   });
 
@@ -1741,7 +1725,7 @@ function AdminPageContent() {
       const res = await apiClient.get("/api/admin/transactions?limit=50");
       return res.data as AdminTransaction[];
     },
-    enabled: isAdmin,
+    enabled: isAdmin && (isFinanceTab || isReportsTab),
     staleTime: 30000,
   });
 
@@ -1754,7 +1738,7 @@ function AdminPageContent() {
       const res = await apiClient.get(`/api/admin/users?${params}`);
       return res.data as AdminUsersResponse;
     },
-    enabled: isAdmin,
+    enabled: isAdmin && isUsersTab,
     staleTime: 30000,
   });
 
@@ -1764,7 +1748,7 @@ function AdminPageContent() {
       const res = await apiClient.get("/api/admin/banking/overview");
       return res.data as BankingOverview;
     },
-    enabled: isAdmin,
+    enabled: isAdmin && (isFinanceTab || isReportsTab),
     staleTime: 30000,
   });
 
@@ -1776,7 +1760,7 @@ function AdminPageContent() {
       });
       return res.data as SystemHealthResponse;
     },
-    enabled: isAdmin,
+    enabled: isAdmin && isReportsTab,
     staleTime: 30000,
   });
 
@@ -1788,7 +1772,7 @@ function AdminPageContent() {
       );
       return res.data as VirtualAccount[];
     },
-    enabled: isAdmin,
+    enabled: isAdmin && (isFinanceTab || isReportsTab),
     staleTime: 30000,
   });
 
@@ -1800,7 +1784,7 @@ function AdminPageContent() {
       );
       return res.data as ProviderEvent[];
     },
-    enabled: isAdmin,
+    enabled: isAdmin && (isFinanceTab || isReportsTab),
     staleTime: 30000,
     refetchInterval: 60000,
   });
@@ -1813,7 +1797,7 @@ function AdminPageContent() {
       );
       return res.data as PendingWithdrawal[];
     },
-    enabled: isAdmin,
+    enabled: isAdmin && (isFinanceTab || isReportsTab),
     staleTime: 30000,
     refetchInterval: 60000,
   });
@@ -1824,7 +1808,7 @@ function AdminPageContent() {
       const res = await apiClient.get("/api/admin/banking/reconciliation");
       return res.data as ReconciliationReport;
     },
-    enabled: isAdmin,
+    enabled: isAdmin && (isFinanceTab || isReportsTab),
     staleTime: 30000,
   });
 
@@ -1842,7 +1826,7 @@ function AdminPageContent() {
 
       return res.data as VtuReconciliationReport;
     },
-    enabled: isAdmin,
+    enabled: isAdmin && (isFinanceTab || isReportsTab),
     staleTime: 30000,
   });
 
@@ -1852,7 +1836,7 @@ function AdminPageContent() {
       const res = await adminVtuApi.getProviderHealth();
       return res.data as AdminVtuProviderHealthResponse;
     },
-    enabled: isAdmin,
+    enabled: isAdmin && (isFinanceTab || isReportsTab),
     staleTime: 30000,
   });
 
@@ -1895,7 +1879,7 @@ function AdminPageContent() {
       const res = await adminExchangeApi.getReceipts(receiptStatus, 50);
       return res.data as ManualExchangeReceipt[];
     },
-    enabled: isAdmin,
+    enabled: isAdmin && isExchangeTab,
     staleTime: 30000,
   });
 
@@ -1908,7 +1892,7 @@ function AdminPageContent() {
       );
       return res.data as ExchangePayout[];
     },
-    enabled: isAdmin,
+    enabled: isAdmin && isExchangeTab,
     staleTime: 30000,
   });
 
@@ -1918,7 +1902,7 @@ function AdminPageContent() {
       const res = await adminExchangePayoutApi.getPayoutStats();
       return res.data as PayoutStats;
     },
-    enabled: isAdmin,
+    enabled: isAdmin && isExchangeTab,
     staleTime: 30000,
   });
 
@@ -1933,7 +1917,7 @@ function AdminPageContent() {
         isStale: boolean;
       };
     },
-    enabled: isAdmin,
+    enabled: isAdmin && isCurrenciesTab,
     staleTime: 60000,
   });
 
@@ -1943,7 +1927,7 @@ function AdminPageContent() {
       const res = await apiClient.get("/api/admin/ops/summary?limit=8");
       return res.data as AdminOpsSummary;
     },
-    enabled: isAdmin,
+    enabled: isAdmin && isReportsTab,
     staleTime: 30000,
   });
 
@@ -2147,22 +2131,6 @@ function AdminPageContent() {
     return transactions.filter((tx) => tx.type === transactionType);
   }, [transactionType, transactionsQuery.data]);
 
-  const exchangeStats = useMemo(() => {
-    const exchangeTransactions = (transactionsQuery.data ?? []).filter(
-      (tx) => tx.type === "EXCHANGE",
-    );
-    const success = exchangeTransactions.filter(
-      (tx) => tx.status === "SUCCESS",
-    );
-    const volume = success.reduce((total, tx) => total + Number(tx.amount), 0);
-
-    return {
-      count: exchangeTransactions.length,
-      successCount: success.length,
-      volume,
-    };
-  }, [transactionsQuery.data]);
-
   const vtuReconciliationBuckets = useMemo<Array<
     [string, Array<Record<string, unknown>>]
   >>(() => {
@@ -2278,31 +2246,6 @@ function AdminPageContent() {
     treasurySettlement?.configured,
     vtuProviderHealthQuery.data,
   ]);
-
-  const refreshAll = async () => {
-    try {
-      await Promise.all([
-        statsQuery.refetch(),
-        opsSummaryQuery.refetch(),
-        transactionsQuery.refetch(),
-        usersQuery.refetch(),
-        bankingQuery.refetch(),
-        virtualAccountsQuery.refetch(),
-        providerEventsQuery.refetch(),
-        pendingWithdrawalsQuery.refetch(),
-        reconciliationQuery.refetch(),
-        vtuReconciliationQuery.refetch(),
-        vtuProviderHealthQuery.refetch(),
-        systemHealthQuery.refetch(),
-        receiptsQuery.refetch(),
-        payoutsQuery.refetch(),
-        payoutStatsQuery.refetch(),
-      ]);
-      toast.success("Admin data refreshed");
-    } catch (error) {
-      toast.error(getErrorMessage(error, "Could not refresh admin data"));
-    }
-  };
 
   const startReceiptReview = (
     receipt: ManualExchangeReceipt,
@@ -2451,90 +2394,53 @@ function AdminPageContent() {
 
   return (
     <DashboardLayout>
+      {isTabPending && (
+        <div className="fixed inset-x-0 top-0 z-[60] h-0.5 overflow-hidden bg-white/10" role="status" aria-label="Loading admin section">
+          <div className="h-full w-1/3 animate-[nav-progress_900ms_ease-in-out_infinite] bg-red-500" />
+        </div>
+      )}
       <div className="flex flex-col gap-6">
         <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-end">
           <div>
-            <div className="flex flex-wrap items-center gap-2">
-              <h1 className="text-3xl font-semibold">Operations control center</h1>
-              <Badge variant="secondary">Monnify settlement</Badge>
-              <Badge variant="outline">Manual exchange review</Badge>
-              <Badge variant="outline">VTU + audit</Badge>
-            </div>
+            <h1 className="text-2xl font-semibold">{adminTab === 'reports' ? 'Reports & system health' : adminTab === 'exchange' ? 'Exchange management' : adminTab === 'users' ? 'Customers' : adminTab === 'finance' ? 'Finance' : adminTab === 'currencies' ? 'Currencies' : 'Admin overview'}</h1>
             <p className="mt-1 text-sm text-muted-foreground">
-              Treasury, exchange, VTU, users, and audit trail in one working
-              console.
+              {adminTab === 'ops' ? 'Your business at a glance.' : adminTab === 'reports' ? 'Detailed operations, treasury and service activity.' : adminTab === 'exchange' ? 'Review requests, manage rates and track payouts.' : adminTab === 'users' ? 'Search accounts, review KYC, and manage access.' : 'Review activity and manage customer operations.'}
             </p>
           </div>
-          <Button variant="outline" onClick={() => void refreshAll()}>
-            <RefreshCw className="size-4" />
-            Refresh
-          </Button>
         </div>
 
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-          <StatTile
-            label="Users"
-            value={formatCount(statsQuery.data?.totalUsers)}
-            detail={`${formatCount(statsQuery.data?.activeUsers)} active in 30 days`}
-            icon={UsersRound}
-            loading={statsQuery.isLoading}
-          />
-          <StatTile
-            label="Successful volume"
-            value={formatMoney(statsQuery.data?.totalVolume, "NGN")}
-            detail={`${formatCount(statsQuery.data?.totalTransactions)} total transactions`}
-            icon={CircleDollarSign}
-            tone="money"
-            loading={statsQuery.isLoading}
-          />
-          <StatTile
-            label="Exchange activity"
-            value={formatMoney(exchangeStats.volume, "NGN")}
-            detail={`${formatCount(exchangeStats.successCount)} successful exchanges`}
-            icon={ArrowLeftRight}
-            tone="money"
-            loading={transactionsQuery.isLoading}
-          />
-          <StatTile
-            label="Funding exceptions"
-            value={formatCount(bankingQuery.data?.providerEvents.failed)}
-            detail={`${formatCount(bankingQuery.data?.virtualAccounts.active)} active virtual accounts`}
-            icon={ShieldCheck}
-            tone={bankingQuery.data?.providerEvents.failed ? "risk" : "default"}
-            loading={bankingQuery.isLoading}
-          />
-        </div>
+        {isOpsTab && (
+          <section aria-label="Business totals" className="grid gap-3 sm:grid-cols-3">
+            <StatTile label="Customers" value={statsQuery.isError ? "Unavailable" : formatCount(statsQuery.data?.totalUsers)} detail="Total accounts" icon={UsersRound} loading={statsQuery.isLoading} />
+            <StatTile label="Transactions" value={statsQuery.isError ? "Unavailable" : formatCount(statsQuery.data?.totalTransactions)} detail="All time" icon={Activity} loading={statsQuery.isLoading} />
+            <StatTile label="Successful volume" value={statsQuery.isError ? "Unavailable" : formatMoney(statsQuery.data?.totalVolume, "NGN")} detail="All time" icon={CircleDollarSign} loading={statsQuery.isLoading} />
+          </section>
+        )}
 
-        <Tabs value={adminTab} onValueChange={changeAdminTab} className="gap-4">
-          <TabsList className="w-full justify-start overflow-x-auto md:w-fit">
-            <TabsTrigger value="ops">
-              <Activity className="size-4" />
-              Ops
-            </TabsTrigger>
-            <TabsTrigger value="finance">
-              <Banknote className="size-4" />
-              Finance
-            </TabsTrigger>
-            <TabsTrigger value="users">
-              <UsersRound className="size-4" />
-              Users
-            </TabsTrigger>
-            <TabsTrigger value="exchange" className="gap-2">
-              <ArrowLeftRight className="size-4" />
-              Exchange
-              {payoutStatsQuery.data && payoutStatsQuery.data.pendingApproval > 0 && (
-                <Badge variant="secondary" className="ml-1 h-5 px-1.5 text-xs">
-                  {payoutStatsQuery.data.pendingApproval}
-                </Badge>
-              )}
-            </TabsTrigger>
-            <TabsTrigger value="currencies">
-              <WalletCards className="size-4" />
-              Currencies
-            </TabsTrigger>
-          </TabsList>
+        {adminTab === "ops" && (
+          <section aria-label="Exchange rate controls" className="max-w-4xl">
+            <RateControlCard />
+          </section>
+        )}
 
+        <Tabs value={adminTab} onValueChange={changeAdminTab} className="gap-4 min-w-0">
           <TabsContent value="ops" className="flex flex-col gap-4">
+            <nav aria-label="Quick access" className="divide-y divide-border border-y border-border">
+              {[
+                { href: "/admin/exchange/manual-orders", title: "Exchange requests", detail: "Review deposits and payouts" },
+                { href: "/admin/support", title: "Customer support", detail: "Open customer cases" },
+                { href: "/admin?tab=reports", title: "Reports & system health", detail: "Treasury, service activity and detailed reports" },
+              ].map((item) => (
+                <Link key={item.href} href={item.href} className="flex min-h-16 items-center justify-between gap-4 rounded-sm px-2 py-3 transition-colors hover:bg-muted/40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring">
+                  <span><span className="block font-medium">{item.title}</span><span className="text-sm text-muted-foreground">{item.detail}</span></span>
+                  <span aria-hidden="true">→</span>
+                </Link>
+              ))}
+            </nav>
+          </TabsContent>
+          <TabsContent value="reports" className="flex flex-col gap-4">
+            <Link href="/admin" className="w-fit text-sm text-muted-foreground hover:text-foreground">← Back to overview</Link>
+              <div className="mt-5 flex flex-col gap-4">
             <div className="grid gap-4 xl:grid-cols-[minmax(0,1.15fr)_minmax(320px,0.85fr)] xl:items-start">
               <Card className="self-start">
                 <CardHeader>
@@ -3253,9 +3159,18 @@ function AdminPageContent() {
             </div>
               </>
             )}
+              </div>
           </TabsContent>
 
           <TabsContent value="finance" className="flex flex-col gap-4">
+            <section aria-label="Finance summary" className="grid gap-3 sm:grid-cols-3">
+              <StatTile label="Transactions" value={formatCount(transactionsQuery.data?.length)} detail="Latest 50 loaded" icon={Activity} loading={transactionsQuery.isLoading} />
+              <StatTile label="Active accounts" value={formatCount(bankingQuery.data?.virtualAccounts.active)} detail="Virtual accounts" icon={Landmark} loading={bankingQuery.isLoading} />
+              <StatTile label="Failed events" value={formatCount(bankingQuery.data?.providerEvents.failed)} detail="Provider exceptions" icon={ShieldCheck} tone={bankingQuery.data?.providerEvents.failed ? "risk" : "default"} loading={bankingQuery.isLoading} />
+            </section>
+            <details className="rounded-xl border border-border bg-card p-4">
+              <summary className="cursor-pointer text-sm font-semibold">Open finance operations</summary>
+              <div className="mt-4 flex flex-col gap-4">
             <InternalTransferReversalQueue />
             <div className="grid gap-4 xl:grid-cols-[1.6fr_1fr]">
               <Card>
@@ -3854,129 +3769,169 @@ function AdminPageContent() {
                 </CardContent>
               </Card>
             )}
+              </div>
+            </details>
           </TabsContent>
 
           <TabsContent value="users" className="flex flex-col gap-4">
-            <Card>
-              <CardHeader className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                <CardTitle>Users and wallet balances</CardTitle>
-                <Select value={kycStatus} onValueChange={setKycStatus}>
-                  <SelectTrigger className="w-full md:w-44">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {kycFilters.map((filter) => (
-                      <SelectItem key={filter} value={filter}>
-                        {filter}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </CardHeader>
-              <CardContent>
-                <div className="mb-4 grid gap-3 md:grid-cols-[1fr_auto]">
-                  <div className="flex flex-col gap-2">
-                    <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                      Search users
+            <section
+              aria-label="Customer account summary"
+              className="grid gap-px overflow-hidden rounded-xl border border-border bg-border sm:grid-cols-3"
+            >
+              <div className="bg-card px-4 py-3">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Customers
+                </p>
+                <p className="mt-1 text-2xl font-semibold tracking-tight">
+                  {usersQuery.isLoading ? "—" : formatCount(usersQuery.data?.total)}
+                </p>
+                <p className="mt-1 text-xs text-muted-foreground">Accounts in the current workspace</p>
+              </div>
+              <div className="bg-card px-4 py-3">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  KYC pending
+                </p>
+                <p className="mt-1 text-2xl font-semibold tracking-tight">
+                  {usersQuery.isLoading ? "—" : formatCount(usersQuery.data?.users.filter((item) => ["PENDING", "SUBMITTED"].includes(item.kycStatus)).length)}
+                </p>
+                <p className="mt-1 text-xs text-muted-foreground">Visible in this result set</p>
+              </div>
+              <div className="bg-card px-4 py-3">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Access issues
+                </p>
+                <p className="mt-1 text-2xl font-semibold tracking-tight">
+                  {usersQuery.isLoading ? "—" : formatCount(usersQuery.data?.users.filter((item) => item.isSuspended).length)}
+                </p>
+                <p className="mt-1 text-xs text-muted-foreground">Suspended accounts in this result set</p>
+              </div>
+            </section>
+
+            <Card className="overflow-hidden">
+              <CardHeader className="border-b border-border/70 pb-4">
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+                  <div>
+                    <CardTitle>Customer accounts</CardTitle>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      Search by name, email, phone, or referral code. Select an account to inspect its activity.
                     </p>
+                  </div>
+                  <Select value={kycStatus} onValueChange={setKycStatus}>
+                    <SelectTrigger aria-label="Filter by KYC status" className="w-full lg:w-44">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {kycFilters.map((filter) => (
+                        <SelectItem key={filter} value={filter}>
+                          {filter === "ALL" ? "All KYC statuses" : filter}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </CardHeader>
+              <CardContent className="p-0">
+                <div className="flex flex-col gap-3 border-b border-border/70 bg-muted/20 p-4 sm:flex-row sm:items-center">
+                  <div className="relative min-w-0 flex-1">
+                    <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
                     <Input
                       value={userSearch}
                       onChange={(event) => setUserSearch(event.target.value)}
-                      placeholder="Email, phone, name, or referral code"
+                      placeholder="Search customers"
+                      aria-label="Search customers"
+                      className="pl-9"
                     />
                   </div>
-                  <div className="flex items-end gap-2">
-                    <Button
-                      variant="ghost"
-                      onClick={() => setUserSearch("")}
-                      className="w-full md:w-auto"
-                      disabled={!userSearch.trim()}
-                    >
-                      Clear
-                    </Button>
-                  </div>
+                  <Button
+                    variant="ghost"
+                    onClick={() => setUserSearch("")}
+                    disabled={!userSearch.trim()}
+                    className="w-full sm:w-auto"
+                  >
+                    Clear search
+                  </Button>
                 </div>
-                <p className="mb-3 text-sm text-muted-foreground">
-                  Showing {formatCount(usersQuery.data?.total)} users
-                  {deferredUserSearch ? ` matching "${deferredUserSearch}"` : ""}
-                </p>
+                <div className="flex items-center justify-between gap-3 px-4 py-3 text-sm text-muted-foreground">
+                  <p aria-live="polite">
+                    {usersQuery.isLoading ? "Loading customers…" : `Showing ${formatCount(usersQuery.data?.total)} customers`}
+                    {deferredUserSearch ? ` matching “${deferredUserSearch}”` : ""}
+                  </p>
+                  {usersQuery.data?.totalPages && usersQuery.data.totalPages > 1 ? (
+                    <span>Page {usersQuery.data.page} of {usersQuery.data.totalPages}</span>
+                  ) : null}
+                </div>
                 {usersQuery.isLoading ? (
-                  <div className="space-y-3">
+                  <div className="space-y-3 p-4">
                     {[1, 2, 3, 4].map((item) => (
-                      <Skeleton key={item} className="h-12 w-full" />
+                      <Skeleton key={item} className="h-14 w-full" />
                     ))}
                   </div>
                 ) : (
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>User</TableHead>
-                        <TableHead>KYC</TableHead>
-                        <TableHead>Role</TableHead>
-                        <TableHead>NGN wallet</TableHead>
-                        <TableHead>GHS wallet</TableHead>
-                        <TableHead>Status</TableHead>
-                        <TableHead>Drilldown</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {usersQuery.data?.users.map((item) => {
-                        const ngnWallet = item.wallets.find(
-                          (wallet) => wallet.currency === "NGN",
-                        );
-                        const ghsWallet = item.wallets.find(
-                          (wallet) => wallet.currency === "GHS",
-                        );
+                  <div className="overflow-x-auto">
+                    <Table>
+                      <TableHeader>
+                        <TableRow className="bg-muted/20 hover:bg-muted/20">
+                          <TableHead className="pl-4 text-[11px] uppercase tracking-wide">Customer</TableHead>
+                          <TableHead className="text-[11px] uppercase tracking-wide">KYC</TableHead>
+                          <TableHead className="hidden text-[11px] uppercase tracking-wide xl:table-cell">Role</TableHead>
+                          <TableHead className="text-right text-[11px] uppercase tracking-wide">NGN</TableHead>
+                          <TableHead className="text-right text-[11px] uppercase tracking-wide">GHS</TableHead>
+                          <TableHead className="text-[11px] uppercase tracking-wide">Access</TableHead>
+                          <TableHead className="pr-4 text-right text-[11px] uppercase tracking-wide">Action</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {usersQuery.data?.users.map((item) => {
+                          const ngnWallet = item.wallets.find((wallet) => wallet.currency === "NGN");
+                          const ghsWallet = item.wallets.find((wallet) => wallet.currency === "GHS");
+                          const displayName = item.fullName?.trim() || maskEmail(item.email);
+                          const initials = displayName.replace(/[^a-zA-Z0-9]/g, "").slice(0, 2).toUpperCase() || "TP";
 
-                        return (
-                          <TableRow key={item.id}>
-                            <TableCell>
-                              <p className="font-medium">
-                                {item.fullName?.trim() || maskEmail(item.email)}
-                              </p>
-                              <p className="text-xs text-muted-foreground">
-                                {maskEmail(item.email)}
-                              </p>
-                              <p className="text-xs text-muted-foreground">
-                                {maskPhone(item.phone)}
-                              </p>
-                            </TableCell>
-                            <TableCell>
-                              <Badge variant={statusVariant(item.kycStatus)}>
-                                {item.kycStatus}
-                              </Badge>
-                            </TableCell>
-                            <TableCell>{item.role}</TableCell>
-                            <TableCell>
-                              {formatMoney(ngnWallet?.balance, "NGN")}
-                            </TableCell>
-                            <TableCell>
-                              {formatMoney(ghsWallet?.balance, "GHS")}
-                            </TableCell>
-                            <TableCell>
-                              <Badge
-                                variant={
-                                  item.isSuspended ? "destructive" : "outline"
-                                }
-                              >
-                                {item.isSuspended ? "SUSPENDED" : "ACTIVE"}
-                              </Badge>
-                            </TableCell>
-                            <TableCell>
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={() => openUserDrilldown(item.id)}
-                              >
-                                <Search className="size-3.5" />
-                                View
-                              </Button>
+                          return (
+                            <TableRow key={item.id} className="group">
+                              <TableCell className="min-w-[200px] pl-4">
+                                <div className="flex items-center gap-3">
+                                  <span className="grid size-9 shrink-0 place-items-center rounded-full bg-primary/10 text-xs font-semibold text-primary" aria-hidden="true">
+                                    {initials}
+                                  </span>
+                                  <div className="min-w-0">
+                                    <p className="truncate font-medium text-foreground">{displayName}</p>
+                                    <p className="truncate text-xs text-muted-foreground">{maskEmail(item.email)} · {maskPhone(item.phone)}</p>
+                                  </div>
+                                </div>
+                              </TableCell>
+                              <TableCell>
+                                <Badge variant={statusVariant(item.kycStatus)} className="whitespace-nowrap">
+                                  {item.kycStatus}
+                                </Badge>
+                              </TableCell>
+                              <TableCell className="hidden text-xs font-medium uppercase tracking-wide text-muted-foreground xl:table-cell">{item.role}</TableCell>
+                              <TableCell className="whitespace-nowrap text-right font-mono text-sm">{formatMoney(ngnWallet?.balance, "NGN")}</TableCell>
+                              <TableCell className="whitespace-nowrap text-right font-mono text-sm">{formatMoney(ghsWallet?.balance, "GHS")}</TableCell>
+                              <TableCell>
+                                <Badge variant={item.isSuspended ? "destructive" : "outline"} className="whitespace-nowrap">
+                                  {item.isSuspended ? "SUSPENDED" : "ACTIVE"}
+                                </Badge>
+                              </TableCell>
+                              <TableCell className="pr-4 text-right">
+                                <Button size="sm" variant="outline" onClick={() => openUserDrilldown(item.id)}>
+                                  <Search className="size-3.5" />
+                                  View
+                                </Button>
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })}
+                        {!usersQuery.data?.users.length && (
+                          <TableRow>
+                            <TableCell colSpan={7} className="h-28 text-center text-sm text-muted-foreground">
+                              No customers match these filters.
                             </TableCell>
                           </TableRow>
-                        );
-                      })}
-                    </TableBody>
-                  </Table>
+                        )}
+                      </TableBody>
+                    </Table>
+                  </div>
                 )}
               </CardContent>
             </Card>
@@ -4004,39 +3959,8 @@ function AdminPageContent() {
 
           <TabsContent
             value="exchange"
-            className="grid gap-4 xl:grid-cols-[1fr_1.2fr]"
+            className="flex flex-col gap-4 min-w-0"
           >
-            <RateControlCard />
-
-            <Card>
-              <CardHeader>
-                <CardTitle>NGN to GHS exchange lane</CardTitle>
-              </CardHeader>
-              <CardContent className="flex flex-col gap-3">
-                {manualExchangeStages.map((stage, index) => (
-                  <div
-                    key={stage.label}
-                    className="flex items-center justify-between gap-3 border-b border-border pb-3 last:border-0 last:pb-0"
-                  >
-                    <div className="flex items-center gap-3">
-                      <span className="flex size-8 items-center justify-center rounded-lg border border-border bg-muted text-sm font-semibold">
-                        {index + 1}
-                      </span>
-                      <div>
-                        <p className="font-medium">{stage.label}</p>
-                        <p className="text-xs text-muted-foreground">
-                          {stage.owner}
-                        </p>
-                      </div>
-                    </div>
-                    <Badge variant={statusVariant(stage.status)}>
-                      {stage.status}
-                    </Badge>
-                  </div>
-                ))}
-              </CardContent>
-            </Card>
-
             <Card>
               <CardHeader>
                 <CardTitle>Exchange transactions</CardTitle>

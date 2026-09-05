@@ -1,8 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { hasAdminAccess } from "@/lib/admin-access";
+
+import { useEffect, useRef, useState } from "react";
 import { useAuth } from "@/lib/auth-provider";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { TrustPayLogo } from "@/components/brand/trustpay-logo";
 import { Button } from "@/components/ui/button";
@@ -62,10 +64,18 @@ const navItems: NavItem[] = [
 ];
 
 const adminItems: NavItem[] = [
-  { label: "Ops", href: "/admin", icon: ShieldCheck },
+  { label: "Overview", href: "/admin", icon: ShieldCheck },
+  { label: "Transactions", href: "/admin?tab=finance", icon: BarChart3 },
+  { label: "Customers", href: "/admin?tab=users", icon: UserRound },
+  {
+    label: "Exchange requests",
+    href: "/admin/exchange/manual-orders",
+    icon: ArrowLeftRight,
+  },
   { label: "Audit Trail", href: "/admin/audit", icon: ScrollText },
-  { label: "VTU Ops", href: "/admin/vtu", icon: Smartphone },
-  { label: "Support Queue", href: "/admin/support", icon: LifeBuoy },
+  { label: "VTU oversight", href: "/admin/vtu", icon: Smartphone },
+  { label: "Exchange rates", href: "/admin?tab=exchange", icon: Banknote },
+  { label: "Customer support", href: "/admin/support", icon: LifeBuoy },
   { label: "KYC Review", href: "/admin/kyc", icon: FileCheck2 },
 ];
 
@@ -73,19 +83,24 @@ function Sidebar({
   items,
   pathname,
   onNavigate,
+  admin = false,
 }: {
   items: NavItem[];
   pathname: string;
   onNavigate?: () => void;
+  admin?: boolean;
 }) {
+  const searchParams = useSearchParams();
   return (
     <nav
       className="flex flex-col gap-1.5 p-3"
-      aria-label="Dashboard navigation"
+      aria-label={admin ? "Admin navigation" : "Dashboard navigation"}
     >
       {items.map((item) => {
         const Icon = item.icon;
-        const active = pathname === item.href;
+        const itemUrl = new URL(item.href, 'https://trustpay.invalid');
+        const active = pathname === itemUrl.pathname &&
+          (itemUrl.searchParams.get('tab') ?? 'ops') === (searchParams.get('tab') ?? 'ops');
 
         return (
           <Link
@@ -119,14 +134,67 @@ export default function DashboardLayout({
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [isSigningOut, setIsSigningOut] = useState(false);
+  const [isNavigating, setIsNavigating] = useState(false);
+  const [pullDistance, setPullDistance] = useState(0);
+  const pullStartY = useRef<number | null>(null);
+  const pullDistanceRef = useRef(0);
+  const adminWorkspace =
+    pathname === "/admin" || pathname.startsWith("/admin/");
+  const staffAccount = hasAdminAccess(user);
+  const redirectingStaff = staffAccount && !adminWorkspace;
 
   useEffect(() => {
     if (!isLoading && !user) {
-      router.push("/login");
+      router.replace(adminWorkspace ? "/staff" : "/login");
+    } else if (!isLoading && redirectingStaff) {
+      router.replace("/admin");
     }
-  }, [user, isLoading, router]);
+  }, [user, isLoading, router, adminWorkspace, redirectingStaff]);
 
-  if (isLoading || !user) {
+  useEffect(() => {
+    if (!adminWorkspace || typeof window === "undefined") return;
+
+    const handleTouchStart = (event: TouchEvent) => {
+      if (!open && window.scrollY <= 0) {
+        pullStartY.current = event.touches[0]?.clientY ?? null;
+      }
+    };
+
+    const handleTouchMove = (event: TouchEvent) => {
+      if (open || pullStartY.current === null || window.scrollY > 0) return;
+      const currentY = event.touches[0]?.clientY ?? pullStartY.current;
+      const distance = Math.max(0, Math.min(currentY - pullStartY.current, 96));
+      pullDistanceRef.current = distance;
+      setPullDistance(distance);
+      if (distance > 4) event.preventDefault();
+    };
+
+    const handleTouchEnd = () => {
+      const shouldReload = pullDistanceRef.current >= 64;
+      pullStartY.current = null;
+      pullDistanceRef.current = 0;
+      setPullDistance(0);
+      if (shouldReload) window.location.reload();
+    };
+
+    document.addEventListener("touchstart", handleTouchStart, {
+      passive: true,
+    });
+    document.addEventListener("touchmove", handleTouchMove, {
+      passive: false,
+    });
+    document.addEventListener("touchend", handleTouchEnd, { passive: true });
+    document.addEventListener("touchcancel", handleTouchEnd, { passive: true });
+
+    return () => {
+      document.removeEventListener("touchstart", handleTouchStart);
+      document.removeEventListener("touchmove", handleTouchMove);
+      document.removeEventListener("touchend", handleTouchEnd);
+      document.removeEventListener("touchcancel", handleTouchEnd);
+    };
+  }, [adminWorkspace, open]);
+
+  if (isLoading || !user || redirectingStaff) {
     return (
       <div className="dark flex min-h-screen items-center justify-center bg-[#050505] text-white">
         <div className="flex flex-col items-center gap-3 text-white/58">
@@ -138,7 +206,7 @@ export default function DashboardLayout({
   }
 
   const initials = user.email?.charAt(0).toUpperCase() || "U";
-  const allItems = [...navItems, ...(user.role === "ADMIN" ? adminItems : [])];
+  const allItems = adminWorkspace ? adminItems : navItems;
   const displayEmail = maskEmail(user.email);
 
   const handleSignOut = async () => {
@@ -150,8 +218,29 @@ export default function DashboardLayout({
     }
   };
 
+  const startNavigation = () => {
+    setIsNavigating(true);
+    window.setTimeout(() => setIsNavigating(false), 1500);
+  };
+
   return (
-    <div className="dark flex min-h-screen flex-col bg-[#050505] text-white">
+    <div className={cn("dark flex min-h-screen flex-col bg-[#050505] text-white", adminWorkspace && "trustpay-admin-console")}>
+      {adminWorkspace && pullDistance > 0 && (
+        <div
+          className="pointer-events-none fixed inset-x-0 top-16 z-40 flex justify-center"
+          role="status"
+          aria-live="polite"
+        >
+          <span className="rounded-full border border-white/10 bg-black/85 px-3 py-1 text-xs text-white/70 shadow-lg">
+            {pullDistance >= 64 ? "Release to refresh" : "Pull to refresh"}
+          </span>
+        </div>
+      )}
+      {isNavigating && (
+        <div className="fixed inset-x-0 top-0 z-[60] h-0.5 overflow-hidden bg-white/10" role="status" aria-label="Loading section">
+          <div className="h-full w-1/3 animate-[nav-progress_900ms_ease-in-out_infinite] bg-red-500" />
+        </div>
+      )}
       <header className="sticky top-0 z-30 border-b border-white/10 bg-black/88 backdrop-blur-xl">
         <div className="container mx-auto flex h-16 items-center justify-between px-4">
           <div className="flex items-center gap-3">
@@ -166,24 +255,39 @@ export default function DashboardLayout({
                   <Menu className="size-5" />
                 </Button>
               </SheetTrigger>
-              <SheetContent side="left" className="dark w-72 border-white/10 bg-[#050505] p-0 text-white">
+              <SheetContent
+                side="left"
+                className="dark w-72 border-white/10 bg-[#050505] p-0 text-white"
+              >
                 <div className="border-b border-white/10 px-4 py-4">
-                  <TrustPayLogo imageClassName="size-10" textClassName="text-base font-bold" />
+                  <TrustPayLogo
+                    imageClassName="size-10"
+                    textClassName="text-base font-bold"
+                  />
                   <p className="mt-1 text-xs text-white/48">
-                    Wallet operations
+                    {adminWorkspace
+                      ? "Operations and oversight"
+                      : "Wallet workspace"}
                   </p>
                 </div>
                 <Sidebar
                   items={allItems}
                   pathname={pathname}
-                  onNavigate={() => setOpen(false)}
+                  admin={adminWorkspace}
+                  onNavigate={() => { setOpen(false); startNavigation(); }}
                 />
               </SheetContent>
             </Sheet>
-            <TrustPayLogo imageClassName="size-10" textClassName="text-xl font-bold" />
-            {user.role === "ADMIN" && (
-              <Badge variant="secondary" className="border-red-500/20 bg-red-600/10 text-red-200">
-                Admin
+            <TrustPayLogo
+              imageClassName="size-10"
+              textClassName="text-xl font-bold"
+            />
+            {adminWorkspace && (
+              <Badge
+                variant="secondary"
+                className="hidden border-red-500/20 bg-red-600/10 text-red-200 sm:inline-flex"
+              >
+                Admin workspace
               </Badge>
             )}
           </div>
@@ -203,20 +307,27 @@ export default function DashboardLayout({
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-48">
-                <DropdownMenuItem asChild>
-                  <Link href="/dashboard/profile" className="cursor-pointer">
-                    Profile
-                  </Link>
-                </DropdownMenuItem>
-                <DropdownMenuItem asChild>
-                  <Link
-                    href="/dashboard/transactions"
-                    className="cursor-pointer"
-                  >
-                    Transactions
-                  </Link>
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
+                {!adminWorkspace && (
+                  <>
+                    <DropdownMenuItem asChild>
+                      <Link
+                        href="/dashboard/profile"
+                        className="cursor-pointer"
+                      >
+                        Profile
+                      </Link>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem asChild>
+                      <Link
+                        href="/dashboard/transactions"
+                        className="cursor-pointer"
+                      >
+                        Transactions
+                      </Link>
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                  </>
+                )}
                 <DropdownMenuItem
                   className="cursor-pointer gap-2 text-destructive"
                   disabled={isSigningOut}
@@ -231,10 +342,31 @@ export default function DashboardLayout({
         </div>
       </header>
       <div className="flex flex-1">
-        <aside className="hidden w-64 border-r border-white/10 bg-[#0b0b0b] md:block">
-          <Sidebar items={allItems} pathname={pathname} />
+        <aside className="sticky top-16 hidden h-[calc(100vh-4rem)] w-60 shrink-0 self-start flex-col border-r border-white/10 bg-[#0b0b0b] md:flex">
+          <Sidebar
+            items={allItems}
+            pathname={pathname}
+            admin={adminWorkspace}
+            onNavigate={startNavigation}
+          />
+          {adminWorkspace && (
+            <div className="mt-auto border-t border-white/10 p-3">
+              <p className="px-3 pb-2 text-[11px] font-medium uppercase tracking-wide text-white/35">
+                Account
+              </p>
+              <Button
+                variant="ghost"
+                className="w-full justify-start gap-3 px-3 text-sm text-white/60 hover:text-white"
+                disabled={isSigningOut}
+                onClick={handleSignOut}
+              >
+                <LogOut className="size-4" />
+                {isSigningOut ? "Signing out..." : "Log out"}
+              </Button>
+            </div>
+          )}
         </aside>
-        <main className="trustpay-dashboard-motion flex-1 bg-[radial-gradient(circle_at_0%_0%,rgba(220,38,38,0.12),transparent_28%),#050505] p-4 sm:p-6">
+        <main className="trustpay-dashboard-motion min-w-0 flex-1 bg-[#0c1015] p-4 sm:p-6 lg:p-8">
           {children}
         </main>
       </div>

@@ -1,9 +1,52 @@
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:trustpay_app/features/home/screens/kyc_verification_screen.dart';
 import 'package:trustpay_app/services/kyc_service.dart';
 
 void main() {
+  testWidgets('pending review refreshes to approval without resubmission',
+      (tester) async {
+    final service = _FakeKycService();
+    service.overview = const KycOverview(
+      status: 'VERIFIED',
+      tier: 'TIER_2',
+      provider: 'Ninja',
+      reference: 'review-result',
+      failureReason: '',
+      verificationUri: null,
+      updatedAt: null,
+      documents: [],
+    );
+    await tester.pumpWidget(MaterialApp(
+        home: KycVerificationScreen(
+      service: service,
+      initialOverview: const KycOverview(
+        status: 'SUBMITTED',
+        tier: 'TIER_0',
+        provider: 'Ninja',
+        reference: 'review-result',
+        failureReason: '',
+        verificationUri: null,
+        updatedAt: null,
+        documents: [],
+      ),
+    )));
+    await tester.pump();
+    expect(find.text('Waiting for approval'), findsOneWidget);
+    expect(find.text('Continue'), findsNothing);
+    await tester.pump(const Duration(seconds: 15));
+    await tester.pump();
+    await tester.pumpAndSettle();
+    expect(service.fetchCount, 1);
+    expect(find.text('Identity verification complete'), findsOneWidget,
+        reason: tester
+            .widgetList<Text>(find.byType(Text))
+            .map((text) => text.data)
+            .join(' | '));
+    expect(find.text('Waiting for approval'), findsNothing);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
   test('Ninja result reads the safe backend response', () {
     final result = KycVerificationResult.fromJson({
       'provider': 'NINJA',
@@ -16,8 +59,7 @@ void main() {
     expect(result.reference, 'ninja-verification-1');
   });
 
-  testWidgets('shows a focused Nigeria-only form and useful empty state',
-      (tester) async {
+  testWidgets('shows a focused form without redundant context', (tester) async {
     await tester.pumpWidget(
       const MaterialApp(
         home: KycVerificationScreen(initialOverview: _pendingOverview),
@@ -26,21 +68,49 @@ void main() {
     await tester.pump();
 
     expect(find.text('KYC verification'), findsOneWidget);
-    expect(find.textContaining('Nigerian identity details'), findsOneWidget);
-    expect(find.text('Nigeria'), findsOneWidget);
-    expect(find.text('Ghana'), findsNothing);
-    expect(find.text('BVN'), findsOneWidget);
-    expect(find.text('NIN'), findsOneWidget);
-    expect(find.text('Date of birth'), findsOneWidget);
-    expect(find.textContaining('shared securely with Ninja'), findsOneWidget);
-    await tester.scrollUntilVisible(
-      find.text('No identity checks yet.'),
-      320,
-      scrollable: find.byType(Scrollable).first,
+    expect(
+      find.text(
+          'Verify your identity in a few short steps. No document upload is required.'),
+      findsOneWidget,
     );
+    expect(find.text('Country'), findsNothing);
+    expect(find.text('Current access'), findsNothing);
+    expect(find.text('Nigeria'), findsNothing);
+    expect(find.text('Ghana'), findsNothing);
+    expect(find.textContaining('Tier 1'), findsOneWidget);
+    expect(find.text('NIN'), findsNothing);
+    expect(find.byKey(const ValueKey('kyc-identity-number')), findsNothing);
+    await tester.enterText(find.byType(TextField).at(0), 'Ada');
+    await tester.enterText(find.byType(TextField).at(1), 'Lovelace');
+    await tester.tap(find.text('Continue'));
     await tester.pumpAndSettle();
-    expect(find.text('No identity checks yet.'), findsOneWidget);
-    expect(find.text('Choose BVN or NIN above to begin.'), findsOneWidget);
+    await tester.tap(find.text('Continue'));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('kyc-identity-number')), findsOneWidget);
+    expect(find.text('Date of birth'), findsNothing);
+    await tester.enterText(
+      find.byKey(const ValueKey('kyc-identity-number')),
+      '11111111111',
+    );
+    await tester.tap(find.text('Continue'));
+    await tester.pumpAndSettle();
+    expect(find.text('Date of birth'), findsOneWidget);
+    expect(
+        find.byKey(const ValueKey('kyc-date-of-birth-picker')), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('kyc-date-of-birth-picker')));
+    await tester.pumpAndSettle();
+    expect(find.byType(CupertinoDatePicker), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('kyc-date-picker-done')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Continue'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('shared securely with Ninja'), findsOneWidget);
+    expect(
+      find.text('I agree to share my identity details securely with Ninja.'),
+      findsOneWidget,
+    );
+    expect(find.byKey(const ValueKey('kyc-consent')), findsOneWidget);
+    expect(find.text('View verification history'), findsNothing);
   });
 
   testWidgets('submits the identifier and exact date of birth', (tester) async {
@@ -55,43 +125,47 @@ void main() {
     );
     await tester.pump();
 
+    await tester.enterText(find.byType(TextField).at(0), 'Ada');
+    await tester.enterText(find.byType(TextField).at(1), 'Lovelace');
+    await tester.tap(find.text('Continue'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Continue'));
+    await tester.pumpAndSettle();
     await tester.enterText(
       find.byKey(const ValueKey('kyc-identity-number')),
       '77777777777',
     );
-    await tester.enterText(
-      find.byKey(const ValueKey('kyc-date-of-birth')),
-      '1975-01-01',
-    );
+    await tester.tap(find.text('Continue'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('kyc-date-of-birth-picker')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('kyc-date-picker-done')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Continue'));
+    await tester.pumpAndSettle();
     tester.testTextInput.hide();
     await tester.pump();
-    await tester.scrollUntilVisible(
-      find.byType(Checkbox),
-      240,
-      scrollable: find.byType(Scrollable).first,
-    );
-    await tester.pumpAndSettle();
     await tester.tap(find.byType(Checkbox));
     await tester.scrollUntilVisible(
-      find.text('Verify BVN'),
+      find.text('Verify NIN'),
       160,
       scrollable: find.byType(Scrollable).first,
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Verify BVN'));
+    await tester.tap(find.text('Verify NIN'));
     await tester.pumpAndSettle();
 
     expect(service.submittedIdNumber, '77777777777');
-    expect(service.submittedDateOfBirth, '1975-01-01');
+    expect(service.submittedDateOfBirth, '1990-01-01');
     expect(service.submittedCountry, 'NG');
-    expect(service.submittedType, 'BVN');
+    expect(service.submittedType, 'NIN');
     expect(service.submittedConsent, isTrue);
     expect(find.text('Identity verified successfully.'), findsOneWidget);
   });
 
   for (final state in <String, String>{
-    'REVIEW_REQUIRED': 'Your identity check needs a manual review.',
-    'REJECTED': 'We could not match those identity details.',
+    'REVIEW_REQUIRED': 'Waiting for approval',
+    'REJECTED': 'Identity check not approved',
     'FAILED': 'The identity service could not complete your check.',
   }.entries) {
     testWidgets('shows recovery guidance for ${state.key}', (tester) async {
@@ -114,7 +188,11 @@ void main() {
       await tester.pump();
 
       expect(find.text(state.value), findsOneWidget);
-      expect(find.text('Verify BVN'), findsOneWidget);
+      expect(find.text('Confirm your legal name'),
+          state.key == 'REVIEW_REQUIRED' ? findsNothing : findsOneWidget);
+      expect(find.text('Continue'),
+          state.key == 'REVIEW_REQUIRED' ? findsNothing : findsOneWidget);
+      await tester.pumpWidget(const SizedBox.shrink());
     });
   }
 
@@ -166,6 +244,8 @@ const _pendingOverview = KycOverview(
 );
 
 class _FakeKycService extends KycService {
+  int fetchCount = 0;
+  KycOverview overview = _pendingOverview;
   String? submittedIdNumber;
   String? submittedDateOfBirth;
   String? submittedCountry;
@@ -173,7 +253,10 @@ class _FakeKycService extends KycService {
   bool? submittedConsent;
 
   @override
-  Future<KycOverview> fetchOverview() async => _pendingOverview;
+  Future<KycOverview> fetchOverview() async {
+    fetchCount++;
+    return overview;
+  }
 
   @override
   Future<KycVerificationResult> verifyIdentity({
@@ -181,6 +264,8 @@ class _FakeKycService extends KycService {
     required String idNumber,
     required String dateOfBirth,
     required bool consentAccepted,
+    String? firstName,
+    String? lastName,
     String country = 'NG',
     String type = 'BVN',
   }) async {

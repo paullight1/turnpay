@@ -15,6 +15,7 @@ class AuthHelpButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     final foreground = onDark ? Colors.white : AppColors.textPrimary;
     final border =
         onDark ? Colors.white.withValues(alpha: 0.26) : AppColors.border;
@@ -26,7 +27,7 @@ class AuthHelpButton extends StatelessWidget {
       button: true,
       label: 'Get help',
       child: GestureDetector(
-        onTap: onTap ?? openTawkChat,
+        onTap: onTap ?? () => openTawkChat(context),
         child: Container(
           height: 38,
           padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm),

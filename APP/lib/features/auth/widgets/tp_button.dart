@@ -3,14 +3,13 @@ import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/haptics.dart';
 import '../../../core/widgets/trustpay_lottie.dart';
 
-/// Primary CTA button used across all auth screens.
-/// Features coral fill, loading spinner, and disabled state.
+/// Shared auth action with native focus, keyboard and accessibility behavior.
 class TpButton extends StatelessWidget {
   final String label;
   final VoidCallback onTap;
   final bool isLoading;
   final bool isDisabled;
-  final bool isOutlined; // For secondary ghost style
+  final bool isOutlined;
 
   const TpButton({
     super.key,
@@ -23,56 +22,70 @@ class TpButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     final effectiveDisabled = isDisabled || isLoading;
-
-    return GestureDetector(
-      onTap: effectiveDisabled
-          ? null
-          : () {
-              Haptics.medium();
-              onTap();
-            },
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
-        height: 56,
-        width: double.infinity,
-        decoration: BoxDecoration(
-          color: isOutlined
-              ? Colors.transparent
-              : effectiveDisabled
-                  ? AppColors.primary.withValues(alpha: 0.35)
-                  : AppColors.primary,
-          borderRadius: BorderRadius.circular(AppRadius.full),
-          border: isOutlined
-              ? Border.all(color: AppColors.border, width: 1.5)
-              : null,
-          boxShadow: (!isOutlined && !effectiveDisabled)
-              ? [
-                  BoxShadow(
-                    color: AppColors.primary.withValues(alpha: 0.3),
-                    blurRadius: 20,
-                    offset: const Offset(0, 6),
-                  ),
-                ]
-              : null,
-        ),
-        child: Center(
-          child: isLoading
-              ? const TrustPayLottie(
-                  variant: TrustPayAnimationVariant.loading,
-                  size: 30,
-                  semanticsLabel: 'Loading',
-                )
-              : Text(
-                  label,
-                  style: AppTextStyles.labelL.copyWith(
-                    color: isOutlined
-                        ? AppColors.textSecondary
-                        : Colors.white,
-                  ),
+    final VoidCallback? activate = effectiveDisabled
+        ? null
+        : () {
+            Haptics.medium();
+            onTap();
+          };
+    final content = isLoading
+        ? Semantics(
+            label: '$label, loading',
+            liveRegion: true,
+            child: const ExcludeSemantics(
+              child: TrustPayLottie(
+                variant: TrustPayAnimationVariant.loading,
+                size: 30,
+              ),
+            ),
+          )
+        : Text(label, textAlign: TextAlign.center);
+    const padding = EdgeInsets.symmetric(horizontal: 24, vertical: 16);
+    const minimumSize = Size.fromHeight(56);
+    final button = isOutlined
+        ? OutlinedButton(
+            onPressed: activate,
+            style: OutlinedButton.styleFrom(
+              foregroundColor: AppColors.textSecondary,
+              side: BorderSide(color: AppColors.border, width: 1.5),
+              shape: const StadiumBorder(),
+              minimumSize: minimumSize,
+              padding: padding,
+              textStyle: AppTextStyles.labelL,
+            ),
+            child: content,
+          )
+        : FilledButton(
+            onPressed: activate,
+            style: FilledButton.styleFrom(
+              backgroundColor: AppColors.primary,
+              foregroundColor: Colors.white,
+              disabledBackgroundColor:
+                  AppColors.primary.withValues(alpha: 0.35),
+              disabledForegroundColor: Colors.white,
+              shape: const StadiumBorder(),
+              minimumSize: minimumSize,
+              padding: padding,
+              textStyle: AppTextStyles.labelL,
+            ),
+            child: content,
+          );
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(AppRadius.full),
+        boxShadow: (!isOutlined && !effectiveDisabled)
+            ? [
+                BoxShadow(
+                  color: AppColors.primary.withValues(alpha: 0.3),
+                  blurRadius: 20,
+                  offset: const Offset(0, 6),
                 ),
-        ),
+              ]
+            : null,
       ),
+      child: button,
     );
   }
 }

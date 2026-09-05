@@ -76,12 +76,7 @@ export class VtuService {
       const order = await this.prisma.vtuOrder.findFirst({
         where: {
           provider: 'VTPASS',
-          OR: [
-            { providerRequestId: event.providerRequestId },
-            ...(event.providerReference
-              ? [{ providerTransactionId: event.providerReference }]
-              : []),
-          ],
+          providerRequestId: event.providerRequestId,
         },
         select: {
           id: true,
@@ -110,37 +105,27 @@ export class VtuService {
         throw new NotFoundException('VTU order not found for callback');
       }
 
-      await this.applyProviderResultToOrder({
-        order,
-        result: {
-          reference: event.providerReference || event.providerRequestId,
-          providerTransactionId:
-            event.providerReference || event.providerRequestId,
-          status: event.status,
-          message: event.message || 'VTpass webhook status update',
-          providerRequestId: event.providerRequestId,
-          safeResponse: {
-            code: event.code,
-            status: event.status,
-          },
-          rawResponse: {
-            code: event.code,
-            status: event.status,
-          },
-        },
-      });
+      if (order.transaction.status !== 'PENDING') {
+        return { processed: false, orderId: order.id, terminal: true };
+      }
+
+      // The gateway signature authenticates transport, not the provider outcome.
+      // Only the authenticated provider requery can settle or refund this order.
+      // Errors propagate to the durable inbox for retry without moving money.
+      const result = await this.vtuApi.requery(order.providerRequestId);
+      await this.applyProviderResultToOrder({ order, result });
 
       this.logger.info(
         {
           providerRequestId: event.providerRequestId,
           providerReference: event.providerReference,
-          status: event.status,
+          status: result.status,
           orderId: order.id,
         },
         'VTpass webhook VTU order processed',
       );
 
-      return { processed: true, orderId: order.id, status: event.status };
+      return { processed: true, orderId: order.id, status: result.status };
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : 'Unknown VTpass webhook error';
@@ -154,7 +139,16 @@ export class VtuService {
 
   async validateSmartCard(dto: ValidateSmartCardDto) {
     this.assertVtuEnabled();
-    return this.vtuApi.validateSmartCard(dto.provider, dto.smartCardNumber);
+    const customer = await this.vtuApi.validateSmartCard(
+      dto.provider,
+      dto.smartCardNumber,
+    );
+    if (dto.subscriptionType === 'renew' && !customer.renewalAmount) {
+      throw new BadRequestException(
+        'Your TV provider has not supplied a renewal price. Choose Change package to select a priced plan, or try renewal again later.',
+      );
+    }
+    return customer;
   }
 
   async validateMeter(dto: ValidateMeterDto) {

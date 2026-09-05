@@ -1,0 +1,550 @@
+name: Mobile signed release candidate
+
+# This workflow is deliberately dispatch-only. The ordinary pull-request and
+# push checks remain in ci.yml; signing credentials are available only to this
+# protected workflow and its selected GitHub environment.
+on:
+  workflow_dispatch:
+    inputs:
+      release_environment:
+        description: 'Environment represented by the artifact'
+        required: true
+        type: choice
+        options:
+          - staging
+          - production
+        default: staging
+      build_number:
+        description: 'Monotonically increasing mobile build number'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mobile-release-${{ github.ref }}-${{ inputs.release_environment }}
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    name: Validate mobile release inputs
+    runs-on: ubuntu-latest
+    environment:
+      name: mobile-${{ inputs.release_environment }}
+    env:
+      RELEASE_ENVIRONMENT: ${{ inputs.release_environment }}
+      BUILD_NUMBER: ${{ inputs.build_number }}
+      API_BASE_URL: ${{ vars.MOBILE_API_BASE_URL }}
+      WEBSITE_BASE_URL: ${{ vars.MOBILE_WEBSITE_BASE_URL }}
+      SUPABASE_URL: ${{ vars.MOBILE_SUPABASE_URL }}
+      SUPABASE_PUBLISHABLE_KEY: ${{ secrets.MOBILE_SUPABASE_PUBLISHABLE_KEY }}
+      SENTRY_DSN: ${{ secrets.MOBILE_SENTRY_DSN }}
+      SENTRY_ENVIRONMENT: ${{ vars.MOBILE_SENTRY_ENVIRONMENT }}
+      API_CERTIFICATE_SHA256_PINS: ${{ vars.MOBILE_API_CERTIFICATE_SHA256_PINS }}
+      PLATFORM_SECURITY_GATE: ${{ vars.MOBILE_PLATFORM_SECURITY_GATE }}
+      PLATFORM_SECURITY_EVIDENCE_URL: ${{ vars.MOBILE_PLATFORM_SECURITY_EVIDENCE_URL }}
+      PLATFORM_SECURITY_EVIDENCE_COMMIT: ${{ vars.MOBILE_PLATFORM_SECURITY_EVIDENCE_COMMIT }}
+    steps:
+      - name: Check out the exact candidate commit
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up pinned Flutter SDK
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.44.6'
+          channel: stable
+          cache: true
+
+      - name: Test mobile release configuration guard
+        run: sh scripts/check-mobile-release-config.test.sh
+
+      - name: Verify Flutter SDK pin
+        shell: bash
+        run: |
+          set -euo pipefail
+          actual_flutter_version="$(flutter --version --machine | jq -r '.frameworkVersion')"
+          [[ "$actual_flutter_version" == '3.44.6' ]] || {
+            echo 'Flutter SDK version does not match the release pin' >&2
+            exit 1
+          }
+
+      - name: Require a trusted release context
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          case "$BUILD_NUMBER" in
+            ''|*[!0-9]*)
+              echo 'build_number must contain digits only' >&2
+              exit 1
+              ;;
+          esac
+
+          case "$RELEASE_ENVIRONMENT:$GITHUB_REF" in
+            staging:refs/heads/main|staging:refs/heads/dev|production:refs/heads/main|production:refs/tags/v*)
+              ;;
+            *)
+              echo 'signed builds may run only from the protected release branches or version tags' >&2
+              exit 1
+              ;;
+          esac
+
+      - name: Require the external platform-security gate for production
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ "$RELEASE_ENVIRONMENT" == production ]]; then
+            if [[ "$PLATFORM_SECURITY_GATE" != verified ]]; then
+              echo 'production promotion is blocked until the protected platform-security gate is verified' >&2
+              exit 1
+            fi
+            if [[ ! "$PLATFORM_SECURITY_EVIDENCE_URL" =~ ^https://[^/[:space:]]+(/[^[:space:]]*)?$ ]]; then
+              echo 'production promotion requires a protected HTTPS platform-security evidence link' >&2
+              exit 1
+            fi
+            if [[ "$PLATFORM_SECURITY_EVIDENCE_URL" == *localhost* ||
+              "$PLATFORM_SECURITY_EVIDENCE_URL" == *127.0.0.1* ||
+              "$PLATFORM_SECURITY_EVIDENCE_URL" == *::1* ]]; then
+              echo 'platform-security evidence must be reachable from a protected HTTPS location' >&2
+              exit 1
+            fi
+            if [[ "$PLATFORM_SECURITY_EVIDENCE_COMMIT" != "$GITHUB_SHA" ]]; then
+              echo 'platform-security evidence must be recorded for the exact candidate commit' >&2
+              exit 1
+            fi
+          else
+            echo 'staging candidate only; public production promotion remains blocked by the platform-security gate'
+          fi
+
+      - name: Validate public Flutter configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+
+          config_dir='APP/config'
+          config_path="$config_dir/release.json"
+          mkdir -p "$config_dir"
+          cleanup() {
+            rm -f "$config_path"
+            rmdir "$config_dir" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+
+          jq -n \
+            --arg api "$API_BASE_URL" \
+            --arg website "$WEBSITE_BASE_URL" \
+            --arg supabase "$SUPABASE_URL" \
+            --arg publishable "$SUPABASE_PUBLISHABLE_KEY" \
+            --arg sentry "$SENTRY_DSN" \
+            --arg sentry_environment "$SENTRY_ENVIRONMENT" \
+            --arg pins "$API_CERTIFICATE_SHA256_PINS" \
+            '{
+              API_BASE_URL: $api,
+              WEBSITE_BASE_URL: $website,
+              SUPABASE_URL: $supabase,
+              SUPABASE_PUBLISHABLE_KEY: $publishable,
+              SENTRY_DSN: $sentry,
+              SENTRY_ENVIRONMENT: $sentry_environment,
+              API_CERTIFICATE_SHA256_PINS: $pins
+            }' >"$config_path"
+          chmod 600 "$config_path"
+
+          ./scripts/check-mobile-release-config.sh \
+            --environment "$RELEASE_ENVIRONMENT" \
+            --config "$config_path"
+
+      - name: Install Flutter dependencies
+        working-directory: APP
+        run: flutter pub get --enforce-lockfile
+
+      - name: Analyze Flutter application
+        working-directory: APP
+        run: flutter analyze --no-fatal-infos
+
+      - name: Run Flutter tests
+        working-directory: APP
+        run: flutter test
+
+      - name: Confirm preflight did not leave configuration behind
+        if: always()
+        shell: bash
+        run: test ! -e APP/config/release.json
+
+  android-release:
+    name: Build signed Android App Bundle
+    needs: preflight
+    if: needs.preflight.result == 'success'
+    runs-on: ubuntu-latest
+    environment:
+      name: mobile-${{ inputs.release_environment }}
+    env:
+      RELEASE_ENVIRONMENT: ${{ inputs.release_environment }}
+      BUILD_NUMBER: ${{ inputs.build_number }}
+      API_BASE_URL: ${{ vars.MOBILE_API_BASE_URL }}
+      WEBSITE_BASE_URL: ${{ vars.MOBILE_WEBSITE_BASE_URL }}
+      SUPABASE_URL: ${{ vars.MOBILE_SUPABASE_URL }}
+      SUPABASE_PUBLISHABLE_KEY: ${{ secrets.MOBILE_SUPABASE_PUBLISHABLE_KEY }}
+      SENTRY_DSN: ${{ secrets.MOBILE_SENTRY_DSN }}
+      SENTRY_ENVIRONMENT: ${{ vars.MOBILE_SENTRY_ENVIRONMENT }}
+      API_CERTIFICATE_SHA256_PINS: ${{ vars.MOBILE_API_CERTIFICATE_SHA256_PINS }}
+      ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+      ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+      ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+      ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+    steps:
+      - name: Check out the exact candidate commit
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up pinned Flutter SDK
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.44.6'
+          channel: stable
+          cache: true
+
+      - name: Install dependencies and build signed Android artifact
+        working-directory: APP
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+
+          fail() {
+            echo "Android release build blocked: $1" >&2
+            exit 1
+          }
+
+          [[ -n "$ANDROID_KEYSTORE_BASE64" ]] || fail 'ANDROID_KEYSTORE_BASE64 is not configured'
+          [[ -n "$ANDROID_KEYSTORE_PASSWORD" ]] || fail 'ANDROID_KEYSTORE_PASSWORD is not configured'
+          [[ -n "$ANDROID_KEY_PASSWORD" ]] || fail 'ANDROID_KEY_PASSWORD is not configured'
+          [[ -n "$ANDROID_KEY_ALIAS" ]] || fail 'ANDROID_KEY_ALIAS is not configured'
+
+          case "$BUILD_NUMBER" in
+            ''|*[!0-9]*) fail 'build_number must contain digits only' ;;
+          esac
+
+          flutter pub get --enforce-lockfile
+
+          config_dir='config'
+          config_path="$config_dir/release.json"
+          keystore_path="$RUNNER_TEMP/trustpay-upload-keystore.jks"
+          mkdir -p "$config_dir"
+          cleanup() {
+            rm -f "$config_path" android/key.properties "$keystore_path"
+            rmdir "$config_dir" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+
+          jq -n \
+            --arg api "$API_BASE_URL" \
+            --arg website "$WEBSITE_BASE_URL" \
+            --arg supabase "$SUPABASE_URL" \
+            --arg publishable "$SUPABASE_PUBLISHABLE_KEY" \
+            --arg sentry "$SENTRY_DSN" \
+            --arg sentry_environment "$SENTRY_ENVIRONMENT" \
+            --arg pins "$API_CERTIFICATE_SHA256_PINS" \
+            '{
+              API_BASE_URL: $api,
+              WEBSITE_BASE_URL: $website,
+              SUPABASE_URL: $supabase,
+              SUPABASE_PUBLISHABLE_KEY: $publishable,
+              SENTRY_DSN: $sentry,
+              SENTRY_ENVIRONMENT: $sentry_environment,
+              API_CERTIFICATE_SHA256_PINS: $pins
+            }' >"$config_path"
+          chmod 600 "$config_path"
+          ../scripts/check-mobile-release-config.sh \
+            --environment "$RELEASE_ENVIRONMENT" \
+            --config "$config_path"
+
+          if ! printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode >"$keystore_path" 2>/dev/null; then
+            fail 'ANDROID_KEYSTORE_BASE64 could not be decoded'
+          fi
+          [[ -s "$keystore_path" ]] || fail 'decoded Android keystore is empty'
+          if ! keytool -list -keystore "$keystore_path" \
+            -storepass "$ANDROID_KEYSTORE_PASSWORD" \
+            -alias "$ANDROID_KEY_ALIAS" >/dev/null 2>&1; then
+            fail 'Android keystore credentials or alias are invalid'
+          fi
+
+          {
+            printf 'storePassword=%s\n' "$ANDROID_KEYSTORE_PASSWORD"
+            printf 'keyPassword=%s\n' "$ANDROID_KEY_PASSWORD"
+            printf 'keyAlias=%s\n' "$ANDROID_KEY_ALIAS"
+            printf 'storeFile=%s\n' "$keystore_path"
+          } >android/key.properties
+          chmod 600 android/key.properties
+
+          flutter build appbundle \
+            --release \
+            --build-number="$BUILD_NUMBER" \
+            --obfuscate \
+            --split-debug-info=build/symbols/android \
+            --dart-define-from-file="$config_path"
+
+          bundle_path='build/app/outputs/bundle/release/app-release.aab'
+          [[ -s "$bundle_path" ]] || fail 'Flutter did not produce an Android App Bundle'
+          if ! jarsigner -verify -strict "$bundle_path" >/dev/null 2>&1; then
+            fail 'Android App Bundle is not signed'
+          fi
+          [[ -d build/symbols/android ]] || fail 'Android obfuscation symbols are missing'
+          find build/symbols/android -type f -print -quit | grep -q . ||
+            fail 'Android obfuscation symbols are empty'
+          [[ -s build/app/outputs/mapping/release/mapping.txt ]] ||
+            fail 'Android R8 mapping is missing'
+
+          metadata_path='build/android-release-metadata.txt'
+          {
+            printf 'commit=%s\n' "$GITHUB_SHA"
+            printf 'build_number=%s\n' "$BUILD_NUMBER"
+            printf 'environment=%s\n' "$RELEASE_ENVIRONMENT"
+            printf 'artifact_sha256='
+            sha256sum "$bundle_path" | awk '{print $1}'
+          } >"$metadata_path"
+
+      - name: Upload signed Android artifact and symbols
+        uses: actions/upload-artifact@v4
+        with:
+          name: trustpay-android-${{ inputs.release_environment }}-${{ inputs.build_number }}
+          if-no-files-found: error
+          retention-days: 14
+          path: |
+            APP/build/app/outputs/bundle/release/app-release.aab
+            APP/build/symbols/android/**
+            APP/build/app/outputs/mapping/release/mapping.txt
+            APP/build/android-release-metadata.txt
+
+      - name: Confirm transient Android signing inputs were removed
+        if: always()
+        shell: bash
+        run: |
+          test ! -e APP/config/release.json
+          test ! -e APP/android/key.properties
+
+  ios-release:
+    name: Build signed iOS IPA
+    needs: preflight
+    if: needs.preflight.result == 'success'
+    runs-on: macos-14
+    environment:
+      name: mobile-${{ inputs.release_environment }}
+    env:
+      RELEASE_ENVIRONMENT: ${{ inputs.release_environment }}
+      BUILD_NUMBER: ${{ inputs.build_number }}
+      API_BASE_URL: ${{ vars.MOBILE_API_BASE_URL }}
+      WEBSITE_BASE_URL: ${{ vars.MOBILE_WEBSITE_BASE_URL }}
+      SUPABASE_URL: ${{ vars.MOBILE_SUPABASE_URL }}
+      SUPABASE_PUBLISHABLE_KEY: ${{ secrets.MOBILE_SUPABASE_PUBLISHABLE_KEY }}
+      SENTRY_DSN: ${{ secrets.MOBILE_SENTRY_DSN }}
+      SENTRY_ENVIRONMENT: ${{ vars.MOBILE_SENTRY_ENVIRONMENT }}
+      API_CERTIFICATE_SHA256_PINS: ${{ vars.MOBILE_API_CERTIFICATE_SHA256_PINS }}
+      IOS_CERTIFICATE_BASE64: ${{ secrets.IOS_CERTIFICATE_BASE64 }}
+      IOS_CERTIFICATE_PASSWORD: ${{ secrets.IOS_CERTIFICATE_PASSWORD }}
+      IOS_PROVISIONING_PROFILE_BASE64: ${{ secrets.IOS_PROVISIONING_PROFILE_BASE64 }}
+      IOS_EXPORT_OPTIONS_PLIST_BASE64: ${{ secrets.IOS_EXPORT_OPTIONS_PLIST_BASE64 }}
+      IOS_TEAM_ID: ${{ vars.IOS_TEAM_ID }}
+      IOS_BUNDLE_IDENTIFIER: ${{ vars.IOS_BUNDLE_IDENTIFIER }}
+      IOS_PROVISIONING_PROFILE_NAME: ${{ vars.IOS_PROVISIONING_PROFILE_NAME }}
+    steps:
+      - name: Check out the exact candidate commit
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up pinned Flutter SDK
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.44.6'
+          channel: stable
+          cache: true
+
+      - name: Install dependencies and build signed iOS artifact
+        working-directory: APP
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+
+          fail() {
+            echo "iOS release build blocked: $1" >&2
+            exit 1
+          }
+
+          [[ -n "$IOS_CERTIFICATE_BASE64" ]] || fail 'IOS_CERTIFICATE_BASE64 is not configured'
+          [[ -n "$IOS_CERTIFICATE_PASSWORD" ]] || fail 'IOS_CERTIFICATE_PASSWORD is not configured'
+          [[ -n "$IOS_PROVISIONING_PROFILE_BASE64" ]] || fail 'IOS_PROVISIONING_PROFILE_BASE64 is not configured'
+          [[ -n "$IOS_EXPORT_OPTIONS_PLIST_BASE64" ]] || fail 'IOS_EXPORT_OPTIONS_PLIST_BASE64 is not configured'
+          [[ -n "$IOS_TEAM_ID" ]] || fail 'IOS_TEAM_ID is not configured'
+          [[ -n "$IOS_BUNDLE_IDENTIFIER" ]] || fail 'IOS_BUNDLE_IDENTIFIER is not configured'
+          [[ -n "$IOS_PROVISIONING_PROFILE_NAME" ]] || fail 'IOS_PROVISIONING_PROFILE_NAME is not configured'
+
+          printf '%s' "$IOS_TEAM_ID" | grep -Eq '^[A-Z0-9]{10}$' ||
+            fail 'IOS_TEAM_ID has an invalid format'
+          [[ "$IOS_BUNDLE_IDENTIFIER" == com.trustpay.app ]] ||
+            fail 'IOS_BUNDLE_IDENTIFIER does not match the app target'
+          case "$BUILD_NUMBER" in
+            ''|*[!0-9]*) fail 'build_number must contain digits only' ;;
+          esac
+
+          flutter pub get --enforce-lockfile
+
+          config_dir='config'
+          config_path="$config_dir/release.json"
+          certificate_path="$RUNNER_TEMP/trustpay-distribution.p12"
+          profile_path="$RUNNER_TEMP/trustpay.mobileprovision"
+          profile_plist="$RUNNER_TEMP/trustpay-profile.plist"
+          export_options_path="$RUNNER_TEMP/trustpay-export-options.plist"
+          keychain_path="$RUNNER_TEMP/trustpay-signing.keychain-db"
+          keychain_password="$(openssl rand -hex 32)"
+          profile_uuid=''
+          profile_installed_path=''
+          mkdir -p "$config_dir"
+
+          cleanup() {
+            rm -f "$config_path" "$certificate_path" "$profile_path" "$profile_plist" "$export_options_path"
+            if [[ -n "$profile_installed_path" ]]; then
+              rm -f "$profile_installed_path"
+            fi
+            security delete-keychain "$keychain_path" >/dev/null 2>&1 || true
+            rmdir "$config_dir" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+
+          jq -n \
+            --arg api "$API_BASE_URL" \
+            --arg website "$WEBSITE_BASE_URL" \
+            --arg supabase "$SUPABASE_URL" \
+            --arg publishable "$SUPABASE_PUBLISHABLE_KEY" \
+            --arg sentry "$SENTRY_DSN" \
+            --arg sentry_environment "$SENTRY_ENVIRONMENT" \
+            --arg pins "$API_CERTIFICATE_SHA256_PINS" \
+            '{
+              API_BASE_URL: $api,
+              WEBSITE_BASE_URL: $website,
+              SUPABASE_URL: $supabase,
+              SUPABASE_PUBLISHABLE_KEY: $publishable,
+              SENTRY_DSN: $sentry,
+              SENTRY_ENVIRONMENT: $sentry_environment,
+              API_CERTIFICATE_SHA256_PINS: $pins
+            }' >"$config_path"
+          chmod 600 "$config_path"
+          ../scripts/check-mobile-release-config.sh \
+            --environment "$RELEASE_ENVIRONMENT" \
+            --config "$config_path"
+
+          if ! printf '%s' "$IOS_CERTIFICATE_BASE64" | base64 -D >"$certificate_path" 2>/dev/null; then
+            fail 'IOS_CERTIFICATE_BASE64 could not be decoded'
+          fi
+          [[ -s "$certificate_path" ]] || fail 'decoded iOS certificate is empty'
+          if ! printf '%s' "$IOS_PROVISIONING_PROFILE_BASE64" | base64 -D >"$profile_path" 2>/dev/null; then
+            fail 'IOS_PROVISIONING_PROFILE_BASE64 could not be decoded'
+          fi
+          [[ -s "$profile_path" ]] || fail 'decoded iOS provisioning profile is empty'
+          if ! printf '%s' "$IOS_EXPORT_OPTIONS_PLIST_BASE64" | base64 -D >"$export_options_path" 2>/dev/null; then
+            fail 'IOS_EXPORT_OPTIONS_PLIST_BASE64 could not be decoded'
+          fi
+          if ! plutil -lint "$export_options_path" >/dev/null 2>&1; then
+            fail 'iOS export options plist is invalid'
+          fi
+
+          if ! security cms -D -i "$profile_path" >"$profile_plist" 2>/dev/null; then
+            fail 'iOS provisioning profile could not be inspected'
+          fi
+          profile_uuid=$(/usr/libexec/PlistBuddy -c 'Print :UUID' "$profile_plist" 2>/dev/null || true)
+          profile_name=$(/usr/libexec/PlistBuddy -c 'Print :Name' "$profile_plist" 2>/dev/null || true)
+          profile_app_id=$(/usr/libexec/PlistBuddy -c 'Print :Entitlements:application-identifier' "$profile_plist" 2>/dev/null || true)
+          [[ -n "$profile_uuid" ]] || fail 'iOS provisioning profile has no UUID'
+          printf '%s' "$profile_uuid" | grep -Eq '^[A-Fa-f0-9-]+$' ||
+            fail 'iOS provisioning profile UUID has an invalid format'
+          [[ "$profile_name" == "$IOS_PROVISIONING_PROFILE_NAME" ]] ||
+            fail 'iOS provisioning profile name does not match the protected release input'
+          [[ "$profile_app_id" == "$IOS_TEAM_ID.$IOS_BUNDLE_IDENTIFIER" ]] ||
+            fail 'iOS provisioning profile is not for the expected app and team'
+
+          profile_installed_path="$HOME/Library/MobileDevice/Provisioning Profiles/$profile_uuid.mobileprovision"
+          mkdir -p "$(dirname "$profile_installed_path")"
+          cp "$profile_path" "$profile_installed_path"
+
+          security create-keychain -p "$keychain_password" "$keychain_path" >/dev/null
+          security set-keychain-settings -lut 21600 "$keychain_path"
+          security unlock-keychain -p "$keychain_password" "$keychain_path"
+          security import "$certificate_path" \
+            -k "$keychain_path" \
+            -P "$IOS_CERTIFICATE_PASSWORD" \
+            -T /usr/bin/codesign \
+            -T /usr/bin/security >/dev/null
+          security set-key-partition-list \
+            -S apple-tool:,apple:,codesign: \
+            -s \
+            -k "$keychain_password" \
+            "$keychain_path" >/dev/null
+          security list-keychains -d user -s "$keychain_path" >/dev/null
+          security default-keychain -s "$keychain_path" >/dev/null
+
+          signing_identity=$(security find-identity -v -p codesigning "$keychain_path" \
+            | awk -F'"' '/Apple Distribution/ {print $2; exit}')
+          [[ -n "$signing_identity" ]] || fail 'no Apple Distribution identity was imported'
+
+          export_method=$(/usr/libexec/PlistBuddy -c 'Print :method' "$export_options_path" 2>/dev/null || true)
+          export_team=$(/usr/libexec/PlistBuddy -c 'Print :teamID' "$export_options_path" 2>/dev/null || true)
+          export_profile=$(/usr/libexec/PlistBuddy -c "Print :provisioningProfiles:$IOS_BUNDLE_IDENTIFIER" "$export_options_path" 2>/dev/null || true)
+          [[ "$export_method" == app-store ]] || fail 'iOS export options must use the app-store method'
+          [[ "$export_team" == "$IOS_TEAM_ID" ]] || fail 'iOS export options team does not match the protected team'
+          [[ "$export_profile" == "$IOS_PROVISIONING_PROFILE_NAME" ]] ||
+            fail 'iOS export options profile does not match the installed profile'
+
+          flutter build ipa \
+            --release \
+            --build-number="$BUILD_NUMBER" \
+            --obfuscate \
+            --split-debug-info=build/symbols/ios \
+            --dart-define-from-file="$config_path" \
+            --export-options-plist="$export_options_path"
+
+          ipa_path=$(find build/ios/ipa -maxdepth 1 -name '*.ipa' -print -quit)
+          [[ -n "$ipa_path" && -s "$ipa_path" ]] || fail 'Flutter did not produce an iOS IPA'
+          unpacked_path="$RUNNER_TEMP/trustpay-ipa-unpacked"
+          mkdir -p "$unpacked_path"
+          unzip -q "$ipa_path" -d "$unpacked_path"
+          [[ -d "$unpacked_path/Payload/Runner.app" ]] || fail 'iOS IPA has no application payload'
+          if ! codesign --verify --deep --strict "$unpacked_path/Payload/Runner.app" >/dev/null 2>&1; then
+            fail 'iOS application payload is not signed'
+          fi
+          [[ -d build/symbols/ios ]] || fail 'iOS obfuscation symbols are missing'
+          find build/symbols/ios -type f -print -quit | grep -q . ||
+            fail 'iOS obfuscation symbols are empty'
+          find build/ios/archive -type d -name '*.dSYM' -print -quit | grep -q . ||
+            fail 'iOS dSYM symbols are missing'
+
+          metadata_path='build/ios-release-metadata.txt'
+          {
+            printf 'commit=%s\n' "$GITHUB_SHA"
+            printf 'build_number=%s\n' "$BUILD_NUMBER"
+            printf 'environment=%s\n' "$RELEASE_ENVIRONMENT"
+            printf 'artifact_sha256='
+            shasum -a 256 "$ipa_path" | awk '{print $1}'
+          } >"$metadata_path"
+
+      - name: Upload signed iOS artifact and symbols
+        uses: actions/upload-artifact@v4
+        with:
+          name: trustpay-ios-${{ inputs.release_environment }}-${{ inputs.build_number }}
+          if-no-files-found: error
+          retention-days: 14
+          path: |
+            APP/build/ios/ipa/*.ipa
+            APP/build/symbols/ios/**
+            APP/build/ios/archive/**/*.dSYM/**
+            APP/build/ios-release-metadata.txt
+
+      - name: Confirm transient iOS signing inputs were removed
+        if: always()
+        shell: bash
+        run: test ! -e APP/config/release.json

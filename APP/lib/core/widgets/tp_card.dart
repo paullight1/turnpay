@@ -23,6 +23,7 @@ class TpCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     return Container(
       width: double.infinity,
       margin: margin,
@@ -57,6 +58,7 @@ class TpCardVariant extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     return Container(
       width: double.infinity,
       padding: padding ?? const EdgeInsets.all(AppSpacing.md),

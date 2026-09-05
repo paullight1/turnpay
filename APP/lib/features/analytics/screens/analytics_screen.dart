@@ -300,6 +300,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen>
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     return Scaffold(
       backgroundColor: AppColors.background,
       body: SafeArea(
@@ -386,6 +387,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen>
 class _AnalyticsHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     return Padding(
       padding: const EdgeInsets.symmetric(
         horizontal: AppSpacing.lg,
@@ -439,6 +441,7 @@ class _AnalyticsLoadingState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     return ListView(
       physics: const NeverScrollableScrollPhysics(),
       padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
@@ -481,6 +484,7 @@ class _AnalyticsErrorState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     return Center(
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -515,6 +519,7 @@ class _TabToggle extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     return Container(
       height: 48,
       decoration: BoxDecoration(
@@ -553,6 +558,7 @@ class _ToggleTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     return Expanded(
       child: GestureDetector(
         onTap: () {
@@ -602,6 +608,7 @@ class _SummaryCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     final isIncome = tabIndex == 0;
     final hasCurrency = analytics.currency.isNotEmpty;
     final total = isIncome ? analytics.monthIncome : analytics.monthSpend;
@@ -707,6 +714,7 @@ class _MiniBarchart extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     final maxValue =
         data.fold<double>(0, (max, value) => value > max ? value : max);
 
@@ -770,6 +778,7 @@ class _DonutChartSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     final hasCategories = categories.isNotEmpty;
     final topCategory = hasCategories ? categories.first : null;
 
@@ -904,6 +913,7 @@ class _SpendBreakdownCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     return Container(
       decoration: BoxDecoration(
         color: AppColors.surface,
@@ -991,6 +1001,7 @@ class _BreakdownRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     return Padding(
       padding: const EdgeInsets.symmetric(
         horizontal: AppSpacing.lg,

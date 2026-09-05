@@ -43,6 +43,24 @@ export class CreateKycUploadDto {
 
 export class CreateIdentityVerificationDto {
   @IsString()
+  @IsOptional()
+  @MinLength(1)
+  @MaxLength(80)
+  @Matches(/^[A-Za-z][A-Za-z' -]*$/, {
+    message: 'First name contains unsupported characters',
+  })
+  firstName?: string;
+
+  @IsString()
+  @IsOptional()
+  @MinLength(1)
+  @MaxLength(80)
+  @Matches(/^[A-Za-z][A-Za-z' -]*$/, {
+    message: 'Last name contains unsupported characters',
+  })
+  lastName?: string;
+
+  @IsString()
   @IsIn(['BVN', 'NIN'])
   type: KYCType;
 

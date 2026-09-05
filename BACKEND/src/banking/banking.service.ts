@@ -109,6 +109,16 @@ export class BankingService {
       throw new ForbiddenException('User is suspended');
     }
 
+    if (
+      !this.canUseSandboxKycBypass() &&
+      (user.kycStatus !== 'VERIFIED' ||
+        !isKycTierAtLeast(user.kycTier, 'TIER_2'))
+    ) {
+      throw new ForbiddenException(
+        'Complete KYC before accessing a virtual account',
+      );
+    }
+
     const existingAccount = await this.prisma.virtualAccount.findUnique({
       where: {
         userId_provider_currency: {
@@ -181,11 +191,9 @@ export class BankingService {
       country: dto.country || 'NG',
       currency: dto.currency,
       bvn:
-        dto.bvn ||
         verifiedIdentifiers.bvn ||
         this.sandboxTestIdentifier('MONNIFY_TEST_BVN'),
       nin:
-        dto.nin ||
         verifiedIdentifiers.nin ||
         this.sandboxTestIdentifier('MONNIFY_TEST_NIN'),
       identityAccountNumber: dto.identityAccountNumber,
@@ -543,10 +551,6 @@ export class BankingService {
     userId: string,
     explicitIdentifiers: { bvn?: string; nin?: string },
   ) {
-    if (explicitIdentifiers.bvn && explicitIdentifiers.nin) {
-      return {};
-    }
-
     const documents = await this.prisma.kycDocument.findMany({
       where: {
         userId,
@@ -563,25 +567,31 @@ export class BankingService {
     const identifiers: { bvn?: string; nin?: string } = {};
 
     for (const document of documents) {
-      if (
-        document.type === 'BVN' &&
-        !explicitIdentifiers.bvn &&
-        !identifiers.bvn &&
-        document.idNumber
-      ) {
+      if (document.type === 'BVN' && !identifiers.bvn && document.idNumber) {
         identifiers.bvn = this.decryptStoredKycIdentifier(document.idNumber);
       }
 
-      if (
-        document.type === 'NIN' &&
-        !explicitIdentifiers.nin &&
-        !identifiers.nin &&
-        document.idNumber
-      ) {
+      if (document.type === 'NIN' && !identifiers.nin && document.idNumber) {
         identifiers.nin = this.decryptStoredKycIdentifier(document.idNumber);
       }
     }
 
+    for (const type of ['bvn', 'nin'] as const) {
+      if (
+        explicitIdentifiers[type] &&
+        explicitIdentifiers[type] !== identifiers[type]
+      ) {
+        throw new ForbiddenException(
+          'Use the identity details already verified on your account',
+        );
+      }
+    }
+    if (
+      !this.canUseSandboxKycBypass() &&
+      (!identifiers.bvn || !identifiers.nin)
+    ) {
+      throw new ForbiddenException('Both verified BVN and NIN are required');
+    }
     return identifiers;
   }
 

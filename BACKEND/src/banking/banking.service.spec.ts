@@ -266,6 +266,10 @@ describe('BankingService', () => {
   });
 
   it('upserts a Monnify virtual account and returns owner-visible account details without raw provider internals', async () => {
+    prisma.kycDocument.findMany.mockResolvedValue([
+      { type: 'BVN', idNumber: '21212121212' },
+      { type: 'NIN', idNumber: '12034875601' },
+    ]);
     prisma.user.findUnique.mockResolvedValue({
       id: 'user-1',
       email: 'user@example.com',
@@ -323,6 +327,10 @@ describe('BankingService', () => {
   });
 
   it('provisions Monnify reserved accounts with BVN/NIN data', async () => {
+    prisma.kycDocument.findMany.mockResolvedValue([
+      { type: 'BVN', idNumber: '21212121212' },
+      { type: 'NIN', idNumber: '12034875601' },
+    ]);
     prisma.user.findUnique.mockResolvedValue({
       id: 'user-1',
       email: 'user@example.com',
@@ -456,7 +464,7 @@ describe('BankingService', () => {
     );
   });
 
-  it('prefers explicit DTO identifiers over verified KYC document identifiers', async () => {
+  it('rejects DTO identifiers that differ from verified KYC documents', async () => {
     prisma.user.findUnique.mockResolvedValue({
       id: 'user-1',
       email: 'user@example.com',
@@ -500,21 +508,19 @@ describe('BankingService', () => {
       status: 'ACTIVE',
     });
 
-    await service.provisionVirtualAccount('user-1', {
-      currency: 'NGN',
-      provider: 'monnify',
-      firstName: 'Ada',
-      lastName: 'Lovelace',
-      country: 'NG',
-      bvn: '99999999999',
-    });
-
-    expect(monnifyVirtualAccounts.provisionVirtualAccount).toHaveBeenCalledWith(
-      expect.objectContaining({
+    await expect(
+      service.provisionVirtualAccount('user-1', {
+        currency: 'NGN',
+        provider: 'monnify',
+        firstName: 'Ada',
+        lastName: 'Lovelace',
+        country: 'NG',
         bvn: '99999999999',
-        nin: '12034875601',
       }),
-    );
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(
+      monnifyVirtualAccounts.provisionVirtualAccount,
+    ).not.toHaveBeenCalled();
   });
 
   it('credits a wallet once for a valid virtual-account deposit event', async () => {

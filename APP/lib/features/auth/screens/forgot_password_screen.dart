@@ -12,10 +12,16 @@ import '../widgets/auth_help_button.dart';
 import '../widgets/auth_text_field.dart';
 import '../widgets/tp_button.dart';
 
-/// Forgot Password screen â€” Single email field, clean layout.
-/// After submitting, user is instructed to check their email for an OTP.
+/// Forgot Password screen — Single email field, clean layout.
 class ForgotPasswordScreen extends StatefulWidget {
-  const ForgotPasswordScreen({super.key});
+  final String initialEmail;
+  final AuthService? authService;
+
+  const ForgotPasswordScreen({
+    super.key,
+    this.initialEmail = '',
+    this.authService,
+  });
 
   @override
   State<ForgotPasswordScreen> createState() => _ForgotPasswordScreenState();
@@ -23,10 +29,19 @@ class ForgotPasswordScreen extends StatefulWidget {
 
 class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
   final _formKey = GlobalKey<FormState>();
-  final _emailController = TextEditingController();
-  final _authService = AuthService();
+  late final TextEditingController _emailController;
+  late final AuthService _authService;
   bool _isLoading = false;
   bool _sent = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _emailController = TextEditingController(
+      text: widget.initialEmail.trim().toLowerCase(),
+    );
+    _authService = widget.authService ?? AuthService();
+  }
 
   @override
   void dispose() {
@@ -60,6 +75,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     return Scaffold(
       backgroundColor: AppColors.background,
       body: SafeArea(
@@ -87,11 +103,11 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
                 ),
                 const SizedBox(height: AppSpacing.sm),
                 if (_sent) ...[
-                  TrustPayAnimatedState(
+                  const TrustPayAnimatedState(
                     variant: TrustPayAnimationVariant.success,
-                    title: 'Reset link sent',
+                    title: 'Reset request received',
                     detail:
-                        'We\'ve sent a reset link to ${_emailController.text.trim()}. Check your inbox and spam folder.',
+                        'If an account exists for that email, a reset link will arrive shortly. Check your inbox and spam folder.',
                     animationSize: 78,
                   ),
                 ] else ...[

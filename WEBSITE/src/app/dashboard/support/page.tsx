@@ -90,7 +90,7 @@ export default function DashboardSupportPage() {
           <div>
             <h1 className="text-3xl font-semibold">Customer care</h1>
             <p className="mt-1 text-muted-foreground">
-              Send payment, VTU, exchange, KYC, and account issues to the admin support queue.
+              Send payment, VTU, exchange, KYC, and account issues to customer support.
             </p>
           </div>
           <Badge variant="secondary" className="w-fit">

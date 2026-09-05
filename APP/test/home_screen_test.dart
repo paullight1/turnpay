@@ -56,6 +56,13 @@ void main() {
     expect(find.text('******'), findsWidgets);
 
     await tester.scrollUntilVisible(
+      find.text('Exchange NGN to GHS'),
+      150,
+      scrollable: find.byType(Scrollable).first,
+    );
+    expect(find.text('Exchange NGN to GHS'), findsOneWidget);
+
+    await tester.scrollUntilVisible(
       find.text('Other wallets'),
       300,
       scrollable: find.byType(Scrollable).first,
@@ -112,6 +119,51 @@ void main() {
     );
   });
 
+  testWidgets('other wallet cards use a compact footprint', (tester) async {
+    final bundle = buildTrustPayTestBundle();
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: HomeScreen(homeDataService: bundle.homeDataService),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.scrollUntilVisible(
+      find.text('Other wallets'),
+      300,
+      scrollable: find.byType(Scrollable).first,
+    );
+    final usdCard = find.byKey(const ValueKey('wallet-summary-USD'));
+    expect(usdCard, findsOneWidget);
+    expect(tester.getSize(usdCard).width, lessThanOrEqualTo(136));
+    expect(tester.getSize(usdCard).height, lessThanOrEqualTo(108));
+  });
+
+  testWidgets('only the Nigeria wallet offers account provisioning',
+      (tester) async {
+    final bundle = buildTrustPayTestBundle(includeVirtualAccounts: false);
+
+    await tester.pumpWidget(
+      MaterialApp.router(
+        routerConfig: GoRouter(
+          initialLocation: AppRoutes.home,
+          routes: [
+            GoRoute(
+              path: AppRoutes.home,
+              builder: (context, state) =>
+                  HomeScreen(homeDataService: bundle.homeDataService),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    await tester.pumpAndSettle();
+
+    expect(find.text('Request account'), findsOneWidget);
+  });
+
   testWidgets('home screen opens the feature hub from quick actions',
       (tester) async {
     final bundle = buildTrustPayTestBundle();
@@ -144,12 +196,22 @@ void main() {
     expect(find.text('Explore features'), findsOneWidget);
     expect(find.text('Fund wallet'), findsOneWidget);
     await tester.scrollUntilVisible(
+      find.text('Coming soon'),
+      200,
+      scrollable: find.byType(Scrollable).first,
+    );
+    expect(find.text('Coming soon'), findsOneWidget);
+    await tester.scrollUntilVisible(
       find.text('Virtual cards'),
       400,
       scrollable: find.byType(Scrollable).first,
     );
     expect(find.text('Virtual cards'), findsOneWidget);
-    expect(find.text('Coming soon'), findsOneWidget);
+    expect(
+      find.text(
+          'Pay online securely with instant cards you can freeze anytime.'),
+      findsOneWidget,
+    );
   });
 
   testWidgets('home screen opens the funding workflow from the feature hub',
@@ -224,6 +286,35 @@ void main() {
     expect(find.textContaining('0123456789'), findsOneWidget);
   });
 
+  testWidgets('funding hides the account number until complete KYC',
+      (tester) async {
+    final bundle = buildTrustPayTestBundle(kycStatus: 'PENDING');
+
+    await tester.pumpWidget(
+      MaterialApp.router(
+        routerConfig: GoRouter(
+          initialLocation: AppRoutes.fund,
+          routes: [
+            GoRoute(
+              path: AppRoutes.fund,
+              builder: (context, state) => MoneyActionScreen(
+                kind: MoneyActionKind.fund,
+                apiClient: bundle.apiClient,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    await tester.pumpAndSettle();
+
+    expect(find.text('Account number locked'), findsOneWidget);
+    expect(find.textContaining('0123456789'), findsNothing);
+    expect(find.byTooltip('Copy account number'), findsNothing);
+    expect(find.text('Complete KYC'), findsOneWidget);
+  });
+
   testWidgets('home screen opens the wallets overview from manage',
       (tester) async {
     final bundle = buildTrustPayTestBundle();
@@ -261,10 +352,17 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Wallets'), findsOneWidget);
+    expect(find.text('Your money, all in one place.'), findsOneWidget);
+    expect(
+      find.text('Live balances from your TrustPay backend account.'),
+      findsNothing,
+    );
     expect(find.text('Active wallets'), findsOneWidget);
     expect(find.text('Add currency wallet'), findsOneWidget);
     expect(find.text('NGN'), findsWidgets);
     expect(find.text('GHS'), findsWidgets);
+    expect(find.text('Coming soon'), findsNWidgets(2));
+    expect(find.text('Provider setup required'), findsNothing);
   });
 
   testWidgets('home screen opens notifications and dismisses them',

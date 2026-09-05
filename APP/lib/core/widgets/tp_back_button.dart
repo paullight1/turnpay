@@ -16,6 +16,7 @@ class TpBackButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     void handleTap() {
       if (onTap != null) {
         onTap!();

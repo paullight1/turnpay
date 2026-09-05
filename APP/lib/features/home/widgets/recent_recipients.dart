@@ -20,6 +20,7 @@ class RecentRecipients extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     return _RecentRecipientsContent(homeDataService: homeDataService);
   }
 }
@@ -32,7 +33,8 @@ class _RecentRecipientsContent extends StatefulWidget {
   });
 
   @override
-  State<_RecentRecipientsContent> createState() => _RecentRecipientsContentState();
+  State<_RecentRecipientsContent> createState() =>
+      _RecentRecipientsContentState();
 }
 
 class _RecentRecipientsContentState extends State<_RecentRecipientsContent> {
@@ -52,6 +54,7 @@ class _RecentRecipientsContentState extends State<_RecentRecipientsContent> {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -117,6 +120,7 @@ class _RecipientsLoadingState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     return const TrustPayAnimatedState(
       variant: TrustPayAnimationVariant.loading,
       title: 'Loading recent recipients',
@@ -143,6 +147,7 @@ class _RecipientsMessage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(AppSpacing.lg),
@@ -200,6 +205,7 @@ class _RecipientRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     return GestureDetector(
       onTap: () => _openWithdraw(context),
       child: Container(

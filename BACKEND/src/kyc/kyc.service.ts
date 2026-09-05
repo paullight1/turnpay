@@ -216,7 +216,10 @@ export class KycService {
         identifierMasked: this.maskIdentifier(normalizedIdNumber),
         consentAccepted: dto.consentAccepted,
         validation: {
-          ...this.toNameValidation(reservation.user.fullName),
+          ...this.toNameValidation(
+            [dto.firstName, dto.lastName].filter(Boolean).join(' ') ||
+              reservation.user.fullName,
+          ),
           dateOfBirth: dto.dateOfBirth,
         },
       });
@@ -593,6 +596,7 @@ export class KycService {
         where: { id: userId },
         select: {
           id: true,
+          fullName: true,
           kycStatus: true,
           kycTier: true,
         },
@@ -634,6 +638,7 @@ export class KycService {
         latestVerification?.provider ?? this.kycProviderGateway.provider,
       kycStatus: user.kycStatus,
       kycTier: user.kycTier,
+      fullName: user.fullName,
       reference: latestVerification?.reference,
       latestVerification: latestVerification
         ? {

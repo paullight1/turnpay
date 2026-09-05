@@ -88,8 +88,7 @@ class ReceiptExporter {
     return Uint8List.fromList(await document.save());
   }
 
-  static Future<void> shareImage(
-    {
+  static Future<void> shareImage({
     required Uint8List bytes,
     required String fileName,
     String? text,
@@ -110,8 +109,7 @@ class ReceiptExporter {
     );
   }
 
-  static Future<void> sharePdf(
-    {
+  static Future<void> sharePdf({
     required Uint8List bytes,
     required String fileName,
     String? text,

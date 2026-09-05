@@ -3,6 +3,7 @@ import { createServer } from 'node:http';
 const HOST = '127.0.0.1';
 const PORT = 3100;
 const TEST_TOKEN_PREFIX = 'access-token-';
+const TEST_ADMIN_TOKEN_PREFIX = 'admin-access-token-';
 
 function sendJson(response, statusCode, body) {
   response.writeHead(statusCode, {
@@ -24,18 +25,23 @@ const server = createServer((request, response) => {
       ? authorization.slice('Bearer '.length)
       : '';
 
-    if (!token.startsWith(TEST_TOKEN_PREFIX)) {
+    const isAdminToken = token.startsWith(TEST_ADMIN_TOKEN_PREFIX);
+    const tokenPrefix = isAdminToken
+      ? TEST_ADMIN_TOKEN_PREFIX
+      : TEST_TOKEN_PREFIX;
+
+    if (!token.startsWith(tokenPrefix)) {
       sendJson(response, 401, { message: 'Unauthorized' });
       return;
     }
 
-    const email = token.slice(TEST_TOKEN_PREFIX.length);
+    const email = token.slice(tokenPrefix.length);
     sendJson(response, 200, {
       user: {
         id: 'user-123',
         email,
         phone: '+2348012345678',
-        role: 'USER',
+        role: isAdminToken ? 'ADMIN' : 'USER',
         kycStatus: 'VERIFIED',
       },
       wallets: [],

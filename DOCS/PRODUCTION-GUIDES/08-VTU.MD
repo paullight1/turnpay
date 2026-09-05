@@ -52,6 +52,17 @@ callbacks. It durably records a redacted event before returning success, then
 processes it asynchronously with idempotent retries. Never log or expose raw
 callback bodies.
 
+The worker now matches the stored provider request ID exactly and re-queries
+VTpass using server credentials before applying any financial outcome. Callback
+status, message, and transaction ID are not settlement authority. A failed
+requery leaves money unchanged and is retried by the durable inbox. Terminal
+transactions are not changed by late callbacks.
+
+A gateway that only signs arbitrary incoming JSON is NOT provider authentication.
+Do not deploy that shortcut. Obtain VTpass's supported callback authentication
+mechanism before configuring the dashboard; the signed endpoint alone is not a
+complete direct-to-VTpass integration.
+
 ## Sandbox certification matrix
 
 Use `https://sandbox.vtpass.com/api` only in a non-production environment with

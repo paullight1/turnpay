@@ -404,11 +404,10 @@ export const footerGroups = [
     ],
   },
   {
-    title: "Account",
+    title: "Get started",
     links: [
-      { label: "Sign In", href: "/login" },
-      { label: "Create Account", href: "/register" },
-      { label: "Reset Password", href: "/forgot-password" },
+      { label: "Get the app", href: "/download" },
+      { label: "Staff access", href: "/staff" },
     ],
   },
   {

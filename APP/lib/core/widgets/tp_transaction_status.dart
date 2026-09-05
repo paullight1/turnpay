@@ -160,6 +160,7 @@ class _TpStatusIconState extends State<TpStatusIcon>
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     return Semantics(
       label: widget.status.label,
       child: SizedBox(
@@ -373,9 +374,7 @@ class _StatusPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _StatusPainter old) =>
-      old.progress != progress ||
-      old.status != status ||
-      old.color != color;
+      old.progress != progress || old.status != status || old.color != color;
 }
 
 /// A compact status chip for transaction lists and detail rows.
@@ -390,6 +389,7 @@ class TpStatusPill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     final color = status.color;
     return Container(
       padding: const EdgeInsets.symmetric(
@@ -494,8 +494,8 @@ class TpTransactionResultView extends StatefulWidget {
               secondaryAction: secondaryLabel == null
                   ? null
                   : OutlinedButton(
-                      onPressed: onSecondary ??
-                          () => Navigator.of(routeContext).pop(),
+                      onPressed:
+                          onSecondary ?? () => Navigator.of(routeContext).pop(),
                       child: Text(secondaryLabel),
                     ),
             ),
@@ -533,6 +533,7 @@ class _TpTransactionResultViewState extends State<TpTransactionResultView> {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     return SafeArea(
       child: Padding(
         padding: const EdgeInsets.all(AppSpacing.lg),
@@ -607,6 +608,7 @@ class _DetailsCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(AppSpacing.md),
@@ -618,8 +620,7 @@ class _DetailsCard extends StatelessWidget {
       child: Column(
         children: [
           for (var i = 0; i < rows.length; i++) ...[
-            if (i > 0)
-              Divider(height: AppSpacing.md, color: AppColors.divider),
+            if (i > 0) Divider(height: AppSpacing.md, color: AppColors.divider),
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -675,6 +676,7 @@ class TpStatusStepTracker extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -712,6 +714,7 @@ class _StepTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     final Color accent;
     switch (state) {
       case _StepState.done:

@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { MonnifyKycSyncService } from './monnify-kyc-sync.service';
 import { HttpModule } from '@nestjs/axios';
 import { BankingController } from './banking.controller';
 import { BankingService } from './banking.service';
@@ -16,6 +17,7 @@ import { WalletsModule } from '../wallets/wallets.module';
   ],
   controllers: [BankingController],
   providers: [
+    MonnifyKycSyncService,
     BankingService,
     BeneficiariesService,
     MonnifyVirtualAccountProvider,

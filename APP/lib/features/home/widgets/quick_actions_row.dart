@@ -15,6 +15,7 @@ class QuickActionsRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     return Row(
       children: [
         Expanded(
@@ -50,6 +51,7 @@ class _QuickActionPill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     return TapScale(
       onTap: onTap,
       borderRadius: BorderRadius.circular(AppRadius.full),

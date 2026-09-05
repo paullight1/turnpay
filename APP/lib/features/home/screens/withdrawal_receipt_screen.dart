@@ -13,8 +13,7 @@ import '../../../core/widgets/tp_snackbar.dart';
 import '../../../services/api_client.dart';
 import '../../../services/auth_service.dart';
 import '../utils/receipt_exporter.dart';
-import 'withdrawal_authorization_screen.dart'
-    show WithdrawalCompletionDetails;
+import 'withdrawal_authorization_screen.dart' show WithdrawalCompletionDetails;
 
 class WithdrawalReceiptScreen extends StatefulWidget {
   final String reference;
@@ -268,6 +267,7 @@ class _WithdrawalReceiptScreenState extends State<WithdrawalReceiptScreen> {
 
   @override
   Widget build(BuildContext context) {
+    AppColors.watch(context);
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: TpAppHeader(

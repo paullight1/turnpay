@@ -1,3 +1,4 @@
+import { hasAdminAccess } from "@/lib/admin-access";
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { createServerClient } from "@supabase/ssr";
@@ -38,7 +39,7 @@ function readLocalSessionCandidateToken(request: NextRequest) {
 async function verifyWithBackend(
   accessToken: string,
   request: NextRequest,
-): Promise<{ ok: boolean; role?: string }> {
+): Promise<{ ok: boolean; role?: string; canAccessAdmin?: boolean }> {
   try {
     const bootstrapUrl = apiBaseUrl
       ? `${apiBaseUrl.replace(/\/$/, "")}/api/auth/bootstrap`
@@ -48,18 +49,24 @@ async function verifyWithBackend(
       method: "POST",
       headers: {
         Authorization: `Bearer ${accessToken}`,
+        "Idempotency-Key": `bootstrap:${crypto.randomUUID()}`,
       },
+      cache: "no-store",
     });
 
     if (!res.ok) {
       return { ok: false };
     }
 
-    const data = (await res.json().catch(() => null)) as
-      | { user?: { role?: string } }
-      | null;
+    const data = (await res.json().catch(() => null)) as {
+      user?: { role?: string; canAccessAdmin?: boolean };
+    } | null;
 
-    return { ok: true, role: data?.user?.role };
+    return {
+      ok: true,
+      role: data?.user?.role,
+      canAccessAdmin: data?.user?.canAccessAdmin === true,
+    };
   } catch {
     return { ok: false };
   }
@@ -77,7 +84,10 @@ async function refreshCookieBackedSession(
     return null;
   }
 
-  const refreshedSession = await refreshSessionWithBackend(storedSession, request);
+  const refreshedSession = await refreshSessionWithBackend(
+    storedSession,
+    request,
+  );
   if (!refreshedSession?.access_token) {
     response.cookies.set(
       SESSION_COOKIE_NAME,
@@ -97,28 +107,29 @@ async function refreshCookieBackedSession(
 
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
+  if (pathname === '/login') return NextResponse.redirect(new URL('/staff', request.url));
+  if (pathname === '/register') return NextResponse.redirect(new URL('/download', request.url));
   const response = NextResponse.next();
 
   const isProtected = PROTECTED_ROUTES.some(
-    (route) => pathname === route || pathname.startsWith(`${route}/`)
+    (route) => pathname === route || pathname.startsWith(`${route}/`),
   );
 
   const isAdmin = ADMIN_ROUTES.some(
-    (route) => pathname === route || pathname.startsWith(`${route}/`)
+    (route) => pathname === route || pathname.startsWith(`${route}/`),
   );
 
   const isAuthRoute = AUTH_ROUTES.includes(pathname);
   const localE2EAuthToken = process.env.TRUSTPAY_E2E_AUTH_BYPASS_TOKEN;
   const hasLocalE2EAuth = Boolean(
     process.env.NODE_ENV !== "production" &&
-      localE2EAuthToken &&
-      (request.headers.get("x-trustpay-e2e-auth") === localE2EAuthToken ||
-        request.cookies.get("trustpay.e2e-auth")?.value ===
-          localE2EAuthToken),
+    localE2EAuthToken &&
+    (request.headers.get("x-trustpay-e2e-auth") === localE2EAuthToken ||
+      request.cookies.get("trustpay.e2e-auth")?.value === localE2EAuthToken),
   );
 
   const redirectToLogin = () => {
-    const url = new URL("/login", request.url);
+    const url = new URL(isAdmin ? "/staff" : "/login", request.url);
     url.searchParams.set("callbackUrl", pathname);
     return NextResponse.redirect(url);
   };
@@ -178,7 +189,10 @@ export async function proxy(request: NextRequest) {
 
     let result = await verifyWithBackend(candidateToken, request);
     if (!result.ok) {
-      const refreshedToken = await refreshCookieBackedSession(request, response);
+      const refreshedToken = await refreshCookieBackedSession(
+        request,
+        response,
+      );
       if (!refreshedToken) {
         return redirectToLogin();
       }
@@ -189,32 +203,45 @@ export async function proxy(request: NextRequest) {
         return redirectToLogin();
       }
     }
-    if (result.role !== "ADMIN") {
-      return NextResponse.redirect(new URL("/dashboard", request.url));
+    if (!hasAdminAccess(result)) {
+      return NextResponse.redirect(new URL("/staff", request.url));
     }
 
     return response;
   }
 
   if (isProtected) {
-    if (hasVerifiedSupabaseUser) {
-      return response;
-    }
-
-    // Supabase could not verify a session (e.g. backend "local" auth mode).
-    // Fall back to verifying the candidate token with the backend.
+    // Staff use the operations workspace, including when they follow an old
+    // customer bookmark. Classify access from backend-verified capabilities.
+    const workspaceResponse = (result: {
+      role?: string;
+      canAccessAdmin?: boolean;
+    }) => {
+      const redirect = NextResponse.redirect(new URL(hasAdminAccess(result) ? '/admin' : '/download', request.url));
+      for (const cookie of response.cookies.getAll())
+        redirect.cookies.set(cookie);
+      return redirect;
+    };
     if (candidateToken) {
-      if ((await verifyWithBackend(candidateToken, request)).ok) {
-        return response;
+      const result = await verifyWithBackend(candidateToken, request);
+      if (result.ok) {
+        return workspaceResponse(result);
       }
 
-      const refreshedToken = await refreshCookieBackedSession(request, response);
-      if (refreshedToken && (await verifyWithBackend(refreshedToken, request)).ok) {
-        return response;
+      const refreshedToken = await refreshCookieBackedSession(
+        request,
+        response,
+      );
+      if (refreshedToken) {
+        const refreshedResult = await verifyWithBackend(
+          refreshedToken,
+          request,
+        );
+        if (refreshedResult.ok) return workspaceResponse(refreshedResult);
       }
     }
 
-    return redirectToLogin();
+    return NextResponse.redirect(new URL('/download', request.url));
   }
 
   // Auth routes: only bounce away Supabase-verified users. We intentionally do
