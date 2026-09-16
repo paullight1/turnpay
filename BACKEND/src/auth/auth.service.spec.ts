@@ -24,6 +24,11 @@ describe('AuthService Supabase integration', () => {
         resend: jest.fn(),
       },
     },
+    recoveryClient: {
+      auth: {
+        resetPasswordForEmail: jest.fn(),
+      },
+    },
     syncUser: jest.fn(),
     ensureRecoveryIdentity: jest.fn(),
     createUserScopedClient: jest.fn(() => scopedClient),
@@ -554,6 +559,9 @@ describe('AuthService Supabase integration', () => {
     expect(
       supabase.authClient.auth.resetPasswordForEmail,
     ).not.toHaveBeenCalled();
+    expect(
+      supabase.recoveryClient.auth.resetPasswordForEmail,
+    ).not.toHaveBeenCalled();
   });
 
   it('normalizes password reset identities before throttling and lookup', async () => {
@@ -576,7 +584,7 @@ describe('AuthService Supabase integration', () => {
       role: 'USER',
     });
     supabase.ensureRecoveryIdentity.mockResolvedValue(undefined);
-    supabase.authClient.auth.resetPasswordForEmail.mockResolvedValue({
+    supabase.recoveryClient.auth.resetPasswordForEmail.mockResolvedValue({
       data: {},
       error: null,
     });
@@ -596,12 +604,11 @@ describe('AuthService Supabase integration', () => {
       fullName: 'Ada Lovelace',
       role: 'USER',
     });
-    expect(supabase.authClient.auth.resetPasswordForEmail).toHaveBeenCalledWith(
-      'ada@example.com',
-      {
-        redirectTo: 'http://localhost:3000/reset-password',
-      },
-    );
+    expect(
+      supabase.recoveryClient.auth.resetPasswordForEmail,
+    ).toHaveBeenCalledWith('ada@example.com', {
+      redirectTo: 'http://localhost:3000/reset-password',
+    });
   });
 
   it('still requests recovery when legacy identity repair is unavailable', async () => {
@@ -615,7 +622,7 @@ describe('AuthService Supabase integration', () => {
     supabase.ensureRecoveryIdentity.mockRejectedValue(
       new Error('SUPABASE_SERVICE_ROLE_KEY is required'),
     );
-    supabase.authClient.auth.resetPasswordForEmail.mockResolvedValue({
+    supabase.recoveryClient.auth.resetPasswordForEmail.mockResolvedValue({
       data: {},
       error: null,
     });
@@ -628,7 +635,9 @@ describe('AuthService Supabase integration', () => {
         'If an account exists, password reset instructions have been sent',
     });
 
-    expect(supabase.authClient.auth.resetPasswordForEmail).toHaveBeenCalled();
+    expect(
+      supabase.recoveryClient.auth.resetPasswordForEmail,
+    ).toHaveBeenCalled();
   });
 
   it('normalizes OTP send identities before throttling and lookup', async () => {

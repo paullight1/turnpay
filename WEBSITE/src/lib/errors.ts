@@ -73,6 +73,17 @@ export function getErrorMessage(error: unknown, fallback: string) {
   }
 
   const message = payload.message;
+  const normalizedMessage =
+    typeof message === "string" ? message.toLowerCase() : "";
+  if (
+    payload.code === "bad_code_verifier" ||
+    payload.code === "pkce_code_verifier_not_found" ||
+    normalizedMessage.includes("pkce code verifier") ||
+    normalizedMessage.includes("code verifier not found")
+  ) {
+    return "This reset link is invalid or expired. Request a new one.";
+  }
+
   if (typeof message === "string") {
     return message;
   }

@@ -676,7 +676,7 @@ export class AuthService {
     }
 
     const { error } =
-      await this.supabaseService.authClient.auth.resetPasswordForEmail(
+      await this.supabaseService.recoveryClient.auth.resetPasswordForEmail(
         normalizedEmail,
         {
           redirectTo: `${this.configService.getOrThrow<string>('WEB_URL')}/reset-password`,

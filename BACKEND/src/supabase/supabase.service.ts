@@ -26,6 +26,7 @@ type RecoveryIdentityCandidate = {
 export class SupabaseService {
   public client: TrustPaySupabaseClient;
   public authClient: TrustPaySupabaseClient;
+  public recoveryClient: TrustPaySupabaseClient;
   public adminClient?: TrustPaySupabaseClient;
 
   constructor(
@@ -43,6 +44,18 @@ export class SupabaseService {
 
     this.authClient = createClient(supabaseUrl, supabaseKey, {
       auth: {
+        autoRefreshToken: false,
+        persistSession: false,
+      },
+    });
+
+    // Recovery links are opened from an email client and may land in a
+    // different browser or device than the one that requested them. Keep
+    // this flow explicit so server-generated links never require a browser
+    // local PKCE verifier.
+    this.recoveryClient = createClient(supabaseUrl, supabaseKey, {
+      auth: {
+        flowType: 'implicit',
         autoRefreshToken: false,
         persistSession: false,
       },

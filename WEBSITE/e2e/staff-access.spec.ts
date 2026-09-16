@@ -49,6 +49,15 @@ test('registration errors explain known conflicts without exposing provider deta
   expect(getErrorMessage({ config: { url: '/api/auth/register' }, response: { status: 500, data: { message: 'private database details' } } }, 'failed')).not.toContain('private');
 });
 
+test('password recovery errors hide Supabase PKCE implementation details', async () => {
+  expect(
+    getErrorMessage(
+      new Error('PKCE code verifier not found in storage'),
+      'Password reset link is invalid or expired',
+    ),
+  ).toBe('This reset link is invalid or expired. Request a new one.');
+});
+
 test('client admin access requires an explicit backend ADMIN role', async () => {
   expect(hasAdminAccess({ role: 'USER' })).toBe(false);
   expect(hasAdminAccess({ role: 'USER', canAccessAdmin: true })).toBe(false);
