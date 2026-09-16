@@ -10,7 +10,11 @@ import React, {
   useState,
 } from "react";
 import { useRouter } from "next/navigation";
-import { createClient, isSupabaseConfigured } from "@/lib/supabase";
+import {
+  createClient,
+  createRecoveryClient,
+  isSupabaseConfigured,
+} from "@/lib/supabase";
 import type { Session, User as SupabaseUser } from "@supabase/supabase-js";
 import { authApi, getAuthDeviceName } from "@/services/api";
 import { hasAdminAccess } from "@/lib/admin-access";
@@ -447,7 +451,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const resetPassword = async (email: string) => {
-    const authClient = requireSupabase();
+    const authClient = createRecoveryClient();
     const { error } = await authClient.auth.resetPasswordForEmail(email, {
       redirectTo: `${window.location.origin}/reset-password`,
     });

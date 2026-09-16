@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -14,8 +14,7 @@ import {
 import { AuthShell } from "@/components/auth/auth-shell";
 import { toast } from "sonner";
 import { Eye, EyeOff, Loader2 } from "lucide-react";
-import { createClient } from "@/lib/supabase";
-import { useAuth } from "@/lib/auth-provider";
+import { createRecoveryClient } from "@/lib/supabase";
 import { getErrorMessage } from "@/lib/errors";
 import { useHydrated } from "@/lib/use-hydrated";
 
@@ -31,25 +30,23 @@ function ResetPasswordContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const recoveryCode = searchParams.get("code");
-  const { updatePassword } = useAuth();
+  const recoveryClient = useMemo(() => createRecoveryClient(), []);
 
   useEffect(() => {
     let isMounted = true;
 
     const prepareRecoverySession = async () => {
       try {
-        const supabase = createClient();
-
         if (recoveryCode) {
           const { error } =
-            await supabase.auth.exchangeCodeForSession(recoveryCode);
+            await recoveryClient.auth.exchangeCodeForSession(recoveryCode);
           if (error) throw error;
         }
 
         const {
           data: { session },
           error,
-        } = await supabase.auth.getSession();
+        } = await recoveryClient.auth.getSession();
 
         if (error) throw error;
         if (!session) {
@@ -75,7 +72,7 @@ function ResetPasswordContent() {
     return () => {
       isMounted = false;
     };
-  }, [recoveryCode]);
+  }, [recoveryCode, recoveryClient]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -97,8 +94,9 @@ function ResetPasswordContent() {
 
     setIsLoading(true);
     try {
-      await updatePassword(password);
-      await createClient().auth.signOut();
+      const { error } = await recoveryClient.auth.updateUser({ password });
+      if (error) throw error;
+      await recoveryClient.auth.signOut();
       toast.success("Password reset successfully");
       router.push("/");
     } catch (error: unknown) {
