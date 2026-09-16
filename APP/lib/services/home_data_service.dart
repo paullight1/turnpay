@@ -466,7 +466,7 @@ class KycGatePolicy {
     required String status,
     required String kycTier,
   }) {
-    return _isVerified(status) && _isTier2OrHigher(kycTier);
+    return _isVerified(status) && _isTier1OrHigher(kycTier);
   }
 
   static bool _isVerified(String status) {
@@ -480,6 +480,15 @@ class KycGatePolicy {
     final tierNumber = tierText == null ? null : int.tryParse(tierText);
 
     return tierNumber != null && tierNumber >= 2;
+  }
+
+  static bool _isTier1OrHigher(String kycTier) {
+    final normalized = kycTier.trim().toUpperCase();
+    final tierMatch = RegExp(r'\d+').firstMatch(normalized);
+    final tierText = tierMatch?.group(0);
+    final tierNumber = tierText == null ? null : int.tryParse(tierText);
+
+    return tierNumber != null && tierNumber >= 1;
   }
 }
 

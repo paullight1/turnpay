@@ -31,7 +31,7 @@ function buildSession(email: string): TestSession {
   const expiresIn = 60 * 60;
 
   return {
-    access_token: `access-token-${email}`,
+    access_token: `admin-access-token-${email}`,
     refresh_token: `refresh-token-${email}`,
     expires_in: expiresIn,
     expires_at: Math.floor(Date.now() / 1000) + expiresIn,
@@ -39,7 +39,7 @@ function buildSession(email: string): TestSession {
     user: {
       id: "user-123",
       email,
-      role: "USER",
+      role: "ADMIN",
     },
     authMode: "local",
   };
@@ -50,7 +50,7 @@ function buildProfile(email: string): TestProfile {
     id: "user-123",
     email,
     phone: "+2348012345678",
-    role: "USER",
+    role: "ADMIN",
     kycStatus: "VERIFIED",
   };
 }
@@ -145,7 +145,7 @@ test.describe("web session hardening", () => {
     await page.getByRole("button", { name: /sign in/i }).click();
     expect((await sessionResponse).ok()).toBe(true);
 
-    await expect(page).toHaveURL(/\/dashboard/);
+    await expect(page).toHaveURL(/\/admin/);
     await expect.poll(() => readStoredSession(page)).toBeNull();
 
     const visibleCookies = await page.evaluate(() => document.cookie);
@@ -169,13 +169,11 @@ test.describe("web session hardening", () => {
       },
     ]);
 
-    await page.goto("/dashboard/profile");
-    await expect(page.getByRole("heading", { name: /^Profile$/i })).toBeVisible({
-      timeout: 15000,
-    });
+    await page.goto("/admin");
+    await expect(page).toHaveURL(/\/admin/);
     await expect.poll(() => readStoredSession(page)).toBeNull();
 
     await page.getByRole("button", { name: /sign out/i }).click();
-    await expect(page).toHaveURL(/\/login/);
+    await expect(page).toHaveURL(/\/staff/);
   });
 });

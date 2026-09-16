@@ -22,9 +22,40 @@ import {
 import { marketingImages } from "@/lib/marketing";
 
 export const metadata: Metadata = {
-  title: "Exchange NGN and GHS | TrustPay",
+  title: "Exchange Naira to Cedis | NGN to GHS Rates",
   description:
-    "Exchange Nigerian naira and Ghanaian cedis with a clear quote, visible rate, and receipt.",
+    "Exchange Nigerian naira to Ghanaian cedis with TrustPay. See a clear NGN to GHS rate, transparent fee, final amount, and receipt before you continue.",
+  keywords: [
+    "naira to cedis",
+    "NGN to GHS",
+    "Nigerian naira to Ghanaian cedi",
+    "naira cedi exchange rate",
+    "send money Nigeria to Ghana",
+  ],
+  alternates: { canonical: "/exchange" },
+  openGraph: {
+    type: "website",
+    title: "Exchange Naira to Cedis | NGN to GHS Rates",
+    description:
+      "Get a clear NGN to GHS quote with transparent fees and a receipt from TrustPay.",
+    url: "/exchange",
+    siteName: "TrustPay",
+    images: [
+      {
+        url: "/opengraph-image",
+        width: 1200,
+        height: 630,
+        alt: "TrustPay Naira to Cedi exchange",
+      },
+    ],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Exchange Naira to Cedis | NGN to GHS Rates",
+    description:
+      "Get a clear NGN to GHS quote with transparent fees and a receipt from TrustPay.",
+    images: ["/twitter-image"],
+  },
 };
 
 const whatsappExchangeUrl =
@@ -56,6 +87,26 @@ const exchangeSteps = [
 export default function ExchangePage() {
   return (
     <MarketingShell>
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{
+          __html: JSON.stringify({
+            "@context": "https://schema.org",
+            "@type": "FinancialProduct",
+            name: "TrustPay Naira to Cedi Exchange",
+            description:
+              "Exchange Nigerian naira to Ghanaian cedis with a clear quote, transparent fees, and secure settlement.",
+            url: "https://trustpay.xyz/exchange",
+            provider: {
+              "@type": "Organization",
+              name: "TrustPay",
+              url: "https://trustpay.xyz",
+            },
+            areaServed: ["Nigeria", "Ghana"],
+            feesAndCommissionsSpecification: "Fees are shown before confirmation.",
+          }),
+        }}
+      />
       <PageHero
         eyebrow="Exchange"
         title="Exchange Naira to Cedis with TrustPay."

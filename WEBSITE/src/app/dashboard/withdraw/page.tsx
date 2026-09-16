@@ -17,6 +17,7 @@ import { useAuth } from "@/lib/auth-provider";
 import { getMoneyActionGate } from "@/lib/account-status";
 import { createMoneyAttemptIdempotencyKey } from "@/lib/idempotency";
 import { maskAccountNumber } from "@/lib/privacy";
+import { canonicalizeMoneyAmount } from "@/lib/money";
 
 export default function WithdrawPage() {
   const { profile } = useAuth();
@@ -32,6 +33,7 @@ export default function WithdrawPage() {
   const inFlightRef = useRef(false);
   const attemptKeyRef = useRef<string | null>(null);
   const moneyGate = getMoneyActionGate(profile);
+  const displayAmount = canonicalizeMoneyAmount(amount) ?? amount;
 
   const resetAttempt = () => {
     attemptKeyRef.current = null;
@@ -73,9 +75,14 @@ export default function WithdrawPage() {
 
     if (inFlightRef.current) return;
 
-    if (!amount || parseFloat(amount) <= 0) {
+    const canonicalAmount = canonicalizeMoneyAmount(amount);
+    if (!canonicalAmount) {
       toast.error("Please enter a valid amount");
       return;
+    }
+
+    if (amount !== canonicalAmount) {
+      setAmount(canonicalAmount);
     }
 
     if (!accountName) {
@@ -101,7 +108,7 @@ export default function WithdrawPage() {
       attemptKeyRef.current = idempotencyKey;
 
       await paymentApi.withdraw({
-        amount: parseFloat(amount),
+        amount: canonicalAmount,
         currency,
         bankCode,
         accountNumber,
@@ -219,12 +226,11 @@ export default function WithdrawPage() {
             <div className="flex flex-col gap-2">
               <Label>Amount</Label>
               <Input
-                type="number"
+                type="text"
+                inputMode="decimal"
                 placeholder="1000"
                 value={amount}
                 onChange={(e) => { setAmount(e.target.value); resetAttempt(); }}
-                min="1"
-                step="0.01"
               />
             </div>
 
@@ -239,7 +245,7 @@ export default function WithdrawPage() {
                   <div>
                     <p className="font-medium">Review withdrawal</p>
                     <p className="mt-1 text-muted-foreground">
-                      Confirm {currency} {Number(amount || 0).toFixed(2)} to {accountName} ({maskAccountNumber(accountNumber)}).
+                      Confirm {currency} {displayAmount} to {accountName} ({maskAccountNumber(accountNumber)}).
                     </p>
                   </div>
                 </div>

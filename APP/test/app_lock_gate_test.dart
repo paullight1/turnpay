@@ -19,7 +19,6 @@ void main() {
 
   setUp(() {
     authStateNotifier.reset();
-    TransactionSecurityService.debugResetEphemeralState();
   });
 
   testWidgets('app lock gate requires a PIN to unlock the app', (tester) async {
@@ -38,7 +37,7 @@ void main() {
         biometricEnabled: false,
         canUseBiometrics: false,
         hasBiometric: false,
-        biometricLabel: 'Biometric approval',
+        biometricLabel: 'Biometric app unlock',
       ),
       approvedPin: '2468',
     );
@@ -88,7 +87,7 @@ void main() {
         biometricEnabled: false,
         canUseBiometrics: false,
         hasBiometric: false,
-        biometricLabel: 'Biometric approval',
+        biometricLabel: 'Biometric app unlock',
       ),
       approvedPin: '2468',
     );
@@ -203,7 +202,7 @@ void main() {
         biometricEnabled: false,
         canUseBiometrics: false,
         hasBiometric: false,
-        biometricLabel: 'Biometric approval',
+        biometricLabel: 'Biometric app unlock',
       ),
       approvedPin: '2468',
       configLoader: () => configCompleter.future,
@@ -248,7 +247,7 @@ void main() {
         biometricEnabled: false,
         canUseBiometrics: false,
         hasBiometric: false,
-        biometricLabel: 'Biometric approval',
+        biometricLabel: 'Biometric app unlock',
       ),
       approvedPin: '2468',
     );
@@ -287,7 +286,7 @@ void main() {
         biometricEnabled: false,
         canUseBiometrics: false,
         hasBiometric: false,
-        biometricLabel: 'Biometric approval',
+        biometricLabel: 'Biometric app unlock',
       ),
       approvedPin: '2468',
     );
@@ -332,7 +331,7 @@ void main() {
         biometricEnabled: false,
         canUseBiometrics: false,
         hasBiometric: false,
-        biometricLabel: 'Biometric approval',
+        biometricLabel: 'Biometric app unlock',
       ),
       approvedPin: '2468',
       throwOnPinVerification: true,
@@ -463,7 +462,7 @@ void main() {
         biometricEnabled: false,
         canUseBiometrics: false,
         hasBiometric: false,
-        biometricLabel: 'Biometric approval',
+        biometricLabel: 'Biometric app unlock',
       ),
       approvedPin: '2468',
     );
@@ -494,7 +493,7 @@ void main() {
         biometricEnabled: false,
         canUseBiometrics: false,
         hasBiometric: false,
-        biometricLabel: 'Biometric approval',
+        biometricLabel: 'Biometric app unlock',
       ),
       approvedPin: '2468',
     );

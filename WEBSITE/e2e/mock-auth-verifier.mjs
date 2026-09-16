@@ -1,7 +1,7 @@
 import { createServer } from 'node:http';
 
-const HOST = '127.0.0.1';
-const PORT = 3100;
+const HOST = process.env.TRUSTPAY_E2E_AUTH_HOST || '127.0.0.1';
+const PORT = Number(process.env.TRUSTPAY_E2E_AUTH_PORT || 33100);
 const TEST_TOKEN_PREFIX = 'access-token-';
 const TEST_ADMIN_TOKEN_PREFIX = 'admin-access-token-';
 

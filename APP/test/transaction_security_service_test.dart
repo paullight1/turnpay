@@ -126,42 +126,45 @@ void main() {
     });
   });
 
-  group('biometric transaction approval cache', () {
+  group('biometric app unlock', () {
     setUp(() {
       FlutterSecureStorage.setMockInitialValues({});
-      TransactionSecurityService.debugResetEphemeralState();
     });
 
-    tearDown(TransactionSecurityService.debugResetEphemeralState);
-
-    test('returns the cached PIN only after biometric approval', () async {
+    test('does not expose a reusable transaction PIN after biometric approval',
+        () async {
       final service = _FakeTransactionSecurityService(approveBiometric: true);
       await service.savePin('2468', pinLength: 4);
 
       expect(
-        await service.unlockPinWithBiometric(reason: 'Approve transaction'),
-        '2468',
+        await service.authenticateBiometric(reason: 'Unlock TrustPay'),
+        isTrue,
       );
-    });
-
-    test('returns null when biometric approval is denied', () async {
-      final service = _FakeTransactionSecurityService(approveBiometric: false);
-      await service.savePin('2468', pinLength: 4);
-
       expect(
-        await service.unlockPinWithBiometric(reason: 'Approve transaction'),
+        await (const FlutterSecureStorage())
+            .read(key: 'trustpay_tx_pin_value'),
         isNull,
       );
     });
 
-    test('clears the cached approval PIN when the session is reset', () async {
+    test('biometric app unlock remains unavailable when denied', () async {
+      final service = _FakeTransactionSecurityService(approveBiometric: false);
+      await service.savePin('2468', pinLength: 4);
+
+      expect(
+        await service.authenticateBiometric(reason: 'Unlock TrustPay'),
+        isFalse,
+      );
+    });
+
+    test('clears legacy raw-PIN material when the session is reset', () async {
       final service = _FakeTransactionSecurityService(approveBiometric: true);
       await service.savePin('2468', pinLength: 4);
 
-      await service.clearEphemeralTransactionApproval();
-
+      await service.clearLegacyTransactionApprovalMaterial();
       expect(
-        await service.unlockPinWithBiometric(reason: 'Approve transaction'),
+        await (const FlutterSecureStorage())
+            .read(key: 'trustpay_tx_pin_value'),
         isNull,
       );
     });

@@ -152,3 +152,7 @@ calling a signed artifact production-ready, the release owner still needs:
 
 No signing credentials, provider secrets, live account identifiers or pins are
 stored in this repository or in this README.
+
+The exact external provisioning and server-verification requirements for Play
+Integrity and App Attest are recorded in
+[`docs/MOBILE-ATTESTATION-PROVISIONING.md`](docs/MOBILE-ATTESTATION-PROVISIONING.md).

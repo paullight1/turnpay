@@ -16,7 +16,7 @@ for (const path of [
   test(`staff cannot enter customer workspace ${path}`, async () => {
     const originalFetch = globalThis.fetch;
     globalThis.fetch = async () =>
-      Response.json({ user: { role: "USER", canAccessAdmin: true } });
+      Response.json({ user: { role: "ADMIN" } });
     try {
       const value = `base64-${Buffer.from(JSON.stringify({ access_token: "synthetic-access" })).toString("base64url")}`;
       const response = await proxy(
@@ -89,7 +89,7 @@ test("session handoff accepts fractional Supabase TTL and verifies the token", a
   const calls: string[] = [];
   globalThis.fetch = async (input) => {
     calls.push(String(input));
-    return Response.json({ user: { id: "synthetic-staff", canAccessAdmin: true } });
+    return Response.json({ user: { id: "synthetic-staff", role: "ADMIN" } });
   };
   try {
     const response = await POST(
@@ -191,7 +191,7 @@ test("authenticated staff screen offers account actions without another login fo
   const user = {
     id: "synthetic-staff",
     email: "staff-test@trustpayhq.com",
-    role: "USER",
+    role: "ADMIN",
     canAccessAdmin: true,
   };
   await page.route("**/api/auth/session", (route) =>
@@ -243,7 +243,7 @@ test("server admin gate sends the required idempotency key when verifying staff"
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async (_input, init) =>
     new Headers(init?.headers).has("Idempotency-Key")
-      ? Response.json({ user: { role: "USER", canAccessAdmin: true } })
+      ? Response.json({ user: { role: "ADMIN" } })
       : Response.json(
           { message: "Idempotency-Key header is required" },
           { status: 400 },

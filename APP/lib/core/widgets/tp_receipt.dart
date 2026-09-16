@@ -253,37 +253,42 @@ class TpReceiptCard extends StatelessWidget {
                 top: Radius.circular(AppRadius.xl),
               ),
             ),
-            child: Row(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Container(
-                  width: 48,
-                  height: 48,
-                  decoration: BoxDecoration(
-                    color: AppColors.primary.withValues(alpha: 0.12),
-                    shape: BoxShape.circle,
-                  ),
-                  child: Icon(
-                    Icons.receipt_long_rounded,
-                    color: AppColors.primary,
-                    size: 24,
-                  ),
-                ),
-                const SizedBox(width: AppSpacing.md),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        headerTitle,
-                        style: AppTextStyles.labelL
-                            .copyWith(fontWeight: FontWeight.w900),
+                Row(children: [
+                  Container(
+                    width: 48,
+                    height: 48,
+                    decoration: BoxDecoration(
+                      color: AppColors.primary.withValues(alpha: 0.12),
+                      shape: BoxShape.circle,
+                    ),
+                    child: ClipOval(
+                      child: Image.asset(
+                        'assets/icons/trustpay-logo.png',
+                        fit: BoxFit.contain,
+                        semanticLabel: 'TrustPay logo',
                       ),
-                      const SizedBox(height: 2),
-                      Text(headerSubtitle, style: AppTextStyles.bodyS),
-                    ],
+                    ),
                   ),
-                ),
-                const SizedBox(width: AppSpacing.sm),
+                  const SizedBox(width: AppSpacing.md),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          headerTitle,
+                          style: AppTextStyles.labelL
+                              .copyWith(fontWeight: FontWeight.w900),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(headerSubtitle, style: AppTextStyles.bodyS),
+                      ],
+                    ),
+                  ),
+                ]),
+                const SizedBox(height: AppSpacing.sm),
                 Container(
                   padding:
                       const EdgeInsets.symmetric(horizontal: 10, vertical: 4),

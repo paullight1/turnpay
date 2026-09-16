@@ -22,8 +22,10 @@ class AppConstants {
 
 const _productionApiBaseUrl = 'https://api.trustpayhq.com';
 const _productionWebsiteBaseUrl = 'https://trustpay.xyz';
-const _localApiPort = '3000';
-const _localWebsitePort = '3001';
+// Local development runs the API beside the Next.js admin panel. Keep these
+// ports explicit so Flutter web does not send API requests to the frontend.
+const _localApiPort = '3001';
+const _localWebsitePort = '3000';
 const _allowRemoteApiInDebug =
     bool.fromEnvironment('ALLOW_REMOTE_API_IN_DEBUG');
 

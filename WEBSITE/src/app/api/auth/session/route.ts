@@ -1,5 +1,9 @@
 import { NextResponse } from "next/server";
-import { hasAdminAccess } from '@/lib/admin-access';
+import { hasAdminAccess } from "@/lib/admin-access";
+import {
+  DEFAULT_API_ORIGIN,
+  resolveApiOrigin,
+} from "@/lib/api-origin";
 import { z } from "zod";
 import {
   buildClientSession,
@@ -14,7 +18,9 @@ import {
   encodeSessionCookie,
 } from "@/lib/server-auth-session";
 
-const apiBaseUrl = process.env.NEXT_PUBLIC_API_URL;
+const apiBaseUrl = resolveApiOrigin(undefined, {
+  fallback: DEFAULT_API_ORIGIN,
+});
 const LEGACY_CHUNK_COUNT = 8;
 
 const authSessionSchema = z.object({

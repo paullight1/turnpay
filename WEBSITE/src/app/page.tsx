@@ -3,23 +3,32 @@ import { LandingPage } from "@/components/marketing/landing-page";
 import { MarketingShell } from "@/components/marketing/marketing-shell";
 
 const description =
-  "TrustPay is a secure platform for multi-currency wallets, transfers, bill payments, and currency exchange.";
+  "Exchange Nigerian naira to Ghanaian cedis with TrustPay. Get a clear NGN to GHS quote, transparent fees, secure settlement, and a receipt.";
 
 export const metadata: Metadata = {
-  title: "TrustPay — Secure wallets, transfers & bill payments",
+  title: "Naira to Cedi Exchange — Secure NGN to GHS Quotes",
   description,
   alternates: { canonical: "/" },
   openGraph: {
     type: "website",
-    title: "TrustPay — Secure wallets, transfers & bill payments",
+    title: "Naira to Cedi Exchange — Secure NGN to GHS Quotes",
     description,
     siteName: "TrustPay",
     url: "/",
+    images: [
+      {
+        url: "/opengraph-image",
+        width: 1200,
+        height: 630,
+        alt: "Exchange Nigerian naira to Ghanaian cedis with TrustPay",
+      },
+    ],
   },
   twitter: {
     card: "summary_large_image",
-    title: "TrustPay — Secure wallets, transfers & bill payments",
+    title: "Naira to Cedi Exchange — Secure NGN to GHS Quotes",
     description,
+    images: ["/twitter-image"],
   },
 };
 

@@ -134,6 +134,7 @@ export default function DashboardLayout({
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [isSigningOut, setIsSigningOut] = useState(false);
+  const [signOutError, setSignOutError] = useState<string | null>(null);
   const [isNavigating, setIsNavigating] = useState(false);
   const [pullDistance, setPullDistance] = useState(0);
   const pullStartY = useRef<number | null>(null);
@@ -211,8 +212,11 @@ export default function DashboardLayout({
 
   const handleSignOut = async () => {
     setIsSigningOut(true);
+    setSignOutError(null);
     try {
       await signOut();
+    } catch {
+      setSignOutError("Could not complete secure sign out. Please try again.");
     } finally {
       setIsSigningOut(false);
     }
@@ -367,6 +371,14 @@ export default function DashboardLayout({
           )}
         </aside>
         <main className="trustpay-dashboard-motion min-w-0 flex-1 bg-[#0c1015] p-4 sm:p-6 lg:p-8">
+          {signOutError && (
+            <div
+              role="alert"
+              className="mx-auto mb-4 max-w-3xl rounded-lg border border-red-400/40 bg-red-950/40 px-4 py-3 text-sm text-red-200"
+            >
+              {signOutError}
+            </div>
+          )}
           {children}
         </main>
       </div>

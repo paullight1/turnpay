@@ -24,7 +24,8 @@ class AuthService {
 
     return _persistSession(
       response.data,
-      clearTransactionApprovalCache: true,
+      email: _normalizeEmail(email),
+      clearLegacyTransactionApprovalMaterial: true,
     );
   }
 
@@ -52,7 +53,8 @@ class AuthService {
 
     return _persistSession(
       response.data,
-      clearTransactionApprovalCache: true,
+      email: _normalizeEmail(email),
+      clearLegacyTransactionApprovalMaterial: true,
     );
   }
 
@@ -198,7 +200,8 @@ class AuthService {
 
   Future<bool> _persistSession(
     dynamic payload, {
-    bool clearTransactionApprovalCache = false,
+    String? email,
+    bool clearLegacyTransactionApprovalMaterial = false,
   }) async {
     if (payload is! Map<String, dynamic>) {
       return false;
@@ -214,14 +217,15 @@ class AuthService {
       return false;
     }
 
-    if (clearTransactionApprovalCache) {
-      await _apiClient.clearTransactionApproval();
+    if (clearLegacyTransactionApprovalMaterial) {
+      await _apiClient.clearLegacyTransactionApprovalMaterial();
     }
 
     final refreshToken = session['refresh_token'];
     await _apiClient.saveSession(
       accessToken: accessToken,
       refreshToken: refreshToken is String ? refreshToken : null,
+      email: email,
     );
 
     // A valid session clears any lingering "session expired" signal.

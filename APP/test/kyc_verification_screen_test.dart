@@ -70,23 +70,34 @@ void main() {
     expect(find.text('KYC verification'), findsOneWidget);
     expect(
       find.text(
-          'Verify your identity in a few short steps. No document upload is required.'),
+          'Two quick checks: NIN first, then BVN. No document upload is required.'),
       findsOneWidget,
     );
     expect(find.text('Country'), findsNothing);
     expect(find.text('Current access'), findsNothing);
     expect(find.text('Nigeria'), findsNothing);
     expect(find.text('Ghana'), findsNothing);
-    expect(find.textContaining('Tier 1'), findsOneWidget);
+    expect(find.textContaining('Step 1 of 2'), findsOneWidget);
     expect(find.text('NIN'), findsNothing);
     expect(find.byKey(const ValueKey('kyc-identity-number')), findsNothing);
     await tester.enterText(find.byType(TextField).at(0), 'Ada');
     await tester.enterText(find.byType(TextField).at(1), 'Lovelace');
     await tester.tap(find.text('Continue'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Continue'));
+    await tester.scrollUntilVisible(
+      find.byType(ElevatedButton).last,
+      120,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.tap(find.byType(ElevatedButton).last);
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('kyc-identity-number')), findsOneWidget);
+    expect(
+        tester
+            .widget<TextField>(
+                find.byKey(const ValueKey('kyc-identity-number')))
+            .obscureText,
+        isFalse);
     expect(find.text('Date of birth'), findsNothing);
     await tester.enterText(
       find.byKey(const ValueKey('kyc-identity-number')),
@@ -129,7 +140,12 @@ void main() {
     await tester.enterText(find.byType(TextField).at(1), 'Lovelace');
     await tester.tap(find.text('Continue'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Continue'));
+    await tester.scrollUntilVisible(
+      find.byType(ElevatedButton).last,
+      120,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.tap(find.byType(ElevatedButton).last);
     await tester.pumpAndSettle();
     await tester.enterText(
       find.byKey(const ValueKey('kyc-identity-number')),

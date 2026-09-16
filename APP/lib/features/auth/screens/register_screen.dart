@@ -211,11 +211,11 @@ class _RegisterScreenState extends State<RegisterScreen> {
             return AlertDialog(
               backgroundColor: AppColors.surface,
               title: Text(
-                'Enable biometric approval',
+                'Enable biometric app unlock',
                 style: AppTextStyles.headingM,
               ),
               content: Text(
-                'Use ${config.biometricLabel} to unlock your transaction PIN before money actions.',
+                'Use ${config.biometricLabel} to unlock the TrustPay app after it locks. Money actions still require a freshly entered transaction PIN.',
                 style: AppTextStyles.bodyM,
               ),
               actions: [
@@ -246,7 +246,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
     if (!shouldEnable) return;
 
     final approved = await _securityService.authenticateBiometric(
-      reason: 'Enable ${config.biometricLabel} for TrustPay transactions',
+      reason: 'Enable ${config.biometricLabel} for TrustPay app unlock',
     );
     if (!approved) {
       _showError('Biometric setup was not completed.');

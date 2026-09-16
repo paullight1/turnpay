@@ -1,10 +1,16 @@
 import { randomUUID } from "crypto";
+import {
+  DEFAULT_API_ORIGIN,
+  resolveApiOrigin,
+} from "@/lib/api-origin";
 
 export const SESSION_COOKIE_NAME = "supabase.auth.token";
 export const CSRF_COOKIE_NAME = "trustpay.csrf-token";
 export const SESSION_COOKIE_MAX_AGE_SECONDS = 30 * 24 * 60 * 60;
 
-const apiBaseUrl = process.env.NEXT_PUBLIC_API_URL;
+const apiBaseUrl = resolveApiOrigin(undefined, {
+  fallback: DEFAULT_API_ORIGIN,
+});
 const isSecureCookie = process.env.NODE_ENV === "production";
 
 function isHttpLoopback(requestUrl?: string) {

@@ -389,7 +389,7 @@ class _FakeTransactionSecurityService extends TransactionSecurityService {
       biometricEnabled: false,
       canUseBiometrics: false,
       hasBiometric: false,
-      biometricLabel: 'Biometric approval',
+      biometricLabel: 'Biometric app unlock',
     );
   }
 }

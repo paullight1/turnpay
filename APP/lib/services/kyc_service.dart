@@ -23,7 +23,7 @@ class KycService {
 
     return KycOverview.fromJson(
       {
-        'provider': 'NINJA',
+        'provider': 'MONNIFY',
         'kycStatus': _asString(userMap['kycStatus'], fallback: 'PENDING'),
         'kycTier': _asString(userMap['kycTier'], fallback: 'TIER_0'),
         'documents': documents.map((document) => document.toJson()).toList(),
@@ -150,7 +150,7 @@ class KycOverview {
           json['provider'],
           latest['provider'],
           kyc['provider'],
-        ], fallback: 'NINJA'),
+        ], fallback: 'MONNIFY'),
       ),
       reference: _firstString([
         json['reference'],
@@ -265,7 +265,7 @@ class KycVerificationResult {
         ),
       ),
       provider: _displayProvider(
-        _firstString([json['provider']], fallback: 'NINJA'),
+        _firstString([json['provider']], fallback: 'MONNIFY'),
       ),
       reference: _firstString([
         json['reference'],
@@ -342,6 +342,7 @@ String _normalizedTier(String value) {
 
 String _displayProvider(String value) {
   final normalized = value.trim().toUpperCase().replaceAll('-', '_');
+  if (normalized == 'MONNIFY') return 'Monnify';
   if (normalized == 'NINJA') return 'Ninja';
   if (normalized == 'YOUVERIFY') return 'Youverify';
   if (normalized == 'MANUAL_REVIEW') return 'Manual review';

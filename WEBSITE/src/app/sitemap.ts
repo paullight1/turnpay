@@ -26,6 +26,6 @@ export default function sitemap(): MetadataRoute.Sitemap {
     url: `${siteUrl}${route}`,
     lastModified,
     changeFrequency: "weekly",
-    priority: route === "" ? 1 : 0.7,
+    priority: route === "" || route === "/exchange" ? 1 : 0.7,
   }));
 }

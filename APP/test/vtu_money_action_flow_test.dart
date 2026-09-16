@@ -162,6 +162,13 @@ void main() {
     );
 
     expect(find.text('Continue to card details'), findsOneWidget);
+    expect(find.text('Renew current package'), findsNothing);
+    expect(
+      find.text(
+          'Renew current package — Coming soon. You can still select and buy a package using Change package.'),
+      findsOneWidget,
+    );
+    expect(find.text('Change package'), findsOneWidget);
     expect(find.text('Smart card / IUC number'), findsNothing);
     await tester.tap(find.text('Continue to card details'));
     await tester.pump();

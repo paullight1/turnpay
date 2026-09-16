@@ -61,7 +61,9 @@ class _AppLockGateState extends ConsumerState<AppLockGate>
   bool _isForeground = true;
   bool _biometricPromptInProgress = false;
   bool _lockCheckQueued = false;
+  bool _usingAccountPassword = false;
   String _pin = '';
+  String _accountPassword = '';
   String? _error;
   TransactionSecurityConfig? _config;
   DateTime? _lastActivityAt;
@@ -102,7 +104,7 @@ class _AppLockGateState extends ConsumerState<AppLockGate>
         state == AppLifecycleState.detached) {
       _isForeground = false;
       _inactivityTimer?.cancel();
-      unawaited(_clearEphemeralApprovalSafely());
+      unawaited(_clearLegacyTransactionMaterialSafely());
       unawaited(_notifyNativePrivacy('show'));
 
       final promptInProgress = _biometricPromptInProgress;
@@ -113,6 +115,7 @@ class _AppLockGateState extends ConsumerState<AppLockGate>
           if (!promptInProgress) {
             _locked = true;
             _pin = '';
+            _accountPassword = '';
             _error = null;
           }
         });
@@ -136,6 +139,7 @@ class _AppLockGateState extends ConsumerState<AppLockGate>
             _ready = false;
             _locked = true;
             _pin = '';
+            _accountPassword = '';
             _error = null;
           });
         }
@@ -359,6 +363,7 @@ class _AppLockGateState extends ConsumerState<AppLockGate>
     setState(() {
       _locked = true;
       _pin = '';
+      _accountPassword = '';
       _error = null;
     });
   }
@@ -392,6 +397,69 @@ class _AppLockGateState extends ConsumerState<AppLockGate>
       _pin = _pin.substring(0, _pin.length - 1);
       _error = null;
     });
+  }
+
+  void _toggleAccountPassword() {
+    if (_verifying) return;
+    setState(() {
+      _usingAccountPassword = !_usingAccountPassword;
+      _pin = '';
+      _accountPassword = '';
+      _error = null;
+    });
+  }
+
+  void _setAccountPassword(String value) {
+    if (_verifying) return;
+    setState(() {
+      _accountPassword = value;
+      _error = null;
+    });
+  }
+
+  Future<void> _verifyAccountPassword() async {
+    if (_verifying || _accountPassword.isEmpty) return;
+
+    final email = await _apiClient.readAccountEmail();
+    if (!mounted) return;
+    if (email == null || email.isEmpty) {
+      setState(() {
+        _error =
+            'Your session needs a full sign-in. Log out and sign in again.';
+      });
+      return;
+    }
+
+    setState(() => _verifying = true);
+    try {
+      final approved = await widget.authService.login(
+        email: email,
+        password: _accountPassword,
+      );
+      if (!mounted) return;
+      if (approved && _isForeground && !authStateNotifier.sessionExpired) {
+        setState(() {
+          _locked = false;
+          _verifying = false;
+          _accountPassword = '';
+          _error = null;
+        });
+        _markSuccessfulActivity();
+        return;
+      }
+      setState(() {
+        _verifying = false;
+        _accountPassword = '';
+        _error = 'Incorrect password. Try again.';
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _verifying = false;
+        _accountPassword = '';
+        _error = authErrorMessage(error, 'Incorrect password. Try again.');
+      });
+    }
   }
 
   Future<void> _verifyPin() async {
@@ -652,10 +720,15 @@ class _AppLockGateState extends ConsumerState<AppLockGate>
                 config: _config,
                 pinLength: _config?.pinLength ?? 4,
                 pinLengthEntered: _pin.length,
+                usingAccountPassword: _usingAccountPassword,
+                accountPassword: _accountPassword,
                 error: _error,
                 verifying: _verifying,
                 onDigit: _appendDigit,
                 onDelete: _deleteDigit,
+                onPasswordChanged: _setAccountPassword,
+                onPasswordSubmit: _verifyAccountPassword,
+                onTogglePassword: _toggleAccountPassword,
                 onBiometric: _useBiometric,
                 onLogout: _logout,
               ),
@@ -676,12 +749,12 @@ class _AppLockGateState extends ConsumerState<AppLockGate>
     }
   }
 
-  Future<void> _clearEphemeralApprovalSafely() async {
+  Future<void> _clearLegacyTransactionMaterialSafely() async {
     try {
-      await widget.securityService.clearEphemeralTransactionApproval();
+      await widget.securityService.clearLegacyTransactionApprovalMaterial();
     } catch (_) {
-      // Leaving the in-memory approval uncleared is handled by the service's
-      // next auth boundary; this lifecycle callback must not crash the app.
+      // Legacy raw-PIN cleanup is best effort; this lifecycle callback must
+      // not crash the app or block the app lock boundary.
     }
   }
 
@@ -721,10 +794,15 @@ class _LockOverlay extends StatelessWidget {
   final TransactionSecurityConfig? config;
   final int pinLength;
   final int pinLengthEntered;
+  final bool usingAccountPassword;
+  final String accountPassword;
   final String? error;
   final bool verifying;
   final ValueChanged<String> onDigit;
   final VoidCallback onDelete;
+  final ValueChanged<String> onPasswordChanged;
+  final VoidCallback onPasswordSubmit;
+  final VoidCallback onTogglePassword;
   final VoidCallback onBiometric;
   final VoidCallback onLogout;
 
@@ -732,10 +810,15 @@ class _LockOverlay extends StatelessWidget {
     required this.config,
     required this.pinLength,
     required this.pinLengthEntered,
+    required this.usingAccountPassword,
+    required this.accountPassword,
     required this.error,
     required this.verifying,
     required this.onDigit,
     required this.onDelete,
+    required this.onPasswordChanged,
+    required this.onPasswordSubmit,
+    required this.onTogglePassword,
     required this.onBiometric,
     required this.onLogout,
   });
@@ -795,23 +878,38 @@ class _LockOverlay extends StatelessWidget {
                 textAlign: TextAlign.center,
               ),
               const SizedBox(height: AppSpacing.xl),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: List.generate(
-                  pinLength,
-                  (index) => Container(
-                    width: 16,
-                    height: 16,
-                    margin: const EdgeInsets.symmetric(horizontal: 6),
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: index < pinLengthEntered
-                          ? AppColors.primary
-                          : AppColors.border,
+              if (usingAccountPassword)
+                TextField(
+                  key: const ValueKey('app-lock-account-password'),
+                  autofocus: true,
+                  obscureText: true,
+                  enabled: !verifying,
+                  textInputAction: TextInputAction.done,
+                  onChanged: onPasswordChanged,
+                  onSubmitted: (_) => onPasswordSubmit(),
+                  decoration: const InputDecoration(
+                    labelText: 'Account password',
+                    hintText: 'Enter your account password',
+                  ),
+                )
+              else
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: List.generate(
+                    pinLength,
+                    (index) => Container(
+                      width: 16,
+                      height: 16,
+                      margin: const EdgeInsets.symmetric(horizontal: 6),
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: index < pinLengthEntered
+                            ? AppColors.primary
+                            : AppColors.border,
+                      ),
                     ),
                   ),
                 ),
-              ),
               if (error != null) ...[
                 const SizedBox(height: AppSpacing.md),
                 Text(
@@ -828,49 +926,74 @@ class _LockOverlay extends StatelessWidget {
                   child: CircularProgressIndicator(strokeWidth: 2.4),
                 ),
               ],
+              if (usingAccountPassword) ...[
+                const SizedBox(height: AppSpacing.lg),
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton(
+                    onPressed: verifying || accountPassword.isEmpty
+                        ? null
+                        : onPasswordSubmit,
+                    child: const Text('Unlock'),
+                  ),
+                ),
+              ],
               const Spacer(),
-              GridView.count(
-                crossAxisCount: 3,
-                shrinkWrap: true,
-                childAspectRatio: 1.5,
-                physics: const NeverScrollableScrollPhysics(),
-                children: [
-                  for (final digit in const [
-                    '1',
-                    '2',
-                    '3',
-                    '4',
-                    '5',
-                    '6',
-                    '7',
-                    '8',
-                    '9'
-                  ])
-                    _LockKeyButton(
-                      label: digit,
-                      enabled: !verifying,
-                      onTap: () => onDigit(digit),
+              if (!usingAccountPassword)
+                GridView.count(
+                  crossAxisCount: 3,
+                  shrinkWrap: true,
+                  childAspectRatio: 1.5,
+                  physics: const NeverScrollableScrollPhysics(),
+                  children: [
+                    for (final digit in const [
+                      '1',
+                      '2',
+                      '3',
+                      '4',
+                      '5',
+                      '6',
+                      '7',
+                      '8',
+                      '9'
+                    ])
+                      _LockKeyButton(
+                        label: digit,
+                        enabled: !verifying,
+                        onTap: () => onDigit(digit),
+                      ),
+                    _LockIconButton(
+                      icon: allowBiometric
+                          ? biometricIcon
+                          : Icons.circle_outlined,
+                      enabled: allowBiometric && !verifying,
+                      onTap: onBiometric,
+                      tooltip: allowBiometric
+                          ? 'Unlock with ${config!.biometricLabel}'
+                          : null,
                     ),
-                  _LockIconButton(
-                    icon:
-                        allowBiometric ? biometricIcon : Icons.circle_outlined,
-                    enabled: allowBiometric && !verifying,
-                    onTap: onBiometric,
-                    tooltip: allowBiometric
-                        ? 'Unlock with ${config!.biometricLabel}'
-                        : null,
+                    _LockKeyButton(
+                      label: '0',
+                      enabled: !verifying,
+                      onTap: () => onDigit('0'),
+                    ),
+                    _LockIconButton(
+                      icon: Icons.backspace_outlined,
+                      enabled: !verifying && pinLengthEntered > 0,
+                      onTap: onDelete,
+                    ),
+                  ],
+                ),
+              TextButton(
+                onPressed: verifying ? null : onTogglePassword,
+                child: Text(
+                  usingAccountPassword
+                      ? 'Use transaction PIN'
+                      : 'Use account password',
+                  style: AppTextStyles.labelM.copyWith(
+                    color: AppColors.primary,
                   ),
-                  _LockKeyButton(
-                    label: '0',
-                    enabled: !verifying,
-                    onTap: () => onDigit('0'),
-                  ),
-                  _LockIconButton(
-                    icon: Icons.backspace_outlined,
-                    enabled: !verifying && pinLengthEntered > 0,
-                    onTap: onDelete,
-                  ),
-                ],
+                ),
               ),
             ],
           ),

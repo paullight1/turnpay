@@ -310,7 +310,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             hasSession: true,
             error: error instanceof Error ? error.message : "Unknown error",
           });
-          await clearSupabaseSession();
+          await clearSupabaseSession().catch(() => undefined);
           throw error;
         }
       } else {
@@ -336,7 +336,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       );
     } catch (error) {
       sessionGeneration.current += 1;
-      await clearSupabaseSession();
+      await clearSupabaseSession().catch(() => undefined);
       if (supabase)
         await supabase.auth.signOut({ scope: "local" }).catch(() => undefined);
       applySession(null);
@@ -385,7 +385,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             hasSession: true,
             error: error instanceof Error ? error.message : "Unknown error",
           });
-          await clearSupabaseSession();
+          await clearSupabaseSession().catch(() => undefined);
           throw error;
         }
       } else {
@@ -408,18 +408,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signOut = async () => {
     const destination = hasAdminAccess(profile) ? "/staff" : "/login";
-    try {
-      if (session) {
-        await authApi.logout(session.refresh_token || undefined);
-      }
-    } finally {
-      await clearSupabaseSession();
-      if (supabase && session?.authMode !== "local") {
-        await supabase.auth.signOut();
-      }
-      applySession(null);
-      router.replace(destination);
+    if (session) {
+      await authApi.logout(session.refresh_token || undefined);
     }
+
+    // Keep the authenticated UI mounted until the HttpOnly cookie cleanup has
+    // succeeded. A rejected CSRF cleanup must remain visible and retryable.
+    await clearSupabaseSession();
+    if (supabase && session?.authMode !== "local") {
+      await supabase.auth.signOut().catch(() => undefined);
+    }
+    applySession(null);
+    router.replace(destination);
   };
 
   const refreshSession = async () => {
@@ -440,7 +440,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         hasSession: true,
         error: error instanceof Error ? error.message : "Unknown error",
       });
-      await clearSupabaseSession();
+      await clearSupabaseSession().catch(() => undefined);
       applySession(null);
       throw error;
     }

@@ -1,4 +1,8 @@
 import { hasAdminAccess } from "@/lib/admin-access";
+import {
+  DEFAULT_API_ORIGIN,
+  resolveApiOrigin,
+} from "@/lib/api-origin";
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { createServerClient } from "@supabase/ssr";
@@ -14,7 +18,56 @@ const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseAnonKey =
   process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ||
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-const apiBaseUrl = process.env.NEXT_PUBLIC_API_URL;
+const apiBaseUrl = resolveApiOrigin(undefined, {
+  fallback: DEFAULT_API_ORIGIN,
+});
+
+const SUPABASE_ORIGIN = resolvePublicHttpOrigin(
+  process.env.NEXT_PUBLIC_SUPABASE_URL,
+);
+const TAWK_HTTPS =
+  "https://*.tawk.to https://embed.tawk.to https://va.tawk.to";
+const TAWK_WSS = "wss://*.tawk.to";
+
+function resolvePublicHttpOrigin(value: string | undefined) {
+  if (!value) return "";
+
+  try {
+    const url = new URL(value);
+    const isLoopbackHttp =
+      url.protocol === "http:" &&
+      ["localhost", "127.0.0.1", "::1", "[::1]"].includes(url.hostname);
+    return url.protocol === "https:" || isLoopbackHttp ? url.origin : "";
+  } catch {
+    return "";
+  }
+}
+
+function createContentSecurityPolicy(nonce: string) {
+  const isDev = process.env.NODE_ENV !== "production";
+  const devScriptPolicy = isDev ? " 'unsafe-eval'" : "";
+
+  return [
+    "default-src 'self'",
+    "base-uri 'self'",
+    "frame-ancestors 'none'",
+    "object-src 'none'",
+    "form-action 'self'",
+    "img-src 'self' data: https:",
+    "font-src 'self' data:",
+    // React style props render style attributes; keep those working while
+    // protecting every executable inline script with the request nonce.
+    "style-src 'self' 'unsafe-inline' https://*.tawk.to",
+    `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'${devScriptPolicy} https://embed.tawk.to https://*.tawk.to`,
+    `connect-src 'self' ${apiBaseUrl} ${SUPABASE_ORIGIN} https://*.supabase.co ${TAWK_HTTPS} ${TAWK_WSS} ${isDev ? "http://localhost:* http://127.0.0.1:* ws://localhost:* ws://127.0.0.1:*" : ""}`
+      .replace(/\s+/g, " ")
+      .trim(),
+    `frame-src 'self' ${TAWK_HTTPS}`,
+  ]
+    .join("; ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
 
 const PROTECTED_ROUTES = ["/dashboard"];
 const ADMIN_ROUTES = ["/admin"];
@@ -109,7 +162,17 @@ export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
   if (pathname === '/login') return NextResponse.redirect(new URL('/staff', request.url));
   if (pathname === '/register') return NextResponse.redirect(new URL('/download', request.url));
-  const response = NextResponse.next();
+  const nonce = Buffer.from(crypto.randomUUID()).toString("base64");
+  const contentSecurityPolicy = createContentSecurityPolicy(nonce);
+  const requestHeaders = new Headers(request.headers);
+  requestHeaders.set("x-nonce", nonce);
+  requestHeaders.set("Content-Security-Policy", contentSecurityPolicy);
+  const response = NextResponse.next({
+    request: {
+      headers: requestHeaders,
+    },
+  });
+  response.headers.set("Content-Security-Policy", contentSecurityPolicy);
 
   const isProtected = PROTECTED_ROUTES.some(
     (route) => pathname === route || pathname.startsWith(`${route}/`),
@@ -255,5 +318,11 @@ export async function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/dashboard/:path*", "/admin/:path*", "/login", "/register"],
+  matcher: [
+    {
+      // Apply the nonce to every HTML/RSC page while leaving API handlers and
+      // static assets on their own response path.
+      source: "/((?!api|_next/static|_next/image|favicon.ico).*)",
+    },
+  ],
 };

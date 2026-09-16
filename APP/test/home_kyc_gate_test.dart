@@ -79,7 +79,7 @@ void main() {
       );
     });
 
-    test('only reveals virtual account numbers after complete KYC', () {
+    test('reveals limited virtual account numbers after Tier 1 KYC', () {
       expect(
         KycGatePolicy.canRevealVirtualAccount(
           status: 'PENDING',
@@ -92,7 +92,7 @@ void main() {
           status: 'VERIFIED',
           kycTier: 'TIER_1',
         ),
-        false,
+        true,
       );
       expect(
         KycGatePolicy.canRevealVirtualAccount(

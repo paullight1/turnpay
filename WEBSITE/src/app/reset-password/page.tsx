@@ -100,7 +100,7 @@ function ResetPasswordContent() {
       await updatePassword(password);
       await createClient().auth.signOut();
       toast.success("Password reset successfully");
-      router.push("/login");
+      router.push("/");
     } catch (error: unknown) {
       toast.error(getErrorMessage(error, "Failed to reset password"));
     } finally {

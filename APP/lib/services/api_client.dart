@@ -14,6 +14,7 @@ import 'secure_transport_factory.dart';
 class ApiClient {
   static const _accessTokenKey = 'trustpay_access_token';
   static const _refreshTokenKey = 'trustpay_refresh_token';
+  static const _accountEmailKey = 'trustpay_account_email';
   static const _storage = FlutterSecureStorage();
   static const _uuid = Uuid();
   static final _transactionSecurity = TransactionSecurityService();
@@ -93,9 +94,14 @@ class ApiClient {
     return _storage.read(key: _refreshTokenKey);
   }
 
+  Future<String?> readAccountEmail() {
+    return _storage.read(key: _accountEmailKey);
+  }
+
   Future<void> saveSession({
     required String accessToken,
     String? refreshToken,
+    String? email,
   }) async {
     final subject = _jwtSubject(accessToken);
     if (subject == null) {
@@ -108,16 +114,23 @@ class ApiClient {
     if (refreshToken != null && refreshToken.isNotEmpty) {
       await _storage.write(key: _refreshTokenKey, value: refreshToken);
     }
+    if (email != null && email.trim().isNotEmpty) {
+      await _storage.write(
+        key: _accountEmailKey,
+        value: email.trim().toLowerCase(),
+      );
+    }
   }
 
   Future<void> clearSession() async {
     await _storage.delete(key: _accessTokenKey);
     await _storage.delete(key: _refreshTokenKey);
+    await _storage.delete(key: _accountEmailKey);
     await _transactionSecurity.clearAllDevicePinState();
   }
 
-  Future<void> clearTransactionApproval() {
-    return _transactionSecurity.clearEphemeralTransactionApproval();
+  Future<void> clearLegacyTransactionApprovalMaterial() {
+    return _transactionSecurity.clearLegacyTransactionApprovalMaterial();
   }
 
   bool _shouldRefresh(DioException error) {

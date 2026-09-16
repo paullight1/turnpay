@@ -12,7 +12,6 @@ class TransactionSecurityConfig {
   final bool biometricEnabled;
   final bool canUseBiometrics;
   final bool hasBiometric;
-  final bool hasBiometricApprovalSession;
   final String biometricLabel;
 
   const TransactionSecurityConfig({
@@ -21,15 +20,12 @@ class TransactionSecurityConfig {
     required this.biometricEnabled,
     required this.canUseBiometrics,
     required this.hasBiometric,
-    this.hasBiometricApprovalSession = false,
     required this.biometricLabel,
   });
 
   bool get shouldOfferBiometrics =>
       canUseBiometrics && hasBiometric && biometricEnabled;
 
-  bool get canUnlockTransactionPinWithBiometrics =>
-      shouldOfferBiometrics && hasBiometricApprovalSession;
 }
 
 class TransactionSecurityService {
@@ -45,7 +41,6 @@ class TransactionSecurityService {
   static const _pinFailedAttemptsKey = 'trustpay_tx_pin_failed_attempts';
   static const _pinLockedUntilKey = 'trustpay_tx_pin_locked_until';
   static const _activeUserKey = 'trustpay_tx_pin_active_user';
-  static String? _ephemeralApprovalPin;
 
   final LocalAuthentication _localAuth = LocalAuthentication();
 
@@ -64,14 +59,13 @@ class TransactionSecurityService {
         biometricEnabled: false,
         canUseBiometrics: false,
         hasBiometric: false,
-        hasBiometricApprovalSession: _hasCachedApprovalPin,
-        biometricLabel: 'Biometric approval',
+        biometricLabel: 'Biometric app unlock',
       );
     }
 
     bool canAuthenticate = false;
     bool hasBiometric = false;
-    String biometricLabel = 'Biometric approval';
+    String biometricLabel = 'Biometric app unlock';
 
     try {
       canAuthenticate = await _localAuth.canCheckBiometrics ||
@@ -94,7 +88,6 @@ class TransactionSecurityService {
       biometricEnabled: biometricEnabled,
       canUseBiometrics: canAuthenticate,
       hasBiometric: hasBiometric,
-      hasBiometricApprovalSession: _hasCachedApprovalPin,
       biometricLabel: biometricLabel,
     );
   }
@@ -108,7 +101,6 @@ class TransactionSecurityService {
     await _storage.write(key: _pinSaltKey, value: saltB64);
     await _storage.write(key: _pinHashKey, value: digest);
     await _storage.write(key: _pinLengthKey, value: '$pinLength');
-    _cacheApprovalPin(pin);
     await _clearPinFailures();
   }
 
@@ -131,7 +123,6 @@ class TransactionSecurityService {
   }
 
   Future<void> clearAllDevicePinState() async {
-    _ephemeralApprovalPin = null;
     await _clearPersistedPinState();
     await _storage.delete(key: _activeUserKey);
   }
@@ -151,7 +142,6 @@ class TransactionSecurityService {
 
     final approved = await _matchesStoredPin(pin);
     if (approved) {
-      _cacheApprovalPin(pin);
       await _clearPinFailures();
       return const PinVerificationResult.approved();
     }
@@ -188,9 +178,6 @@ class TransactionSecurityService {
     await markBiometricPromptSeen();
     await _storage.delete(key: _faceIdKey);
     await _storage.delete(key: _fingerprintKey);
-    if (!enabled) {
-      _ephemeralApprovalPin = null;
-    }
   }
 
   /// Returns whether the one-time biometric setup prompt has already been
@@ -222,32 +209,12 @@ class TransactionSecurityService {
     }
   }
 
-  /// Reveals the current-session PIN after a successful biometric prompt so it
-  /// can be re-sent to the server for money-action authorization.
+  /// Removes the legacy raw-PIN key used by older app versions.
   ///
-  /// The PIN is never persisted at rest. A future launch step should replace
-  /// the in-memory cache with OS-bound keystore/keychain wrapping so biometric
-  /// enrollment changes and device compromise signals can invalidate approval
-  /// without relying on session memory alone.
-  Future<String?> unlockPinWithBiometric({
-    required String reason,
-  }) async {
-    await _purgeLegacyStoredPinValue();
-    final approved = await authenticateBiometric(reason: reason);
-    if (!approved) {
-      return null;
-    }
-
-    final pin = _ephemeralApprovalPin;
-    if (pin == null || !RegExp(r'^\d{4,6}$').hasMatch(pin)) {
-      return null;
-    }
-
-    return pin;
-  }
-
-  Future<void> clearEphemeralTransactionApproval() async {
-    _ephemeralApprovalPin = null;
+  /// Biometric app unlock never yields or replays a transaction PIN. Money
+  /// actions must collect a fresh PIN and send it through the normal server
+  /// verification path until an OS-bound server challenge is implemented.
+  Future<void> clearLegacyTransactionApprovalMaterial() async {
     await _purgeLegacyStoredPinValue();
   }
 
@@ -308,18 +275,6 @@ class TransactionSecurityService {
 
   Future<void> _purgeLegacyStoredPinValue() {
     return _storage.delete(key: _pinValueKey);
-  }
-
-  static void _cacheApprovalPin(String pin) {
-    _ephemeralApprovalPin = pin;
-  }
-
-  static bool get _hasCachedApprovalPin =>
-      _ephemeralApprovalPin != null && _ephemeralApprovalPin!.isNotEmpty;
-
-  @visibleForTesting
-  static void debugResetEphemeralState() {
-    _ephemeralApprovalPin = null;
   }
 
   // ─── KEY DERIVATION ──────────────────────────────────────────────────────
@@ -396,7 +351,7 @@ class TransactionSecurityService {
           ? 'Touch ID'
           : 'Fingerprint';
     }
-    return 'Biometric approval';
+    return 'Biometric app unlock';
   }
 }
 

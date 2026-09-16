@@ -55,6 +55,12 @@ type ReviewRequest = {
   idempotencyKey: string | undefined;
 };
 
+const screenshotDir = process.env.PLAYWRIGHT_ARTIFACT_DIR || "output";
+
+function screenshotPath(fileName: string) {
+  return `${screenshotDir}/${fileName}`;
+}
+
 function iso(offsetMs = 0) {
   return new Date(Date.now() + offsetMs).toISOString();
 }
@@ -403,23 +409,26 @@ test.describe("Admin manual exchange queue", () => {
       await page.setViewportSize({ width, height: 844 });
       await expect(page.getByRole('heading', { name: 'Exchange requests' })).toBeVisible();
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
-      await page.screenshot({ path: `output/admin-exchange-${width}.png`, fullPage: true });
+      await page.screenshot({ path: screenshotPath(`admin-exchange-${width}.png`), fullPage: true });
     }
   });
 
   test("overview tabs remain above content and follow sidebar navigation", async ({ page }) => {
     await page.goto('/admin');
     await expect(page.getByRole('heading', { name: 'Admin overview' })).toBeVisible();
-    await expect(page.getByRole('region', { name: 'Operations overview' })).toBeVisible();
+    await expect(page.getByRole('region', { name: 'Business totals' })).toBeVisible();
     expect(await page.locator('[data-slot="tabs"]').evaluate(el => getComputedStyle(el).flexDirection)).toBe('column');
-    await page.getByRole('link', { name: 'Transactions & volume', exact: true }).click();
+    await page
+      .getByRole('navigation', { name: 'Admin navigation' })
+      .getByRole('link', { name: 'Transactions', exact: true })
+      .click();
     await expect(page.getByRole('heading', { name: 'Finance', exact: true })).toBeVisible();
     await page.getByRole('link', { name: 'Overview', exact: true }).click();
     await expect(page.getByRole('heading', { name: 'Admin overview' })).toBeVisible();
     for (const width of [1087, 390]) {
       await page.setViewportSize({ width, height: 844 });
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
-      await page.screenshot({ path: `output/admin-overview-${width}.png`, fullPage: true });
+      await page.screenshot({ path: screenshotPath(`admin-overview-${width}.png`), fullPage: true });
     }
   });
 

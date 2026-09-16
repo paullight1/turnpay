@@ -5,7 +5,6 @@ import 'package:trustpay_app/services/transaction_security_service.dart';
 void main() {
   setUp(() {
     FlutterSecureStorage.setMockInitialValues({});
-    TransactionSecurityService.debugResetEphemeralState();
   });
 
   test('fresh device verifies when the server already has a PIN', () {
@@ -83,7 +82,7 @@ void main() {
     });
   });
 
-  test('changing authenticated users clears persisted and ephemeral PIN state',
+  test('changing authenticated users clears persisted PIN state',
       () async {
     final security = TransactionSecurityService();
     await security.bindToAuthenticatedUser('user-1');
@@ -93,9 +92,5 @@ void main() {
     await security.bindToAuthenticatedUser('user-2');
 
     expect((await security.getConfig()).hasPin, isFalse);
-    expect(
-      await security.unlockPinWithBiometric(reason: 'test'),
-      isNull,
-    );
   });
 }

@@ -884,13 +884,13 @@ class _SecurityLimitsBody extends StatelessWidget {
         ),
         _ProfileActionRow(
           icon: Icons.fingerprint_rounded,
-          label: 'Biometric approval',
-          detail: 'Use fingerprint or Face ID where supported',
+          label: 'Biometric app unlock',
+          detail: 'Unlock the app with fingerprint or Face ID where supported',
           onTap: onTransactionSecurity,
         ),
         _DataPanel(
           child: Text(
-            'All money actions request transaction approval before submission. Keep your PIN private and never share OTPs or passwords.',
+            'All money actions request a freshly entered transaction PIN before submission. Keep your PIN private and never share OTPs or passwords.',
             style: AppTextStyles.bodyM,
           ),
         ),
@@ -2497,7 +2497,7 @@ class _FaqPanel extends StatelessWidget {
     ),
     (
       'What protects my transactions?',
-      'Money actions require transaction approval with PIN, and biometrics can be enabled on supported devices.',
+      'Money actions require a freshly entered transaction PIN. Biometrics can unlock the app on supported devices.',
     ),
   ];
 

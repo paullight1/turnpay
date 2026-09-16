@@ -1,4 +1,8 @@
 import { hasAdminAccess } from "@/lib/admin-access";
+import {
+  DEFAULT_API_ORIGIN,
+  resolveApiOrigin,
+} from "@/lib/api-origin";
 import type { Metadata } from "next";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
@@ -11,7 +15,9 @@ export const metadata: Metadata = {
 };
 
 const LOCAL_SESSION_COOKIE_NAME = "supabase.auth.token";
-const apiBaseUrl = process.env.NEXT_PUBLIC_API_URL;
+const apiBaseUrl = resolveApiOrigin(undefined, {
+  fallback: DEFAULT_API_ORIGIN,
+});
 
 type LocalSessionCookie = { access_token?: string };
 

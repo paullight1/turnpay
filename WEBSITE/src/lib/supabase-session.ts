@@ -3,6 +3,7 @@
 import type { Session } from "@supabase/supabase-js";
 
 const SESSION_COOKIE_NAME = "supabase.auth.token";
+const CSRF_COOKIE_NAME = "trustpay.csrf-token";
 const SESSION_STORAGE_KEY = "trustpay.auth.session";
 const CHUNK_COUNT = 8;
 const SESSION_REFRESH_BUFFER_SECONDS = 60;
@@ -22,6 +23,16 @@ let pendingSessionRead: Promise<PersistedSession | null> | null = null;
 
 function clearCookie(name: string) {
   document.cookie = `${name}=; path=/; max-age=0; samesite=lax`;
+}
+
+function readCookie(name: string) {
+  const prefix = `${name}=`;
+  const entry = document.cookie
+    .split(";")
+    .map((value) => value.trim())
+    .find((value) => value.startsWith(prefix));
+
+  return entry ? decodeURIComponent(entry.slice(prefix.length)) : null;
 }
 
 function clearLegacySessionChunks() {
@@ -148,13 +159,116 @@ export async function refreshPersistedSupabaseSession() {
   }
 }
 
+export class SessionCleanupError extends Error {
+  constructor(message = "Unable to securely clear the website session") {
+    super(message);
+    this.name = "SessionCleanupError";
+  }
+}
+
+async function getCsrfToken(forceRefresh = false) {
+  if (!forceRefresh) {
+    const cookieToken = readCookie(CSRF_COOKIE_NAME);
+    if (cookieToken) {
+      inMemoryCsrfToken = cookieToken;
+      return cookieToken;
+    }
+
+    if (inMemoryCsrfToken) {
+      return inMemoryCsrfToken;
+    }
+  }
+
+  const response = await fetch("/api/auth/session", {
+    method: "GET",
+    cache: "no-store",
+  });
+
+  if (response.status === 401) {
+    // The route clears an expired or unverifiable session itself.
+    inMemoryCsrfToken = null;
+    return null;
+  }
+
+  if (!response.ok) {
+    throw new SessionCleanupError("Unable to recover the secure sign out token");
+  }
+
+  await parseSessionRouteResponse(response);
+  const token = inMemoryCsrfToken || readCookie(CSRF_COOKIE_NAME);
+  if (!token) {
+    throw new SessionCleanupError("Unable to recover the secure sign out token");
+  }
+
+  inMemoryCsrfToken = token;
+  return token;
+}
+
+async function deleteServerSession() {
+  let csrfToken = await getCsrfToken();
+  if (!csrfToken) return;
+
+  const requestDelete = (token: string) =>
+    fetch("/api/auth/session", {
+      method: "DELETE",
+      cache: "no-store",
+      headers: {
+        "x-csrf-token": token,
+      },
+    });
+
+  let response = await requestDelete(csrfToken);
+  if (response.status === 403) {
+    // A tab can hold a stale in-memory token after another tab refreshed the
+    // CSRF cookie. Recover a fresh pair once, then retry the deletion.
+    inMemoryCsrfToken = null;
+    csrfToken = await getCsrfToken(true);
+    if (!csrfToken) return;
+    response = await requestDelete(csrfToken);
+  }
+
+  if (!response.ok) {
+    throw new SessionCleanupError("Unable to complete secure sign out");
+  }
+}
+
+async function verifyServerSessionCleared() {
+  const response = await fetch("/api/auth/session", {
+    method: "GET",
+    cache: "no-store",
+  });
+
+  if (response.status === 401) return;
+  if (!response.ok) {
+    throw new SessionCleanupError("Unable to verify secure sign out");
+  }
+
+  const session = await parseSessionRouteResponse(response);
+  if (session) {
+    throw new SessionCleanupError("Unable to verify secure sign out");
+  }
+}
+
 export async function clearSupabaseSession() {
-  inMemorySession = null;
   if (typeof window === "undefined") {
+    inMemorySession = null;
+    inMemoryCsrfToken = null;
     return;
   }
 
+  // Clear legacy client-visible state immediately, but keep the active
+  // in-memory session until the HttpOnly cookie has been deleted and verified.
   clearLegacySessionChunks();
+
+  if (typeof fetch === "function") {
+    try {
+      await deleteServerSession();
+      await verifyServerSessionCleared();
+    } catch (error) {
+      if (error instanceof SessionCleanupError) throw error;
+      throw new SessionCleanupError();
+    }
+  }
 
   try {
     window.localStorage.removeItem(SESSION_STORAGE_KEY);
@@ -162,22 +276,10 @@ export async function clearSupabaseSession() {
     // Ignore storage failures when clearing stale state.
   }
 
-  if (typeof fetch === "function") {
-    try {
-      await fetch("/api/auth/session", {
-        method: "DELETE",
-        headers: inMemoryCsrfToken
-          ? {
-              "x-csrf-token": inMemoryCsrfToken,
-            }
-          : undefined,
-      });
-    } catch {
-      // Ignore route failures when clearing stale state.
-    }
-  }
-
+  clearCookie(CSRF_COOKIE_NAME);
+  inMemorySession = null;
   inMemoryCsrfToken = null;
+  pendingSessionRead = null;
 }
 
 export async function readPersistedSupabaseSession() {

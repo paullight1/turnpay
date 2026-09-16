@@ -41,10 +41,7 @@ export default function ForgotPasswordPage() {
   };
 
   return (
-    <AuthShell
-      title="Recover access without weakening security."
-      subtitle="Reset your password through a protected email link, then return to your wallet with the same transaction controls."
-    >
+    <AuthShell title="" subtitle="">
       <CardHeader className="text-center">
         <CardTitle className="text-3xl font-semibold">Reset access</CardTitle>
         <CardDescription>
@@ -59,8 +56,8 @@ export default function ForgotPasswordPage() {
             <p className="text-muted-foreground">
               We&apos;ve sent a password reset link to <strong>{email}</strong>
             </p>
-            <Link href="/login">
-              <Button className="w-full">Back to Login</Button>
+            <Link href="/">
+              <Button className="w-full">Back to homepage</Button>
             </Link>
           </div>
         ) : (

@@ -3387,8 +3387,6 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
       MaterialPageRoute(
         builder: (_) => TransactionPinScreen.verify(
           pinLength: serverStatus.pinLength ?? config.pinLength,
-          allowBiometric: config.shouldOfferBiometrics,
-          biometricLabel: config.biometricLabel,
           title: title,
           subtitle: subtitle,
           securityService: _transactionSecurityService,
@@ -3902,7 +3900,7 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
               _ChoiceRow(
                 label: 'Subscription type',
                 value: _cableSubscriptionType,
-                values: const ['change', 'renew'],
+                values: const ['change'],
                 labels: const {
                   'change': 'Change package',
                   'renew': 'Renew current package',
@@ -3919,6 +3917,11 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
                     _loadCablePackages(_vtuProvider);
                   }
                 },
+              ),
+              const SizedBox(height: AppSpacing.sm),
+              const _InfoPanel(
+                text:
+                    'Renew current package — Coming soon. You can still select and buy a package using Change package.',
               ),
               const SizedBox(height: AppSpacing.md),
               if (_isLoadingVtuCatalog && _localCableProviders.isEmpty) ...[

@@ -2,6 +2,7 @@ package com.trustpay.app
 
 import android.os.Bundle
 import android.view.WindowManager
+import android.content.pm.ApplicationInfo
 import io.flutter.embedding.android.FlutterFragmentActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -17,11 +18,8 @@ class MainActivity : FlutterFragmentActivity() {
                     result.notImplemented()
                 } else {
                     try {
-                        val risky = Build.TAGS?.contains("test-keys") == true || listOf(
-                            "/system/bin/su", "/system/xbin/su", "/sbin/su", "/su/bin/su",
-                            "/data/adb/magisk", "/system/app/Superuser.apk"
-                        ).any { File(it).exists() }
-                        val emulator = Build.FINGERPRINT.startsWith("generic") || Build.MODEL.contains("sdk_gphone") || Build.MODEL.contains("Emulator")
+                        val risky = isPotentiallyCompromisedBuild()
+                        val emulator = isEmulatorBuild()
                         result.success(if (risky) "risky" else if (emulator) "unavailable" else "clear")
                     } catch (_: Exception) { result.success("unavailable") }
                 }
@@ -35,5 +33,55 @@ class MainActivity : FlutterFragmentActivity() {
             WindowManager.LayoutParams.FLAG_SECURE,
             WindowManager.LayoutParams.FLAG_SECURE,
         )
+    }
+
+    /**
+     * Local signals are deliberately conservative heuristics. They are useful
+     * for refusing a sensitive request when the app can see an obvious debug,
+     * test-key, emulator, or root marker, but they are not Play Integrity and
+     * must never be treated as proof by the server.
+     */
+    private fun isPotentiallyCompromisedBuild(): Boolean {
+        val tags = Build.TAGS.orEmpty()
+        if (tags.split(',').any { it.trim() == "test-keys" || it.trim() == "dev-keys" }) {
+            return true
+        }
+
+        if ((applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0) {
+            return true
+        }
+
+        return listOf(
+            "/system/bin/su",
+            "/system/xbin/su",
+            "/sbin/su",
+            "/su/bin/su",
+            "/data/local/su",
+            "/data/local/bin/su",
+            "/data/local/xbin/su",
+            "/system/app/Superuser.apk",
+            "/system/bin/.ext/.su",
+            "/system/usr/we-need-root/su",
+            "/data/adb/magisk",
+            "/data/adb/ksu",
+        ).any { File(it).exists() }
+    }
+
+    private fun isEmulatorBuild(): Boolean {
+        val fingerprint = Build.FINGERPRINT.orEmpty().lowercase()
+        val model = Build.MODEL.orEmpty().lowercase()
+        val manufacturer = Build.MANUFACTURER.orEmpty().lowercase()
+        val brand = Build.BRAND.orEmpty().lowercase()
+        val device = Build.DEVICE.orEmpty().lowercase()
+        val product = Build.PRODUCT.orEmpty().lowercase()
+
+        return fingerprint.startsWith("generic") ||
+            fingerprint.contains("unknown") ||
+            model.contains("emulator") ||
+            model.contains("android sdk built for") ||
+            manufacturer.contains("genymotion") ||
+            (brand.startsWith("generic") && device.startsWith("generic")) ||
+            product.contains("sdk") ||
+            product.contains("emulator")
     }
 }

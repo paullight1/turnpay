@@ -67,14 +67,53 @@ class SceneDelegate: FlutterSceneDelegate {
     let integrity = FlutterMethodChannel(name: "trustpay/device_integrity", binaryMessenger: flutterViewController.binaryMessenger)
     integrity.setMethodCallHandler { call, result in
       guard call.method == "check" else { result(FlutterMethodNotImplemented); return }
-      #if targetEnvironment(simulator)
-      result("unavailable")
-      #else
-      let markers = ["/Applications/Cydia.app", "/Library/MobileSubstrate/MobileSubstrate.dylib", "/bin/bash", "/usr/sbin/sshd", "/etc/apt", "/var/jb"]
-      result(markers.contains { FileManager.default.fileExists(atPath: $0) } ? "risky" : "clear")
-      #endif
+      result(self.localIntegritySignal())
     }
     integrityChannel = integrity
+  }
+
+  /// These are local jailbreak/debug heuristics only. They can conservatively
+  /// block a sensitive request when an obvious marker is present, but they do
+  /// not attest the app or device to the server. App Attest remains a separate
+  /// provisioning and backend-verification requirement.
+  private func localIntegritySignal() -> String {
+    #if targetEnvironment(simulator)
+    return "unavailable"
+    #else
+    let markers = [
+      "/Applications/Cydia.app",
+      "/Applications/Sileo.app",
+      "/Applications/Zebra.app",
+      "/Library/MobileSubstrate/MobileSubstrate.dylib",
+      "/Library/MobileSubstrate/DynamicLibraries",
+      "/usr/lib/libsubstrate.dylib",
+      "/usr/lib/libsubstitute.dylib",
+      "/usr/lib/TweakInject",
+      "/bin/bash",
+      "/usr/sbin/sshd",
+      "/etc/apt",
+      "/var/cache/apt",
+      "/var/lib/dpkg",
+      "/var/jb",
+    ]
+    let injectedVariables = [
+      "DYLD_INSERT_LIBRARIES",
+      "DYLD_LIBRARY_PATH",
+      "DYLD_FRAMEWORK_PATH",
+    ]
+
+    if markers.contains(where: { FileManager.default.fileExists(atPath: $0) }) ||
+      injectedVariables.contains(where: { value in
+        guard let raw = ProcessInfo.processInfo.environment[value] else {
+          return false
+        }
+        return !raw.isEmpty
+      }) {
+      return "risky"
+    }
+
+    return "clear"
+    #endif
   }
 
   private func installPrivacyCover() {

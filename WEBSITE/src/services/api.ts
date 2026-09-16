@@ -1,5 +1,6 @@
 import axios from "axios";
 import { createClient, isSupabaseConfigured } from "@/lib/supabase";
+import { resolveApiOrigin } from "@/lib/api-origin";
 import type { Session } from "@supabase/supabase-js";
 import {
   createMoneyAttemptIdempotencyKey,
@@ -38,38 +39,7 @@ type AppSession = Session & {
 const AUTH_SESSION_UPDATED_EVENT = "trustpay-auth-session-updated";
 
 function resolveApiUrl() {
-  const configured = process.env.NEXT_PUBLIC_API_URL;
-  if (configured) {
-    if (
-      typeof window !== "undefined" &&
-      process.env.NODE_ENV === "production" &&
-      !configured.startsWith("https://") &&
-      !isLocalHttpUrl(configured)
-    ) {
-      throw new Error(
-        "NEXT_PUBLIC_API_URL must be HTTPS outside localhost in production",
-      );
-    }
-    return configured;
-  }
-
-  if (process.env.NODE_ENV === "production") {
-    return "";
-  }
-
-  return "http://localhost:3000";
-}
-
-function isLocalHttpUrl(value: string) {
-  try {
-    const url = new URL(value);
-    return (
-      url.protocol === "http:" &&
-      ["localhost", "127.0.0.1", "::1", "[::1]"].includes(url.hostname)
-    );
-  } catch {
-    return false;
-  }
+  return resolveApiOrigin();
 }
 
 function emitAuthSessionUpdated(session: AppSession | null) {
@@ -237,6 +207,8 @@ apiClient.interceptors.response.use(
 export const authApi = {
   registerStaff: (data: { email: string; password: string; fullName?: string }, idempotencyKey: string) =>
     apiClient.post("/api/auth/staff/register", data, { headers: { "Idempotency-Key": idempotencyKey } }),
+  resendConfirmation: (email: string) =>
+    apiClient.post("/api/auth/resend-confirmation", { email }),
   bootstrap: (accessToken?: string) =>
     apiClient.post(
       "/api/auth/bootstrap",
@@ -760,7 +732,7 @@ export const adminInternalTransferReversalApi = {
 export const paymentApi = {
   withdraw: (
     data: {
-      amount: number;
+      amount: string;
       currency: string;
       bankCode: string;
       accountNumber: string;

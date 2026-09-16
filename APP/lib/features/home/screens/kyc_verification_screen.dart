@@ -100,8 +100,6 @@ class _KycVerificationScreenState extends State<KycVerificationScreen> {
         .where((document) => document.status == 'VERIFIED')
         .map((document) => document.type)
         .toSet();
-    // TrustPay's progression is deliberate: NIN unlocks Tier 1, then BVN
-    // unlocks Tier 2. Users should not have to choose the wrong document first.
     if (verified.contains('NIN')) return 'BVN';
     return 'NIN';
   }
@@ -276,12 +274,11 @@ class _KycVerificationScreenState extends State<KycVerificationScreen> {
               padding: const EdgeInsets.all(AppSpacing.lg),
               children: [
                 Text(
-                  'Verify your identity in a few short steps. No document upload is required.',
+                  'Two quick checks: NIN first, then BVN. No document upload is required.',
                   style: AppTextStyles.bodyM,
                 ),
                 const SizedBox(height: AppSpacing.md),
-                _KycTierProgress(
-                    currentTier: overview.tier, status: overview.displayStatus),
+                _KycTierProgress(currentTier: overview.tier),
                 if (_showVerificationState(overview)) ...[
                   const SizedBox(height: AppSpacing.md),
                   _VerificationState(overview: overview),
@@ -352,9 +349,8 @@ class _KycVerificationScreenState extends State<KycVerificationScreen> {
 
 class _KycTierProgress extends StatelessWidget {
   final String currentTier;
-  final String status;
 
-  const _KycTierProgress({required this.currentTier, required this.status});
+  const _KycTierProgress({required this.currentTier});
 
   @override
   Widget build(BuildContext context) {
@@ -363,23 +359,30 @@ class _KycTierProgress extends StatelessWidget {
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [
           Expanded(
-              child: Text('Verification level', style: AppTextStyles.labelM)),
-          Text(status, style: AppTextStyles.caption),
+              child:
+                  Text('Identity verification', style: AppTextStyles.labelM)),
+          Text(rank >= 2 ? 'Complete' : 'Step ${rank == 0 ? 1 : 2} of 2',
+              style: AppTextStyles.caption),
         ]),
         const SizedBox(height: AppSpacing.sm),
         Row(children: [
           Expanded(
               child: _TierItem(
-                  label: 'Tier 1',
-                  detail: 'Identity check',
-                  complete: rank >= 1)),
+                  label: '1  NIN', detail: 'First check', complete: rank >= 1)),
           const SizedBox(width: AppSpacing.sm),
           Expanded(
               child: _TierItem(
-                  label: 'Tier 2',
-                  detail: 'Higher limits',
-                  complete: rank >= 2)),
+                  label: '2  BVN', detail: 'Final check', complete: rank >= 2)),
         ]),
+        if (rank == 0 || rank == 1) ...[
+          const SizedBox(height: AppSpacing.sm),
+          Text(
+            rank == 0
+                ? 'Start with your NIN. We will request your BVN next.'
+                : 'NIN verified. Verify your BVN to finish.',
+            style: AppTextStyles.caption,
+          ),
+        ],
       ]),
     );
   }
@@ -555,7 +558,7 @@ class _VerificationForm extends StatelessWidget {
     AppColors.watch(context);
     final titles = [
       'Confirm your legal name',
-      'Choose your verification level',
+      'Your first identity check',
       'Enter your $documentType number',
       'Confirm your date of birth',
       'Review and consent',
@@ -563,8 +566,8 @@ class _VerificationForm extends StatelessWidget {
     final descriptions = [
       'Use the name shown on your identity record.',
       documentType == 'NIN'
-          ? 'Tier 1 starts with a NIN verification.'
-          : 'Tier 2 upgrades your account with BVN verification.',
+          ? 'Step 1 of 2. We start with your NIN.'
+          : 'Step 2 of 2. Your NIN is verified; now verify your BVN.',
       'Use the 11-digit number linked to your profile.',
       'This must match the identity record exactly.',
       'Your details are shared securely with Ninja for this check.',
@@ -611,13 +614,20 @@ class _VerificationForm extends StatelessWidget {
                     Expanded(
                       child: Text(
                         documentType == 'NIN'
-                            ? 'Tier 1 · Verify your NIN first'
-                            : 'Tier 2 · Verify your BVN to upgrade',
+                            ? 'Step 1 of 2  ·  Verify NIN'
+                            : 'Step 2 of 2  ·  Verify BVN',
                         style: AppTextStyles.labelM,
                       ),
                     ),
                   ],
                 ),
+              ),
+              const SizedBox(height: AppSpacing.sm),
+              Text(
+                documentType == 'NIN'
+                    ? 'After this check, we will ask for your BVN.'
+                    : 'This is the final identity check for your account.',
+                style: AppTextStyles.bodyS,
               ),
             ] else if (stepIndex == 2) ...[
               Text('$documentType number', style: AppTextStyles.labelM),
@@ -626,7 +636,7 @@ class _VerificationForm extends StatelessWidget {
                 key: const ValueKey('kyc-identity-number'),
                 controller: idNumberController,
                 enabled: !isSubmitting,
-                obscureText: true,
+                obscureText: documentType != 'NIN',
                 enableSuggestions: false,
                 autocorrect: false,
                 keyboardType: TextInputType.number,

@@ -123,8 +123,6 @@ class _TransactionSecurityScreenState extends State<TransactionSecurityScreen> {
         builder: (_) => switch (screenMode) {
           PinScreenMode.verify => TransactionPinScreen.verify(
               pinLength: state.server.pinLength ?? state.device.pinLength,
-              allowBiometric: state.device.shouldOfferBiometrics,
-              biometricLabel: state.device.biometricLabel,
               title: 'Verify transaction PIN',
               subtitle:
                   'Confirm the PIN already configured on your TrustPay account.',
@@ -165,7 +163,7 @@ class _TransactionSecurityScreenState extends State<TransactionSecurityScreen> {
 
     if (enabled) {
       final approved = await _securityService.authenticateBiometric(
-        reason: 'Enable ${config.biometricLabel} for TrustPay transactions',
+        reason: 'Enable ${config.biometricLabel} for TrustPay app unlock',
       );
       if (!approved) {
         _showToast('${config.biometricLabel} setup was not completed.');
@@ -228,7 +226,7 @@ class _TransactionSecurityScreenState extends State<TransactionSecurityScreen> {
                       ),
                       const SizedBox(height: AppSpacing.sm),
                       Text(
-                        'Protect money actions with PIN and biometric approval.',
+                        'Protect money actions with a fresh transaction PIN. Biometrics unlock the app only.',
                         style: AppTextStyles.bodyM,
                       ),
                       const SizedBox(height: AppSpacing.xl),
@@ -278,7 +276,7 @@ class _TransactionSecurityScreenState extends State<TransactionSecurityScreen> {
                                 _BiometricTogglePanel(
                                   title: config.biometricLabel,
                                   detail: config.hasBiometric
-                                      ? 'Use ${config.biometricLabel} to approve sensitive transactions after your PIN is set.'
+                                      ? 'Use ${config.biometricLabel} to unlock the TrustPay app after it locks.'
                                       : '${config.biometricLabel} is not available on this device or current build.',
                                   icon: _biometricIcon(config),
                                   value: config.biometricEnabled &&
@@ -292,7 +290,7 @@ class _TransactionSecurityScreenState extends State<TransactionSecurityScreen> {
                                 const _SecurityInfoPanel(
                                   title: 'Current behavior',
                                   detail:
-                                      'Money action routes request your PIN before submission. Biometrics can unlock your PIN only when enabled and supported.',
+                                    'Money action routes always request a freshly entered transaction PIN before submission. Biometrics are limited to app unlock until a server challenge can bind approval to the device.',
                                   icon: Icons.verified_user_outlined,
                                 ),
                               ],
@@ -314,8 +312,6 @@ class _TransactionSecurityScreenState extends State<TransactionSecurityScreen> {
 class TransactionPinScreen extends StatefulWidget {
   final PinScreenMode mode;
   final int initialPinLength;
-  final bool allowBiometric;
-  final String biometricLabel;
   final String title;
   final String subtitle;
   final TransactionSecurityService? securityService;
@@ -324,8 +320,6 @@ class TransactionPinScreen extends StatefulWidget {
   const TransactionPinScreen._({
     required this.mode,
     required this.initialPinLength,
-    required this.allowBiometric,
-    required this.biometricLabel,
     required this.title,
     required this.subtitle,
     this.securityService,
@@ -339,8 +333,6 @@ class TransactionPinScreen extends StatefulWidget {
     return TransactionPinScreen._(
       mode: PinScreenMode.create,
       initialPinLength: 4,
-      allowBiometric: false,
-      biometricLabel: 'Biometric approval',
       title: 'Create transaction PIN',
       subtitle: 'Set the code that will be required for money action requests.',
       securityService: securityService,
@@ -350,8 +342,6 @@ class TransactionPinScreen extends StatefulWidget {
 
   factory TransactionPinScreen.verify({
     required int pinLength,
-    required bool allowBiometric,
-    required String biometricLabel,
     required String title,
     required String subtitle,
     TransactionSecurityService? securityService,
@@ -360,8 +350,6 @@ class TransactionPinScreen extends StatefulWidget {
     return TransactionPinScreen._(
       mode: PinScreenMode.verify,
       initialPinLength: pinLength,
-      allowBiometric: allowBiometric,
-      biometricLabel: biometricLabel,
       title: title,
       subtitle: subtitle,
       securityService: securityService,
@@ -377,8 +365,6 @@ class TransactionPinScreen extends StatefulWidget {
     return TransactionPinScreen._(
       mode: PinScreenMode.reset,
       initialPinLength: pinLength,
-      allowBiometric: false,
-      biometricLabel: 'Biometric approval',
       title: 'Verify current PIN',
       subtitle: 'Enter your current server PIN before choosing a new one.',
       securityService: securityService,
@@ -597,37 +583,6 @@ class _TransactionPinScreenState extends State<TransactionPinScreen> {
     }
   }
 
-  Future<void> _useBiometric() async {
-    final pin = await _securityService.unlockPinWithBiometric(
-      reason: 'Approve this TrustPay transaction with ${widget.biometricLabel}',
-    );
-
-    if (!mounted) return;
-
-    if (pin != null) {
-      try {
-        await _authService.verifyTransactionPin(pin);
-        if (!mounted) return;
-        Navigator.of(context).pop(pin);
-        return;
-      } catch (error) {
-        await _securityService.clearEphemeralTransactionApproval();
-        if (!mounted) return;
-        setState(() {
-          _error = authErrorMessage(
-            error,
-            'Cached PIN is no longer valid. Enter your current PIN.',
-          );
-        });
-        return;
-      }
-    }
-
-    setState(() {
-      _error = 'Biometric check was not completed.';
-    });
-  }
-
   @override
   Widget build(BuildContext context) {
     AppColors.watch(context);
@@ -747,15 +702,9 @@ class _TransactionPinScreenState extends State<TransactionPinScreen> {
                       label: digit,
                       onTap: () => _handleDigit(digit),
                     ),
-                  _KeypadIconButton(
-                    icon: widget.allowBiometric
-                        ? widget.biometricLabel == 'Face ID'
-                            ? Icons.face_retouching_natural_rounded
-                            : Icons.fingerprint_rounded
-                        : Icons.circle_outlined,
-                    enabled: widget.allowBiometric,
-                    onTap: widget.allowBiometric ? _useBiometric : null,
-                  ),
+                  // Keep the zero key centered in the three-column keypad.
+                  // Money actions require a freshly entered transaction PIN.
+                  const SizedBox.shrink(),
                   _KeypadButton(
                     label: '0',
                     onTap: () => _handleDigit('0'),
@@ -934,7 +883,7 @@ class _BiometricTogglePanel extends StatelessWidget {
           const SizedBox(width: AppSpacing.sm),
           Semantics(
             container: true,
-            label: '$title transaction approval',
+            label: '$title app unlock',
             value: enabled ? (value ? 'On' : 'Off') : 'Unavailable',
             enabled: enabled,
             toggled: enabled && value,

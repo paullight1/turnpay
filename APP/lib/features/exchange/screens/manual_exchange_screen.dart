@@ -384,8 +384,6 @@ class _ManualExchangeScreenState extends State<ManualExchangeScreen>
           fullscreenDialog: true,
           builder: (_) => TransactionPinScreen.verify(
             pinLength: server.pinLength ?? device.pinLength,
-            allowBiometric: device.shouldOfferBiometrics,
-            biometricLabel: device.biometricLabel,
             title: 'Enter your transaction PIN',
             subtitle:
                 'Approve this exchange request before the order is created.',

@@ -2,7 +2,7 @@
 
 import { FormEvent, useRef, useState } from "react";
 import Link from "next/link";
-import { Loader2, ShieldCheck } from "lucide-react";
+import { Eye, EyeOff, Loader2, ShieldCheck } from "lucide-react";
 import { AuthShell } from "@/components/auth/auth-shell";
 import {
   CardContent,
@@ -24,10 +24,13 @@ export default function StaffAccessPage() {
   const [creating, setCreating] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [fullName, setFullName] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [logoutError, setLogoutError] = useState<string | null>(null);
   const [sent, setSent] = useState(false);
+  const [resendMessage, setResendMessage] = useState<string | null>(null);
   const attemptKey = useRef<string | null>(null);
   const hydrated = useHydrated();
   const { signIn, signOut, profile, isLoading } = useAuth();
@@ -72,12 +75,45 @@ export default function StaffAccessPage() {
     }
   }
 
+  async function handleSignOut() {
+    if (busy) return;
+    setBusy(true);
+    setLogoutError(null);
+    try {
+      await signOut();
+    } catch {
+      setLogoutError("Could not complete secure sign out. Please try again.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   function changeMode() {
     setCreating(!creating);
     setError(null);
     setSent(false);
+    setResendMessage(null);
     setPassword("");
+    setShowPassword(false);
     attemptKey.current = null;
+  }
+
+  async function resendConfirmation() {
+    if (busy) return;
+    setBusy(true);
+    setResendMessage(null);
+    try {
+      await authApi.resendConfirmation(email.trim().toLowerCase());
+      setResendMessage(
+        "If the account is eligible, a new verification email is on its way. Check your spam or promotions folder too.",
+      );
+    } catch {
+      setResendMessage(
+        "We could not resend the email right now. Please try again shortly.",
+      );
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
@@ -96,7 +132,7 @@ export default function StaffAccessPage() {
             ? "Verify your email using the message from TrustPay, then return here to sign in."
             : creating
               ? "Use your TrustPay work email. No phone number or wallet PIN is needed."
-              : "For assigned admins and verified @trustpayhq.com accounts."}
+              : "For assigned admins. Staff account creation is subject to approval."}
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-5">
@@ -111,13 +147,20 @@ export default function StaffAccessPage() {
             className="rounded-lg border border-white/15 p-4 text-sm"
           >
             This signed-in account does not have admin access. Verify your work
-            email, or sign out to use your staff account.
+            email, or sign out to use your staff account. An explicit ADMIN role
+            is required to open the admin panel.
+            {logoutError && (
+              <p role="alert" className="mt-3 text-red-200">
+                {logoutError}
+              </p>
+            )}
             <Button
               variant="link"
               className="px-0 text-red-400"
-              onClick={() => signOut()}
+              disabled={busy}
+              onClick={handleSignOut}
             >
-              Sign out
+              {busy ? "Signing out…" : "Sign out"}
             </Button>
           </div>
         )}
@@ -126,6 +169,11 @@ export default function StaffAccessPage() {
             <p className="text-sm text-white/75">
               Signed in as {profile.email}
             </p>
+            {logoutError && (
+              <p role="alert" className="text-sm text-red-200">
+                {logoutError}
+              </p>
+            )}
             <Button asChild className="w-full">
               <Link href="/admin">Open admin panel</Link>
             </Button>
@@ -133,16 +181,9 @@ export default function StaffAccessPage() {
               variant="outline"
               className="w-full"
               disabled={busy}
-              onClick={async () => {
-                setBusy(true);
-                try {
-                  await signOut();
-                } finally {
-                  setBusy(false);
-                }
-              }}
+              onClick={handleSignOut}
             >
-              Sign out
+              {busy ? "Signing out…" : "Sign out"}
             </Button>
           </div>
         )}
@@ -151,9 +192,23 @@ export default function StaffAccessPage() {
           (sent ? (
             <div className="space-y-4">
               <p role="status" className="text-sm text-white/75">
-                A verification request was submitted for {email.trim()}. An
-                existing account can sign in instead.
+                A verification link—not a numeric OTP—was requested for{" "}
+                {email.trim()}. Open the message from TrustPay to verify your
+                work email, then return here to sign in.
               </p>
+              {resendMessage && (
+                <p role="status" className="text-sm text-white/75">
+                  {resendMessage}
+                </p>
+              )}
+              <Button
+                variant="outline"
+                className="w-full"
+                disabled={busy}
+                onClick={resendConfirmation}
+              >
+                {busy ? "Resending…" : "Resend verification email"}
+              </Button>
               <Button
                 className="w-full"
                 onClick={() => {
@@ -201,20 +256,39 @@ export default function StaffAccessPage() {
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="staff-password">Password</Label>
-                  <Input
-                    id="staff-password"
-                    type="password"
-                    autoComplete={
-                      creating ? "new-password" : "current-password"
-                    }
-                    required
-                    maxLength={72}
-                    value={password}
-                    onChange={(e) => {
-                      setPassword(e.target.value);
-                      attemptKey.current = null;
-                    }}
-                  />
+                  <div className="relative">
+                    <Input
+                      id="staff-password"
+                      type={showPassword ? "text" : "password"}
+                      autoComplete={
+                        creating ? "new-password" : "current-password"
+                      }
+                      required
+                      maxLength={72}
+                      value={password}
+                      onChange={(e) => {
+                        setPassword(e.target.value);
+                        attemptKey.current = null;
+                      }}
+                      className="pr-10"
+                    />
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-sm"
+                      className="absolute right-1 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                      aria-label={
+                        showPassword ? "Hide password" : "Show password"
+                      }
+                      onClick={() => setShowPassword((current) => !current)}
+                    >
+                      {showPassword ? (
+                        <EyeOff className="size-4" />
+                      ) : (
+                        <Eye className="size-4" />
+                      )}
+                    </Button>
+                  </div>
                 </div>
                 {creating && (
                   <p className="text-xs text-white/65">
@@ -261,9 +335,8 @@ export default function StaffAccessPage() {
               : "New staff member? Create account"}
           </button>
         )}
-        <div className="flex justify-between gap-4 text-sm text-white/65">
+        <div className="flex justify-end gap-4 text-sm text-white/65">
           <Link href="/forgot-password">Forgot password?</Link>
-          <Link href="/download">Get the mobile app</Link>
         </div>
       </CardContent>
     </AuthShell>
