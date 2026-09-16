@@ -37,7 +37,7 @@ export class MonnifyKycSyncService {
           status: 'ACTIVE',
           user: {
             kycStatus: 'VERIFIED',
-            kycTier: 'TIER_2',
+            kycTier: { in: ['TIER_1', 'TIER_2'] },
             isSuspended: false,
           },
         },
@@ -49,7 +49,7 @@ export class MonnifyKycSyncService {
       for (const account of accounts) {
         try {
           await this.syncAccount(account.id);
-        } catch (_) {
+        } catch {
           this.logger.warn(
             { accountId: account.id },
             'Monnify KYC sync deferred',
@@ -84,15 +84,15 @@ export class MonnifyKycSyncService {
       account.status !== 'ACTIVE' ||
       account.user.isSuspended ||
       account.user.kycStatus !== 'VERIFIED' ||
-      account.user.kycTier !== 'TIER_2'
+      !['TIER_1', 'TIER_2'].includes(account.user.kycTier)
     )
       return;
     const bvn = account.user.kycDocuments.find((d) => d.type === 'BVN');
     const nin = account.user.kycDocuments.find((d) => d.type === 'NIN');
-    if (!bvn?.idNumber || !nin?.idNumber) return;
+    if (!bvn?.idNumber && !nin?.idNumber) return;
     const version = createHash('sha256')
       .update(
-        `${bvn.id}:${bvn.updatedAt.toISOString()}|${nin.id}:${nin.updatedAt.toISOString()}`,
+        `${bvn?.id ?? 'missing'}:${bvn?.updatedAt.toISOString() ?? ''}|${nin?.id ?? 'missing'}:${nin?.updatedAt.toISOString() ?? ''}`,
       )
       .digest('hex');
     const metadata = this.object(account.metadata);
@@ -123,12 +123,28 @@ export class MonnifyKycSyncService {
       await this.provider.updateReservedAccountKyc(
         `TP-NGN-${account.userId}`.slice(0, 64),
         {
-          bvn: this.decrypt(bvn.idNumber),
-          nin: this.decrypt(nin.idNumber),
+          ...(bvn?.idNumber ? { bvn: this.decrypt(bvn.idNumber) } : {}),
+          ...(nin?.idNumber ? { nin: this.decrypt(nin.idNumber) } : {}),
         },
       );
+      if (bvn?.idNumber && nin?.idNumber) {
+        const tier2LimitProfileCode = this.config
+          .get<string>('MONNIFY_TIER_2_LIMIT_PROFILE_CODE')
+          ?.trim();
+        const isProduction =
+          this.config.get<string>('NODE_ENV', 'development') === 'production';
+        if (isProduction && !tier2LimitProfileCode) {
+          throw new Error('Monnify Tier 2 limit profile is not configured');
+        }
+        if (tier2LimitProfileCode) {
+          await this.provider.updateReservedAccountLimit(
+            `TP-NGN-${account.userId}`.slice(0, 64),
+            tier2LimitProfileCode,
+          );
+        }
+      }
       success = true;
-    } catch (_) {
+    } catch {
       // Do not persist upstream errors; they can contain government identifiers.
     }
     await this.prisma.$transaction(async (tx) => {

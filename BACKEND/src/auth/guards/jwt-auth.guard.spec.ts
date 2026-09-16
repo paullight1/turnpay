@@ -1,4 +1,4 @@
-import { ForbiddenException } from '@nestjs/common';
+import { ForbiddenException, UnauthorizedException } from '@nestjs/common';
 import { JwtAuthGuard } from './jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 
@@ -22,9 +22,15 @@ describe('admin authorization from verified identity', () => {
     const supabase = {
       verifyToken: jest.fn().mockResolvedValue({ ...identity, ...overrides }),
       syncUser: jest.fn().mockResolvedValue(current),
+      getVerifiedProviderSessionId: jest
+        .fn()
+        .mockResolvedValue('provider-session-1'),
     };
     const prisma = {
       user: { findUnique: jest.fn().mockResolvedValue(current) },
+      refreshToken: {
+        findFirst: jest.fn().mockResolvedValue({ id: 'app-session-1' }),
+      },
     };
     const request = {
       headers: { authorization: 'Bearer test-token' },
@@ -46,12 +52,14 @@ describe('admin authorization from verified identity', () => {
     } as never);
     return { request, roles, context };
   }
-  it('allows a confirmed exact-domain staff identity without changing its stored role', async () => {
+  it('does not grant admin access to a verified company email without the ADMIN role', async () => {
     const { request, roles, context } = await authorize();
     expect(request.user).toEqual(
-      expect.objectContaining({ role: 'USER', canAccessAdmin: true }),
+      expect.objectContaining({ role: 'USER', canAccessAdmin: false }),
     );
-    expect(roles.canActivate(context as never)).toBe(true);
+    expect(() => roles.canActivate(context as never)).toThrow(
+      ForbiddenException,
+    );
   });
   it.each([
     { email_confirmed_at: undefined },
@@ -81,5 +89,47 @@ describe('admin authorization from verified identity', () => {
     await expect(
       authorize({}, { role: 'ADMIN', isSuspended: true }),
     ).rejects.toThrow(ForbiddenException);
+  });
+
+  it('rejects a provider token whose session was revoked locally', async () => {
+    const current = { ...account, role: 'ADMIN' };
+    const supabase = {
+      verifyToken: jest.fn().mockResolvedValue(identity),
+      syncUser: jest.fn().mockResolvedValue(current),
+      getVerifiedProviderSessionId: jest
+        .fn()
+        .mockResolvedValue('provider-session-revoked'),
+    };
+    const prisma = {
+      user: { findUnique: jest.fn().mockResolvedValue(current) },
+      refreshToken: { findFirst: jest.fn().mockResolvedValue(null) },
+    };
+    const request = {
+      headers: { authorization: 'Bearer refreshed-provider-token' },
+      user: undefined as unknown,
+    };
+    const context = {
+      switchToHttp: () => ({ getRequest: () => request }),
+      getHandler: () => null,
+      getClass: () => null,
+    };
+    const guard = new JwtAuthGuard(
+      supabase as never,
+      prisma as never,
+      {} as never,
+    );
+
+    await expect(guard.canActivate(context as never)).rejects.toThrow(
+      UnauthorizedException,
+    );
+    expect(prisma.refreshToken.findFirst).toHaveBeenCalledWith({
+      where: {
+        userId: 'staff-id',
+        providerSessionId: 'provider-session-revoked',
+        revokedAt: null,
+        expiresAt: { gt: expect.any(Date) },
+      },
+      select: { id: true },
+    });
   });
 });

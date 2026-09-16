@@ -111,6 +111,7 @@ reject_unsafe_url() {
 }
 
 if [ "${NODE_ENV:-development}" = "production" ]; then
+  require_https_url SENTRY_DSN
   require_supabase_database_url
   require_https_url WEB_URL
   require_https_url ADMIN_URL
@@ -152,6 +153,13 @@ if [ "${NODE_ENV:-development}" = "production" ]; then
   fi
 
   case "$(lower "${KYC_PROVIDER:-}")" in
+    monnify)
+      require_env MONNIFY_API_KEY
+      require_env MONNIFY_SECRET_KEY
+      require_https_url MONNIFY_BASE_URL
+      reject_unsafe_url MONNIFY_BASE_URL
+      require_min_length PII_ENCRYPTION_KEY 32
+      ;;
     ninja)
       require_env NINJA_CLIENT_KEY
       require_env NINJA_CLIENT_SECRET
@@ -169,7 +177,7 @@ if [ "${NODE_ENV:-development}" = "production" ]; then
       reject_unsafe_url YOUVERIFY_WEBHOOK_URL
       ;;
     *)
-      fail "KYC_PROVIDER must be ninja or youverify"
+      fail "KYC_PROVIDER must be monnify, ninja, or youverify"
       ;;
   esac
 
@@ -202,5 +210,32 @@ if [ "${NODE_ENV:-development}" = "production" ]; then
     require_min_length VTPASS_WEBHOOK_SECRET 16
   fi
 fi
+
+# Staging and production must use the real SMS transport. Development may use
+# the local OTP override; deployed environments must never accept one.
+case "${NODE_ENV:-development}" in
+  production|staging)
+    [ "${SMS_PROVIDER:-}" = "twilio" ] ||
+      fail "SMS_PROVIDER must be twilio in deployed environments"
+    require_env TWILIO_ACCOUNT_SID
+    printf '%s' "${TWILIO_ACCOUNT_SID}" | grep -Eq '^AC[A-Za-z0-9]{32}$' ||
+      fail "TWILIO_ACCOUNT_SID must match the Twilio account SID format"
+    require_env TWILIO_AUTH_TOKEN
+    require_env TWILIO_PHONE_NUMBER
+    printf '%s' "${TWILIO_PHONE_NUMBER}" | grep -Eq '^\+[1-9][0-9]{1,14}$' ||
+      fail "TWILIO_PHONE_NUMBER must use E.164 format"
+    [ -z "${OTP_DEV_CODE:-}" ] ||
+      fail "OTP_DEV_CODE must be empty in deployed environments"
+    [ "${OTP_LENGTH:-}" = "6" ] ||
+      fail "OTP_LENGTH must be 6 in deployed environments"
+    case "${OTP_EXPIRES_IN:-}" in
+      [1-5]m|[1-9]s|[1-9][0-9]s|[12][0-9][0-9]s|300s)
+        ;;
+      *)
+        fail "OTP_EXPIRES_IN must be no more than 300 seconds in deployed environments"
+        ;;
+    esac
+    ;;
+esac
 
 exec "$@"

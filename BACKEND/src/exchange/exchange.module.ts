@@ -19,6 +19,7 @@ import {
 import { UsersModule } from '../users/users.module';
 import { WalletsModule } from '../wallets/wallets.module';
 import { BankingModule } from '../banking/banking.module';
+import { ReconciliationModule } from '../common/services/reconciliation.module';
 
 @Module({
   imports: [
@@ -29,6 +30,7 @@ import { BankingModule } from '../banking/banking.module';
     UsersModule,
     WalletsModule,
     BankingModule,
+    ReconciliationModule,
   ],
   controllers: [
     ExchangeController,

@@ -47,6 +47,7 @@ export class JwtAuthGuard implements CanActivate {
     let userId: string;
     let role: string;
     let verifiedIdentity: SupabaseUser | undefined;
+    let providerSessionId: string | undefined;
 
     try {
       const supabaseUser = await this.supabaseService.verifyToken(accessToken);
@@ -54,6 +55,8 @@ export class JwtAuthGuard implements CanActivate {
       userId = user.id;
       role = user.role;
       verifiedIdentity = supabaseUser;
+      providerSessionId =
+        await this.supabaseService.getVerifiedProviderSessionId(accessToken);
     } catch (supabaseError) {
       if (this.canUseLocalAuthFallback()) {
         const localUser = this.verifyLocalToken(accessToken);
@@ -82,20 +85,31 @@ export class JwtAuthGuard implements CanActivate {
       throw new ForbiddenException('Account suspended');
     }
 
+    if (verifiedIdentity && providerSessionId) {
+      const activeSession = await this.prisma.refreshToken.findFirst({
+        where: {
+          userId: user.id,
+          providerSessionId,
+          revokedAt: null,
+          expiresAt: { gt: new Date() },
+        },
+        select: { id: true },
+      });
+
+      if (!activeSession) {
+        throw new UnauthorizedException(
+          'Session expired. Please sign in again.',
+        );
+      }
+    }
+
     request.user = {
       userId: user.id,
       email: user.email,
       role: user.role || role,
-      // Company access is derived only from Supabase's verified current user,
-      // never from JWT/user_metadata claims or an unverified local session.
-      canAccessAdmin:
-        user.role === 'ADMIN' ||
-        Boolean(
-          verifiedIdentity?.email_confirmed_at &&
-          verifiedIdentity.email?.trim().toLowerCase() ===
-            user.email.trim().toLowerCase() &&
-          /^[^@\s]+@trustpayhq\.com$/i.test(verifiedIdentity.email),
-        ),
+      // Domain ownership identifies a staff candidate during signup only. It
+      // never substitutes for the explicit database ADMIN assignment.
+      canAccessAdmin: user.role === 'ADMIN',
     };
 
     return true;

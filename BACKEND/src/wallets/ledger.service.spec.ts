@@ -1,4 +1,9 @@
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  NotFoundException,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import { Decimal } from '@prisma/client/runtime/library';
 import { LedgerService } from './ledger.service';
 
@@ -12,6 +17,13 @@ describe('LedgerService', () => {
     ledgerEntry: {
       create: jest.fn(),
     },
+    reconciliationRun: {
+      findMany: jest.fn(),
+    },
+    auditLog: {
+      findMany: jest.fn(),
+    },
+    $queryRaw: jest.fn(),
     $transaction: jest.fn(async (fn: any) => fn(prisma)),
   };
 
@@ -20,6 +32,9 @@ describe('LedgerService', () => {
   beforeEach(() => {
     jest.resetAllMocks();
     prisma.$transaction.mockImplementation(async (fn: any) => fn(prisma));
+    prisma.reconciliationRun.findMany.mockResolvedValue([]);
+    prisma.auditLog.findMany.mockResolvedValue([]);
+    prisma.$queryRaw.mockResolvedValue([]);
     service = new LedgerService(prisma);
   });
 
@@ -143,6 +158,96 @@ describe('LedgerService', () => {
     });
     expect(result.balanceBefore.equals(800)).toBe(true);
     expect(result.balanceAfter.equals(700)).toBe(true);
+    expect(prisma.$queryRaw).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects a debit while the persisted transaction PIN reset hold is active', async () => {
+    prisma.$queryRaw.mockResolvedValue([
+      { resetHoldUntil: new Date(Date.now() + 60_000) },
+    ]);
+
+    await expect(
+      service.debitWallet({
+        userId: 'user-1',
+        currency: 'NGN',
+        amount: new Decimal(100),
+        transactionId: 'tx-1',
+        reference: 'WD-1',
+        source: 'WITHDRAWAL',
+      }),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+
+    expect(prisma.$queryRaw).toHaveBeenCalledTimes(1);
+    expect(prisma.wallet.updateMany).not.toHaveBeenCalled();
+    expect(prisma.ledgerEntry.create).not.toHaveBeenCalled();
+  });
+
+  it('does not apply the PIN reset hold or reconciliation hold to compensation debits', async () => {
+    prisma.reconciliationRun.findMany.mockResolvedValue([
+      {
+        id: 'blocked-run',
+        scope: 'WALLET_BALANCES',
+        status: 'BLOCKED',
+        createdAt: new Date(),
+        mismatchCount: 1,
+      },
+    ]);
+    prisma.$queryRaw.mockResolvedValue([
+      { resetHoldUntil: new Date(Date.now() + 60_000) },
+    ]);
+    prisma.wallet.updateMany.mockResolvedValue({ count: 1 });
+    prisma.wallet.findUnique.mockResolvedValue({
+      id: 'wallet-1',
+      userId: 'user-1',
+      currency: 'NGN',
+      balance: new Decimal(700),
+    });
+    prisma.ledgerEntry.create.mockResolvedValue({ id: 'ledger-1' });
+
+    await expect(
+      service.debitWallet({
+        userId: 'user-1',
+        currency: 'NGN',
+        amount: new Decimal(100),
+        transactionId: 'tx-1',
+        reference: 'REV-1',
+        source: 'WITHDRAWAL_REVERSAL',
+      }),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        walletId: 'wallet-1',
+        balanceAfter: expect.any(Decimal),
+      }),
+    );
+
+    expect(prisma.reconciliationRun.findMany).not.toHaveBeenCalled();
+    expect(prisma.$queryRaw).not.toHaveBeenCalled();
+  });
+
+  it('blocks outbound debits when an unresolved reconciliation run exists', async () => {
+    prisma.reconciliationRun.findMany.mockResolvedValue([
+      {
+        id: 'blocked-run',
+        scope: 'WALLET_BALANCES',
+        status: 'BLOCKED',
+        createdAt: new Date(),
+        mismatchCount: 1,
+      },
+    ]);
+
+    await expect(
+      service.debitWallet({
+        userId: 'user-1',
+        currency: 'NGN',
+        amount: new Decimal(100),
+        transactionId: 'tx-1',
+        reference: 'WD-1',
+        source: 'WITHDRAWAL',
+      }),
+    ).rejects.toBeInstanceOf(ServiceUnavailableException);
+
+    expect(prisma.$queryRaw).not.toHaveBeenCalled();
+    expect(prisma.wallet.updateMany).not.toHaveBeenCalled();
   });
 
   it('fails when the target wallet does not exist', async () => {

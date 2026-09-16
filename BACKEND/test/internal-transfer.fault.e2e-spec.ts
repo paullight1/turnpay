@@ -222,6 +222,111 @@ describe('Internal transfer fault E2E (real PostgreSQL and Redis)', () => {
     }
   });
 
+  it('commits a PIN reset hold before Redis cleanup and concurrent money authorization', async () => {
+    if (!fixture) throw new Error('Financial fixture was not created');
+    const config = new ConfigService({ TRANSACTION_PIN_REQUIRED: true });
+    const redis = {
+      assertAvailable: jest.fn(),
+      reportOperationalAlert: jest.fn(),
+      get: jest.fn(async () => null),
+      del: jest.fn(async () => undefined),
+    };
+    const pin = new TransactionPinService(
+      redis as never,
+      config,
+      prisma as never,
+    );
+    await pin.setPin(fixture.users.sender.id, '2468');
+    let reachedCleanup!: () => void;
+    const cleanupStarted = new Promise<void>((resolve) => {
+      reachedCleanup = resolve;
+    });
+    let finishCleanup!: () => void;
+    const cleanupGate = new Promise<void>((resolve) => {
+      finishCleanup = resolve;
+    });
+    redis.del.mockImplementationOnce(async () => {
+      reachedCleanup();
+      await cleanupGate;
+      throw new Error('Redis cleanup failed');
+    });
+    const reset = pin.resetPinWithHold(fixture.users.sender.id, '1357');
+    const resetResult = expect(reset).resolves.toMatchObject({ success: true });
+    await cleanupStarted;
+    try {
+      await expect(
+        pin.verifyRequired(fixture.users.sender.id, '1357'),
+      ).rejects.toThrow('money movement is temporarily locked');
+      const credential =
+        await prisma.transactionPinCredential.findUniqueOrThrow({
+          where: { userId: fixture.users.sender.id },
+        });
+      expect(credential.resetHoldUntil!.getTime()).toBeGreaterThan(Date.now());
+    } finally {
+      finishCleanup();
+      await resetResult;
+    }
+    await expect(
+      pin.verifyRequired(fixture.users.sender.id, '1357'),
+    ).rejects.toThrow('money movement is temporarily locked');
+    expect(
+      await prisma.auditLog.count({
+        where: {
+          action: 'transaction_pin_reset',
+          targetId: fixture.users.sender.id,
+        },
+      }),
+    ).toBe(1);
+  });
+
+  it('rejects a transfer when a reset commits after PIN verification but before debit', async () => {
+    if (!fixture) throw new Error('Financial fixture was not created');
+    const userId = fixture.users.sender.id;
+    const config = new ConfigService({ TRANSACTION_PIN_REQUIRED: true });
+    const redis = {
+      assertAvailable: jest.fn(),
+      reportOperationalAlert: jest.fn(),
+      get: jest.fn(async () => null),
+      del: jest.fn(async () => undefined),
+    };
+    const pin = new TransactionPinService(
+      redis as never,
+      config,
+      prisma as never,
+    );
+    await pin.setPin(userId, '2468');
+    const senderBefore = await walletBalance(prisma, userId, 'NGN');
+    const recipientBefore = await walletBalance(
+      prisma,
+      fixture.users.recipientA.id,
+      'NGN',
+    );
+    const transfers = createRealTransferServices(prisma, {
+      pinVerifier: {
+        verifyRequired: async () => {
+          await pin.verifyRequired(userId, '2468');
+          await pin.resetPinWithHold(userId, '1357');
+        },
+      },
+    }).transfers;
+    await expect(
+      transfers.sendInternalTransfer(
+        userId,
+        {
+          recipientId: fixture.users.recipientA.id,
+          amount: '15.00',
+          currency: 'NGN',
+          transactionPin: '2468',
+        },
+        fixture.context('pin-reset-before-debit'),
+      ),
+    ).rejects.toThrow('money movement is temporarily locked');
+    expect(await walletBalance(prisma, userId, 'NGN')).toEqual(senderBefore);
+    expect(
+      await walletBalance(prisma, fixture.users.recipientA.id, 'NGN'),
+    ).toEqual(recipientBefore);
+  });
+
   it('makes reversal requests idempotent and rejects a changed reason', async () => {
     if (!fixture) throw new Error('Financial fixture was not created');
     const { transfers, reversals } = createRealTransferServices(prisma);

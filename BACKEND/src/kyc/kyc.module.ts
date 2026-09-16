@@ -10,6 +10,7 @@ import { KycService } from './kyc.service';
 import { KYC_PROVIDER_GATEWAY } from './providers/kyc-provider.gateway';
 import { YouverifyProvider } from './providers/youverify.provider';
 import { NinjaProvider } from './providers/ninja.provider';
+import { MonnifyProvider } from './providers/monnify.provider';
 import { selectKycProvider } from './providers/kyc-provider.selector';
 import { KycWebhookInboxService } from './kyc-webhook-inbox.service';
 import { KycWebhookProcessorService } from './kyc-webhook-processor.service';
@@ -28,15 +29,12 @@ import { KycWebhookProcessorService } from './kyc-webhook-processor.service';
     KycWebhookProcessorService,
     YouverifyProvider,
     NinjaProvider,
+    MonnifyProvider,
     {
       provide: KYC_PROVIDER_GATEWAY,
-      inject: [ConfigService, NinjaProvider, YouverifyProvider],
-      useFactory: (
-        config: ConfigService,
-        ninja: NinjaProvider,
-        youverify: YouverifyProvider,
-      ) =>
-        selectKycProvider(config.get<string>('KYC_PROVIDER'), ninja, youverify),
+      inject: [ConfigService, MonnifyProvider],
+      useFactory: (config: ConfigService, monnify: MonnifyProvider) =>
+        selectKycProvider(config.get<string>('KYC_PROVIDER'), monnify),
     },
   ],
 })

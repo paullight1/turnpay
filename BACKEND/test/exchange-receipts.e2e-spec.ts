@@ -53,8 +53,19 @@ const mockPrisma = {
     updateMany: jest.fn(),
   },
   transaction: {
+    findFirst: jest.fn(),
     create: jest.fn(),
     update: jest.fn(),
+  },
+  exchangeDepositAllocation: {
+    findFirst: jest.fn(),
+    create: jest.fn(),
+  },
+  providerEvent: {
+    findFirst: jest.fn(),
+  },
+  paymentWebhookInbox: {
+    findFirst: jest.fn(),
   },
   exchangeReceipt: {
     create: jest.fn(),
@@ -68,6 +79,7 @@ const mockPrisma = {
     findUnique: jest.fn(),
     create: jest.fn(),
     update: jest.fn(),
+    delete: jest.fn(),
   },
   auditLog: {
     create: jest.fn(),
@@ -263,6 +275,10 @@ describe('Exchange Receipts E2E', () => {
       id: 'idem-' + Date.now(),
     });
     mockPrisma.idempotencyRecord.update.mockResolvedValue({});
+    mockPrisma.idempotencyRecord.delete.mockResolvedValue({});
+    mockPrisma.exchangeDepositAllocation.findFirst.mockResolvedValue(null);
+    mockPrisma.providerEvent.findFirst.mockResolvedValue(null);
+    mockPrisma.paymentWebhookInbox.findFirst.mockResolvedValue(null);
   });
 
   afterAll(async () => {

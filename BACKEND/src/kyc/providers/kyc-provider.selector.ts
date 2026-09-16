@@ -2,15 +2,14 @@ import type { KycProviderGateway } from './kyc-provider.gateway';
 
 export function selectKycProvider(
   configuredProvider: string | undefined,
-  ninja: KycProviderGateway,
-  youverify: KycProviderGateway,
+  monnify: KycProviderGateway,
+  _legacy?: KycProviderGateway,
 ): KycProviderGateway {
+  void _legacy;
   switch (configuredProvider?.trim().toLowerCase()) {
-    case 'ninja':
-      return ninja;
-    case 'youverify':
-      return youverify;
+    case 'monnify':
+      return monnify;
     default:
-      throw new Error('Unsupported KYC provider');
+      throw new Error('KYC_PROVIDER must be monnify');
   }
 }

@@ -4,6 +4,7 @@ import {
   ForbiddenException,
   Injectable,
   NotFoundException,
+  Optional,
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -30,6 +31,7 @@ import {
   nextManualExchangeStatus,
   quoteManualExchange,
 } from './manual-exchange.policy';
+import { SettlementHoldService } from '../common/services/settlement-hold.service';
 
 const include = { events: { orderBy: { createdAt: 'asc' as const } } };
 type Order = Prisma.ManualExchangeOrderGetPayload<{ include: typeof include }>;
@@ -50,6 +52,8 @@ const proofOpen = [
 
 @Injectable()
 export class ManualExchangeService {
+  private readonly settlementHold: SettlementHoldService;
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
@@ -58,7 +62,10 @@ export class ManualExchangeService {
     private readonly pin: TransactionPinService,
     private readonly storage: SupabaseService,
     private readonly logger: PinoLogger,
-  ) {}
+    @Optional() settlementHold?: SettlementHoldService,
+  ) {
+    this.settlementHold = settlementHold ?? new SettlementHoldService(prisma);
+  }
 
   configuration() {
     return {
@@ -101,24 +108,15 @@ export class ManualExchangeService {
       throw new ForbiddenException('KYC Tier 2 is required for exchange');
   }
   private collection(currency: 'NGN' | 'GHS' = 'NGN') {
-    const prefix = currency === 'NGN' ? 'MANUAL_EXCHANGE_COLLECTION_' : 'MANUAL_EXCHANGE_GHS_COLLECTION_';
+    const prefix =
+      currency === 'NGN'
+        ? 'MANUAL_EXCHANGE_COLLECTION_'
+        : 'MANUAL_EXCHANGE_GHS_COLLECTION_';
     const values = {
-      bankName: this.config.get<string>(
-        `${prefix}BANK_NAME`,
-        '',
-      ),
-      accountName: this.config.get<string>(
-        `${prefix}ACCOUNT_NAME`,
-        '',
-      ),
-      accountNumber: this.config.get<string>(
-        `${prefix}ACCOUNT_NUMBER`,
-        '',
-      ),
-      version: this.config.get<string>(
-        `${prefix}VERSION`,
-        '',
-      ),
+      bankName: this.config.get<string>(`${prefix}BANK_NAME`, ''),
+      accountName: this.config.get<string>(`${prefix}ACCOUNT_NAME`, ''),
+      accountNumber: this.config.get<string>(`${prefix}ACCOUNT_NUMBER`, ''),
+      version: this.config.get<string>(`${prefix}VERSION`, ''),
       currency,
     };
     if (
@@ -550,6 +548,17 @@ export class ManualExchangeService {
           );
         if (!dto.payoutReference)
           throw new BadRequestException('Actual payout reference is required');
+
+        await this.settlementHold.assertSettlementAllowed(
+          {
+            operation: 'MANUAL_EXCHANGE',
+            scope: 'MANUAL_EXCHANGE',
+            currency: row.sourceCurrency,
+            provider: 'MANUAL_ADMIN',
+            reference: row.reference,
+          },
+          tx,
+        );
         update.payoutReference = dto.payoutReference.trim().toUpperCase();
         update.payoutProofKey = dto.payoutProofObjectKey;
       }

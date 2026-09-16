@@ -15,6 +15,7 @@ import type {
   VtuPackage,
   VtuProviderPurchase,
   VtuProviderResult,
+  VtuProviderCurrency,
 } from './vtpass.types';
 import type { VtuMeterType } from '../dto/vtu.dto';
 
@@ -47,14 +48,19 @@ interface VtpassResponse {
   code?: string;
   response_description?: string;
   requestId?: string;
+  amount?: string | number;
+  currency?: string;
   content?: {
     variations?: VtpassVariation[];
     varations?: VtpassVariation[];
     transactions?: {
       status?: string;
       transactionId?: string;
+      amount?: string | number;
+      currency?: string;
       total_amount?: string | number;
       commission?: string | number;
+      wallet_credit_id?: string;
     };
   };
   purchased_code?: string;
@@ -756,14 +762,27 @@ export class VtuApiProvider {
 
   private mapVtpassPurchaseResponse(data: VtpassResponse, requestId: string) {
     const transaction = data.content?.transactions;
+    const providerRequestId = data.requestId?.trim() || requestId;
     const providerTransactionId =
-      transaction?.transactionId || data.requestId || requestId;
+      transaction?.transactionId || providerRequestId;
+    const providerAmount = this.optionalMoney(
+      data.amount ?? transaction?.amount ?? transaction?.total_amount,
+    );
+    const providerCurrency = this.providerCurrency(
+      data.currency ?? transaction?.currency,
+    );
+    const walletCreditId = this.optionalIdentifier(
+      transaction?.wallet_credit_id,
+    );
     const safeResponse = {
       code: data.code,
       responseDescription: data.response_description,
-      requestId: data.requestId || requestId,
+      requestId: providerRequestId,
       providerTransactionId,
       providerStatus: transaction?.status,
+      providerAmount,
+      providerCurrency,
+      walletCreditId,
       providerCost: this.optionalMoney(transaction?.total_amount),
       providerCommission: this.optionalMoney(transaction?.commission),
     };
@@ -775,7 +794,10 @@ export class VtuApiProvider {
         data.response_description ||
         data.content?.transactions?.status ||
         'VTpass transaction submitted',
-      providerRequestId: requestId,
+      providerRequestId,
+      providerAmount,
+      providerCurrency,
+      walletCreditId,
       providerCost: this.optionalMoney(transaction?.total_amount),
       providerCommission: this.optionalMoney(transaction?.commission),
       purchasedCode:
@@ -966,6 +988,18 @@ export class VtuApiProvider {
     } catch {
       return undefined;
     }
+  }
+
+  private optionalIdentifier(value: unknown) {
+    if (typeof value !== 'string') return undefined;
+    const normalized = value.trim();
+    return normalized ? normalized.slice(0, 128) : undefined;
+  }
+
+  private providerCurrency(value: unknown): VtuProviderCurrency | undefined {
+    if (value === undefined || value === null || value === '') return 'NGN';
+    if (value === 'NGN' || value === 'GHS') return value;
+    return undefined;
   }
 
   private async executeProviderRequest<T>(request: () => Promise<T>) {

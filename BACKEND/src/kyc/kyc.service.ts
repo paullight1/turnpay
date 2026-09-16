@@ -105,10 +105,7 @@ export class KycService {
     const documentId = randomUUID();
     const verificationId = randomUUID();
     const consentRecordedAt = new Date();
-    const consentVersion =
-      provider === 'NINJA'
-        ? 'ninja-direct-verify-consent-v1'
-        : 'youverify-subject-consent-v1';
+    const consentVersion = 'monnify-direct-verify-consent-v1';
 
     let reservation: {
       document: {
@@ -124,6 +121,7 @@ export class KycService {
       };
       user: {
         fullName: string | null;
+        phone: string;
         kycStatus: 'PENDING' | 'SUBMITTED' | 'VERIFIED' | 'REJECTED';
         kycTier: KYCTier;
       };
@@ -135,6 +133,7 @@ export class KycService {
           where: { id: userId },
           select: {
             fullName: true,
+            phone: true,
             kycStatus: true,
             kycTier: true,
           },
@@ -142,8 +141,29 @@ export class KycService {
         if (!user) {
           throw new NotFoundException('User not found');
         }
-        if (provider === 'NINJA') {
-          const nameValidation = this.toNameValidation(user.fullName);
+        if (provider === 'MONNIFY') {
+          const verifiedNin = await tx.kycDocument.findFirst({
+            where: {
+              userId,
+              status: 'VERIFIED',
+              type: 'NIN',
+            },
+            select: { id: true },
+          });
+          if (dto.type === 'BVN' && !verifiedNin) {
+            throw new BadRequestException(
+              'Verify your NIN before submitting your BVN',
+            );
+          }
+          if (dto.type === 'NIN' && verifiedNin) {
+            throw new ConflictException('Your NIN is already verified');
+          }
+        }
+        if (provider === 'MONNIFY') {
+          const nameValidation = this.toNameValidation(
+            [dto.firstName, dto.lastName].filter(Boolean).join(' ') ||
+              user.fullName,
+          );
           if (!nameValidation?.firstName || !nameValidation.lastName) {
             throw new BadRequestException(
               'Complete your legal first and last name before identity verification',
@@ -221,6 +241,7 @@ export class KycService {
               reservation.user.fullName,
           ),
           dateOfBirth: dto.dateOfBirth,
+          ...(reservation.user.phone ? { phone: reservation.user.phone } : {}),
         },
       });
       if (providerResult.provider !== provider) {

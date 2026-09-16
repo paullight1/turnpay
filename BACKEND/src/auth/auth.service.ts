@@ -6,6 +6,7 @@ import {
   BadRequestException,
   HttpException,
   HttpStatus,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as bcrypt from 'bcrypt';
@@ -218,8 +219,7 @@ export class AuthService {
         data: { failedAttempts: 0, lockedUntil: null },
       });
 
-      await this.otpService.assertOtpSendAllowed(phone);
-      await this.otpService.sendOtp(phone);
+      const otpDelivered = await this.trySendRegistrationOtp(phone);
 
       this.logger.info(
         {
@@ -234,16 +234,26 @@ export class AuthService {
         user,
         session: localSession.session,
         authMode: 'local' as AuthMode,
+        ...(otpDelivered ? {} : { otpDeliveryPending: true }),
       };
     }
 
-    await this.trackRefreshToken(user.id, data.session?.refresh_token, {
-      ...context,
-      deviceName: registerDto.deviceName,
-    });
+    const providerSessionId = data.session?.access_token
+      ? await this.supabaseService.getVerifiedProviderSessionId(
+          data.session.access_token,
+        )
+      : undefined;
+    await this.trackRefreshToken(
+      user.id,
+      data.session?.refresh_token,
+      {
+        ...context,
+        deviceName: registerDto.deviceName,
+      },
+      providerSessionId,
+    );
 
-    await this.otpService.assertOtpSendAllowed(phone);
-    await this.otpService.sendOtp(phone);
+    const otpDelivered = await this.trySendRegistrationOtp(phone);
 
     this.logger.info(
       { userId: user.id, event: 'user_registered', transactionPinSet: true },
@@ -254,6 +264,7 @@ export class AuthService {
       user,
       session: data.session,
       authMode: 'supabase' as AuthMode,
+      ...(otpDelivered ? {} : { otpDeliveryPending: true }),
     };
   }
 
@@ -348,10 +359,19 @@ export class AuthService {
 
     const syncedUser = await this.supabaseService.syncUser(data.user);
     await this.resetFailedLoginState(syncedUser.id);
-    await this.trackRefreshToken(syncedUser.id, data.session.refresh_token, {
-      ...context,
-      deviceName: loginDto.deviceName,
-    });
+    const providerSessionId =
+      await this.supabaseService.getVerifiedProviderSessionId(
+        data.session.access_token,
+      );
+    await this.trackRefreshToken(
+      syncedUser.id,
+      data.session.refresh_token,
+      {
+        ...context,
+        deviceName: loginDto.deviceName,
+      },
+      providerSessionId,
+    );
 
     this.logger.info(
       { userId: data.user.id, event: 'user_login' },
@@ -366,6 +386,7 @@ export class AuthService {
   }
 
   async bootstrap(userId: string, canAccessAdmin = false) {
+    void canAccessAdmin;
     const [user, wallets] = await Promise.all([
       this.usersService.findOne(userId),
       this.walletsService.getWallets(userId),
@@ -379,7 +400,7 @@ export class AuthService {
     return {
       user: {
         ...user,
-        canAccessAdmin: user.role === 'ADMIN' || canAccessAdmin,
+        canAccessAdmin: user.role === 'ADMIN',
       },
       wallets,
     };
@@ -419,26 +440,48 @@ export class AuthService {
       throw new UnauthorizedException(REFRESH_FAILURE_MESSAGE);
     }
 
-    await this.rotateRefreshToken(existingToken, data.session.refresh_token, {
-      ipAddress: context.ipAddress,
-      userAgent: context.userAgent || existingToken.userAgent || undefined,
-      deviceName: context.deviceName || existingToken.deviceName || undefined,
-    });
+    const providerSessionId =
+      await this.supabaseService.getVerifiedProviderSessionId(
+        data.session.access_token,
+      );
+    await this.rotateRefreshToken(
+      existingToken,
+      data.session.refresh_token,
+      {
+        ipAddress: context.ipAddress,
+        userAgent: context.userAgent || existingToken.userAgent || undefined,
+        deviceName: context.deviceName || existingToken.deviceName || undefined,
+      },
+      providerSessionId,
+    );
 
     return { session: data.session };
   }
 
   async logout(accessToken: string, refreshToken?: string) {
-    const { error } = await this.supabaseService
-      .createUserScopedClient(accessToken)
-      .auth.signOut({ scope: 'local' });
+    let providerSessionId: string | undefined;
+    let providerRevocationFailed = false;
 
-    if (error) {
-      this.logger.warn({ error }, 'Supabase logout failed');
+    try {
+      providerSessionId =
+        await this.supabaseService.getVerifiedProviderSessionId(accessToken);
+      await this.supabaseService.revokeProviderSession(accessToken, 'local');
+    } catch {
+      providerRevocationFailed = true;
+      this.logger.warn(
+        { event: 'provider_logout_failed' },
+        'Supabase logout failed',
+      );
     }
 
     if (refreshToken) {
       await this.revokeRefreshToken(refreshToken);
+    } else if (providerSessionId) {
+      await this.revokeProviderSessionRecords(providerSessionId);
+    }
+
+    if (providerRevocationFailed) {
+      throw new ServiceUnavailableException('Unable to complete logout');
     }
 
     this.logger.info({ event: 'user_logout' }, 'User logged out');
@@ -469,17 +512,46 @@ export class AuthService {
     return { sessions };
   }
 
-  async revokeSession(userId: string, sessionId: string) {
+  async revokeSession(userId: string, sessionId: string, accessToken?: string) {
     const session = await this.prisma.refreshToken.findFirst({
       where: { id: sessionId, userId, revokedAt: null },
-      select: { id: true },
+      select: { id: true, providerSessionId: true },
     });
 
+    let providerRevocationFailed = false;
     if (session) {
       await this.prisma.refreshToken.update({
         where: { id: session.id },
         data: { revokedAt: new Date() },
       });
+      await this.revokeProviderSessionRecords(session.providerSessionId);
+
+      if (accessToken && session.providerSessionId) {
+        try {
+          const currentProviderSessionId =
+            await this.supabaseService.getVerifiedProviderSessionId(
+              accessToken,
+            );
+          if (currentProviderSessionId === session.providerSessionId) {
+            await this.supabaseService.revokeProviderSession(
+              accessToken,
+              'local',
+            );
+          }
+        } catch {
+          providerRevocationFailed = true;
+          this.logger.warn(
+            { userId, sessionId, event: 'provider_session_revoke_failed' },
+            'Provider session could not be revoked',
+          );
+        }
+      }
+    }
+
+    if (providerRevocationFailed) {
+      throw new ServiceUnavailableException(
+        'Session revoked locally, but provider revocation failed',
+      );
     }
 
     this.logger.info(
@@ -509,14 +581,15 @@ export class AuthService {
       );
     }
 
-    const { error } = await this.supabaseService
-      .createUserScopedClient(accessToken)
-      .auth.updateUser({
-        password: newPassword,
-      });
-
-    if (error) {
-      throw new BadRequestException(error.message);
+    try {
+      await this.supabaseService.updatePasswordWithAccessToken(
+        accessToken,
+        newPassword,
+      );
+    } catch {
+      throw new BadRequestException(
+        'Unable to update password with provided credentials',
+      );
     }
 
     await this.prisma.refreshToken.updateMany({
@@ -526,6 +599,18 @@ export class AuthService {
       },
       data: { revokedAt: new Date() },
     });
+
+    try {
+      await this.supabaseService.revokeProviderSession(accessToken, 'global');
+    } catch {
+      this.logger.warn(
+        { userId, event: 'provider_password_session_revoke_failed' },
+        'Provider sessions could not be revoked after password change',
+      );
+      throw new ServiceUnavailableException(
+        'Password changed, but sessions could not be fully revoked',
+      );
+    }
 
     this.logger.info(
       { userId, event: 'password_changed' },
@@ -568,13 +653,27 @@ export class AuthService {
       return { success: true, message: RESET_RESPONSE_MESSAGE };
     }
 
-    await this.supabaseService.ensureRecoveryIdentity({
-      id: user.id,
-      email: user.email,
-      phone: user.phone,
-      fullName: user.fullName,
-      role: user.role === 'ADMIN' ? 'ADMIN' : 'USER',
-    });
+    try {
+      await this.supabaseService.ensureRecoveryIdentity({
+        id: user.id,
+        email: user.email,
+        phone: user.phone,
+        fullName: user.fullName,
+        role: user.role === 'ADMIN' ? 'ADMIN' : 'USER',
+      });
+    } catch (error) {
+      // Recovery must remain generic and non-blocking. The admin client is
+      // only needed to repair legacy local users; normal Supabase identities
+      // can still receive a reset email with the publishable client.
+      this.logger.warn(
+        {
+          userId: user.id,
+          event: 'password_recovery_identity_repair_skipped',
+          reason: error instanceof Error ? error.message : 'unknown_error',
+        },
+        'Password recovery identity repair was unavailable',
+      );
+    }
 
     const { error } =
       await this.supabaseService.authClient.auth.resetPasswordForEmail(
@@ -661,7 +760,9 @@ export class AuthService {
       throw new BadRequestException('Current PIN or OTP is required');
     }
 
-    const verificationMethod = dto.currentPin ? 'current_pin' : 'otp';
+    const verificationMethod: 'current_pin' | 'otp' = dto.currentPin
+      ? 'current_pin'
+      : 'otp';
     if (dto.currentPin) {
       await this.transactionPin.verifyPin(userId, dto.currentPin);
       if (dto.currentPin === dto.newPin) {
@@ -677,24 +778,17 @@ export class AuthService {
       }
     }
 
-    await this.transactionPin.setPin(userId, dto.newPin);
-    const holdUntil = await this.transactionPin.setResetHold(userId);
-
-    await this.prisma.auditLog.create({
-      data: {
-        action: 'transaction_pin_reset',
-        targetType: 'USER',
-        targetId: userId,
-        metadata: {
-          actorUserId: userId,
-          verificationMethod,
-          holdUntil,
-          requestId: auditContext?.requestId,
-          ipAddress: auditContext?.ipAddress,
-          userAgent: auditContext?.userAgent,
-        },
+    const reset = await this.transactionPin.resetPinWithHold(
+      userId,
+      dto.newPin,
+      {
+        verificationMethod,
+        requestId: auditContext?.requestId ?? 'unknown',
+        ipAddress: auditContext?.ipAddress ?? 'unknown',
+        userAgent: auditContext?.userAgent,
       },
-    });
+    );
+    const holdUntil = reset.holdUntil;
 
     this.logger.warn(
       { userId, event: 'transaction_pin_reset', holdUntil },
@@ -719,6 +813,23 @@ export class AuthService {
         },
         'Unable to sync Supabase app_metadata role',
       );
+    }
+  }
+
+  private async trySendRegistrationOtp(phone: string) {
+    try {
+      await this.otpService.assertOtpSendAllowed(phone);
+      await this.otpService.sendOtp(phone);
+      return true;
+    } catch (error) {
+      this.logger.warn(
+        {
+          event: 'registration_otp_delivery_pending',
+          errorType: error instanceof HttpException ? error.name : 'unknown',
+        },
+        'Registration completed before OTP delivery was confirmed',
+      );
+      return false;
     }
   }
 
@@ -774,6 +885,7 @@ export class AuthService {
     userId: string,
     refreshToken: string | undefined,
     context: SessionContext,
+    providerSessionId?: string,
     expiresAt: Date = this.refreshTokenExpiry(),
   ) {
     if (!refreshToken) {
@@ -784,6 +896,7 @@ export class AuthService {
       data: {
         userId,
         tokenHash: this.hashToken(refreshToken),
+        providerSessionId,
         deviceId: randomUUID(),
         deviceName: this.resolveDeviceName(context),
         userAgent: context.userAgent,
@@ -800,9 +913,11 @@ export class AuthService {
       deviceId: string;
       deviceName: string | null;
       userAgent: string | null;
+      providerSessionId?: string | null;
     },
     nextRefreshToken: string | undefined,
     context: SessionContext,
+    providerSessionId?: string,
   ) {
     if (!nextRefreshToken) {
       await this.prisma.refreshToken.update({
@@ -817,6 +932,8 @@ export class AuthService {
         data: {
           userId: existingToken.userId,
           tokenHash: this.hashToken(nextRefreshToken),
+          providerSessionId:
+            providerSessionId || existingToken.providerSessionId || undefined,
           deviceId: existingToken.deviceId,
           deviceName: this.resolveDeviceName(context),
           userAgent: context.userAgent,
@@ -840,6 +957,22 @@ export class AuthService {
     await this.prisma.refreshToken.updateMany({
       where: {
         tokenHash: this.hashToken(refreshToken),
+        revokedAt: null,
+      },
+      data: { revokedAt: new Date() },
+    });
+  }
+
+  private async revokeProviderSessionRecords(
+    providerSessionId?: string | null,
+  ) {
+    if (!providerSessionId) {
+      return;
+    }
+
+    await this.prisma.refreshToken.updateMany({
+      where: {
+        providerSessionId,
         revokedAt: null,
       },
       data: { revokedAt: new Date() },

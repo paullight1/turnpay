@@ -9,6 +9,7 @@ describe('Ninja production configuration', () => {
   const productionEnv: NodeJS.ProcessEnv = {
     ...process.env,
     NODE_ENV: 'production',
+    SENTRY_DSN: 'https://ci-public@sentry.io/123456',
     DATABASE_URL:
       'postgresql://postgres.project-ref:test-password@aws-0-eu-west-1.pooler.supabase.com:5432/postgres?sslmode=require&schema=public',
     WEB_URL: 'https://trustpay.example.com',
@@ -18,6 +19,13 @@ describe('Ninja production configuration', () => {
     REDIS_URL: 'rediss://default:test@redis.example.com:6379',
     REDIS_ALLOW_MEMORY_FALLBACK: 'false',
     TRUST_PROXY_HOPS: '1',
+    OTP_EXPIRES_IN: '5m',
+    OTP_LENGTH: '6',
+    OTP_DEV_CODE: '',
+    SMS_PROVIDER: 'twilio',
+    TWILIO_ACCOUNT_SID: 'ACaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    TWILIO_AUTH_TOKEN: 'ci-twilio-auth-token',
+    TWILIO_PHONE_NUMBER: '+15557122661',
     IDEMPOTENCY_RESPONSE_ENCRYPTION_KEY: Buffer.alloc(32, 7).toString('base64'),
     IDEMPOTENCY_RESPONSE_ENCRYPTION_KEY_ID: 'v1',
     INTERNAL_TRANSFERS_ENABLED: 'false',

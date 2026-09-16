@@ -30,6 +30,7 @@ import { VtuProviderHealthResponse } from './providers/provider-health.types';
 import type { VtuProviderResult } from './providers/vtpass.types';
 import type { VtpassInboxEvent } from './vtu-webhook-inbox.service';
 import { VtuReceiptService } from './vtu-receipt.service';
+import { SettlementHoldService } from '../common/services/settlement-hold.service';
 
 type VtuPricingContext = {
   amount: Decimal;
@@ -50,6 +51,7 @@ export class VtuService {
     private readonly ledger: LedgerService,
     private readonly transactionPin: TransactionPinService,
     private readonly receipt: VtuReceiptService,
+    private readonly settlementHold: SettlementHoldService,
   ) {}
 
   async getProviders(type?: string) {
@@ -82,6 +84,9 @@ export class VtuService {
           id: true,
           transactionId: true,
           providerRequestId: true,
+          providerTransactionId: true,
+          status: true,
+          costAmount: true,
           transaction: {
             select: {
               id: true,
@@ -105,7 +110,13 @@ export class VtuService {
         throw new NotFoundException('VTU order not found for callback');
       }
 
-      if (order.transaction.status !== 'PENDING') {
+      if (order.providerRequestId !== event.providerRequestId) {
+        throw new BadRequestException('VTU provider request identity mismatch');
+      }
+
+      const isLateReversal =
+        order.transaction.status === 'SUCCESS' && event.status === 'reversed';
+      if (order.transaction.status !== 'PENDING' && !isLateReversal) {
         return { processed: false, orderId: order.id, terminal: true };
       }
 
@@ -113,7 +124,31 @@ export class VtuService {
       // Only the authenticated provider requery can settle or refund this order.
       // Errors propagate to the durable inbox for retry without moving money.
       const result = await this.vtuApi.requery(order.providerRequestId);
-      await this.applyProviderResultToOrder({ order, result });
+
+      if (isLateReversal && result.status !== 'reversed') {
+        // A signed reversal callback is an authenticated trigger, not proof
+        // of the final provider state. Keep the inbox row retryable when the
+        // first requery is stale so a later confirmed reversal is not lost.
+        throw new Error('VTU provider reversal not yet confirmed');
+      }
+
+      await this.applyProviderResultToOrder({
+        order,
+        result:
+          isLateReversal && result.status === 'reversed'
+            ? {
+                ...result,
+                // VTpass documents wallet_credit_id on the signed reversal
+                // callback, while some requery responses omit it. Keep the
+                // requery authoritative for status/identity and use callback
+                // evidence only to complete the provider reversal reference.
+                walletCreditId: result.walletCreditId || event.walletCreditId,
+                providerAmount: result.providerAmount || event.providerAmount,
+                providerCurrency:
+                  result.providerCurrency || event.providerCurrency,
+              }
+            : result,
+      });
 
       this.logger.info(
         {
@@ -250,8 +285,31 @@ export class VtuService {
         id: transaction.id,
         reference: transaction.reference,
         orderId: order.id,
+        currency: transaction.currency || 'NGN',
       };
     });
+
+    try {
+      await this.settlementHold.assertOutboundAllowed({
+        operation: 'VTU',
+        scope: 'VTU_SETTLEMENT',
+        currency: 'NGN',
+        reference: transactionRecord.reference,
+      });
+    } catch (error) {
+      await this.reverseVtuPurchase(
+        userId,
+        transactionRecord,
+        debitAmount,
+        'VTU settlement blocked by reconciliation hold',
+        {
+          ...metadata,
+          providerStatus: 'BLOCKED_RECONCILIATION',
+        },
+        'FAILED',
+      );
+      throw error;
+    }
 
     let purchaseResult: VtuProviderResult;
 
@@ -517,20 +575,29 @@ export class VtuService {
       throw new NotFoundException('VTU order not found');
     }
 
-    if (['SUCCESS', 'FAILED', 'REVERSED'].includes(order.status)) {
+    if (['FAILED', 'REVERSED'].includes(order.status)) {
       return { processed: false, terminal: true };
     }
+
+    const locallySuccessful =
+      order.status === 'SUCCESS' || order.transaction.status === 'SUCCESS';
 
     let result: VtuProviderResult;
 
     try {
       result = await this.vtuApi.requery(order.providerRequestId);
     } catch (error) {
-      await this.scheduleOrderRequery(
-        order.id,
-        error instanceof Error ? error.message : 'Unknown requery error',
-      );
+      if (!locallySuccessful) {
+        await this.scheduleOrderRequery(
+          order.id,
+          error instanceof Error ? error.message : 'Unknown requery error',
+        );
+      }
       throw error;
+    }
+
+    if (locallySuccessful && result.status !== 'reversed') {
+      return { processed: false, terminal: true };
     }
 
     await this.applyProviderResultToOrder({
@@ -907,6 +974,9 @@ export class VtuService {
       id: string;
       transactionId: string;
       providerRequestId: string;
+      providerTransactionId?: string | null;
+      status?: string;
+      costAmount?: Decimal | null;
       transaction: {
         id: string;
         userId: string;
@@ -921,12 +991,34 @@ export class VtuService {
     result: VtuProviderResult;
   }) {
     const orderStatus = this.orderStatusFromProviderStatus(input.result.status);
+    const isLateReversal =
+      input.order.transaction.status === 'SUCCESS' &&
+      orderStatus === 'REVERSED';
+
+    this.assertProviderRequestIdentity(
+      input.order,
+      input.result,
+      isLateReversal,
+    );
+    if (isLateReversal) {
+      this.assertConfirmedLateReversal(input.order, input.result);
+    }
+
+    const providerAmount = this.providerAmount(input.result);
+    const providerCurrency = this.providerCurrency(input.result);
+    const walletCreditId = this.walletCreditId(input.result);
     const metadata = {
       ...this.asMetadata(input.order.transaction.metadata),
       providerReference: input.result.reference,
       providerStatus: input.result.status,
       providerRequestId:
         input.result.providerRequestId || input.order.providerRequestId,
+      ...(isLateReversal && input.result.providerTransactionId
+        ? { providerTransactionId: input.result.providerTransactionId }
+        : {}),
+      ...(providerAmount ? { providerAmount } : {}),
+      ...(providerCurrency ? { providerCurrency } : {}),
+      ...(walletCreditId ? { walletCreditId } : {}),
     };
 
     if (orderStatus === 'SUCCESS') {
@@ -974,6 +1066,7 @@ export class VtuService {
           id: input.order.transaction.id,
           reference: input.order.transaction.reference,
           orderId: input.order.id,
+          currency: input.order.transaction.currency,
         },
         new Decimal(input.order.transaction.amount).plus(
           input.order.transaction.fee,
@@ -981,6 +1074,7 @@ export class VtuService {
         input.result.message,
         metadata,
         orderStatus,
+        isLateReversal ? 'SUCCESS' : 'PENDING',
       );
       return;
     }
@@ -1012,20 +1106,158 @@ export class VtuService {
     });
   }
 
+  private assertProviderRequestIdentity(
+    order: { providerRequestId: string },
+    result: VtuProviderResult,
+    required: boolean,
+  ) {
+    if (!required) return;
+
+    if (
+      !result.providerRequestId ||
+      result.providerRequestId !== order.providerRequestId
+    ) {
+      throw new BadRequestException('VTU provider request identity mismatch');
+    }
+  }
+
+  private assertConfirmedLateReversal(
+    order: {
+      providerRequestId: string;
+      providerTransactionId?: string | null;
+      costAmount?: Decimal | null;
+      transaction: {
+        amount: Decimal;
+        currency: 'NGN' | 'GHS';
+      };
+    },
+    result: VtuProviderResult,
+  ) {
+    if (result.status !== 'reversed') {
+      throw new BadRequestException('VTU provider reversal was not confirmed');
+    }
+
+    const resultTransactionId =
+      result.providerTransactionId || result.reference;
+    if (
+      !resultTransactionId ||
+      (order.providerTransactionId &&
+        resultTransactionId !== order.providerTransactionId)
+    ) {
+      throw new BadRequestException(
+        'VTU provider transaction identity mismatch',
+      );
+    }
+
+    const providerCurrency = this.providerCurrency(result);
+    if (providerCurrency !== order.transaction.currency) {
+      throw new BadRequestException('VTU provider reversal currency mismatch');
+    }
+
+    const providerAmount = this.providerAmount(result);
+    if (!providerAmount) {
+      throw new BadRequestException('VTU provider reversal amount is missing');
+    }
+
+    let normalizedProviderAmount: Decimal;
+    try {
+      normalizedProviderAmount = new Decimal(providerAmount);
+    } catch {
+      throw new BadRequestException('VTU provider reversal amount is invalid');
+    }
+    if (
+      !normalizedProviderAmount.isFinite() ||
+      normalizedProviderAmount.lessThanOrEqualTo(0)
+    ) {
+      throw new BadRequestException('VTU provider reversal amount is invalid');
+    }
+
+    const expectedProviderAmounts = [
+      order.costAmount ? new Decimal(order.costAmount) : undefined,
+      new Decimal(order.transaction.amount),
+    ].filter((amount): amount is Decimal => Boolean(amount));
+    if (
+      !expectedProviderAmounts.some((amount) =>
+        normalizedProviderAmount.equals(amount),
+      )
+    ) {
+      throw new BadRequestException('VTU provider reversal amount mismatch');
+    }
+
+    if (!this.walletCreditId(result)) {
+      throw new BadRequestException(
+        'VTU provider reversal wallet credit is missing',
+      );
+    }
+  }
+
+  private providerAmount(result: VtuProviderResult) {
+    const value =
+      result.providerAmount ??
+      result.providerCost ??
+      this.safeResponseValue(result, ['providerAmount', 'amount']);
+    return this.optionalMoneyString(value);
+  }
+
+  private providerCurrency(result: VtuProviderResult) {
+    const value =
+      result.providerCurrency ??
+      this.safeResponseValue(result, ['providerCurrency', 'currency']);
+    return value === 'NGN' || value === 'GHS' ? value : undefined;
+  }
+
+  private walletCreditId(result: VtuProviderResult) {
+    const value =
+      result.walletCreditId ??
+      this.safeResponseValue(result, ['walletCreditId', 'wallet_credit_id']);
+    return typeof value === 'string' && value.trim()
+      ? value.trim().slice(0, 128)
+      : undefined;
+  }
+
+  private safeResponseValue(result: VtuProviderResult, keys: string[]) {
+    for (const key of keys) {
+      const value = result.safeResponse?.[key];
+      if (value !== undefined && value !== null && value !== '') return value;
+    }
+    return undefined;
+  }
+
+  private optionalMoneyString(value: unknown) {
+    if (value === undefined || value === null || value === '') return undefined;
+    try {
+      const normalized = new Decimal(value as string | number);
+      if (!normalized.isFinite() || normalized.isNegative()) return undefined;
+      return normalized.toFixed(2);
+    } catch {
+      return undefined;
+    }
+  }
+
   private async reverseVtuPurchase(
     userId: string,
-    transaction: { id: string; reference: string; orderId?: string },
+    transaction: {
+      id: string;
+      reference: string;
+      currency: 'NGN' | 'GHS';
+      orderId?: string;
+    },
     amount: Decimal,
     reason: string,
     metadata: Record<string, unknown>,
     finalStatus: Extract<TransactionStatus, 'FAILED' | 'REVERSED'> = 'FAILED',
+    expectedStatus: Extract<
+      TransactionStatus,
+      'PENDING' | 'SUCCESS'
+    > = 'PENDING',
   ) {
     const reversed = await this.prisma.$transaction(async (tx) => {
-      // Guarded transition: only a still-PENDING purchase may be reversed.
-      // A late FAILED/REVERSED provider event after the order was already
-      // delivered (SUCCESS) or refunded (REVERSED) must not double-refund.
+      // Guarded transition: an outright failure only reverses a pending
+      // purchase, while a provider-confirmed reversal may also reverse a
+      // locally successful purchase. The guarded write makes duplicate and
+      // concurrent callbacks no-ops.
       const transitioned = await tx.transaction.updateMany({
-        where: { reference: transaction.reference, status: 'PENDING' },
+        where: { reference: transaction.reference, status: expectedStatus },
         data: {
           status: finalStatus,
           metadata: {
@@ -1050,7 +1282,7 @@ export class VtuService {
         await this.ledger.creditWallet(
           {
             userId,
-            currency: 'NGN',
+            currency: transaction.currency,
             amount,
             transactionId: transaction.id,
             reference: `${transaction.reference}-REVERSAL`,

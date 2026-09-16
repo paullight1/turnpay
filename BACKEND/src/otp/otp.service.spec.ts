@@ -1,4 +1,8 @@
-import { HttpException, HttpStatus } from '@nestjs/common';
+import {
+  HttpException,
+  HttpStatus,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import { OtpService } from './otp.service';
 
 type StoredValue = {
@@ -51,6 +55,7 @@ describe('OtpService', () => {
     OTP_LENGTH: '6',
     OTP_DEV_CODE: '654321',
     NODE_ENV: 'test',
+    SMS_PROVIDER: 'twilio',
   };
 
   const configService = {
@@ -65,8 +70,17 @@ describe('OtpService', () => {
     warn: jest.fn(),
   };
 
+  const smsProvider = {
+    sendSms: jest.fn().mockResolvedValue(undefined),
+  };
+
   beforeEach(() => {
     jest.clearAllMocks();
+    configValues.OTP_EXPIRES_IN = '5';
+    configValues.OTP_LENGTH = '6';
+    configValues.OTP_DEV_CODE = '654321';
+    configValues.NODE_ENV = 'test';
+    configValues.SMS_PROVIDER = 'twilio';
   });
 
   it('rejects a fourth OTP send in the same hour for one normalized phone', async () => {
@@ -75,6 +89,7 @@ describe('OtpService', () => {
       redis as never,
       configService as never,
       logger as never,
+      smsProvider,
     );
 
     const attempts = await Promise.allSettled(
@@ -102,6 +117,7 @@ describe('OtpService', () => {
       redis as never,
       configService as never,
       logger as never,
+      smsProvider,
     );
 
     const attempts = await Promise.allSettled(
@@ -129,6 +145,7 @@ describe('OtpService', () => {
       redis as never,
       configService as never,
       logger as never,
+      smsProvider,
     );
 
     await service.sendOtp('+2348012345678');
@@ -143,5 +160,85 @@ describe('OtpService', () => {
     await expect(service.verifyOtp('+2348012345678', '654321')).resolves.toBe(
       false,
     );
+  });
+
+  it('delivers an OTP before persisting the code and returns success only after delivery', async () => {
+    const { redis, store } = createRedisMock();
+    configValues.OTP_DEV_CODE = '';
+    const service = new OtpService(
+      redis as never,
+      configService as never,
+      logger as never,
+      smsProvider,
+    );
+
+    await expect(service.sendOtp('+2348012345678')).resolves.toEqual({
+      success: true,
+      message: 'OTP sent successfully',
+    });
+
+    expect(smsProvider.sendSms).toHaveBeenCalledTimes(1);
+    expect(smsProvider.sendSms).toHaveBeenCalledWith(
+      '+2348012345678',
+      expect.stringMatching(/^Your TrustPay verification code is: \d{6}\./),
+    );
+    expect(store.size).toBe(1);
+  });
+
+  it('does not persist a code or report success when SMS delivery fails', async () => {
+    const { redis, store } = createRedisMock();
+    configValues.OTP_DEV_CODE = '';
+    smsProvider.sendSms.mockRejectedValueOnce(
+      new ServiceUnavailableException('OTP delivery unavailable'),
+    );
+    const service = new OtpService(
+      redis as never,
+      configService as never,
+      logger as never,
+      smsProvider,
+    );
+
+    await expect(service.sendOtp('+2348012345678')).rejects.toBeInstanceOf(
+      ServiceUnavailableException,
+    );
+    expect(store.size).toBe(0);
+    expect(logger.info).not.toHaveBeenCalledWith(
+      expect.anything(),
+      'OTP generated',
+    );
+  });
+
+  it('clamps configured expiry to five minutes and allows the development override only locally', async () => {
+    const { redis, store } = createRedisMock();
+    configValues.OTP_EXPIRES_IN = '15m';
+    const service = new OtpService(
+      redis as never,
+      configService as never,
+      logger as never,
+      smsProvider,
+    );
+
+    await service.sendOtp('+2348012345678');
+    const stored = [...store.values()][0];
+    expect(stored.expiresAt).toBeDefined();
+    expect(stored.expiresAt! - Date.now()).toBeLessThanOrEqual(300_000);
+
+    configValues.NODE_ENV = 'staging';
+    configValues.OTP_DEV_CODE = '654321';
+    const stagingService = new OtpService(
+      redis as never,
+      configService as never,
+      logger as never,
+      smsProvider,
+    );
+    await stagingService.sendOtp('+2348012345678');
+    expect(smsProvider.sendSms).toHaveBeenLastCalledWith(
+      '+2348012345678',
+      expect.not.stringContaining('654321'),
+    );
+
+    configValues.OTP_EXPIRES_IN = '5';
+    configValues.OTP_DEV_CODE = '654321';
+    configValues.NODE_ENV = 'test';
   });
 });

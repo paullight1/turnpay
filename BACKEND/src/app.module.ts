@@ -61,6 +61,13 @@ const defaultNodeEnv =
           .empty('value')
           .default(defaultNodeEnv),
         PORT: Joi.number().empty('').empty('value').default(3000),
+        SENTRY_DSN: Joi.when('NODE_ENV', {
+          is: 'production',
+          then: Joi.string()
+            .uri({ scheme: ['https'] })
+            .required(),
+          otherwise: Joi.string().allow('').optional(),
+        }),
         DATABASE_URL: Joi.when('NODE_ENV', {
           is: deployedEnvironment,
           then: Joi.string()
@@ -97,7 +104,13 @@ const defaultNodeEnv =
           then: Joi.string().min(32).required(),
           otherwise: Joi.string().default('dev_refresh_secret_do_not_use'),
         }),
-        SUPABASE_URL: Joi.string().uri().required(),
+        SUPABASE_URL: Joi.when('NODE_ENV', {
+          is: deployedEnvironment,
+          then: Joi.string()
+            .uri({ scheme: ['https'] })
+            .required(),
+          otherwise: Joi.string().uri().required(),
+        }),
         SUPABASE_PUBLISHABLE_KEY: Joi.string().allow('').optional(),
         SUPABASE_ANON_KEY: Joi.string().allow('').optional(),
         SUPABASE_SERVICE_ROLE_KEY: Joi.when('NODE_ENV', {
@@ -115,8 +128,8 @@ const defaultNodeEnv =
         KYC_PROVIDER: Joi.string()
           .trim()
           .lowercase()
-          .valid('ninja', 'youverify')
-          .default('ninja'),
+          .valid('monnify')
+          .default('monnify'),
         NINJA_CLIENT_KEY: Joi.when('KYC_PROVIDER', {
           is: 'ninja',
           then: Joi.when('NODE_ENV', {
@@ -257,9 +270,43 @@ const defaultNodeEnv =
           then: Joi.number().integer().min(1).max(2).required(),
           otherwise: Joi.number().integer().min(0).max(2).default(0),
         }),
-        OTP_EXPIRES_IN: Joi.string().allow('').optional(),
-        OTP_LENGTH: Joi.string().allow('').optional(),
-        OTP_DEV_CODE: Joi.string().allow('').optional(),
+        OTP_EXPIRES_IN: Joi.string()
+          .empty('')
+          .pattern(/^(?:[1-5]m?|(?:[1-9]|[1-9]\d|[12]\d{2}|300)s)$/)
+          .default('5m'),
+        OTP_LENGTH: Joi.string().empty('').valid('6').default('6'),
+        OTP_DEV_CODE: Joi.when('NODE_ENV', {
+          is: deployedEnvironment,
+          then: Joi.string().valid('').optional(),
+          otherwise: Joi.string()
+            .allow('')
+            .pattern(/^\d{6}$/)
+            .optional(),
+        }),
+        SMS_PROVIDER: Joi.when('NODE_ENV', {
+          is: deployedEnvironment,
+          then: Joi.string().valid('twilio').required(),
+          otherwise: Joi.string().valid('', 'twilio').optional(),
+        }),
+        TWILIO_ACCOUNT_SID: Joi.when('NODE_ENV', {
+          is: deployedEnvironment,
+          then: Joi.string()
+            .pattern(/^AC[a-zA-Z0-9]{32}$/)
+            .required(),
+          otherwise: Joi.string().allow('').optional(),
+        }),
+        TWILIO_AUTH_TOKEN: Joi.when('NODE_ENV', {
+          is: deployedEnvironment,
+          then: Joi.string().min(1).required(),
+          otherwise: Joi.string().allow('').optional(),
+        }),
+        TWILIO_PHONE_NUMBER: Joi.when('NODE_ENV', {
+          is: deployedEnvironment,
+          then: Joi.string()
+            .pattern(/^\+[1-9]\d{1,14}$/)
+            .required(),
+          otherwise: Joi.string().allow('').optional(),
+        }),
         BANKING_ENABLED: Joi.boolean()
           .truthy('true')
           .falsy('false')
@@ -273,8 +320,24 @@ const defaultNodeEnv =
           .falsy('false')
           .default(false),
         INTERNAL_TRANSFERS_ENABLED: internalTransfersEnabledSchema,
-        MONNIFY_API_KEY: Joi.string().allow('').optional(),
-        MONNIFY_SECRET_KEY: Joi.string().allow('').optional(),
+        MONNIFY_API_KEY: Joi.when('KYC_PROVIDER', {
+          is: 'monnify',
+          then: Joi.when('NODE_ENV', {
+            is: deployedEnvironment,
+            then: Joi.string().trim().min(1).required(),
+            otherwise: Joi.string().allow('').optional(),
+          }),
+          otherwise: Joi.string().allow('').optional(),
+        }),
+        MONNIFY_SECRET_KEY: Joi.when('KYC_PROVIDER', {
+          is: 'monnify',
+          then: Joi.when('NODE_ENV', {
+            is: deployedEnvironment,
+            then: Joi.string().trim().min(1).required(),
+            otherwise: Joi.string().allow('').optional(),
+          }),
+          otherwise: Joi.string().allow('').optional(),
+        }),
         MONNIFY_CONTRACT_CODE: Joi.string().allow('').optional(),
         MONNIFY_BASE_URL: Joi.string().uri().allow('').optional(),
         MONNIFY_WEBHOOK_URL: Joi.string().uri().allow('').optional(),

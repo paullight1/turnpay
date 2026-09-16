@@ -29,6 +29,7 @@ import {
   VtuOrderScope,
 } from '@prisma/client';
 import { Decimal } from '@prisma/client/runtime/library';
+import * as Sentry from '@sentry/nestjs';
 import { LedgerService } from '../wallets/ledger.service';
 import { SupabaseService } from '../supabase/supabase.service';
 import { VtuService } from '../vtu/vtu.service';
@@ -436,6 +437,7 @@ export class AdminService {
       select: {
         id: true,
         userId: true,
+        providerSessionId: true,
         deviceId: true,
         deviceName: true,
         userAgent: true,
@@ -461,9 +463,14 @@ export class AdminService {
     await this.prisma.$transaction(async (tx) => {
       const updated = await tx.refreshToken.updateMany({
         where: {
-          id: sessionId,
           userId,
           revokedAt: null,
+          OR: [
+            { id: sessionId },
+            ...(session.providerSessionId
+              ? [{ providerSessionId: session.providerSessionId }]
+              : []),
+          ],
         },
         data: { revokedAt },
       });
@@ -1234,16 +1241,26 @@ export class AdminService {
 
     // Wallet balances vs net ledger movement must be compared over all time
     // regardless of the requested range: balances are cumulative state.
-    const [walletTotals, ledgerTotals] = await Promise.all([
-      this.prisma.wallet.groupBy({
-        by: ['currency'],
-        _sum: { balance: true },
-      }),
-      this.prisma.ledgerEntry.groupBy({
-        by: ['currency', 'direction'],
-        _sum: { amount: true },
-      }),
-    ]);
+    const { walletTotals, ledgerTotals } = await this.prisma.$transaction(
+      async (tx) => {
+        const [walletTotals, ledgerTotals] = await Promise.all([
+          tx.wallet.groupBy({
+            by: ['currency'],
+            _sum: { balance: true },
+          }),
+          tx.ledgerEntry.groupBy({
+            by: ['currency', 'direction'],
+            _sum: { amount: true },
+          }),
+        ]);
+        return { walletTotals, ledgerTotals };
+      },
+      {
+        isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead,
+        timeout: 5000,
+        maxWait: 3000,
+      },
+    );
 
     const ledgerNetByCurrency = new Map<string, Decimal>();
     for (const row of ledgerTotals) {
@@ -1373,6 +1390,29 @@ export class AdminService {
           }) as Prisma.InputJsonValue,
         },
       });
+
+      if (status === 'BLOCKED') {
+        this.logger.error(
+          {
+            alertCode: 'ADMIN_BANKING_RECONCILIATION_BLOCKED',
+            reconciliationScope: 'ADMIN_BANKING',
+            runId: run.id,
+            mismatchCount,
+          },
+          'Admin banking reconciliation blocked outbound settlement',
+        );
+        Sentry.captureMessage(
+          'Admin banking reconciliation blocked outbound settlement',
+          {
+            level: 'error',
+            tags: {
+              alertCode: 'ADMIN_BANKING_RECONCILIATION_BLOCKED',
+              reconciliationScope: 'ADMIN_BANKING',
+            },
+            extra: { runId: run.id, mismatchCount },
+          },
+        );
+      }
 
       await this.prisma.auditLog.create({
         data: {

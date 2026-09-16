@@ -3,6 +3,7 @@ import {
   ForbiddenException,
   Injectable,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
@@ -19,6 +20,10 @@ import { maskAccountNumber } from '../common/utils/masking';
 import { TransactionPinService } from '../common/services/transaction-pin.service';
 import { formatKycTier, isKycTierAtLeast } from '../common/utils/kyc-tier';
 import { toProviderDecimalString } from './utils/provider-amount';
+import {
+  isReconciliationSettlementHoldError,
+  SettlementHoldService,
+} from '../common/services/settlement-hold.service';
 
 type WithdrawalProvider = 'monnify';
 
@@ -54,6 +59,8 @@ interface WithdrawalRecord {
 
 @Injectable()
 export class PaymentService {
+  private readonly settlementHold: SettlementHoldService;
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly walletsService: WalletsService,
@@ -62,7 +69,13 @@ export class PaymentService {
     private readonly logger: PinoLogger,
     private readonly ledger: LedgerService,
     private readonly transactionPin: TransactionPinService,
-  ) {}
+    @Optional() settlementHold?: SettlementHoldService,
+  ) {
+    // Keep direct construction fail-closed. Production DI supplies the
+    // shared service; fixtures that omit it still exercise the persisted
+    // reconciliation check instead of silently bypassing the hold.
+    this.settlementHold = settlementHold ?? new SettlementHoldService(prisma);
+  }
 
   async withdraw(userId: string, dto: WithdrawDto) {
     await this.transactionPin.verifyRequired(userId, dto.transactionPin);
@@ -285,6 +298,10 @@ export class PaymentService {
     });
 
     try {
+      await this.assertSettlementAllowed(
+        withdrawalRecord.reference,
+        'WITHDRAWAL',
+      );
       const sourceAccountNumber = this.getMonnifySourceAccountNumber();
       const transfer = await this.monnifyBanks.initiateTransfer({
         amount: toProviderDecimalString(amount),
@@ -349,6 +366,37 @@ export class PaymentService {
       }
 
       if (!withdrawalRecord) {
+        throw error;
+      }
+
+      // The hold is checked again immediately before provider dispatch. If a
+      // new BLOCKED run appeared after reservation, release the local debit
+      // and mark the attempt terminal instead of treating the hold as an
+      // ambiguous provider timeout with funds still reserved.
+      if (!transferRequestSent && isReconciliationSettlementHoldError(error)) {
+        await this.prisma.transaction.updateMany({
+          where: { reference: withdrawalRecord.reference, status: 'PENDING' },
+          data: { status: 'FAILED' },
+        });
+        await this.prisma.transferAttempt.update({
+          where: { id: withdrawalRecord.transferAttemptId },
+          data: {
+            providerStatus: 'RECONCILIATION_HOLD',
+            status: 'FAILED',
+            lastCheckedAt: new Date(),
+          },
+        });
+        await this.reverseWithdrawal(
+          userId,
+          dto.currency,
+          amount,
+          withdrawalRecord,
+          destination,
+        );
+        this.logger.warn(
+          { reference: withdrawalRecord.reference },
+          'Withdrawal reservation released because reconciliation blocked settlement',
+        );
         throw error;
       }
 
@@ -582,6 +630,7 @@ export class PaymentService {
       latestAttempt.metadata,
     );
 
+    await this.assertSettlementAllowed(reconciled.reference, 'WITHDRAWAL');
     const authorization = await this.monnifyBanks.authorizeTransfer({
       reference: providerReference,
       authorizationCode,
@@ -1385,6 +1434,19 @@ export class PaymentService {
     ) {
       throw new BadRequestException('Amount must be between 0.01 and 10000000');
     }
+  }
+
+  private async assertSettlementAllowed(
+    reference: string,
+    operation: 'WITHDRAWAL',
+  ) {
+    await this.settlementHold.assertSettlementAllowed({
+      operation,
+      scope: 'ADMIN_BANKING',
+      currency: 'NGN',
+      provider: 'MONNIFY',
+      reference,
+    });
   }
 
   private getMonnifySourceAccountNumber() {

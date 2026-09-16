@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ServiceUnavailableException,
   UnauthorizedException,
 } from '@nestjs/common';
 import { AuthService } from './auth.service';
@@ -26,6 +27,9 @@ describe('AuthService Supabase integration', () => {
     syncUser: jest.fn(),
     ensureRecoveryIdentity: jest.fn(),
     createUserScopedClient: jest.fn(() => scopedClient),
+    getVerifiedProviderSessionId: jest.fn(),
+    revokeProviderSession: jest.fn(),
+    updatePasswordWithAccessToken: jest.fn(),
     setAuthAppRole: jest.fn(),
   };
 
@@ -51,6 +55,7 @@ describe('AuthService Supabase integration', () => {
     setInitialPin: jest.fn(),
     verifyPin: jest.fn(),
     setResetHold: jest.fn(),
+    resetPinWithHold: jest.fn(),
     getStatus: jest.fn(),
   };
 
@@ -159,11 +164,14 @@ describe('AuthService Supabase integration', () => {
     supabase.authClient.auth.signUp.mockResolvedValue({
       data: {
         user: { id: 'user-1', email: 'ada@example.com' },
-        session: { access_token: 'token' },
+        session: { access_token: 'token', refresh_token: 'refresh-token' },
       },
       error: null,
     });
     supabase.syncUser.mockResolvedValue({ id: 'user-1' });
+    supabase.getVerifiedProviderSessionId.mockResolvedValue(
+      'provider-session-1',
+    );
     users.findOne.mockResolvedValue({ id: 'user-1', email: 'ada@example.com' });
     referrals.ensureReferralCode.mockResolvedValue(undefined);
     referrals.recordReferral.mockResolvedValue(undefined);
@@ -183,6 +191,11 @@ describe('AuthService Supabase integration', () => {
     );
     expect(supabase.setAuthAppRole).toHaveBeenCalledWith('user-1', 'USER');
     expect(transactionPin.setPin).toHaveBeenCalledWith('user-1', '1234');
+    expect(prisma.refreshToken.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        providerSessionId: 'provider-session-1',
+      }),
+    });
   });
 
   it('rejects registration when the phone is already registered locally', async () => {
@@ -204,6 +217,45 @@ describe('AuthService Supabase integration', () => {
     });
 
     expect(supabase.authClient.auth.signUp).not.toHaveBeenCalled();
+  });
+
+  it('returns the created session when registration OTP delivery is unavailable', async () => {
+    users.findByEmail.mockResolvedValue(null);
+    users.findByPhone.mockResolvedValue(null);
+    supabase.authClient.auth.signUp.mockResolvedValue({
+      data: {
+        user: { id: 'user-1', email: 'ada@example.com' },
+        session: {
+          access_token: 'access-token',
+          refresh_token: 'raw-refresh',
+        },
+      },
+      error: null,
+    });
+    supabase.syncUser.mockResolvedValue({ id: 'user-1' });
+    supabase.getVerifiedProviderSessionId.mockResolvedValue(
+      'provider-session-1',
+    );
+    users.findOne.mockResolvedValue({ id: 'user-1', email: 'ada@example.com' });
+    referrals.ensureReferralCode.mockResolvedValue(undefined);
+    referrals.recordReferral.mockResolvedValue(undefined);
+    otp.sendOtp.mockRejectedValue(
+      new ServiceUnavailableException('OTP delivery unavailable'),
+    );
+
+    await expect(
+      service.register({
+        email: 'ada@example.com',
+        phone: '+2348012345678',
+        password: 'Password1',
+        transactionPin: '1234',
+      }),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        authMode: 'supabase',
+        otpDeliveryPending: true,
+      }),
+    );
   });
 
   it('returns an email-specific conflict when Supabase reports a duplicate email', async () => {
@@ -282,7 +334,48 @@ describe('AuthService Supabase integration', () => {
       ),
     ).rejects.toBeInstanceOf(UnauthorizedException);
 
-    expect(scopedClient.auth.updateUser).not.toHaveBeenCalled();
+    expect(supabase.updatePasswordWithAccessToken).not.toHaveBeenCalled();
+  });
+
+  it('updates the password through an explicit-token provider operation and revokes all sessions', async () => {
+    users.findOne.mockResolvedValue({ id: 'user-1', email: 'ada@example.com' });
+    supabase.authClient.auth.signInWithPassword.mockResolvedValue({
+      data: {
+        user: { id: 'user-1', email: 'ada@example.com' },
+        session: {
+          access_token: 'reauth-token',
+          refresh_token: 'reauth-refresh',
+        },
+      },
+      error: null,
+    });
+    supabase.updatePasswordWithAccessToken.mockResolvedValue(undefined);
+    supabase.revokeProviderSession.mockResolvedValue(undefined);
+
+    await expect(
+      service.changePassword(
+        'user-1',
+        'access-token',
+        'CurrentPassword1',
+        'NewPassword1',
+      ),
+    ).resolves.toEqual({
+      success: true,
+      message: 'Password changed successfully',
+    });
+
+    expect(supabase.updatePasswordWithAccessToken).toHaveBeenCalledWith(
+      'access-token',
+      'NewPassword1',
+    );
+    expect(supabase.revokeProviderSession).toHaveBeenCalledWith(
+      'access-token',
+      'global',
+    );
+    expect(prisma.refreshToken.updateMany).toHaveBeenCalledWith({
+      where: { userId: 'user-1', revokedAt: null },
+      data: { revokedAt: expect.any(Date) },
+    });
   });
 
   it('records failed login attempts and returns a safe auth error', async () => {
@@ -370,6 +463,9 @@ describe('AuthService Supabase integration', () => {
       error: null,
     });
     supabase.syncUser.mockResolvedValue({ id: 'user-1' });
+    supabase.getVerifiedProviderSessionId.mockResolvedValue(
+      'provider-session-1',
+    );
     users.findOne.mockResolvedValue({ id: 'user-1', email: 'ada@example.com' });
 
     await service.login(
@@ -388,6 +484,7 @@ describe('AuthService Supabase integration', () => {
     expect(prisma.refreshToken.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         userId: 'user-1',
+        providerSessionId: 'provider-session-1',
         deviceName: 'Ada iPhone',
         userAgent: 'jest-agent',
         ipAddress: '127.0.0.1',
@@ -419,6 +516,9 @@ describe('AuthService Supabase integration', () => {
       },
       error: null,
     });
+    supabase.getVerifiedProviderSessionId.mockResolvedValue(
+      'provider-session-1',
+    );
     prisma.refreshToken.create.mockResolvedValue({ id: 'refresh-2' });
 
     await service.refreshToken('old-refresh', { ipAddress: '127.0.0.1' });
@@ -426,6 +526,7 @@ describe('AuthService Supabase integration', () => {
     expect(prisma.refreshToken.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         userId: 'user-1',
+        providerSessionId: 'provider-session-1',
         deviceId: 'device-1',
         deviceName: 'Ada iPhone',
         ipAddress: '127.0.0.1',
@@ -503,6 +604,33 @@ describe('AuthService Supabase integration', () => {
     );
   });
 
+  it('still requests recovery when legacy identity repair is unavailable', async () => {
+    users.findByEmail.mockResolvedValue({
+      id: 'local-user-1',
+      email: 'ada@example.com',
+      phone: '+2348012345678',
+      fullName: 'Ada Lovelace',
+      role: 'USER',
+    });
+    supabase.ensureRecoveryIdentity.mockRejectedValue(
+      new Error('SUPABASE_SERVICE_ROLE_KEY is required'),
+    );
+    supabase.authClient.auth.resetPasswordForEmail.mockResolvedValue({
+      data: {},
+      error: null,
+    });
+
+    await expect(
+      service.sendPasswordResetEmail('ada@example.com'),
+    ).resolves.toEqual({
+      success: true,
+      message:
+        'If an account exists, password reset instructions have been sent',
+    });
+
+    expect(supabase.authClient.auth.resetPasswordForEmail).toHaveBeenCalled();
+  });
+
   it('normalizes OTP send identities before throttling and lookup', async () => {
     users.findByPhone.mockResolvedValue(null);
 
@@ -512,15 +640,41 @@ describe('AuthService Supabase integration', () => {
     expect(users.findByPhone).toHaveBeenCalledWith('+2348012345678');
   });
 
-  it('logs out the caller session with a user scoped Supabase client', async () => {
-    scopedClient.auth.signOut.mockResolvedValue({ error: null });
-
-    await service.logout('access-token');
-
-    expect(supabase.createUserScopedClient).toHaveBeenCalledWith(
-      'access-token',
+  it('logs out the caller session through Supabase with the explicit access token', async () => {
+    supabase.getVerifiedProviderSessionId.mockResolvedValue(
+      'provider-session-1',
     );
-    expect(scopedClient.auth.signOut).toHaveBeenCalledWith({ scope: 'local' });
+    supabase.revokeProviderSession.mockResolvedValue(undefined);
+
+    await service.logout('access-token', 'refresh-token');
+
+    expect(supabase.revokeProviderSession).toHaveBeenCalledWith(
+      'access-token',
+      'local',
+    );
+    expect(prisma.refreshToken.updateMany).toHaveBeenCalledWith({
+      where: {
+        tokenHash: expect.any(String),
+        revokedAt: null,
+      },
+      data: { revokedAt: expect.any(Date) },
+    });
+    expect(supabase.createUserScopedClient).not.toHaveBeenCalled();
+  });
+
+  it('marks the local session revoked before reporting provider logout failure', async () => {
+    supabase.getVerifiedProviderSessionId.mockResolvedValue(
+      'provider-session-1',
+    );
+    supabase.revokeProviderSession.mockRejectedValue(
+      new Error('provider down'),
+    );
+
+    await expect(
+      service.logout('access-token', 'refresh-token'),
+    ).rejects.toThrow('Unable to complete logout');
+
+    expect(prisma.refreshToken.updateMany).toHaveBeenCalled();
   });
 
   it('sets transaction PIN only when no PIN exists and audits setup', async () => {
@@ -569,30 +723,45 @@ describe('AuthService Supabase integration', () => {
   });
 
   it('resets transaction PIN with current PIN verification and reset hold', async () => {
-    transactionPin.setResetHold.mockResolvedValue('2026-05-28T12:00:00.000Z');
-
-    await service.resetTransactionPin('user-1', {
-      currentPin: '1234',
-      newPin: '5678',
+    transactionPin.resetPinWithHold.mockResolvedValue({
+      success: true,
+      holdUntil: '2026-05-28T12:00:00.000Z',
     });
+
+    await service.resetTransactionPin(
+      'user-1',
+      {
+        currentPin: '1234',
+        newPin: '5678',
+      },
+      {
+        requestId: 'request-1',
+        ipAddress: '127.0.0.1',
+        userAgent: 'test-agent',
+      },
+    );
 
     expect(transactionPin.verifyPin).toHaveBeenCalledWith('user-1', '1234');
-    expect(transactionPin.setPin).toHaveBeenCalledWith('user-1', '5678');
-    expect(prisma.auditLog.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({
-        action: 'transaction_pin_reset',
-        metadata: expect.objectContaining({
-          verificationMethod: 'current_pin',
-          holdUntil: '2026-05-28T12:00:00.000Z',
-        }),
-      }),
-    });
+    expect(transactionPin.resetPinWithHold).toHaveBeenCalledWith(
+      'user-1',
+      '5678',
+      {
+        verificationMethod: 'current_pin',
+        requestId: 'request-1',
+        ipAddress: '127.0.0.1',
+        userAgent: 'test-agent',
+      },
+    );
+    expect(prisma.auditLog.create).not.toHaveBeenCalled();
   });
 
   it("resets transaction PIN with OTP for the authenticated user's phone", async () => {
     users.findOne.mockResolvedValue({ id: 'user-1', phone: '+2348012345678' });
     otp.verifyOtp.mockResolvedValue(true);
-    transactionPin.setResetHold.mockResolvedValue('2026-05-28T12:00:00.000Z');
+    transactionPin.resetPinWithHold.mockResolvedValue({
+      success: true,
+      holdUntil: '2026-05-28T12:00:00.000Z',
+    });
 
     await service.resetTransactionPin('user-1', {
       otp: '123456',
@@ -600,7 +769,16 @@ describe('AuthService Supabase integration', () => {
     });
 
     expect(otp.verifyOtp).toHaveBeenCalledWith('+2348012345678', '123456');
-    expect(transactionPin.setPin).toHaveBeenCalledWith('user-1', '5678');
+    expect(transactionPin.resetPinWithHold).toHaveBeenCalledWith(
+      'user-1',
+      '5678',
+      {
+        verificationMethod: 'otp',
+        requestId: 'unknown',
+        ipAddress: 'unknown',
+        userAgent: undefined,
+      },
+    );
   });
 
   it('does not reset transaction PIN without current PIN or OTP', async () => {
@@ -672,7 +850,7 @@ describe('AuthService Supabase integration', () => {
 
     expect(prisma.refreshToken.findFirst).toHaveBeenCalledWith({
       where: { id: 'session-1', userId: 'user-1', revokedAt: null },
-      select: { id: true },
+      select: { id: true, providerSessionId: true },
     });
     expect(prisma.refreshToken.update).toHaveBeenCalledWith({
       where: { id: 'session-1' },
@@ -688,7 +866,7 @@ describe('AuthService Supabase integration', () => {
 
     expect(prisma.refreshToken.findFirst).toHaveBeenCalledWith({
       where: { id: 'missing', userId: 'user-1', revokedAt: null },
-      select: { id: true },
+      select: { id: true, providerSessionId: true },
     });
     expect(prisma.refreshToken.update).not.toHaveBeenCalled();
     expect(response).toEqual({ success: true });

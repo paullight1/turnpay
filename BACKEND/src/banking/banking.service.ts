@@ -48,7 +48,7 @@ export class BankingService {
     const canRevealAccountNumber =
       user != null &&
       user.kycStatus === 'VERIFIED' &&
-      isKycTierAtLeast(user.kycTier, 'TIER_2');
+      isKycTierAtLeast(user.kycTier, 'TIER_1');
     const accounts = await this.prisma.virtualAccount.findMany({
       where: { userId },
       select: {
@@ -112,7 +112,7 @@ export class BankingService {
     if (
       !this.canUseSandboxKycBypass() &&
       (user.kycStatus !== 'VERIFIED' ||
-        !isKycTierAtLeast(user.kycTier, 'TIER_2'))
+        !isKycTierAtLeast(user.kycTier, 'TIER_1'))
     ) {
       throw new ForbiddenException(
         'Complete KYC before accessing a virtual account',
@@ -166,9 +166,9 @@ export class BankingService {
       );
     }
 
-    if (!isKycTierAtLeast(user.kycTier, 'TIER_2') && !canUseSandboxKycBypass) {
+    if (!isKycTierAtLeast(user.kycTier, 'TIER_1') && !canUseSandboxKycBypass) {
       throw new ForbiddenException(
-        `KYC ${formatKycTier('TIER_2')} is required to provision a virtual account`,
+        `KYC ${formatKycTier('TIER_1')} is required to provision a virtual account`,
       );
     }
 
@@ -196,6 +196,11 @@ export class BankingService {
       nin:
         verifiedIdentifiers.nin ||
         this.sandboxTestIdentifier('MONNIFY_TEST_NIN'),
+      limitProfileCode: this.resolveMonnifyLimitProfileCode(
+        verifiedIdentifiers.bvn && verifiedIdentifiers.nin
+          ? 'TIER_2'
+          : 'TIER_1',
+      ),
       identityAccountNumber: dto.identityAccountNumber,
       identityBankCode: dto.identityBankCode,
     };
@@ -382,9 +387,9 @@ export class BankingService {
           throw new ForbiddenException('Verified KYC is required for deposits');
         }
 
-        if (!isKycTierAtLeast(accountUser.kycTier, 'TIER_2')) {
+        if (!isKycTierAtLeast(accountUser.kycTier, 'TIER_1')) {
           throw new ForbiddenException(
-            `KYC ${formatKycTier('TIER_2')} is required for deposits`,
+            `KYC ${formatKycTier('TIER_1')} is required for deposits`,
           );
         }
 
@@ -588,11 +593,29 @@ export class BankingService {
     }
     if (
       !this.canUseSandboxKycBypass() &&
-      (!identifiers.bvn || !identifiers.nin)
+      !identifiers.bvn &&
+      !identifiers.nin
     ) {
-      throw new ForbiddenException('Both verified BVN and NIN are required');
+      throw new ForbiddenException('A verified NIN or BVN is required');
     }
     return identifiers;
+  }
+
+  private resolveMonnifyLimitProfileCode(tier: 'TIER_1' | 'TIER_2') {
+    const key =
+      tier === 'TIER_2'
+        ? 'MONNIFY_TIER_2_LIMIT_PROFILE_CODE'
+        : 'MONNIFY_TIER_1_LIMIT_PROFILE_CODE';
+    const code = this.configService.get<string>(key)?.trim();
+    const isProduction =
+      this.configService.get<string>('NODE_ENV', 'development') ===
+      'production';
+    if (isProduction && !code) {
+      throw new BadRequestException(
+        `Monnify ${formatKycTier(tier)} limit profile is not configured`,
+      );
+    }
+    return code || undefined;
   }
 
   private decryptStoredKycIdentifier(idNumber: string) {

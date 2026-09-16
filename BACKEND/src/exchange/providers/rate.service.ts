@@ -8,13 +8,21 @@ import { firstValueFrom } from 'rxjs';
 import { AxiosResponse } from 'axios';
 import { PinoLogger } from 'nestjs-pino';
 import { Prisma } from '@prisma/client';
+import { Decimal } from '@prisma/client/runtime/library';
 
 interface FxRateResponse {
   result?: string;
   base_code?: string;
-  rates?: Record<string, number>;
+  base?: string;
+  rates?: Record<string, unknown>;
+  conversion_rates?: Record<string, unknown>;
   // Generic fallback shape
-  data?: { rates?: Record<string, number> };
+  data?: {
+    base_code?: string;
+    base?: string;
+    rates?: Record<string, unknown>;
+    conversion_rates?: Record<string, unknown>;
+  };
 }
 
 interface CachedRate {
@@ -184,70 +192,95 @@ export class RateService implements OnModuleInit {
     reason?: string,
     database: PrismaService | Prisma.TransactionClient = this.prisma,
     options: { refreshCache?: boolean } = {},
-  ): Promise<void> {
-    // Get old rate for audit
-    const oldRate = await database.rate.findUnique({
-      where: { from_to: { from, to } },
-    });
+  ): Promise<{ rate: number; markup: number }> {
+    const persistedRate = this.normalizePersistedRate(rate);
+    const persistedMarkup = this.normalizePersistedMarkup(markup);
 
-    const oldRateValue = oldRate
-      ? {
-          rate: oldRate.rate.toNumber(),
-          markup: oldRate.markup.toNumber(),
-          source: oldRate.source,
-        }
-      : null;
+    const persistRateAndAudit = async (
+      db: PrismaService | Prisma.TransactionClient,
+    ) => {
+      // Get the old rate and write the new rate/audit record in one DB
+      // transaction for direct admin overrides. The dual-approval path passes
+      // its existing transaction client and writes its review audit there.
+      const oldRate = await db.rate.findUnique({
+        where: { from_to: { from, to } },
+      });
 
-    await database.rate.upsert({
-      where: {
-        from_to: { from, to },
-      },
-      update: {
-        rate: String(rate),
-        markup: String(markup),
-        source: 'admin',
-        validUntil: null,
-      },
-      create: {
-        from,
-        to,
-        rate: String(rate),
-        markup: String(markup),
-        source: 'admin',
-        validUntil: null,
-      },
-    });
+      const oldRateValue = oldRate
+        ? {
+            rate: oldRate.rate.toNumber(),
+            markup: oldRate.markup.toNumber(),
+            source: oldRate.source,
+          }
+        : null;
 
-    if (options.refreshCache !== false) {
-      await this.refreshRateCache(from, to, rate, markup);
-    }
-
-    // Write audit log
-    if (adminId) {
-      await database.auditLog.create({
-        data: {
-          adminId,
-          action: 'FX_RATE_OVERRIDE',
-          targetType: 'Rate',
-          targetId: `${from}_${to}`,
-          reason: reason || 'Manual rate override',
-          before: oldRateValue
-            ? {
-                rate: oldRateValue.rate,
-                markup: oldRateValue.markup,
-                source: oldRateValue.source,
-              }
-            : { rate: null, markup: null },
-          after: { rate, markup, source: 'admin' },
-          metadata: { from, to },
+      await db.rate.upsert({
+        where: {
+          from_to: { from, to },
+        },
+        update: {
+          rate: String(persistedRate),
+          markup: String(persistedMarkup),
+          source: 'admin',
+          validUntil: null,
+        },
+        create: {
+          from,
+          to,
+          rate: String(persistedRate),
+          markup: String(persistedMarkup),
+          source: 'admin',
+          validUntil: null,
         },
       });
+
+      if (adminId) {
+        await db.auditLog.create({
+          data: {
+            adminId,
+            action: 'FX_RATE_OVERRIDE',
+            targetType: 'Rate',
+            targetId: `${from}_${to}`,
+            reason: reason || 'Manual rate override',
+            before: oldRateValue
+              ? {
+                  rate: oldRateValue.rate,
+                  markup: oldRateValue.markup,
+                  source: oldRateValue.source,
+                }
+              : { rate: null, markup: null },
+            after: {
+              rate: persistedRate,
+              markup: persistedMarkup,
+              source: 'admin',
+            },
+            metadata: { from, to },
+          },
+        });
+      }
+    };
+
+    if (database === this.prisma && adminId) {
+      await this.prisma.$transaction(async (tx) => {
+        await persistRateAndAudit(tx);
+      });
+    } else {
+      await persistRateAndAudit(database);
+    }
+
+    // Cache only after the database mutation and its audit record have
+    // committed. Redis is a cache and may lag, but it must not expose an
+    // unaudited admin rate when the audit write fails.
+    if (options.refreshCache !== false) {
+      await this.refreshRateCache(from, to, persistedRate, persistedMarkup);
     }
 
     this.logger.info(
-      { from, to, rate, markup, adminId },
+      { from, to, rate: persistedRate, markup: persistedMarkup, adminId },
       'Manual rate set by admin',
     );
+
+    return { rate: persistedRate, markup: persistedMarkup };
   }
 
   async refreshRateCache(
@@ -256,9 +289,11 @@ export class RateService implements OnModuleInit {
     rate: number,
     markup: number,
   ): Promise<void> {
+    const persistedRate = this.normalizePersistedRate(rate);
+    const persistedMarkup = this.normalizePersistedMarkup(markup);
     const cached: CachedRate = {
-      rate,
-      markup,
+      rate: persistedRate,
+      markup: persistedMarkup,
       fetchedAt: Date.now(),
       source: 'admin',
     };
@@ -370,16 +405,15 @@ export class RateService implements OnModuleInit {
           }),
         );
 
-        const rates = this.extractRates(response.data);
-        if (rates) {
-          await this.saveRatesToDatabase(rates);
-          successCount++;
-        }
+        const rates = this.extractRates(response.data, base);
+        await this.saveRatesToDatabase(rates, base);
+        successCount++;
       } catch (error) {
         this.logger.error(
           {
             base,
-            error: error instanceof Error ? error.message : 'Unknown error',
+            error: 'provider_request_failed',
+            errorType: error instanceof Error ? error.name : 'UnknownError',
           },
           `Failed to fetch FX rates for ${base}`,
         );
@@ -417,23 +451,50 @@ export class RateService implements OnModuleInit {
     return `${baseUrl}${separator}apikey=${apiKey}&base_currency=${base}`;
   }
 
-  private extractRates(data: FxRateResponse): Record<string, number> | null {
-    // exchangerate-api.com format: { result: "success", base_code: "GHS", rates: {...} }
-    if (data.result === 'success' && data.rates) {
-      return data.rates;
+  private extractRates(
+    data: FxRateResponse | null | undefined,
+    requestedBase: 'GHS' | 'NGN',
+  ): Record<string, number> {
+    if (!data || typeof data !== 'object') {
+      throw new Error('FX provider returned an empty response');
     }
 
-    // Direct rates object
-    if (data.rates) {
-      return data.rates;
+    const responseBase = this.normalizeCurrency(
+      data.base_code || data.base || data.data?.base_code || data.data?.base,
+    );
+    if (responseBase && responseBase !== requestedBase) {
+      throw new Error(
+        `FX provider base mismatch: requested ${requestedBase}, received ${responseBase}`,
+      );
     }
 
-    // Nested data.rates
-    if (data.data?.rates) {
-      return data.data.rates;
+    if (data.result && data.result.toLowerCase() === 'error') {
+      throw new Error('FX provider returned an error response');
     }
 
-    return null;
+    const rawRates =
+      data.conversion_rates ??
+      data.rates ??
+      data.data?.conversion_rates ??
+      data.data?.rates;
+    if (
+      !rawRates ||
+      typeof rawRates !== 'object' ||
+      Array.isArray(rawRates) ||
+      Object.keys(rawRates).length === 0
+    ) {
+      throw new Error('FX provider returned no rates');
+    }
+
+    const target = requestedBase === 'GHS' ? 'NGN' : 'GHS';
+    const targetRate = rawRates[target];
+    if (!this.isFinitePositiveRate(targetRate)) {
+      throw new Error(
+        `FX provider returned an invalid ${requestedBase}->${target} rate`,
+      );
+    }
+
+    return { [target]: targetRate };
   }
 
   // ─── Private: Circuit Breaker ─────────────────────────────────────
@@ -481,7 +542,9 @@ export class RateService implements OnModuleInit {
       } catch (auditError) {
         this.logger.error(
           {
-            error: auditError instanceof Error ? auditError.message : 'Unknown',
+            error: 'audit_log_write_failed',
+            errorType:
+              auditError instanceof Error ? auditError.name : 'UnknownError',
           },
           'Failed to write circuit-breaker audit log',
         );
@@ -727,30 +790,24 @@ export class RateService implements OnModuleInit {
 
   private async saveRatesToDatabase(
     rates: Record<string, number>,
+    base: 'GHS' | 'NGN',
   ): Promise<void> {
-    // Derive both pairs from the fetched rates
-    // If we fetched with base=GHS, rates contains GHS→NGN directly
-    // We also compute NGN→GHS as the inverse
-    const ghsToNgn = rates['NGN']; // When base=GHS, NGN rate = GHS→NGN
-    const ngnToGhs = rates['GHS']; // When base=NGN, GHS rate = NGN→GHS
-
-    const ratePairs: Array<{ from: string; to: string; rate: number }> = [];
-
-    if (ghsToNgn && ghsToNgn > 0) {
-      ratePairs.push({ from: 'GHS', to: 'NGN', rate: ghsToNgn });
-      // Compute inverse
-      ratePairs.push({ from: 'NGN', to: 'GHS', rate: 1 / ghsToNgn });
+    const target = base === 'GHS' ? 'NGN' : 'GHS';
+    const targetRate = rates[target];
+    if (!this.isFinitePositiveRate(targetRate)) {
+      throw new Error(`No valid ${base}->${target} rate to persist`);
     }
 
-    if (ngnToGhs && ngnToGhs > 0) {
-      // Don't duplicate NGN→GHS if already added from inverse
-      if (!ratePairs.some((p) => p.from === 'NGN' && p.to === 'GHS')) {
-        ratePairs.push({ from: 'NGN', to: 'GHS', rate: ngnToGhs });
-      }
-      if (!ratePairs.some((p) => p.from === 'GHS' && p.to === 'NGN')) {
-        ratePairs.push({ from: 'GHS', to: 'NGN', rate: 1 / ngnToGhs });
-      }
-    }
+    // Rate is Decimal(10,4) in Postgres. Normalize before both persistence
+    // and caching so a cache hit cannot quote at more precision than a DB
+    // reload would use.
+    const normalizedRate = this.normalizePersistedRate(targetRate);
+    const normalizedInverse = this.normalizePersistedRate(1 / targetRate);
+
+    const ratePairs: Array<{ from: string; to: string; rate: number }> = [
+      { from: base, to: target, rate: normalizedRate },
+      { from: target, to: base, rate: normalizedInverse },
+    ];
 
     for (const { from, to, rate } of ratePairs) {
       const existing = await this.prisma.rate.findUnique({
@@ -811,6 +868,35 @@ export class RateService implements OnModuleInit {
       { pairs: ratePairs.length },
       'Rates saved to database and caches',
     );
+  }
+
+  private normalizeCurrency(value: unknown): string | undefined {
+    return typeof value === 'string' && value.trim()
+      ? value.trim().toUpperCase()
+      : undefined;
+  }
+
+  private isFinitePositiveRate(value: unknown): value is number {
+    return typeof value === 'number' && Number.isFinite(value) && value > 0;
+  }
+
+  private normalizePersistedRate(value: number): number {
+    if (!this.isFinitePositiveRate(value)) {
+      throw new Error('FX rate must be finite and positive');
+    }
+
+    const normalized = new Decimal(value).toDecimalPlaces(4).toNumber();
+    if (!this.isFinitePositiveRate(normalized)) {
+      throw new Error('FX rate is not positive at persisted precision');
+    }
+    return normalized;
+  }
+
+  private normalizePersistedMarkup(value: number): number {
+    if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
+      throw new Error('FX markup must be finite and non-negative');
+    }
+    return new Decimal(value).toDecimalPlaces(2).toNumber();
   }
 
   // ─── Private: Fallback ─────────────────────────────────────────────

@@ -166,20 +166,44 @@ describe('manual exchange financial boundaries (real PostgreSQL)', () => {
   }
 
   it('freezes GHS collection and credits NGN exactly once for reverse exchange', async () => {
-    const before = await prisma.wallet.findUniqueOrThrow({ where: { userId_currency: { userId: user(), currency: 'NGN' } } });
+    const before = await prisma.wallet.findUniqueOrThrow({
+      where: { userId_currency: { userId: user(), currency: 'NGN' } },
+    });
     const key = randomUUID();
-    const created = await service.create(user(), { sourceCurrency: 'GHS', amount: '100.00', settlementMode: 'WALLET', transactionPin: '2468' }, key);
+    const created = await service.create(
+      user(),
+      {
+        sourceCurrency: 'GHS',
+        amount: '100.00',
+        settlementMode: 'WALLET',
+        transactionPin: '2468',
+      },
+      key,
+    );
     expect(created.sourceCurrency).toBe('GHS');
     expect(created.targetCurrency).toBe('NGN');
-    expect(created.collectionAccount).toMatchObject({ currency: 'GHS', bankName: 'Test MoMo' });
-    await expect(service.create(user(), { amount: '100.00', settlementMode: 'WALLET', transactionPin: '2468' }, key)).rejects.toThrow('different exchange details');
+    expect(created.collectionAccount).toMatchObject({
+      currency: 'GHS',
+      bankName: 'Test MoMo',
+    });
+    await expect(
+      service.create(
+        user(),
+        { amount: '100.00', settlementMode: 'WALLET', transactionPin: '2468' },
+        key,
+      ),
+    ).rejects.toThrow('different exchange details');
     await attach(created.id);
     const reviewKey = randomUUID();
     const review = confirm('GHS-DEP-' + randomUUID());
     await service.review(created.id, admin(), review, reviewKey);
     await service.review(created.id, admin(), review, reviewKey);
-    const after = await prisma.wallet.findUniqueOrThrow({ where: { userId_currency: { userId: user(), currency: 'NGN' } } });
-    expect(after.balance.minus(before.balance).toFixed(2)).toBe(created.targetAmount);
+    const after = await prisma.wallet.findUniqueOrThrow({
+      where: { userId_currency: { userId: user(), currency: 'NGN' } },
+    });
+    expect(after.balance.minus(before.balance).toFixed(2)).toBe(
+      created.targetAmount,
+    );
   });
 
   it('requires explicit approval of expired frozen terms, then reconciliation detects damaged credit evidence', async () => {

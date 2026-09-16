@@ -69,6 +69,9 @@ describe('PaymentService withdrawals', () => {
   const transactionPin = {
     verifyRequired: jest.fn(),
   };
+  const settlementHold = {
+    assertSettlementAllowed: jest.fn(),
+  };
 
   let service: PaymentService;
 
@@ -82,6 +85,7 @@ describe('PaymentService withdrawals', () => {
       logger as any,
       ledger as any,
       transactionPin as any,
+      settlementHold as any,
     );
   });
 

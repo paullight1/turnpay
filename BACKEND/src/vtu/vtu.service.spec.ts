@@ -66,6 +66,9 @@ describe('VtuService purchase ledger handling', () => {
   const transactionPin = {
     verifyRequired: jest.fn(),
   };
+  const settlementHold = {
+    assertOutboundAllowed: jest.fn(),
+  };
 
   let service: VtuService;
 
@@ -106,6 +109,7 @@ describe('VtuService purchase ledger handling', () => {
     prisma.vtuOrder.updateMany.mockResolvedValue({ count: 1 });
     prisma.transaction.updateMany.mockResolvedValue({ count: 1 });
     prisma.vtuPricingRule.findFirst.mockResolvedValue(null);
+    settlementHold.assertOutboundAllowed.mockResolvedValue(undefined);
     prisma.webhookLog.findUnique.mockResolvedValue({
       id: 'webhook-log-1',
       reference: 'vtpass:transaction-update:REQ-1:provider-vtu-1:success',
@@ -128,6 +132,7 @@ describe('VtuService purchase ledger handling', () => {
           value ? { purchasedCode: '1234-5678-9012' } : {},
         ),
       } as any,
+      settlementHold as any,
     );
   });
 
@@ -196,6 +201,12 @@ describe('VtuService purchase ledger handling', () => {
     });
     expect(result.success).toBe(true);
     expect(result.orderId).toBe('order-1');
+    expect(settlementHold.assertOutboundAllowed).toHaveBeenCalledWith({
+      operation: 'VTU',
+      scope: 'VTU_SETTLEMENT',
+      currency: 'NGN',
+      reference: 'VTU-1',
+    });
   });
 
   it('rejects a local cable purchase when smartcard verification fails', async () => {
@@ -228,6 +239,45 @@ describe('VtuService purchase ledger handling', () => {
     expect(prisma.transaction.create).not.toHaveBeenCalled();
     expect(ledger.debitWallet).not.toHaveBeenCalled();
     expect(vtuApi.purchase).not.toHaveBeenCalled();
+  });
+
+  it('releases the reservation when reconciliation blocks VTU dispatch', async () => {
+    walletsService.getWallet.mockResolvedValue({
+      id: 'wallet-1',
+      balance: new Decimal(5000),
+    });
+    prisma.transaction.create.mockResolvedValue({
+      id: 'tx-1',
+      reference: 'VTU-1',
+    });
+    ledger.debitWallet.mockResolvedValue({
+      balanceAfter: new Decimal(4500),
+    });
+    settlementHold.assertOutboundAllowed.mockRejectedValueOnce(
+      new Error('reconciliation hold'),
+    );
+
+    await expect(
+      service.purchase('user-1', {
+        type: 'airtime',
+        provider: 'mtn',
+        contactPhone: '+2348012345678',
+        recipientNumber: '+2348012345678',
+        amount: '500',
+      }),
+    ).rejects.toThrow('reconciliation hold');
+
+    expect(vtuApi.purchase).not.toHaveBeenCalled();
+    expect(ledger.creditWallet).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: 'user-1',
+        currency: 'NGN',
+        amount: new Decimal('500'),
+        transactionId: 'tx-1',
+        source: 'VTU_REVERSAL',
+      }),
+      prisma,
+    );
   });
 
   it('verifies the meter and stores the customer details before electricity purchase', async () => {
@@ -789,6 +839,55 @@ describe('VtuService purchase ledger handling', () => {
     expect(result).toEqual({ processed: true, status: 'success' });
   });
 
+  it('requeries a successful VTU order and applies a confirmed reversal', async () => {
+    prisma.vtuOrder.findUnique.mockResolvedValue({
+      id: 'order-1',
+      transactionId: 'tx-1',
+      providerRequestId: 'REQ-1',
+      providerTransactionId: 'TX-1',
+      status: 'SUCCESS',
+      costAmount: new Decimal('485.00'),
+      transaction: {
+        id: 'tx-1',
+        userId: 'user-1',
+        reference: 'VTU-1',
+        amount: new Decimal('500.00'),
+        fee: new Decimal('25.00'),
+        currency: 'NGN',
+        status: 'SUCCESS',
+        metadata: {},
+      },
+    });
+    vtuApi.requery.mockResolvedValue({
+      reference: 'TX-1',
+      providerTransactionId: 'TX-1',
+      providerRequestId: 'REQ-1',
+      status: 'reversed',
+      message: 'TRANSACTION REVERSAL TO WALLET',
+      providerAmount: '485.00',
+      providerCurrency: 'NGN',
+      walletCreditId: 'WALLET-CREDIT-1',
+      providerCost: '485.00',
+    });
+    prisma.transaction.updateMany.mockResolvedValue({ count: 1 });
+    prisma.ledgerEntry.findFirst.mockResolvedValue(null);
+
+    await expect(service.requeryOrder('order-1')).resolves.toEqual({
+      processed: true,
+      status: 'reversed',
+    });
+    expect(vtuApi.requery).toHaveBeenCalledWith('REQ-1');
+    expect(ledger.creditWallet).toHaveBeenCalledTimes(1);
+    expect(ledger.creditWallet).toHaveBeenCalledWith(
+      expect.objectContaining({
+        amount: new Decimal('525.00'),
+        currency: 'NGN',
+        source: 'VTU_REVERSAL',
+      }),
+      prisma,
+    );
+  });
+
   it('reverses a failed VTU purchase through a single reversal ledger entry', async () => {
     walletsService.getWallet.mockResolvedValue({
       id: 'wallet-1',
@@ -901,6 +1000,214 @@ describe('VtuService purchase ledger handling', () => {
       }),
     });
   });
+
+  it('requeries and refunds a provider-confirmed reversal after local success', async () => {
+    prisma.vtuOrder.findFirst.mockResolvedValue({
+      id: 'order-1',
+      transactionId: 'tx-1',
+      providerRequestId: 'REQ-1',
+      providerTransactionId: 'TX-1',
+      status: 'SUCCESS',
+      costAmount: new Decimal('485.00'),
+      transaction: {
+        id: 'tx-1',
+        userId: 'user-1',
+        reference: 'VTU-1',
+        amount: new Decimal('500.00'),
+        fee: new Decimal('25.00'),
+        currency: 'NGN',
+        status: 'SUCCESS',
+        metadata: {},
+      },
+    });
+    vtuApi.requery.mockResolvedValue({
+      reference: 'TX-1',
+      providerTransactionId: 'TX-1',
+      providerRequestId: 'REQ-1',
+      status: 'reversed',
+      message: 'TRANSACTION REVERSAL TO WALLET',
+      providerAmount: '485.00',
+      providerCurrency: 'NGN',
+      walletCreditId: 'WALLET-CREDIT-1',
+      providerCost: '485.00',
+      safeResponse: { code: '040', status: 'reversed' },
+      rawResponse: { code: '040', status: 'reversed' },
+    });
+    prisma.transaction.updateMany.mockResolvedValue({ count: 1 });
+    prisma.ledgerEntry.findFirst.mockResolvedValue(null);
+
+    await expect(
+      service.processVtpassWebhookEvent({
+        eventType: 'transaction-update',
+        providerRequestId: 'REQ-1',
+        providerReference: 'TX-1',
+        status: 'reversed',
+        message: 'TRANSACTION REVERSAL TO WALLET',
+        code: '040',
+      }),
+    ).resolves.toMatchObject({
+      processed: true,
+      orderId: 'order-1',
+      status: 'reversed',
+    });
+
+    expect(vtuApi.requery).toHaveBeenCalledWith('REQ-1');
+    expect(prisma.transaction.updateMany).toHaveBeenCalledWith({
+      where: { reference: 'VTU-1', status: 'SUCCESS' },
+      data: expect.objectContaining({
+        status: 'REVERSED',
+        metadata: expect.objectContaining({
+          providerRequestId: 'REQ-1',
+          providerTransactionId: 'TX-1',
+          walletCreditId: 'WALLET-CREDIT-1',
+        }),
+      }),
+    });
+    expect(ledger.creditWallet).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: 'user-1',
+        currency: 'NGN',
+        amount: new Decimal('525.00'),
+        transactionId: 'tx-1',
+        reference: 'VTU-1-REVERSAL',
+        source: 'VTU_REVERSAL',
+      }),
+      prisma,
+    );
+  });
+
+  it('keeps a late reversal callback retryable until requery confirms it', async () => {
+    const successfulOrder = {
+      id: 'order-1',
+      transactionId: 'tx-1',
+      providerRequestId: 'REQ-1',
+      providerTransactionId: 'TX-1',
+      status: 'SUCCESS',
+      costAmount: new Decimal('485.00'),
+      transaction: {
+        id: 'tx-1',
+        userId: 'user-1',
+        reference: 'VTU-1',
+        amount: new Decimal('500.00'),
+        fee: new Decimal('25.00'),
+        currency: 'NGN',
+        status: 'SUCCESS',
+        metadata: {},
+      },
+    };
+    prisma.vtuOrder.findFirst.mockResolvedValue(successfulOrder);
+    vtuApi.requery
+      .mockResolvedValueOnce({
+        reference: 'TX-1',
+        providerTransactionId: 'TX-1',
+        providerRequestId: 'REQ-1',
+        status: 'pending',
+        message: 'Still processing',
+      })
+      .mockResolvedValueOnce({
+        reference: 'TX-1',
+        providerTransactionId: 'TX-1',
+        providerRequestId: 'REQ-1',
+        status: 'reversed',
+        message: 'TRANSACTION REVERSAL TO WALLET',
+        providerAmount: '485.00',
+        providerCurrency: 'NGN',
+        walletCreditId: 'WALLET-CREDIT-1',
+        providerCost: '485.00',
+      });
+    prisma.transaction.updateMany.mockResolvedValue({ count: 1 });
+    prisma.ledgerEntry.findFirst.mockResolvedValue(null);
+
+    const event = {
+      eventType: 'transaction-update' as const,
+      providerRequestId: 'REQ-1',
+      providerReference: 'TX-1',
+      status: 'reversed' as const,
+      message: 'TRANSACTION REVERSAL TO WALLET',
+      code: '040',
+    };
+
+    await expect(service.processVtpassWebhookEvent(event)).rejects.toThrow(
+      'VTU provider reversal not yet confirmed',
+    );
+    expect(prisma.transaction.updateMany).not.toHaveBeenCalled();
+    expect(ledger.creditWallet).not.toHaveBeenCalled();
+
+    await expect(service.processVtpassWebhookEvent(event)).resolves.toEqual({
+      processed: true,
+      orderId: 'order-1',
+      status: 'reversed',
+    });
+    expect(ledger.creditWallet).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    [
+      'provider request identity',
+      { providerRequestId: 'OTHER-REQUEST' },
+      'VTU provider request identity mismatch',
+    ],
+    [
+      'provider currency',
+      { providerCurrency: 'GHS' },
+      'VTU provider reversal currency mismatch',
+    ],
+    [
+      'provider amount',
+      { providerAmount: '484.99' },
+      'VTU provider reversal amount mismatch',
+    ],
+    [
+      'provider wallet credit',
+      { walletCreditId: undefined },
+      'VTU provider reversal wallet credit is missing',
+    ],
+  ])(
+    'rejects a late reversal with an invalid %s',
+    async (_field, override, message) => {
+      prisma.vtuOrder.findFirst.mockResolvedValue({
+        id: 'order-1',
+        transactionId: 'tx-1',
+        providerRequestId: 'REQ-1',
+        providerTransactionId: 'TX-1',
+        status: 'SUCCESS',
+        costAmount: new Decimal('485.00'),
+        transaction: {
+          id: 'tx-1',
+          userId: 'user-1',
+          reference: 'VTU-1',
+          amount: new Decimal('500.00'),
+          fee: new Decimal('25.00'),
+          currency: 'NGN',
+          status: 'SUCCESS',
+          metadata: {},
+        },
+      });
+      vtuApi.requery.mockResolvedValue({
+        reference: 'TX-1',
+        providerTransactionId: 'TX-1',
+        providerRequestId: 'REQ-1',
+        status: 'reversed',
+        message: 'TRANSACTION REVERSAL TO WALLET',
+        providerAmount: '485.00',
+        providerCurrency: 'NGN',
+        walletCreditId: 'WALLET-CREDIT-1',
+        ...override,
+      });
+
+      await expect(
+        service.processVtpassWebhookEvent({
+          eventType: 'transaction-update',
+          providerRequestId: 'REQ-1',
+          providerReference: 'TX-1',
+          status: 'reversed',
+          code: '040',
+        }),
+      ).rejects.toThrow(message);
+      expect(prisma.transaction.updateMany).not.toHaveBeenCalled();
+      expect(ledger.creditWallet).not.toHaveBeenCalled();
+    },
+  );
 
   it.each(['success', 'failed', 'reversed'] as const)(
     'ignores callback %s when authenticated requery says pending',

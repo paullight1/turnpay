@@ -56,7 +56,7 @@ describe('KycService', () => {
   };
 
   const kycProviderGateway = {
-    provider: 'YOUVERIFY',
+    provider: 'MONNIFY',
     verifyIdentity: jest.fn(),
   };
   const youverifyProvider = {
@@ -73,7 +73,7 @@ describe('KycService', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
-    kycProviderGateway.provider = 'YOUVERIFY';
+    kycProviderGateway.provider = 'MONNIFY';
     prisma.$transaction.mockImplementation(async (input: unknown) => {
       if (typeof input === 'function') {
         return input(prisma);
@@ -89,7 +89,7 @@ describe('KycService', () => {
       'https://storage.example/read/sign/kyc-1',
     );
     kycProviderGateway.verifyIdentity.mockResolvedValue({
-      provider: 'YOUVERIFY',
+      provider: 'MONNIFY',
       status: 'VERIFIED',
       reference: 'youverify-verification-1',
       checks: {
@@ -146,7 +146,7 @@ describe('KycService', () => {
     );
   });
 
-  it('verifies a consented identity through Youverify and promotes the KYC tier transactionally', async () => {
+  it('verifies a consented identity through Monnify and promotes the KYC tier transactionally', async () => {
     prisma.kycDocument.findFirst.mockResolvedValue(null);
     prisma.user.findUnique.mockResolvedValue({
       fullName: 'Ada Okafor',
@@ -159,14 +159,14 @@ describe('KycService', () => {
       createdAt: new Date('2026-09-01T00:00:00.000Z'),
       updatedAt: new Date('2026-09-01T00:00:00.000Z'),
     }));
-    prisma.kycDocument.findMany.mockResolvedValue([{ type: 'BVN' }]);
+    prisma.kycDocument.findMany.mockResolvedValue([{ type: 'NIN' }]);
     prisma.kycVerification.create.mockResolvedValue({});
     prisma.user.update.mockResolvedValue({});
     prisma.auditLog.create.mockResolvedValue({});
 
     const result = await service.verifyWithYouverify('user-1', {
       country: 'NG',
-      type: 'BVN',
+      type: 'NIN',
       idNumber: '12345678901',
       dateOfBirth: '1990-01-02',
       consentAccepted: true,
@@ -176,7 +176,7 @@ describe('KycService', () => {
       expect.objectContaining({
         userId: 'user-1',
         country: 'NG',
-        type: 'BVN',
+        type: 'NIN',
         identifier: '12345678901',
         identifierMasked: '*******8901',
         consentAccepted: true,
@@ -190,7 +190,7 @@ describe('KycService', () => {
     expect(prisma.kycDocument.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         userId: 'user-1',
-        type: 'BVN',
+        type: 'NIN',
         documentUrl: null,
         idNumber: expect.stringMatching(/^enc:v1:/),
         status: 'PENDING',
@@ -198,11 +198,11 @@ describe('KycService', () => {
     });
     expect(prisma.kycVerification.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
-        provider: 'YOUVERIFY',
+        provider: 'MONNIFY',
         status: 'PENDING',
         reference: expect.stringMatching(/^pending:/),
         consentRecordedAt: expect.any(Date),
-        consentVersion: 'youverify-subject-consent-v1',
+        consentVersion: 'monnify-direct-verify-consent-v1',
         consentSource: 'WEB_OR_MOBILE',
       }),
     });
@@ -229,7 +229,7 @@ describe('KycService', () => {
     });
     expect(result).toEqual(
       expect.objectContaining({
-        provider: 'YOUVERIFY',
+        provider: 'MONNIFY',
         verificationStatus: 'VERIFIED',
         reference: 'youverify-verification-1',
         idNumber: '*******8901',
@@ -253,7 +253,7 @@ describe('KycService', () => {
       responseHash: 'ninja-response-hash',
     });
     prisma.user.findUnique.mockResolvedValue({
-      fullName: 'Ada Okafor',
+      fullName: 'Ada',
       kycStatus: 'PENDING',
       kycTier: 'TIER_0',
     });
@@ -275,6 +275,8 @@ describe('KycService', () => {
       idNumber: '12345678901',
       dateOfBirth: '1990-01-02',
       consentAccepted: true,
+      firstName: 'Ada',
+      lastName: 'Okafor',
     } as any);
 
     expect(prisma.kycVerification.create).toHaveBeenCalledWith({
@@ -320,7 +322,7 @@ describe('KycService', () => {
     await expect(
       service.verifyWithYouverify('user-1', {
         country: 'NG',
-        type: 'BVN',
+        type: 'NIN',
         idNumber: '12345678901',
         dateOfBirth: '1990-01-02',
         consentAccepted: true,
@@ -351,6 +353,7 @@ describe('KycService', () => {
   });
 
   it('returns a conflict when an active attempt already exists for the identity type', async () => {
+    prisma.kycDocument.findFirst.mockResolvedValue(null);
     prisma.user.findUnique.mockResolvedValue({
       fullName: 'Ada Okafor',
       kycStatus: 'PENDING',
@@ -363,7 +366,7 @@ describe('KycService', () => {
     await expect(
       service.verifyWithYouverify('user-1', {
         country: 'NG',
-        type: 'BVN',
+        type: 'NIN',
         idNumber: '12345678901',
         dateOfBirth: '1990-01-02',
         consentAccepted: true,
@@ -417,8 +420,8 @@ describe('KycService', () => {
     expect(kycProviderGateway.verifyIdentity).not.toHaveBeenCalled();
   });
 
-  it('requires both legal names before reserving a Ninja attempt', async () => {
-    kycProviderGateway.provider = 'NINJA';
+  it('requires both legal names before reserving a Monnify attempt', async () => {
+    kycProviderGateway.provider = 'MONNIFY';
     prisma.user.findUnique.mockResolvedValue({
       fullName: 'Ada',
       kycStatus: 'PENDING',

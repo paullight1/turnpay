@@ -93,7 +93,24 @@ function createPrismaMock(credentials = new Map<string, StoredCredential>()) {
     }),
   };
 
-  return { credentials, prisma: { transactionPinCredential } };
+  const prisma = {
+    transactionPinCredential,
+    auditLog: { create: jest.fn(async () => ({ id: 'pin-audit' })) },
+    $transaction: jest.fn(),
+  };
+  prisma.$transaction.mockImplementation(
+    async (work: (tx: typeof prisma) => Promise<unknown>) => {
+      const before = new Map(credentials);
+      try {
+        return await work(prisma);
+      } catch (error) {
+        credentials.clear();
+        for (const [key, value] of before) credentials.set(key, value);
+        throw error;
+      }
+    },
+  );
+  return { credentials, prisma };
 }
 
 describe('TransactionPinService', () => {
@@ -215,6 +232,82 @@ describe('TransactionPinService', () => {
       resetHoldUntil: null,
       locked: false,
     });
+  });
+
+  it('keeps the reset hold when Redis cleanup fails after saving the new PIN', async () => {
+    const { redis } = createRedisMock();
+    const { prisma, credentials } = createPrismaMock();
+    const service = new TransactionPinService(
+      redis as never,
+      configService as never,
+      prisma as never,
+    );
+    await service.setPin('user-1', '1234');
+    redis.del.mockRejectedValueOnce(new Error('Redis connection lost'));
+
+    await expect(
+      service.resetPinWithHold('user-1', '5678'),
+    ).resolves.toMatchObject({ success: true });
+
+    expect(
+      credentials.get('user-1')?.resetHoldUntil?.getTime(),
+    ).toBeGreaterThan(Date.now());
+    await expect(service.verifyRequired('user-1', '5678')).rejects.toThrow(
+      'money movement is temporarily locked',
+    );
+    expect(prisma.auditLog.create).toHaveBeenCalledTimes(1);
+    expect(redis.reportOperationalAlert).toHaveBeenCalledWith(
+      'TRANSACTION_PIN_RESET_CLEANUP_FAILED',
+    );
+  });
+
+  it('rolls back the reset when its audit record cannot be committed', async () => {
+    const { redis } = createRedisMock();
+    const { prisma, credentials } = createPrismaMock();
+    const service = new TransactionPinService(
+      redis as never,
+      configService as never,
+      prisma as never,
+    );
+    await service.setPin('user-1', '1234');
+    const before = credentials.get('user-1');
+    prisma.auditLog.create.mockRejectedValueOnce(
+      new Error('Audit write failed'),
+    );
+    await expect(service.resetPinWithHold('user-1', '5678')).rejects.toThrow(
+      'Audit write failed',
+    );
+    expect(credentials.get('user-1')).toEqual(before);
+    await expect(
+      service.verifyRequired('user-1', '1234'),
+    ).resolves.toBeUndefined();
+  });
+
+  it('does not authorize a PIN whose credential changes during verification', async () => {
+    const { redis } = createRedisMock();
+    const { prisma, credentials } = createPrismaMock();
+    const service = new TransactionPinService(
+      redis as never,
+      configService as never,
+      prisma as never,
+    );
+    await service.setPin('user-1', '1234');
+    const originalDel = redis.del.getMockImplementation()!;
+    let changed = false;
+    redis.del.mockImplementation(async (key: string) => {
+      if (!changed && key === 'transaction-pin-failures:user-1') {
+        changed = true;
+        const current = credentials.get('user-1')!;
+        credentials.set('user-1', {
+          ...current,
+          hash: 'new-credential',
+          resetHoldUntil: new Date(Date.now() + 3600000),
+        });
+      }
+      await originalDel(key);
+    });
+
+    await expect(service.verifyRequired('user-1', '1234')).rejects.toThrow();
   });
 
   it('returns configured, locked, and recent-reset state from server stores', async () => {

@@ -1,14 +1,22 @@
-import { Injectable } from '@nestjs/common';
+import {
+  Injectable,
+  Optional,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
+import { Prisma } from '@prisma/client';
 import { Decimal } from '@prisma/client/runtime/library';
 import { PrismaService } from '../../prisma/prisma.service';
 import { PinoLogger } from 'nestjs-pino';
+import * as Sentry from '@sentry/nestjs';
+import { SettlementHoldService } from './settlement-hold.service';
 
 @Injectable()
 export class ReconciliationService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly pinoLogger: PinoLogger,
+    @Optional() private readonly settlementHold?: SettlementHoldService,
   ) {}
 
   @Cron(CronExpression.EVERY_DAY_AT_MIDNIGHT)
@@ -43,8 +51,27 @@ export class ReconciliationService {
 
       if (result.mismatches.length > 0) {
         this.pinoLogger.warn(
-          { mismatchCount: result.mismatches.length },
+          {
+            alertCode: 'WALLET_RECONCILIATION_BLOCKED',
+            runId: run.id,
+            mismatchCount: result.mismatches.length,
+          },
           'Found wallet mismatches',
+        );
+        Sentry.captureMessage(
+          'Wallet reconciliation blocked outbound settlement',
+          {
+            level: 'error',
+            tags: {
+              alertCode: 'WALLET_RECONCILIATION_BLOCKED',
+              reconciliationScope: 'WALLET_BALANCES',
+            },
+            extra: {
+              runId: run.id,
+              mismatchCount: result.mismatches.length,
+              checkedWallets: result.totalChecked,
+            },
+          },
         );
       }
 
@@ -84,6 +111,25 @@ export class ReconciliationService {
         errorMessage: true,
       },
     });
+  }
+
+  clearHoldAfterPassingRun(
+    blockedRunId: string,
+    passingRunId: string,
+    adminId: string,
+    reason: string,
+  ) {
+    if (!this.settlementHold) {
+      throw new ServiceUnavailableException(
+        'Reconciliation hold service is unavailable',
+      );
+    }
+    return this.settlementHold.clearHoldAfterPassingRun(
+      blockedRunId,
+      passingRunId,
+      adminId,
+      reason,
+    );
   }
 
   @Cron(CronExpression.EVERY_HOUR)
@@ -133,6 +179,21 @@ export class ReconciliationService {
           },
           'Internal transfer reconciliation blocked',
         );
+        Sentry.captureMessage(
+          'Internal transfer reconciliation blocked outbound transfers',
+          {
+            level: 'error',
+            tags: {
+              alertCode: 'INTERNAL_TRANSFER_RECONCILIATION_BLOCKED',
+              reconciliationScope: 'INTERNAL_TRANSFERS',
+            },
+            extra: {
+              runId: run.id,
+              mismatchCount: result.mismatches.length,
+              checkedTransfers: result.totalChecked,
+            },
+          },
+        );
       }
       return result;
     } catch (error) {
@@ -155,90 +216,120 @@ export class ReconciliationService {
   }
 
   async reconcileInternalTransfers() {
-    const [attempts, reversals, usages, duplicateGroups] = await Promise.all([
-      this.prisma.internalTransferAttempt.findMany({
-        where: { status: 'SUCCESS' },
-        select: {
-          id: true,
-          userId: true,
-          recipientUserId: true,
-          transferReference: true,
-          senderTransactionId: true,
-          recipientTransactionId: true,
-          status: true,
-          amount: true,
-          currency: true,
-          idempotencyKeyHash: true,
-          requestHash: true,
-          response: true,
-          createdAt: true,
-        },
-      }),
-      this.prisma.internalTransferReversal.findMany({
-        where: { status: 'COMPLETED' },
-        select: {
-          id: true,
-          status: true,
-          originalTransferReference: true,
-          reversalReference: true,
-          reversalSenderTransactionId: true,
-          reversalRecipientTransactionId: true,
-          amount: true,
-          currency: true,
-        },
-      }),
-      this.prisma.internalTransferLimitUsage.findMany({
-        select: {
-          userId: true,
-          currency: true,
-          period: true,
-          periodStart: true,
-          amount: true,
-        },
-      }),
-      this.prisma.internalTransferAttempt.groupBy({
-        by: ['userId', 'idempotencyKeyHash'],
-        where: { idempotencyKeyHash: { not: null } },
-        _count: { _all: true },
-      }),
-    ]);
+    const snapshot = await this.prisma.$transaction(
+      async (tx) => {
+        const [attempts, reversals, usages, duplicateGroups] =
+          await Promise.all([
+            tx.internalTransferAttempt.findMany({
+              where: { status: 'SUCCESS' },
+              select: {
+                id: true,
+                userId: true,
+                recipientUserId: true,
+                transferReference: true,
+                senderTransactionId: true,
+                recipientTransactionId: true,
+                status: true,
+                amount: true,
+                currency: true,
+                idempotencyKeyHash: true,
+                requestHash: true,
+                response: true,
+                createdAt: true,
+              },
+            }),
+            tx.internalTransferReversal.findMany({
+              where: { status: 'COMPLETED' },
+              select: {
+                id: true,
+                status: true,
+                originalTransferReference: true,
+                reversalReference: true,
+                reversalSenderTransactionId: true,
+                reversalRecipientTransactionId: true,
+                amount: true,
+                currency: true,
+              },
+            }),
+            tx.internalTransferLimitUsage.findMany({
+              select: {
+                userId: true,
+                currency: true,
+                period: true,
+                periodStart: true,
+                amount: true,
+              },
+            }),
+            tx.internalTransferAttempt.groupBy({
+              by: ['userId', 'idempotencyKeyHash'],
+              where: { idempotencyKeyHash: { not: null } },
+              _count: { _all: true },
+            }),
+          ]);
 
-    const transactionIds = new Set<string>();
-    for (const attempt of attempts) {
-      if (attempt.senderTransactionId)
-        transactionIds.add(attempt.senderTransactionId);
-      if (attempt.recipientTransactionId)
-        transactionIds.add(attempt.recipientTransactionId);
-    }
-    for (const reversal of reversals) {
-      if (reversal.reversalSenderTransactionId)
-        transactionIds.add(reversal.reversalSenderTransactionId);
-      if (reversal.reversalRecipientTransactionId)
-        transactionIds.add(reversal.reversalRecipientTransactionId);
-    }
+        const transactionIds = new Set<string>();
+        for (const attempt of attempts) {
+          if (attempt.senderTransactionId)
+            transactionIds.add(attempt.senderTransactionId);
+          if (attempt.recipientTransactionId)
+            transactionIds.add(attempt.recipientTransactionId);
+        }
+        for (const reversal of reversals) {
+          if (reversal.reversalSenderTransactionId)
+            transactionIds.add(reversal.reversalSenderTransactionId);
+          if (reversal.reversalRecipientTransactionId)
+            transactionIds.add(reversal.reversalRecipientTransactionId);
+        }
 
-    const transactions = await this.prisma.transaction.findMany({
-      where: { id: { in: [...transactionIds] } },
-      select: {
-        id: true,
-        userId: true,
-        reference: true,
-        amount: true,
-        currency: true,
-        type: true,
+        const [transactions, ledgers] = await Promise.all([
+          tx.transaction.findMany({
+            where: { id: { in: [...transactionIds] } },
+            select: {
+              id: true,
+              userId: true,
+              reference: true,
+              amount: true,
+              currency: true,
+              type: true,
+            },
+          }),
+          tx.ledgerEntry.findMany({
+            where: { transactionId: { in: [...transactionIds] } },
+            select: {
+              transactionId: true,
+              direction: true,
+              amount: true,
+              currency: true,
+              reference: true,
+              source: true,
+            },
+          }),
+        ]);
+
+        return {
+          attempts,
+          reversals,
+          usages,
+          duplicateGroups,
+          transactions,
+          ledgers,
+        };
       },
-    });
-    const ledgers = await this.prisma.ledgerEntry.findMany({
-      where: { transactionId: { in: [...transactionIds] } },
-      select: {
-        transactionId: true,
-        direction: true,
-        amount: true,
-        currency: true,
-        reference: true,
-        source: true,
+      {
+        isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead,
+        timeout: 5000,
+        maxWait: 3000,
       },
-    });
+    );
+
+    const {
+      attempts,
+      reversals,
+      usages,
+      duplicateGroups,
+      transactions,
+      ledgers,
+    } = snapshot;
 
     const transactionById = new Map(transactions.map((row) => [row.id, row]));
     const ledgerByTransactionId = new Map(
@@ -445,18 +536,39 @@ export class ReconciliationService {
   }
 
   async reconcileWallets() {
-    // Aggregate ledger movements in the database (one row per
-    // wallet/direction/currency) instead of streaming every ledger entry into
-    // memory — the entry table grows unbounded and would otherwise OOM the
-    // daily cron as volume increases.
-    const ledgerSums = await this.prisma.ledgerEntry.groupBy({
-      by: ['walletId', 'direction', 'currency'],
-      _sum: { amount: true },
-    });
+    const snapshot = await this.prisma.$transaction(
+      async (tx) => {
+        // Aggregate ledger movements in the database (one row per
+        // wallet/direction/currency) instead of streaming every ledger entry
+        // into memory. Both aggregates are read from this transaction's
+        // repeatable snapshot so a valid concurrent commit cannot manufacture
+        // a false mismatch.
+        const ledgerSums = await tx.ledgerEntry.groupBy({
+          by: ['walletId', 'direction', 'currency'],
+          _sum: { amount: true },
+        });
+
+        const wallets = await tx.wallet.findMany({
+          select: {
+            id: true,
+            userId: true,
+            currency: true,
+            balance: true,
+          },
+        });
+
+        return { ledgerSums, wallets };
+      },
+      {
+        isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead,
+        timeout: 5000,
+        maxWait: 3000,
+      },
+    );
 
     // walletId -> (currency -> signed expected balance)
     const expectedByWallet = new Map<string, Map<string, Decimal>>();
-    for (const row of ledgerSums) {
+    for (const row of snapshot.ledgerSums) {
       const amount = new Decimal(row._sum.amount ?? 0);
       const signed = row.direction === 'CREDIT' ? amount : amount.negated();
 
@@ -469,15 +581,6 @@ export class ReconciliationService {
       byCurrency.set(row.currency, current.plus(signed));
     }
 
-    const wallets = await this.prisma.wallet.findMany({
-      select: {
-        id: true,
-        userId: true,
-        currency: true,
-        balance: true,
-      },
-    });
-
     const mismatches: Array<{
       walletId: string;
       userId: string;
@@ -487,7 +590,7 @@ export class ReconciliationService {
       difference: string;
     }> = [];
 
-    for (const wallet of wallets) {
+    for (const wallet of snapshot.wallets) {
       // Only entries recorded in the wallet's own currency count toward its
       // expected balance (matches the previous per-entry currency filter).
       const expectedBalance =
@@ -508,7 +611,7 @@ export class ReconciliationService {
     }
 
     return {
-      totalChecked: wallets.length,
+      totalChecked: snapshot.wallets.length,
       mismatches,
       timestamp: new Date().toISOString(),
     };

@@ -110,9 +110,14 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   async revokeSession(
     @CurrentUser() user: { userId: string },
+    @Headers('authorization') authorization: string,
     @Param('sessionId') sessionId: string,
   ) {
-    return this.authService.revokeSession(user.userId, sessionId);
+    return this.authService.revokeSession(
+      user.userId,
+      sessionId,
+      this.extractBearerToken(authorization),
+    );
   }
 
   @Post('change-password')

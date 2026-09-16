@@ -297,10 +297,15 @@ describe('VtuApiProvider VTpass adapter', () => {
         data: {
           code: '000',
           response_description: 'TRANSACTION REVERSAL TO WALLET',
+          requestId: '202609031122REV',
+          amount: '48.50',
           content: {
             transactions: {
               status: 'reversed',
+              amount: '50.00',
+              total_amount: '48.50',
               transactionId: 'provider-reversal-1',
+              wallet_credit_id: 'wallet-credit-1',
             },
           },
         },
@@ -308,7 +313,13 @@ describe('VtuApiProvider VTpass adapter', () => {
     );
 
     await expect(provider.requery('202609031122REV')).resolves.toEqual(
-      expect.objectContaining({ status: 'reversed' }),
+      expect.objectContaining({
+        status: 'reversed',
+        providerRequestId: '202609031122REV',
+        providerAmount: '48.50',
+        providerCurrency: 'NGN',
+        walletCreditId: 'wallet-credit-1',
+      }),
     );
   });
 

@@ -1,14 +1,25 @@
-import { HttpException, HttpStatus, Injectable } from '@nestjs/common';
+import {
+  HttpException,
+  HttpStatus,
+  Inject,
+  Injectable,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { RedisService } from '../redis/redis.service';
 import { createHash, randomInt } from 'crypto';
 import { PinoLogger } from 'nestjs-pino';
 import { maskPhone } from '../common/utils/masking';
+import { SMS_PROVIDER } from './sms-provider';
+import type { SmsProvider } from './sms-provider';
 
 const OTP_SEND_LIMIT = 3;
 const OTP_SEND_WINDOW_SECONDS = 60 * 60;
 const PASSWORD_RESET_LIMIT = 3;
 const PASSWORD_RESET_WINDOW_SECONDS = 60 * 60;
+const DEFAULT_OTP_EXPIRY_SECONDS = 5 * 60;
+const MAX_OTP_EXPIRY_SECONDS = 5 * 60;
+const MAX_OTP_ATTEMPTS = 3;
 
 const INCREMENT_WITH_TTL_SCRIPT = `
 local total = redis.call("INCR", KEYS[1])
@@ -54,23 +65,34 @@ export class OtpService {
   private readonly expirySeconds: number;
   private readonly otpLength: number;
   private readonly devOtpCode?: string;
-  private readonly maxAttempts = 3;
+  private readonly maxAttempts = MAX_OTP_ATTEMPTS;
   private readonly localLocks = new Map<string, Promise<void>>();
 
   constructor(
     private readonly redis: RedisService,
     private readonly configService: ConfigService,
     private readonly logger: PinoLogger,
+    @Inject(SMS_PROVIDER) private readonly smsProvider: SmsProvider,
   ) {
     this.logger.setContext(OtpService.name);
-    this.expirySeconds =
-      parseInt(this.configService.get<string>('OTP_EXPIRES_IN') || '5') * 60;
-    this.otpLength = parseInt(
+    this.expirySeconds = this.parseExpirySeconds(
+      this.configService.get<string>('OTP_EXPIRES_IN'),
+    );
+    const configuredOtpLength = Number(
       this.configService.get<string>('OTP_LENGTH') || '6',
     );
+    // The public DTO accepts six digits. Fall back to that contract when a
+    // malformed or incompatible value is supplied instead of generating an
+    // OTP that the API cannot verify.
+    this.otpLength = configuredOtpLength === 6 ? configuredOtpLength : 6;
     const configuredDevCode = this.configService.get<string>('OTP_DEV_CODE');
+    const nodeEnv = (
+      this.configService.get<string>('NODE_ENV') ?? 'development'
+    )
+      .trim()
+      .toLowerCase();
     this.devOtpCode =
-      this.configService.get<string>('NODE_ENV') !== 'production' &&
+      (nodeEnv === 'development' || nodeEnv === 'test') &&
       configuredDevCode &&
       /^\d{6}$/.test(configuredDevCode)
         ? configuredDevCode
@@ -107,7 +129,28 @@ export class OtpService {
     const phoneHash = this.hashPhone(normalizedPhone);
     const codeKey = this.codeKey(phoneHash);
     const attemptsKey = this.attemptsKey(phoneHash);
+    const message = `Your TrustPay verification code is: ${code}. Valid for ${Math.ceil(this.expirySeconds / 60)} minutes.`;
 
+    if (!this.devOtpCode) {
+      try {
+        await this.smsProvider.sendSms(normalizedPhone, message);
+      } catch (error: unknown) {
+        this.logger.warn(
+          {
+            phoneHash,
+            phoneMasked: maskPhone(normalizedPhone),
+          },
+          'OTP delivery failed',
+        );
+        if (error instanceof HttpException) {
+          throw error;
+        }
+        throw new ServiceUnavailableException('OTP delivery unavailable');
+      }
+    }
+
+    // Persist only after the provider acknowledges the request. This avoids
+    // leaving a newly generated code usable when delivery fails or times out.
     await this.redis.set(codeKey, code, this.expirySeconds);
     await this.redis.del(attemptsKey);
 
@@ -176,6 +219,26 @@ export class OtpService {
     const min = Math.pow(10, this.otpLength - 1);
     const max = Math.pow(10, this.otpLength) - 1;
     return String(randomInt(min, max + 1));
+  }
+
+  private parseExpirySeconds(configured?: string): number {
+    const value = configured?.trim().toLowerCase();
+    if (!value) return DEFAULT_OTP_EXPIRY_SECONDS;
+
+    const match = /^(\d+)(s|m)?$/.exec(value);
+    if (!match) return DEFAULT_OTP_EXPIRY_SECONDS;
+
+    const amount = Number(match[1]);
+    if (!Number.isSafeInteger(amount) || amount <= 0) {
+      return DEFAULT_OTP_EXPIRY_SECONDS;
+    }
+
+    const seconds = match[2] === 's' ? amount : amount * 60;
+    if (!Number.isSafeInteger(seconds) || seconds <= 0) {
+      return DEFAULT_OTP_EXPIRY_SECONDS;
+    }
+
+    return Math.min(seconds, MAX_OTP_EXPIRY_SECONDS);
   }
 
   private async enforceRateLimit(

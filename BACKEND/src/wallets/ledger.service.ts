@@ -1,11 +1,18 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { Decimal } from '@prisma/client/runtime/library';
 import { PrismaService } from '../prisma/prisma.service';
+import {
+  isCompensatingLedgerSource,
+  SettlementHoldService,
+  settlementOperationForSource,
+} from '../common/services/settlement-hold.service';
 
 type LedgerCurrency = 'NGN' | 'GHS';
 type LedgerDirection = 'DEBIT' | 'CREDIT';
@@ -20,11 +27,24 @@ interface WalletMovementInput {
   metadata?: Record<string, unknown>;
 }
 
-type LedgerClient = Pick<Prisma.TransactionClient, 'wallet' | 'ledgerEntry'>;
+type LedgerClient = Pick<
+  Prisma.TransactionClient,
+  'wallet' | 'ledgerEntry' | 'reconciliationRun' | 'auditLog' | '$queryRaw'
+>;
 
 @Injectable()
 export class LedgerService {
-  constructor(private readonly prisma: PrismaService) {}
+  private readonly settlementHold: SettlementHoldService;
+
+  constructor(
+    private readonly prisma: PrismaService,
+    @Optional() settlementHold?: SettlementHoldService,
+  ) {
+    // The application module always supplies this provider. The fallback
+    // keeps direct service tests honest: they exercise the same persisted
+    // hold check instead of silently disabling it when a fixture omits DI.
+    this.settlementHold = settlementHold ?? new SettlementHoldService(prisma);
+  }
 
   creditWallet(input: WalletMovementInput, client?: LedgerClient) {
     return this.postWalletMovement('CREDIT', input, client);
@@ -42,6 +62,36 @@ export class LedgerService {
     this.assertPositiveAmount(input.amount);
 
     const execute = async (tx: LedgerClient) => {
+      if (direction === 'DEBIT' && !isCompensatingLedgerSource(input.source)) {
+        await this.settlementHold.assertOutboundAllowed(
+          {
+            operation: settlementOperationForSource(input.source),
+            currency: input.currency,
+            reference: input.reference,
+          },
+          tx,
+        );
+
+        // The PIN reset endpoint and this debit must serialize on the same
+        // credential row. A check performed before entering the ledger
+        // transaction can race a reset that publishes a new credential and
+        // reset hold while this debit is in flight.
+        const credentials = await tx.$queryRaw<
+          Array<{ resetHoldUntil: Date | null }>
+        >`
+          SELECT "resetHoldUntil"
+          FROM "transaction_pin_credentials"
+          WHERE "userId" = ${input.userId}
+          FOR SHARE
+        `;
+        const resetHoldUntil = credentials[0]?.resetHoldUntil;
+        if (resetHoldUntil && resetHoldUntil > new Date()) {
+          throw new ForbiddenException(
+            'Transaction PIN was recently reset; money movement is temporarily locked',
+          );
+        }
+      }
+
       let walletId: string;
       let balanceBefore: Decimal;
       let balanceAfter: Decimal;

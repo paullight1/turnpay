@@ -30,6 +30,9 @@ describe('manual exchange HTTP authorization and validation', () => {
           provide: SupabaseService,
           useValue: {
             verifyToken: jest.fn().mockResolvedValue({}),
+            getVerifiedProviderSessionId: jest
+              .fn()
+              .mockResolvedValue('provider-session-1'),
             syncUser: jest
               .fn()
               .mockResolvedValue({ id: 'customer', role: 'USER' }),
@@ -47,6 +50,9 @@ describe('manual exchange HTTP authorization and validation', () => {
                   isSuspended: false,
                 }),
               ),
+            },
+            refreshToken: {
+              findFirst: jest.fn().mockResolvedValue({ id: 'session-1' }),
             },
           },
         },

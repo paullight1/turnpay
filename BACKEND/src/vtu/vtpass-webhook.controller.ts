@@ -14,6 +14,7 @@ import { PinoLogger } from 'nestjs-pino';
 import type { RawBodyRequest } from '../common/types/request-context';
 import { IsIn, IsObject } from 'class-validator';
 import { VtuWebhookInboxService } from './vtu-webhook-inbox.service';
+import type { VtuProviderCurrency } from './providers/vtpass.types';
 
 export class VtpassWebhookDto {
   @IsIn(['transaction-update'])
@@ -120,6 +121,20 @@ export class VtpassWebhookController {
       throw new BadRequestException('Invalid VTpass webhook payload');
     }
 
+    const providerAmount = this.stringValue(
+      data.amount ?? transaction.amount ?? transaction.total_amount,
+    )
+      .trim()
+      .slice(0, 64);
+    const providerCurrency = this.normalizeCurrency(
+      data.currency ?? transaction.currency,
+    );
+    const walletCreditId = this.stringValue(
+      transaction.wallet_credit_id || data.wallet_credit_id,
+    )
+      .trim()
+      .slice(0, 128);
+
     return {
       eventType,
       providerRequestId,
@@ -130,6 +145,9 @@ export class VtpassWebhookController {
           .trim()
           .slice(0, 500) || undefined,
       code: this.stringValue(data.code).trim().slice(0, 20) || undefined,
+      ...(providerAmount ? { providerAmount } : {}),
+      ...(providerCurrency ? { providerCurrency } : {}),
+      ...(walletCreditId ? { walletCreditId } : {}),
     };
   }
 
@@ -173,6 +191,11 @@ export class VtpassWebhookController {
     }
 
     return '';
+  }
+
+  private normalizeCurrency(value: unknown): VtuProviderCurrency | undefined {
+    const currency = this.stringValue(value).trim().toUpperCase();
+    return currency === 'NGN' || currency === 'GHS' ? currency : undefined;
   }
 
   private timingSafeCompare(expected: string, received: string) {

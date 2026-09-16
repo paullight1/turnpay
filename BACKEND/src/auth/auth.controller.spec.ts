@@ -123,12 +123,17 @@ describe('AuthController', () => {
 
     const user = { userId: 'user-1' };
     const list = await controller.sessions(user);
-    const revoke = await controller.revokeSession(user, 'session-1');
+    const revoke = await controller.revokeSession(
+      user,
+      'Bearer access-token',
+      'session-1',
+    );
 
     expect(authService.listSessions).toHaveBeenCalledWith('user-1');
     expect(authService.revokeSession).toHaveBeenCalledWith(
       'user-1',
       'session-1',
+      'access-token',
     );
     expect(list).toEqual([]);
     expect(revoke).toEqual({ revoked: true });

@@ -11,6 +11,8 @@ import { randomBytes } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 
 type TrustPaySupabaseClient = SupabaseClient<any, any, 'public', any, any>;
+type SupabaseSignOutScope = 'local' | 'global' | 'others';
+const PASSWORD_UPDATE_TIMEOUT_MS = 10_000;
 
 type RecoveryIdentityCandidate = {
   id: string;
@@ -68,6 +70,71 @@ export class SupabaseService {
     }
 
     return data.user;
+  }
+
+  /**
+   * Returns the session_id from an access token after Supabase has verified it.
+   * getClaims() performs signature/expiry validation and falls back to the
+   * Auth server for projects using symmetric JWT signing.
+   */
+  async getVerifiedProviderSessionId(accessToken: string) {
+    const { data, error } = await this.authClient.auth.getClaims(accessToken);
+    const sessionId = data?.claims?.session_id;
+
+    if (error || typeof sessionId !== 'string' || sessionId.length === 0) {
+      throw new UnauthorizedException('Session expired. Please sign in again.');
+    }
+
+    return sessionId;
+  }
+
+  /**
+   * Supabase's signOut() uses the client's stored session. The backend does
+   * not keep mutable SDK sessions, so call the explicit-token admin API
+   * method, which sends the provider JWT to /auth/v1/logout.
+   */
+  async revokeProviderSession(
+    accessToken: string,
+    scope: SupabaseSignOutScope = 'local',
+  ) {
+    const { error } = await this.authClient.auth.admin.signOut(
+      accessToken,
+      scope,
+    );
+
+    if (error) {
+      throw new Error('Unable to revoke the Supabase session');
+    }
+  }
+
+  /**
+   * Update a signed-in user's password with the access token explicitly
+   * supplied by the caller. Calling auth.updateUser() on a header-only client
+   * is rejected by auth-js because it has no stored session; this direct Auth
+   * API request preserves the same user-token authorization without mutating a
+   * shared SDK client's session state.
+   */
+  async updatePasswordWithAccessToken(accessToken: string, password: string) {
+    const supabaseUrl = this.configService.getOrThrow<string>('SUPABASE_URL');
+    const supabaseKey =
+      this.configService.get<string>('SUPABASE_PUBLISHABLE_KEY') ||
+      this.configService.getOrThrow<string>('SUPABASE_ANON_KEY');
+
+    const response = await fetch(`${supabaseUrl}/auth/v1/user`, {
+      method: 'PUT',
+      redirect: 'error',
+      signal: AbortSignal.timeout(PASSWORD_UPDATE_TIMEOUT_MS),
+      headers: {
+        apikey: supabaseKey,
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ password }),
+    });
+
+    if (!response.ok) {
+      throw new Error('Unable to update the Supabase password');
+    }
   }
 
   createUserScopedClient(accessToken: string) {

@@ -19,6 +19,7 @@ export type KycIdentityVerificationRequest = {
     firstName?: string;
     lastName?: string;
     dateOfBirth?: string;
+    phone?: string;
   };
 };
 

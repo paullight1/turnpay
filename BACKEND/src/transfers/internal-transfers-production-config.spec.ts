@@ -9,6 +9,7 @@ describe('internal transfer production configuration', () => {
   const productionEnv: NodeJS.ProcessEnv = {
     ...process.env,
     NODE_ENV: 'production',
+    SENTRY_DSN: 'https://ci-public@sentry.io/123456',
     DATABASE_URL:
       'postgresql://postgres.project-ref:test-password@aws-0-eu-west-1.pooler.supabase.com:5432/postgres?sslmode=require&schema=public',
     WEB_URL: 'https://trustpay.example.com',
@@ -18,6 +19,13 @@ describe('internal transfer production configuration', () => {
     REDIS_URL: 'rediss://default:test@redis.example.com:6379',
     REDIS_ALLOW_MEMORY_FALLBACK: 'false',
     TRUST_PROXY_HOPS: '1',
+    OTP_EXPIRES_IN: '5m',
+    OTP_LENGTH: '6',
+    OTP_DEV_CODE: '',
+    SMS_PROVIDER: 'twilio',
+    TWILIO_ACCOUNT_SID: 'ACaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    TWILIO_AUTH_TOKEN: 'ci-twilio-auth-token',
+    TWILIO_PHONE_NUMBER: '+15557122661',
     IDEMPOTENCY_RESPONSE_ENCRYPTION_KEY: Buffer.alloc(32, 7).toString('base64'),
     IDEMPOTENCY_RESPONSE_ENCRYPTION_KEY_ID: 'v1',
     TRANSACTION_PIN_REQUIRED: 'true',
@@ -141,6 +149,26 @@ describe('internal transfer production configuration', () => {
     expect(result.status).toBe(1);
     expect(result.stderr).toContain(
       'IDEMPOTENCY_RESPONSE_ENCRYPTION_KEY must decode to exactly 32 bytes',
+    );
+  });
+
+  it('requires production Sentry and rejects development OTP overrides', () => {
+    const missingSentryEnv = { ...productionEnv };
+    delete missingSentryEnv.SENTRY_DSN;
+    const missingSentryResult = spawnSync(script, ['true'], {
+      env: missingSentryEnv,
+      encoding: 'utf8',
+    });
+    expect(missingSentryResult.status).toBe(1);
+    expect(missingSentryResult.stderr).toContain('SENTRY_DSN is required');
+
+    const devCodeResult = spawnSync(script, ['true'], {
+      env: { ...productionEnv, OTP_DEV_CODE: '123456' },
+      encoding: 'utf8',
+    });
+    expect(devCodeResult.status).toBe(1);
+    expect(devCodeResult.stderr).toContain(
+      'OTP_DEV_CODE must be empty in deployed environments',
     );
   });
 });

@@ -9,6 +9,7 @@ import { pbkdf2, randomBytes, timingSafeEqual } from 'crypto';
 import { promisify } from 'util';
 import { RedisService } from '../../redis/redis.service';
 import { PrismaService } from '../../prisma/prisma.service';
+import type { RequestAuditContext } from './request-audit-context';
 
 type StoredPin = {
   salt: string;
@@ -77,6 +78,53 @@ export class TransactionPinService {
     return { success: true };
   }
 
+  async resetPinWithHold(
+    userId: string,
+    pin: string,
+    auditContext?: RequestAuditContext & {
+      verificationMethod?: 'current_pin' | 'otp';
+    },
+  ) {
+    this.redis.assertAvailable();
+    this.assertValidPin(pin);
+    const stored = await this.buildStoredPin(pin);
+    const resetHoldUntil = new Date(Date.now() + 60 * 60 * 1000);
+
+    // One write publishes the credential and its hold together. Redis cleanup
+    // may fail afterward, but must never leave a usable, unheld replacement.
+    await this.prisma.$transaction(async (tx) => {
+      await tx.transactionPinCredential.upsert({
+        where: { userId },
+        create: { userId, ...stored, resetHoldUntil },
+        update: { ...stored, resetHoldUntil },
+      });
+      await tx.auditLog.create({
+        data: {
+          action: 'transaction_pin_reset',
+          targetType: 'USER',
+          targetId: userId,
+          metadata: {
+            actorUserId: userId,
+            verificationMethod: auditContext?.verificationMethod,
+            holdUntil: resetHoldUntil.toISOString(),
+            requestId: auditContext?.requestId,
+            ipAddress: auditContext?.ipAddress,
+            userAgent: auditContext?.userAgent,
+          },
+        },
+      });
+    });
+    try {
+      await this.redis.del(this.legacyPinKey(userId));
+      await this.clearFailures(userId);
+    } catch {
+      // The durable reset already succeeded. Reporting a transient failure
+      // would discard the endpoint's idempotency result and invite a new reset.
+      this.redis.reportOperationalAlert('TRANSACTION_PIN_RESET_CLEANUP_FAILED');
+    }
+    return { success: true, holdUntil: resetHoldUntil.toISOString() };
+  }
+
   async setInitialPin(userId: string, pin: string) {
     this.redis.assertAvailable();
     this.assertValidPin(pin);
@@ -99,7 +147,7 @@ export class TransactionPinService {
     }
   }
 
-  async verifyPin(userId: string, pin: string) {
+  async verifyPin(userId: string, pin: string, enforceResetHold = false) {
     this.assertValidPin(pin);
 
     const locked = await this.redis.get(this.lockKey(userId));
@@ -109,14 +157,19 @@ export class TransactionPinService {
 
     let stored = await this.prisma.transactionPinCredential.findUnique({
       where: { userId },
-      select: { salt: true, hash: true, iterations: true },
+      select: {
+        salt: true,
+        hash: true,
+        iterations: true,
+        resetHoldUntil: true,
+      },
     });
     let legacyCredential = false;
 
     if (!stored) {
       const raw = await this.redis.get(this.legacyPinKey(userId));
       if (raw) {
-        stored = JSON.parse(raw) as StoredPin;
+        stored = { ...(JSON.parse(raw) as StoredPin), resetHoldUntil: null };
         legacyCredential = true;
       }
     }
@@ -124,6 +177,8 @@ export class TransactionPinService {
     if (!stored) {
       throw new ForbiddenException('Transaction PIN setup is required');
     }
+
+    if (enforceResetHold) this.assertResetHoldExpired(stored.resetHoldUntil);
 
     const candidate = await this.hashPin(pin, stored.salt, stored.iterations);
     const isValid = this.safeEqual(candidate, stored.hash);
@@ -143,6 +198,21 @@ export class TransactionPinService {
     }
 
     await this.clearFailures(userId);
+
+    if (enforceResetHold) {
+      // PBKDF2 and Redis operations yield to other requests. Reject if a reset
+      // changed the verified credential while this authorization was running.
+      const current = await this.prisma.transactionPinCredential.findUnique({
+        where: { userId },
+        select: { hash: true, resetHoldUntil: true },
+      });
+      if (!current || current.hash !== stored.hash) {
+        throw new ForbiddenException(
+          'Transaction PIN changed; please try again',
+        );
+      }
+      this.assertResetHoldExpired(current.resetHoldUntil);
+    }
   }
 
   async getStatus(userId: string) {
@@ -178,17 +248,10 @@ export class TransactionPinService {
       return;
     }
 
-    const [credential, legacyResetHold] = await Promise.all([
-      this.prisma.transactionPinCredential.findUnique({
-        where: { userId },
-        select: { resetHoldUntil: true },
-      }),
-      this.redis.get(this.legacyResetHoldKey(userId)),
-    ]);
-    if (
-      (credential?.resetHoldUntil && credential.resetHoldUntil > new Date()) ||
-      legacyResetHold
-    ) {
+    const legacyResetHold = await this.redis.get(
+      this.legacyResetHoldKey(userId),
+    );
+    if (legacyResetHold) {
       throw new ForbiddenException(
         'Transaction PIN was recently reset; money movement is temporarily locked',
       );
@@ -198,7 +261,15 @@ export class TransactionPinService {
       throw new BadRequestException('Transaction PIN is required');
     }
 
-    await this.verifyPin(userId, pin);
+    await this.verifyPin(userId, pin, true);
+  }
+
+  private assertResetHoldExpired(holdUntil: Date | null) {
+    if (holdUntil && holdUntil > new Date()) {
+      throw new ForbiddenException(
+        'Transaction PIN was recently reset; money movement is temporarily locked',
+      );
+    }
   }
 
   isRequired() {

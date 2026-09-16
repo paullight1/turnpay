@@ -84,9 +84,12 @@ describe('MonnifyKycSyncService', () => {
     await service.syncAccount('va-1');
     expect(provider.updateReservedAccountKyc).not.toHaveBeenCalled();
   });
-  it('requires both verified identifiers', async () => {
+  it('syncs the remaining verified identifier for a limited account', async () => {
     account.user.kycDocuments.pop();
     await service.syncAccount('va-1');
-    expect(provider.updateReservedAccountKyc).not.toHaveBeenCalled();
+    expect(provider.updateReservedAccountKyc).toHaveBeenCalledWith(
+      'TP-NGN-u-1',
+      { bvn: '12345678901' },
+    );
   });
 });

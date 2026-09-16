@@ -3,7 +3,10 @@ import { Prisma } from '@prisma/client';
 import { createHash } from 'crypto';
 import { PinoLogger } from 'nestjs-pino';
 import { PrismaService } from '../prisma/prisma.service';
-import type { NormalizedVtuStatus } from './providers/vtpass.types';
+import type {
+  NormalizedVtuStatus,
+  VtuProviderCurrency,
+} from './providers/vtpass.types';
 
 export type VtpassInboxEvent = {
   eventType: string;
@@ -12,6 +15,9 @@ export type VtpassInboxEvent = {
   status: NormalizedVtuStatus;
   message?: string;
   code?: string;
+  providerAmount?: string;
+  providerCurrency?: VtuProviderCurrency;
+  walletCreditId?: string;
 };
 
 type InboxProcessor = (event: VtpassInboxEvent) => Promise<unknown>;
@@ -29,6 +35,11 @@ export class VtuWebhookInboxService {
     const payload = {
       code: event.code,
       message: event.message,
+      ...(event.providerAmount ? { providerAmount: event.providerAmount } : {}),
+      ...(event.providerCurrency
+        ? { providerCurrency: event.providerCurrency }
+        : {}),
+      ...(event.walletCreditId ? { walletCreditId: event.walletCreditId } : {}),
     };
     const payloadHash = this.hash(JSON.stringify(payload));
     const eventKey = this.hash(
@@ -92,6 +103,9 @@ export class VtuWebhookInboxService {
       status: this.normalizedStatus(row.providerStatus),
       message: this.optionalString(payload.message),
       code: this.optionalString(payload.code),
+      providerAmount: this.optionalString(payload.providerAmount),
+      providerCurrency: this.optionalCurrency(payload.providerCurrency),
+      walletCreditId: this.optionalString(payload.walletCreditId),
     };
 
     try {
@@ -165,6 +179,10 @@ export class VtuWebhookInboxService {
 
   private optionalString(value: unknown) {
     return typeof value === 'string' && value ? value : undefined;
+  }
+
+  private optionalCurrency(value: unknown): VtuProviderCurrency | undefined {
+    return value === 'NGN' || value === 'GHS' ? value : undefined;
   }
 
   private normalizedStatus(value: string): NormalizedVtuStatus {

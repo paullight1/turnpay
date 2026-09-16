@@ -36,6 +36,7 @@ describe('ExchangeService', () => {
       findUniqueOrThrow: jest.fn(),
     },
     transaction: {
+      findUnique: jest.fn(),
       findFirst: jest.fn(),
       create: jest.fn(),
       update: jest.fn(),
@@ -53,6 +54,7 @@ describe('ExchangeService', () => {
       findUnique: jest.fn(),
       updateMany: jest.fn(),
     },
+    reconciliationRun: { findMany: jest.fn() },
     providerEvent: {
       findFirst: jest.fn(),
       create: jest.fn(),
@@ -72,6 +74,7 @@ describe('ExchangeService', () => {
     },
     auditLog: {
       create: jest.fn(),
+      findMany: jest.fn(),
     },
   };
 
@@ -107,6 +110,9 @@ describe('ExchangeService', () => {
     mockPrisma.$transaction.mockImplementation(async (fn: any) =>
       fn(mockPrisma),
     );
+    mockPrisma.transaction.findUnique.mockResolvedValue(undefined);
+    mockPrisma.reconciliationRun.findMany.mockResolvedValue([]);
+    mockPrisma.auditLog.findMany.mockResolvedValue([]);
     mockRateService.getRate.mockResolvedValue({ rate: 3.1746, markup: 2.5 });
 
     const module: TestingModule = await Test.createTestingModule({
@@ -227,6 +233,21 @@ describe('ExchangeService', () => {
   });
 
   describe('createQuote', () => {
+    it('rejects an amount that rounds to zero in the destination currency', async () => {
+      mockRateService.getRate.mockResolvedValue({
+        rate: 0.001,
+        markup: 0,
+        isStale: false,
+      });
+      await expect(
+        service.createQuote('user-1', {
+          from: 'NGN',
+          to: 'GHS',
+          amount: '0.01',
+        }),
+      ).rejects.toThrow('Amount is too small');
+      expect(mockRedis.set).not.toHaveBeenCalled();
+    });
     it('should throw error if from and to currencies are the same', async () => {
       await expect(
         service.createQuote('user-1', {
@@ -273,6 +294,85 @@ describe('ExchangeService', () => {
   });
 
   describe('executeQuote', () => {
+    it.each([new Date(0).toISOString(), 'invalid-date'])(
+      'rejects a stored quote with expired or invalid expiry %s before moving money',
+      async (expiresAt) => {
+        mockRedis.get.mockResolvedValue(
+          JSON.stringify({
+            id: 'quote-1',
+            userId: 'user-1',
+            from: 'NGN',
+            to: 'GHS',
+            amount: '100.00',
+            fee: '2.00',
+            sendAmount: '102.00',
+            receiveAmount: '10.00',
+            expiresAt,
+          }),
+        );
+        await expect(
+          service.executeQuote('user-1', { quoteId: 'quote-1' }),
+        ).rejects.toThrow('Quote has expired');
+        expect(mockLedger.debitWallet).not.toHaveBeenCalled();
+        expect(mockLedger.creditWallet).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each([false, true])(
+      'replays after Redis quote loss (commit raced lookup: %s)',
+      async (commitRacedLookup) => {
+        const createdAt = new Date();
+        mockRedis.get.mockResolvedValue(null);
+        mockPrisma.transaction.findUnique.mockResolvedValue({
+          id: 'tx-1',
+          userId: 'user-1',
+          exchangeQuoteId: 'quote-1',
+          reference: 'EXC-1',
+          type: 'EXCHANGE',
+          amount: new Decimal('100.00'),
+          fee: new Decimal('2.00'),
+          currency: 'NGN',
+          status: 'SUCCESS',
+          createdAt,
+          ledgerEntries: [
+            {
+              source: 'EXCHANGE_DEBIT',
+              currency: 'NGN',
+              balanceAfter: new Decimal('898.00'),
+            },
+            {
+              source: 'EXCHANGE_CREDIT',
+              currency: 'GHS',
+              balanceAfter: new Decimal('60.00'),
+            },
+          ],
+        });
+
+        if (commitRacedLookup) {
+          mockPrisma.transaction.findUnique.mockResolvedValueOnce(null);
+        }
+        const result = await service.executeQuote('user-1', {
+          quoteId: 'quote-1',
+        });
+
+        expect(result).toMatchObject({
+          success: true,
+          transaction: {
+            id: 'tx-1',
+            reference: 'EXC-1',
+            status: 'SUCCESS',
+          },
+          wallets: {
+            source: { currency: 'NGN', balance: new Decimal('898.00') },
+            target: { currency: 'GHS', balance: new Decimal('60.00') },
+          },
+        });
+        expect(mockPrisma.transaction.create).not.toHaveBeenCalled();
+        expect(mockLedger.debitWallet).not.toHaveBeenCalled();
+        expect(mockLedger.creditWallet).not.toHaveBeenCalled();
+      },
+    );
+
     it('posts exchange debit and credit through the ledger in one transaction', async () => {
       const expiresAt = new Date(Date.now() + 60_000);
       mockRedis.get.mockResolvedValue(

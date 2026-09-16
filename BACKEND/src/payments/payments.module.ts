@@ -7,10 +7,11 @@ import { PaymentWebhookProcessorService } from './webhooks/payment-webhook.proce
 import { WalletsModule } from '../wallets/wallets.module';
 import { BankingModule } from '../banking/banking.module';
 import { ExchangeModule } from '../exchange/exchange.module';
+import { ReconciliationModule } from '../common/services/reconciliation.module';
 import { WebhookInboxService } from './webhooks/webhook-inbox.service';
 
 @Module({
-  imports: [WalletsModule, BankingModule, ExchangeModule],
+  imports: [WalletsModule, BankingModule, ExchangeModule, ReconciliationModule],
   controllers: [PaymentController, WebhookController],
   providers: [
     PaymentService,

@@ -120,13 +120,14 @@ export class MonnifyVirtualAccountProvider {
 
   async updateReservedAccountKyc(
     accountReference: string,
-    identifiers: { bvn: string; nin: string },
+    identifiers: { bvn?: string; nin?: string },
   ): Promise<void> {
     if (
-      !/^\d{11}$/.test(identifiers.bvn) ||
-      !/^\d{11}$/.test(identifiers.nin)
+      (identifiers.bvn && !/^\d{11}$/.test(identifiers.bvn)) ||
+      (identifiers.nin && !/^\d{11}$/.test(identifiers.nin)) ||
+      (!identifiers.bvn && !identifiers.nin)
     ) {
-      throw new BadRequestException('Verified BVN and NIN are required');
+      throw new BadRequestException('A verified BVN or NIN is required');
     }
     const token = await this.getAccessToken();
     const response = await this.fetchMonnify<{ requestSuccessful: boolean }>(
@@ -146,6 +147,36 @@ export class MonnifyVirtualAccountProvider {
     );
     if (!response.data.requestSuccessful) {
       throw new BadRequestException('Could not update reserved account KYC');
+    }
+  }
+
+  async updateReservedAccountLimit(
+    accountReference: string,
+    limitProfileCode: string,
+  ): Promise<void> {
+    if (!limitProfileCode.trim()) {
+      throw new BadRequestException('Monnify limit profile is required');
+    }
+    const token = await this.getAccessToken();
+    const response = await this.fetchMonnify<{
+      requestSuccessful: boolean;
+    }>(
+      firstValueFrom(
+        this.httpService.put(
+          `${this.baseUrl}/api/v1/bank-transfer/reserved-accounts/limit`,
+          { accountReference, limitProfileCode: limitProfileCode.trim() },
+          {
+            headers: {
+              Authorization: `Bearer ${token}`,
+              'Content-Type': 'application/json',
+            },
+          },
+        ),
+      ),
+      'Could not update reserved account limit',
+    );
+    if (!response.data.requestSuccessful) {
+      throw new BadRequestException('Could not update reserved account limit');
     }
   }
 
@@ -192,6 +223,10 @@ export class MonnifyVirtualAccountProvider {
       ),
     };
 
+    if (input.limitProfileCode) {
+      payload.limitProfileCode = input.limitProfileCode;
+    }
+
     if (input.bvn) {
       payload.bvn = input.bvn;
     }
@@ -206,11 +241,14 @@ export class MonnifyVirtualAccountProvider {
     }
 
     let response: AxiosResponse<MonnifyReservedAccountResponse>;
+    const reservePath = input.limitProfileCode
+      ? '/api/v2/bank-transfer/reserved-accounts/limit'
+      : '/api/v2/bank-transfer/reserved-accounts';
     try {
       response = await this.fetchMonnify<MonnifyReservedAccountResponse>(
         firstValueFrom(
           this.httpService.post<MonnifyReservedAccountResponse>(
-            `${this.baseUrl}/api/v2/bank-transfer/reserved-accounts`,
+            `${this.baseUrl}${reservePath}`,
             payload,
             {
               headers: {

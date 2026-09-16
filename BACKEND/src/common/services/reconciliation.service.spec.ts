@@ -3,6 +3,9 @@ import { ReconciliationService } from './reconciliation.service';
 
 describe('ReconciliationService', () => {
   const prisma = {
+    $transaction: jest.fn(async (operation: (tx: unknown) => unknown) =>
+      operation(prisma),
+    ),
     reconciliationRun: {
       create: jest.fn(),
       update: jest.fn(),
@@ -32,7 +35,10 @@ describe('ReconciliationService', () => {
 
   beforeEach(() => {
     jest.resetAllMocks();
-    service = new ReconciliationService(prisma as any, pinoLogger as any);
+    prisma.$transaction.mockImplementation(
+      async (operation: (tx: unknown) => unknown) => operation(prisma),
+    );
+    service = new ReconciliationService(prisma, pinoLogger as any);
   });
 
   it('derives expected wallet balances from aggregated ledger sums', async () => {

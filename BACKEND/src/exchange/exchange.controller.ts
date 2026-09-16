@@ -159,7 +159,7 @@ export class ExchangeController {
     // actor and before/after values, while the customer-facing rate remains a
     // single, predictable value that operators can update as markets move.
     const markup = dto.markup ?? 0;
-    await this.rateService.setManualRate(
+    const persisted = await this.rateService.setManualRate(
       dto.from,
       dto.to,
       dto.rate,
@@ -167,13 +167,13 @@ export class ExchangeController {
       user.userId,
       dto.reason?.trim() || undefined,
     );
-    const effectiveRate = dto.rate * (1 - markup / 100);
+    const effectiveRate = persisted.rate * (1 - persisted.markup / 100);
     return {
       success: true,
       from: dto.from,
       to: dto.to,
-      rate: dto.rate,
-      markup,
+      rate: persisted.rate,
+      markup: persisted.markup,
       effectiveRate,
       message: `Rate updated for ${dto.from}/${dto.to}`,
     };

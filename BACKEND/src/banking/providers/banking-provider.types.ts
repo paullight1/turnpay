@@ -20,6 +20,7 @@ export interface ProvisionVirtualAccountInput {
   currency: BankingCurrency;
   bvn?: string;
   nin?: string;
+  limitProfileCode?: string;
   identityAccountNumber?: string;
   identityBankCode?: string;
 }

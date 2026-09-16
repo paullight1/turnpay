@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { Prisma } from '@prisma/client';
 import { PinoLogger } from 'nestjs-pino';
+import * as Sentry from '@sentry/nestjs';
 import { PrismaService } from '../prisma/prisma.service';
 
 /** Internal evidence checks only. Operators must still reconcile bank/MoMo statements. */
@@ -37,7 +38,7 @@ export class ManualExchangeReconciliationService {
           mismatchDetails: result.mismatches,
         },
       });
-      if (result.mismatches.length)
+      if (result.mismatches.length) {
         this.logger.error(
           {
             alertCode: 'MANUAL_EXCHANGE_RECONCILIATION_BLOCKED',
@@ -46,6 +47,19 @@ export class ManualExchangeReconciliationService {
           },
           'Manual exchange needs reconciliation',
         );
+        Sentry.captureMessage('Manual exchange reconciliation blocked payout', {
+          level: 'error',
+          tags: {
+            alertCode: 'MANUAL_EXCHANGE_RECONCILIATION_BLOCKED',
+            reconciliationScope: 'MANUAL_EXCHANGE',
+          },
+          extra: {
+            runId: run.id,
+            mismatchCount: result.mismatches.length,
+            checkedOrders: result.totalChecked,
+          },
+        });
+      }
       return result;
     } catch {
       await this.prisma.reconciliationRun.update({

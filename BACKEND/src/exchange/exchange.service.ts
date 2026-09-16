@@ -38,6 +38,7 @@ import { formatKycTier, isKycTierAtLeast } from '../common/utils/kyc-tier';
 import { SupabaseService } from '../supabase/supabase.service';
 import { redactProviderPayload } from '../common/utils/masking';
 import { BankingService } from '../banking/banking.service';
+import { SettlementHoldService } from '../common/services/settlement-hold.service';
 
 export interface QuoteData {
   id: string;
@@ -81,6 +82,7 @@ const RECEIPT_CONTENT_TYPE_EXTENSIONS: Record<string, string> = {
 export class ExchangeService {
   private readonly quoteTtlSeconds = 600;
   private readonly transactionTimeout: number;
+  private readonly settlementHold: SettlementHoldService;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -94,8 +96,10 @@ export class ExchangeService {
     private readonly supabaseService?: SupabaseService,
     @Optional()
     private readonly bankingService?: BankingService,
+    @Optional() settlementHold?: SettlementHoldService,
   ) {
     this.transactionTimeout = 5000;
+    this.settlementHold = settlementHold ?? new SettlementHoldService(prisma);
   }
 
   async getRate(from: string, to: string) {
@@ -123,12 +127,16 @@ export class ExchangeService {
     );
 
     const amount = new Decimal(dto.amount);
+    this.assertPositiveMoney(amount);
     if (amount.greaterThan(10_000_000)) {
       throw new BadRequestException('Amount must be at most 10000000');
     }
     const fee = this.calculateFee(amount, markup);
     const sendAmount = amount.plus(fee);
-    const receiveAmount = amount.mul(effectiveRate);
+    const receiveAmount = amount.mul(effectiveRate).toDecimalPlaces(2);
+    if (!receiveAmount.isFinite() || receiveAmount.lte(0)) {
+      throw new BadRequestException('Amount is too small for this exchange');
+    }
 
     const quoteId = uuidv4();
     const quote: QuoteData = {
@@ -171,9 +179,24 @@ export class ExchangeService {
   async executeQuote(userId: string, dto: ExecuteQuoteDto) {
     await this.transactionPin.verifyRequired(userId, dto.transactionPin);
 
+    const existingExecution = await this.getExecutedQuoteResponse(
+      userId,
+      dto.quoteId,
+    );
+    if (existingExecution) {
+      return existingExecution;
+    }
+
     const raw = await this.redis.get(`quote:${dto.quoteId}`);
 
     if (!raw) {
+      // Another execution may have committed and removed the cache entry
+      // between our first durable lookup and the Redis read.
+      const committed = await this.getExecutedQuoteResponse(
+        userId,
+        dto.quoteId,
+      );
+      if (committed) return committed;
       throw new NotFoundException(
         'Quote not found. Please create a new quote.',
       );
@@ -185,7 +208,8 @@ export class ExchangeService {
       throw new BadRequestException('Quote does not belong to this user');
     }
 
-    if (new Date() > quote.expiresAt) {
+    const expiresAt = new Date(quote.expiresAt).getTime();
+    if (!Number.isFinite(expiresAt) || Date.now() >= expiresAt) {
       await this.redis.del(`quote:${quote.id}`);
       throw new BadRequestException(
         'Quote has expired. Please create a new quote.',
@@ -273,6 +297,7 @@ export class ExchangeService {
               status: 'SUCCESS',
               reference,
               fee,
+              exchangeQuoteId: quote.id,
               metadata: {
                 quoteId: quote.id,
                 from: quote.from,
@@ -341,6 +366,22 @@ export class ExchangeService {
         // Release the claim so a transient failure (e.g. DB timeout) does not
         // block the user from legitimately retrying the same quote.
         await this.redis.del(execLockKey);
+        if (
+          error instanceof Prisma.PrismaClientKnownRequestError &&
+          error.code === 'P2002'
+        ) {
+          const replay = await this.getExecutedQuoteResponse(
+            userId,
+            dto.quoteId,
+          );
+          if (replay) {
+            return {
+              transaction: replay.transaction,
+              sourceWallet: replay.wallets.source,
+              targetWallet: replay.wallets.target,
+            };
+          }
+        }
         throw error;
       });
 
@@ -1684,6 +1725,17 @@ export class ExchangeService {
           );
         }
 
+        await this.settlementHold.assertSettlementAllowed(
+          {
+            operation: 'EXCHANGE',
+            scope: 'EXCHANGE_SETTLEMENT',
+            currency: payout.sourceCurrency,
+            provider: 'MANUAL_ADMIN',
+            reference: payout.transaction.reference,
+          },
+          tx,
+        );
+
         const before = {
           status: payout.status,
           notificationSent: payout.notificationSent,
@@ -2156,6 +2208,75 @@ export class ExchangeService {
       );
     }
     return result;
+  }
+
+  private async getExecutedQuoteResponse(userId: string, quoteId: string) {
+    const transaction = await this.prisma.transaction.findUnique({
+      where: { exchangeQuoteId: quoteId },
+      select: {
+        id: true,
+        userId: true,
+        reference: true,
+        type: true,
+        amount: true,
+        fee: true,
+        currency: true,
+        status: true,
+        createdAt: true,
+        ledgerEntries: {
+          select: {
+            source: true,
+            currency: true,
+            balanceAfter: true,
+          },
+        },
+      },
+    });
+
+    if (!transaction) {
+      return null;
+    }
+
+    if (transaction.userId !== userId) {
+      throw new BadRequestException('Quote does not belong to this user');
+    }
+
+    const sourceEntry = transaction.ledgerEntries.find(
+      (entry) => entry.source === 'EXCHANGE_DEBIT',
+    );
+    const targetEntry = transaction.ledgerEntries.find(
+      (entry) => entry.source === 'EXCHANGE_CREDIT',
+    );
+
+    if (!sourceEntry || !targetEntry) {
+      throw new ServiceUnavailableException(
+        'Exchange execution record is incomplete',
+      );
+    }
+
+    return {
+      success: true,
+      transaction: {
+        id: transaction.id,
+        reference: transaction.reference,
+        type: transaction.type,
+        amount: transaction.amount,
+        fee: transaction.fee,
+        currency: transaction.currency,
+        status: transaction.status,
+        createdAt: transaction.createdAt,
+      },
+      wallets: {
+        source: {
+          currency: sourceEntry.currency,
+          balance: sourceEntry.balanceAfter,
+        },
+        target: {
+          currency: targetEntry.currency,
+          balance: targetEntry.balanceAfter,
+        },
+      },
+    };
   }
 
   private calculateFee(amount: Decimal, markupPercent: number): Decimal {

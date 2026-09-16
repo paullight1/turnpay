@@ -5,6 +5,7 @@ import type {
 } from '../dto/vtu.dto';
 
 export type NormalizedVtuStatus = 'success' | 'pending' | 'failed' | 'reversed';
+export type VtuProviderCurrency = 'NGN' | 'GHS';
 
 export interface VtuPackage {
   id: string;
@@ -35,6 +36,12 @@ export interface VtuProviderResult {
   providerTransactionId: string;
   status: NormalizedVtuStatus;
   message: string;
+  /** Amount reported by VTpass for the provider-side transaction. */
+  providerAmount?: string;
+  /** VTpass is currently NGN-only for TRUSTPAY. */
+  providerCurrency?: VtuProviderCurrency;
+  /** Provider wallet credit identifier present on reversal responses. */
+  walletCreditId?: string;
   providerCost?: string;
   providerCommission?: string;
   purchasedCode?: string;

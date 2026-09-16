@@ -1013,6 +1013,7 @@ describe('AdminService banking operations', () => {
     prisma.refreshToken.findFirst.mockResolvedValueOnce({
       id: 'session-1',
       userId: 'user-1',
+      providerSessionId: 'provider-session-1',
       deviceId: 'device-1',
       deviceName: 'Chrome on iPhone',
       userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)',
@@ -1040,9 +1041,9 @@ describe('AdminService banking operations', () => {
     );
     expect(prisma.refreshToken.updateMany).toHaveBeenCalledWith({
       where: {
-        id: 'session-1',
         userId: 'user-1',
         revokedAt: null,
+        OR: [{ id: 'session-1' }, { providerSessionId: 'provider-session-1' }],
       },
       data: {
         revokedAt: expect.any(Date),

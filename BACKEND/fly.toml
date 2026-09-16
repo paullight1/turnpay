@@ -13,7 +13,13 @@ primary_region = "jnb"  # Johannesburg — closest to West African users
 [env]
   NODE_ENV = "production"
   PORT = "3000"
+  # Fly runs the migration gate before replacing serving machines.
+  RUN_MIGRATIONS_ON_STARTUP = "false"
   ENABLE_SWAGGER = "false"
+  OTP_EXPIRES_IN = "5m"
+  OTP_LENGTH = "6"
+  OTP_DEV_CODE = ""
+  SMS_PROVIDER = "twilio"
   REDIS_ALLOW_MEMORY_FALLBACK = "false"
   TRUST_PROXY_HOPS = "1"
   KYC_PROVIDER = "ninja"
@@ -93,3 +99,6 @@ primary_region = "jnb"  # Johannesburg — closest to West African users
 [deploy]
   strategy = "rolling"          # Rolling deploys for zero-downtime
   max_unavailable = "25%"       # Keep 75%+ capacity during deploy
+  # Release machines use the exact image and production DATABASE_URL before
+  # traffic is shifted to serving machines.
+  release_command = "npx prisma migrate deploy"

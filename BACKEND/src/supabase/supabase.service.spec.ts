@@ -100,3 +100,89 @@ describe('SupabaseService recovery identity repair', () => {
     ).resolves.toBeUndefined();
   });
 });
+
+describe('SupabaseService provider session operations', () => {
+  const config = {
+    getOrThrow: jest.fn((key: string) => {
+      if (key === 'SUPABASE_URL') return 'https://example.supabase.co';
+      if (key === 'SUPABASE_ANON_KEY') return 'test-publishable-key';
+      throw new Error(`Unexpected config key: ${key}`);
+    }),
+    get: jest.fn((key: string) => {
+      if (key === 'SUPABASE_PUBLISHABLE_KEY') return 'test-publishable-key';
+      if (key === 'SUPABASE_SERVICE_ROLE_KEY') return undefined;
+      return undefined;
+    }),
+  };
+  const logger = { info: jest.fn(), warn: jest.fn() };
+
+  it('revokes the provider session with the explicit access token', async () => {
+    const service = new SupabaseService(
+      config as never,
+      {} as never,
+      logger as never,
+    );
+    const originalFetch = global.fetch;
+    const fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      status: 204,
+      json: jest.fn(),
+    });
+    global.fetch = fetch as never;
+
+    try {
+      await service.revokeProviderSession('access-token', 'local');
+    } finally {
+      global.fetch = originalFetch;
+    }
+
+    expect(fetch).toHaveBeenCalledWith(
+      'https://example.supabase.co/auth/v1/logout?scope=local',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({
+          apikey: 'test-publishable-key',
+          Authorization: 'Bearer access-token',
+        }),
+      }),
+    );
+  });
+
+  it('updates a password through the provider user endpoint with the explicit access token', async () => {
+    const service = new SupabaseService(
+      config as never,
+      {} as never,
+      logger as never,
+    );
+    const originalFetch = global.fetch;
+    const fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: jest.fn().mockResolvedValue({ user: { id: 'user-1' } }),
+    });
+    global.fetch = fetch as never;
+
+    try {
+      await service.updatePasswordWithAccessToken(
+        'access-token',
+        'NewPassword1',
+      );
+    } finally {
+      global.fetch = originalFetch;
+    }
+
+    expect(fetch).toHaveBeenCalledWith(
+      'https://example.supabase.co/auth/v1/user',
+      expect.objectContaining({
+        method: 'PUT',
+        redirect: 'error',
+        signal: expect.any(AbortSignal),
+        headers: expect.objectContaining({
+          apikey: 'test-publishable-key',
+          Authorization: 'Bearer access-token',
+        }),
+        body: JSON.stringify({ password: 'NewPassword1' }),
+      }),
+    );
+  });
+});

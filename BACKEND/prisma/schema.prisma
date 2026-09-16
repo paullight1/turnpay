@@ -284,6 +284,7 @@ model RefreshToken {
   id                String    @id @default(uuid())
   userId            String
   tokenHash         String    @unique
+  providerSessionId String?
   deviceId          String
   deviceName        String?
   userAgent         String?
@@ -298,6 +299,7 @@ model RefreshToken {
 
   @@index([userId])
   @@index([userId, revokedAt, expiresAt])
+  @@index([providerSessionId, revokedAt, expiresAt])
   @@index([deviceId])
   @@map("refresh_tokens")
 }
@@ -319,18 +321,19 @@ model Wallet {
 }
 
 model Transaction {
-  id        String            @id @default(uuid())
-  userId    String
-  walletId  String?
-  type      TransactionType
-  amount    Decimal           @db.Decimal(15, 2)
-  currency  WalletCurrency
-  status    TransactionStatus @default(PENDING)
-  reference String            @unique
-  fee       Decimal           @default(0) @db.Decimal(15, 2)
-  metadata  Json?
-  createdAt DateTime          @default(now())
-  updatedAt DateTime          @updatedAt
+  id              String            @id @default(uuid())
+  userId          String
+  walletId        String?
+  type            TransactionType
+  amount          Decimal           @db.Decimal(15, 2)
+  currency        WalletCurrency
+  status          TransactionStatus @default(PENDING)
+  reference       String            @unique
+  fee             Decimal           @default(0) @db.Decimal(15, 2)
+  exchangeQuoteId String?           @unique
+  metadata        Json?
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
 
   user                User                 @relation(fields: [userId], references: [id])
   wallet              Wallet?              @relation(fields: [walletId], references: [id])

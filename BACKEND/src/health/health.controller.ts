@@ -75,6 +75,17 @@ export class HealthController {
     const piiKey = this.config.get<string>('PII_ENCRYPTION_KEY')?.trim() ?? '';
     if (piiKey.length < 32) return false;
 
+    if (provider === 'monnify') {
+      const apiKey = this.config.get<string>('MONNIFY_API_KEY')?.trim() ?? '';
+      const secretKey =
+        this.config.get<string>('MONNIFY_SECRET_KEY')?.trim() ?? '';
+      return (
+        apiKey.length > 0 &&
+        secretKey.length > 0 &&
+        this.isHttpsUrl(this.config.get<string>('MONNIFY_BASE_URL'))
+      );
+    }
+
     if (provider === 'ninja') {
       const clientKey =
         this.config.get<string>('NINJA_CLIENT_KEY')?.trim() ?? '';

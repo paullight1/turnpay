@@ -26,6 +26,7 @@ describe('PaymentService.reconcilePendingWithdrawals', () => {
   const config = { get: jest.fn(() => undefined) };
   const logger = { info: jest.fn(), warn: jest.fn(), error: jest.fn() };
   const ledger = { creditWallet: jest.fn(), debitWallet: jest.fn() };
+  const settlementHold = { assertSettlementAllowed: jest.fn() };
 
   let service: PaymentService;
 
@@ -63,6 +64,7 @@ describe('PaymentService.reconcilePendingWithdrawals', () => {
       logger as any,
       ledger as any,
       {} as any,
+      settlementHold as any,
     );
   });
 

@@ -9,6 +9,7 @@ import { WalletsModule } from '../wallets/wallets.module';
 import { VtuReceiptService } from './vtu-receipt.service';
 import { VtuWebhookInboxService } from './vtu-webhook-inbox.service';
 import { VtuWebhookProcessorService } from './vtu-webhook-processor.service';
+import { ReconciliationModule } from '../common/services/reconciliation.module';
 
 @Module({
   imports: [
@@ -17,6 +18,7 @@ import { VtuWebhookProcessorService } from './vtu-webhook-processor.service';
       maxRedirects: 5,
     }),
     WalletsModule,
+    ReconciliationModule,
   ],
   controllers: [VtuController, VtpassWebhookController],
   providers: [
