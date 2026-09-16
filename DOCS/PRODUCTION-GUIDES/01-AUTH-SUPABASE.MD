@@ -21,10 +21,10 @@ JWT_REFRESH_EXPIRES_IN=7d
 OTP_EXPIRES_IN=5m
 OTP_LENGTH=6
 OTP_DEV_CODE=
-SMS_PROVIDER=
-TWILIO_ACCOUNT_SID=
-TWILIO_AUTH_TOKEN=
-TWILIO_PHONE_NUMBER=
+SMS_PROVIDER=twilio
+TWILIO_ACCOUNT_SID=ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+TWILIO_AUTH_TOKEN=<secret>
+TWILIO_PHONE_NUMBER=+15557122661
 ```
 
 Website:
@@ -64,9 +64,12 @@ Never expose `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_JWT_SECRET`, `JWT_SECRET`, `
 3. Store Supabase backend keys in the backend secret manager.
 4. Store only publishable browser-safe keys in website and mobile builds.
 5. Remove `OTP_DEV_CODE` from production.
-6. Configure live SMS sender approval, templates, and regional delivery rules.
-7. Confirm Supabase Auth and local JWT strategy are intentionally aligned. If both exist, document which token is accepted by each backend guard.
-8. Rotate any key copied through chat, local files, screenshots, or logs.
+6. Set `SMS_PROVIDER=twilio` and configure all three Twilio values in the
+   production secret manager. Startup must fail closed if any is missing or
+   invalid.
+7. Configure live SMS sender approval, templates, and regional delivery rules.
+8. Confirm Supabase Auth and local JWT strategy are intentionally aligned. If both exist, document which token is accepted by each backend guard.
+9. Rotate any key copied through chat, local files, screenshots, or logs.
 
 ## Verification Checklist
 
@@ -75,6 +78,8 @@ Never expose `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_JWT_SECRET`, `JWT_SECRET`, `
 - [ ] Authorization decisions do not depend on user-editable `user_metadata`.
 - [ ] Admin role claims come from trusted server-side data or app metadata.
 - [ ] OTP expires in 5 minutes or less and allows no more than 3 attempts.
+- [ ] OTP delivery returns success only after Twilio acknowledges a message; provider failures return a safe error and do not persist a new code.
+- [ ] Twilio delivery has no automatic retry after an ambiguous timeout; clients reuse the original `Idempotency-Key`.
 - [ ] Login, OTP, refresh, and password reset endpoints are rate limited.
 - [ ] User deletion or suspension revokes active sessions where required.
 - [ ] Logs do not include tokens, OTP codes, passwords, or Supabase secrets.

@@ -6,7 +6,7 @@ These are the only active external providers:
 
 | Capability | Provider | Backend callback |
 | --- | --- | --- |
-| KYC | Ninja direct identity API | None; direct verification returns synchronously |
+| KYC | Monnify verification API | None; direct verification returns synchronously |
 | Banking, deposits, bank resolution, virtual accounts, withdrawals | Monnify | `/api/webhooks/monnify` |
 | Nigeria airtime, data, cable, electricity | VTpass | Trusted gateway → `/api/webhooks/vtu/vtpass` |
 
@@ -17,12 +17,12 @@ must pass through TRUSTPAY's controlled ingress, which validates the upstream
 request and signs the unchanged raw body with `VTPASS_WEBHOOK_SECRET`; direct
 unsigned delivery to the backend is rejected.
 
-Legacy database enum values and already-applied migrations remain so existing records can still be read. Youverify remains available as an explicit backend rollback adapter, but it is not exposed as a client choice and its secrets are unnecessary while Ninja is active.
+Legacy database enum values and already-applied migrations remain so existing records can still be read. Ninja and Youverify provider adapters remain in the repository only for historical records/rollback compatibility; Monnify is the active KYC provider.
 
 Required provider selector values:
 
 ```env
-KYC_PROVIDER=ninja
+KYC_PROVIDER=monnify
 BANKING_PROVIDER_PRIMARY=monnify
 BANKING_PROVIDER_FALLBACK=
 VTU_PROVIDER=vtpass

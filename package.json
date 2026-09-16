@@ -4,8 +4,8 @@
   "private": true,
   "description": "TrustPay - Fintech application for currency exchange, VTU, and bill payments",
   "scripts": {
-    "dev:backend": "cd BACKEND && npm run start:dev",
-    "dev:web": "cd WEBSITE && npm run dev",
+    "dev:backend": "cd BACKEND && PORT=3001 npm run start:dev",
+    "dev:web": "cd WEBSITE && NEXT_PUBLIC_API_URL=http://localhost:3001 npm run dev -- --port 3000",
     "dev": "concurrently \"npm run dev:backend\" \"npm run dev:web\"",
     "build:backend": "cd BACKEND && npm run build",
     "build:web": "cd WEBSITE && npm run build",

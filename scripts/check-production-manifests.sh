@@ -70,12 +70,20 @@ check_env_value() {
 
 if has_env_value "NODE_ENV" "staging" "render.yaml"; then
   check_present "https://sandbox.monnify.com" "render.yaml"
-  check_present "https://vtpass.com/api" "render.yaml"
+  check_present "https://sandbox.vtpass.com/api" "render.yaml"
+  check_absent "https://vtpass.com/api" "render.yaml"
   check_present "https://api.sandbox.ninja.boucloud.io" "render.yaml"
   check_env_value "KYC_PROVIDER" "ninja" "render.yaml"
   check_env_value "BANKING_SANDBOX_MODE" "true" "render.yaml"
   check_env_value "WITHDRAWALS_ENABLED" "false" "render.yaml"
   check_env_value "INTERNAL_TRANSFERS_ENABLED" "false" "render.yaml"
+  check_env_value "SMS_PROVIDER" "twilio" "render.yaml"
+  check_env_value "OTP_EXPIRES_IN" "5m" "render.yaml"
+  check_env_value "OTP_LENGTH" "6" "render.yaml"
+  check_env_value "OTP_DEV_CODE" "" "render.yaml"
+  check_present "TWILIO_ACCOUNT_SID" "render.yaml"
+  check_present "TWILIO_AUTH_TOKEN" "render.yaml"
+  check_present "TWILIO_PHONE_NUMBER" "render.yaml"
 else
   check_absent "https://sandbox.monnify.com" "render.yaml"
   check_absent "https://sandbox.vtpass.com/api" "render.yaml"
@@ -91,3 +99,16 @@ check_env_value "VTU_ENABLED" "true" "render.yaml"
 check_env_value "VTU_SIMULATION_ENABLED" "false" "render.yaml"
 
 check_absent "https://turnpay.onrender.com/api/webhooks/monnify" "render.yaml"
+
+# Fly must apply migrations on a release machine before serving traffic. The
+# serving command keeps startup migrations disabled so two serving machines do
+# not race over the same migration lock.
+check_present 'RUN_MIGRATIONS_ON_STARTUP = "false"' "BACKEND/fly.toml"
+check_present 'release_command = "npx prisma migrate deploy"' "BACKEND/fly.toml"
+
+# A self-managed Compose host must expose only its TLS proxy. Direct HTTP
+# bindings would bypass the proxy's HTTPS, WAF, and access-control boundary.
+check_present "'127.0.0.1:3000:3000'" "docker-compose.prod.yml"
+check_present "'127.0.0.1:3001:3001'" "docker-compose.prod.yml"
+check_absent "      - '3000:3000'" "docker-compose.prod.yml"
+check_absent "      - '3001:3001'" "docker-compose.prod.yml"

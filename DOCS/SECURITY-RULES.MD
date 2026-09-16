@@ -366,8 +366,10 @@ async handleMonnifyWebhook(
 
 **11.6** All transaction status transitions must be validated:
    - `PENDING` → `SUCCESS` or `FAILED`
-   - `FAILED` → `REVERSED` (only if previously succeeded)
-   - No other transitions allowed.
+   - `PENDING` → `REVERSED` when the provider confirms reversal of reserved funds.
+   - `SUCCESS` → `REVERSED` only after an authenticated, independently confirmed provider reversal; credit exactly one compensating ledger entry in the same database transaction.
+   - Replayed or stale pending/failure events must never overwrite success or create another refund. Do not refund an already refunded `FAILED` or `REVERSED` transaction.
+   - No other transitions are allowed without a documented product-specific state machine and financial regression coverage.
 
 **11.7** Implement a daily reconciliation job to verify:
    - Sum of all wallet balances = expected total

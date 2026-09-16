@@ -95,7 +95,8 @@ DATABASE_URL=postgresql://trustpay:YOUR_PASSWORD@trustpay-postgres-db-do-user-XX
 
 ### Step 5: Backups & PITR
 
-- Daily backups: enabled by default, 7-day retention
+- Daily backups: enabled by default; the selected plan and the encrypted
+  `BACKEND/scripts/backup-db.sh` job must provide at least 30-day retention
 - Point-in-Time Recovery: enabled
 - Verify: `doctl databases backup-list YOUR_DATABASE_ID`
 

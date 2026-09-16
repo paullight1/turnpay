@@ -42,7 +42,7 @@ Current banking direction:
 - Monnify only for Nigerian NGN virtual accounts.
 - Nomba is not active.
 - Monnify is the only payment, virtual-account, and withdrawal provider.
-- VTpass is the only VTU provider, and Ninja is the primary Nigerian KYC provider.
+- VTpass is the only VTU provider, and Monnify is the primary Nigerian KYC provider.
 - Monnify-verified NGN exchange deposits require admin approval before GHS wallet credit.
 
 Primary status docs:
@@ -189,7 +189,7 @@ graph TB
 | **Cache** | [![Redis](https://img.shields.io/badge/Redis-DC382D?style=flat-square&logo=redis&logoColor=white)](https://redis.io) | Fast rate caching, session storage |
 | **Auth** | JWT + OTP | Secure, industry standard |
 | **Payments** | Monnify for NGN virtual accounts, deposits, bank resolution, and withdrawals | Nigerian payment infrastructure |
-| **KYC** | Ninja direct identity API | Server-mediated Nigerian BVN/NIN verification |
+| **KYC** | Monnify verification API | Server-mediated Nigerian BVN/NIN verification |
 | **VTU** | VTpass | Airtime, data, cable, and electricity |
 | **CI/CD** | [![GitHub Actions](https://img.shields.io/badge/GitHub_Actions-2088FF?style=flat-square&logo=github-actions&logoColor=white)](https://github.com/features/actions) | Automated testing & deployment |
 
@@ -241,7 +241,7 @@ npm run dev
 |-------------|---------|-----|
 | 📱 **Mobile App** (Web Preview) | `cd APP && flutter run -d chrome` | Opens in Chrome |
 | 🌐 **Web App** | `cd WEBSITE && npm run dev` | `http://localhost:3000` |
-| 🔧 **Backend API** | `cd BACKEND && npm run start:dev` | `http://localhost:3000/api` |
+| 🔧 **Backend API** | `cd BACKEND && PORT=3001 npm run start:dev` | `http://localhost:3001/api` |
 | 📊 **Admin Panel** | `cd WEBSITE && npm run dev` | `http://localhost:3000/admin` |
 
 > 💡 **Windows users without Android Studio?** Use `flutter run -d chrome` to preview the mobile app directly in your browser!
@@ -295,11 +295,11 @@ VTPASS_PUBLIC_KEY="your-vtpass-public-key"
 VTPASS_SECRET_KEY="your-vtpass-secret-key"
 VTPASS_WEBHOOK_SECRET="your-webhook-secret"
 
-# ─── Ninja KYC ─────────────────────────────────────────────
-KYC_PROVIDER="ninja"
-NINJA_CLIENT_KEY="your-ninja-client-key"
-NINJA_CLIENT_SECRET="your-ninja-client-secret"
-NINJA_BASE_URL="https://api.sandbox.ninja.boucloud.io"
+# ─── Monnify KYC ───────────────────────────────────────────
+KYC_PROVIDER="monnify"
+MONNIFY_API_KEY="your-monnify-api-key"
+MONNIFY_SECRET_KEY="your-monnify-secret"
+MONNIFY_BASE_URL="https://sandbox.monnify.com"
 
 # ─── FX Rate API ───────────────────────────────────────────
 FX_API_KEY="your-fx-api-key"
@@ -310,8 +310,8 @@ TWILIO_AUTH_TOKEN="your-auth-token"
 TWILIO_PHONE_NUMBER="+1234567890"
 
 # ─── Application ───────────────────────────────────────────
-API_URL="http://localhost:3000"
-WEB_URL="http://localhost:3001"
+API_URL="http://localhost:3001"
+WEB_URL="http://localhost:3000"
 NODE_ENV="development"
 ```
 
@@ -351,7 +351,7 @@ NODE_ENV="development"
 ### KYC
 | Method | Endpoint | Description | Auth |
 |--------|----------|-------------|------|
-| `POST` | `/kyc/verify` | Verify a consented Nigerian BVN or NIN through Ninja | ✅ |
+| `POST` | `/kyc/verify` | Verify a consented Nigerian BVN or NIN through Monnify | ✅ |
 
 ### VTU
 | Method | Endpoint | Description | Auth |

@@ -19,72 +19,66 @@ How to integrate third-party services into the TRUSTPAY platform.
 
 ### Twilio
 
-#### Setup
-```bash
-# Install
-cd backend
-npm install twilio
+Twilio is the selected SMS provider for the current OTP implementation. The
+backend calls Twilio's REST Messages endpoint through the existing
+`@nestjs/axios` dependency; no Twilio SDK or second SMS provider is required.
 
-# Add to .env
+#### Configuration
+
+Set these values in the backend secret manager (never commit them):
+
+```env
 SMS_PROVIDER=twilio
-TWILIO_ACCOUNT_SID=ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-TWILIO_AUTH_TOKEN=your_auth_token
-TWILIO_PHONE_NUMBER=+1234567890
+TWILIO_ACCOUNT_SID=ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+TWILIO_AUTH_TOKEN=<secret>
+TWILIO_PHONE_NUMBER=+15557122661
+OTP_EXPIRES_IN=5m
+OTP_LENGTH=6
+# Development/test only. Leave empty in staging and production.
+OTP_DEV_CODE=
 ```
 
-#### Implementation
-```typescript
-// src/otp/providers/twilio.provider.ts
-import { Injectable } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
-import twilio from 'twilio';
+`TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, and `TWILIO_PHONE_NUMBER` are
+required for staging and production. Startup validation must reject a deployed
+environment with missing or invalid values. A six-digit `OTP_DEV_CODE` is
+accepted only when `NODE_ENV` is `development` or `test`; it bypasses the SMS
+transport for local verification and must be absent from staging and
+production.
 
-@Injectable()
-export class TwilioProvider {
-  private client: any;
+#### Delivery behavior
 
-  constructor(private configService: ConfigService) {
-    this.client = twilio(
-      this.configService.get('TWILIO_ACCOUNT_SID'),
-      this.configService.get('TWILIO_AUTH_TOKEN'),
-    );
-  }
+`BACKEND/src/otp/twilio.provider.ts` sends one `POST` request to
+`https://api.twilio.com/2010-04-01/Accounts/{AccountSid}/Messages.json` with
+HTTP Basic authentication and URL-encoded `To`, `From`, and `Body` fields. The
+provider uses an eight-second request timeout and deliberately does not retry:
+an ambiguous timeout may mean Twilio accepted the message, so retrying could
+send a duplicate code.
 
-  async sendSms(to: string, message: string): Promise<boolean> {
-    try {
-      await this.client.messages.create({
-        body: message,
-        from: this.configService.get('TWILIO_PHONE_NUMBER'),
-        to,
-      });
-      return true;
-    } catch (error) {
-      console.error('Twilio SMS failed:', error);
-      return false;
-    }
-  }
-}
-```
+`OtpService` persists the generated code only after Twilio returns a successful
+message response with a message SID. Delivery errors produce a safe 503 and do
+not return `{ success: true }` or log the OTP, auth token, message body, or
+provider credentials. The existing send limit remains three requests per hour
+per normalized phone, and verification remains three attempts with a maximum
+five-minute lifetime.
 
-#### Update OTP Service
-```typescript
-// In OtpService.sendOtp():
-const message = `Your TrustPay verification code is: ${code}. Valid for ${this.expirySeconds / 60} minutes.`;
-await this.smsProvider.sendSms(phone, message);
-```
+The auth mutation idempotency interceptor protects `/api/auth/otp/send` and
+registration. Clients must reuse the same `Idempotency-Key` when retrying an
+unknown response; do not issue a new delivery request merely because the
+provider call timed out.
 
-### Africa's Talking
+#### Local verification
 
-#### Setup
+No live SMS is needed for the OTP unit tests. Run the synthetic provider tests
+with:
+
 ```bash
-npm install africastalking
-
-# Add to .env
-SMS_PROVIDER=africastalking
-AT_USERNAME=your_username
-AT_API_KEY=your_api_key
-AT_SHORTCODE=your_shortcode
+cd BACKEND
+npm test -- --runInBand otp.service.spec.ts twilio.provider.spec.ts
 ```
+
+Before launch, validate delivery with a controlled staging handset and
+provider-approved sender. Record the provider response and successful OTP
+verification without putting the code in logs or test artifacts.
 
 ---
 

@@ -1,76 +1,74 @@
-# TRUSTPAY Ninja KYC Guide
+# TRUSTPAY Monnify KYC Guide
 
 Last reviewed: 2026-09-03
 
-Ninja is TRUSTPAY's primary KYC provider for Nigerian BVN and NIN checks. Web
-and Flutter call TRUSTPAY's authenticated backend. Ninja credentials must never
-be placed in a browser, mobile build, `NEXT_PUBLIC_*` variable, log, screenshot,
-ticket, or source-controlled environment file.
+Monnify is TRUSTPAY's primary KYC provider for Nigerian BVN and NIN checks. Web
+and Flutter call TRUSTPAY's authenticated backend. Monnify credentials must
+never be placed in a browser, mobile build, `NEXT_PUBLIC_*` variable, log,
+screenshot, ticket, or source-controlled environment file.
 
 ## Direct verification flow
 
-1. The authenticated client sends `country: NG`, `type: BVN|NIN`, an 11-digit
-   identifier, ISO date of birth, explicit consent, and an `Idempotency-Key` to
-   `POST /api/kyc/verify`.
+1. The authenticated client first sends `country: NG`, `type: NIN`, an
+   11-digit identifier, ISO date of birth, explicit consent, and an
+   `Idempotency-Key` to `POST /api/kyc/verify`. After NIN succeeds, the client
+   submits the second and final check with `type: BVN`.
 2. The backend validates the DTO, reserves a single active attempt, reads the
-   user's legal first and last names, and uses the KYC document row ID as the
-   stable Ninja reference.
-3. The backend creates a short-lived Ninja session with `POST /auth/session`.
-   The token is cached until shortly before its five-minute expiry. Concurrent
-   requests share one authentication call.
-4. The backend calls `POST /api/identity/identify` in `verify` mode. One `401`
-   causes one session refresh and one replay with the same reference.
-5. A result is accepted only when `found=true`, `verified=true`, and
-   `recommendation=accept`. Ambiguous results require review; not-found and
-   rejected results fail closed.
+   user's legal names and phone, and uses the KYC document row ID as the local
+   verification reference.
+3. The backend obtains a short-lived Monnify access token server-side.
+4. The backend calls Monnify's NIN or BVN verification endpoint and maps the
+   response match flag into TRUSTPAY's verified or rejected status.
+5. A result is accepted only when Monnify reports a successful request and the
+   relevant identity match flag is true. Invalid or unavailable responses fail
+   closed.
 6. The identifier is encrypted at rest. Only an allowlisted, sanitized evidence
    summary is stored or returned, and the public identifier remains masked.
 7. Document status, verification status, user status, tier, and audit data are
    committed transactionally.
 
-Ninja direct identity verification is synchronous and does not use a webhook.
-The existing Youverify callback path remains isolated for rollback and historical
-attempts only.
+Monnify identity verification is synchronous and does not use a KYC webhook.
+Funding webhooks remain separate and are used only for payment events.
 
 ## Supported checks
 
-| Country | TRUSTPAY type | Ninja `idType` | Required input |
+| Country | TRUSTPAY type | Monnify endpoint | Required input |
 | --- | --- | --- | --- |
-| Nigeria | `BVN` | `bvn` | 11-digit BVN, legal names, date of birth |
-| Nigeria | `NIN` | `nin` | 11-digit NIN, legal names, date of birth |
+| Nigeria | `NIN` first | `/api/v1/vas/nin-verification` | 11-digit NIN |
+| Nigeria | `BVN` second | `/api/v1/vas/bvn-details-match` | 11-digit BVN, legal name, date of birth, phone |
 
 The clients do not offer Ghana, passport, driver's licence, or voter's card in
 this release. Unsupported combinations are rejected before a provider call.
 
 ## Backend environment
 
-Sandbox:
+Sandbox or production:
 
 ```env
-KYC_PROVIDER=ninja
-NINJA_CLIENT_KEY=<exact sandbox dashboard value>
-NINJA_CLIENT_SECRET=<exact sandbox dashboard value>
-NINJA_BASE_URL=https://api.sandbox.ninja.boucloud.io
+KYC_PROVIDER=monnify
+MONNIFY_API_KEY=<server-side Monnify API key>
+MONNIFY_SECRET_KEY=<server-side Monnify secret key>
+MONNIFY_BASE_URL=https://sandbox.monnify.com
 PII_ENCRYPTION_KEY=<at least 32 characters from the secret manager>
 PII_KEY_VERSION=1
 ```
 
-Production changes only the credentials and URL:
+Production uses separate live credentials and URL:
 
 ```env
-KYC_PROVIDER=ninja
-NINJA_CLIENT_KEY=<exact live dashboard value>
-NINJA_CLIENT_SECRET=<exact live dashboard value>
-NINJA_BASE_URL=https://api.ninja.boucloud.io
+KYC_PROVIDER=monnify
+MONNIFY_API_KEY=<exact live dashboard value>
+MONNIFY_SECRET_KEY=<exact live dashboard value>
+MONNIFY_BASE_URL=https://api.monnify.com
 ```
 
-Do not create a `NINJA_TOKEN` variable. TRUSTPAY requests and refreshes session
-tokens internally. Variable names are literal—there is no `ninjaapi+` prefix.
+TRUSTPAY obtains and caches the Monnify access token internally. Never place
+Monnify credentials in Flutter, website code, logs, or source control.
 
 Official references:
 
-- Developer documentation: https://www.ninja.ng/docs/
-- Published pricing: https://www.ninja.ng/pricing/
+- Verification API: https://developers.monnify.com/docs/verification-api/verifying-your-customers
+- BVN/NIN account guide: https://developers.monnify.com/docs/integration-guide-bvn-nin-update
 
 ## Sandbox test identities
 

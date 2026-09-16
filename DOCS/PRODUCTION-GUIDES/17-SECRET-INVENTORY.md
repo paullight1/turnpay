@@ -41,10 +41,10 @@
 |---|---|---|---|---|
 | 1 | `NODE_ENV` | 📋 CONFIG | 🔄 BOTH | `production` / `staging` / `development` |
 | 2 | `PORT` | 📋 CONFIG | 🔄 BOTH | `3000` |
-| 3 | `WEB_URL` | 📋 CONFIG | 🅿️ PROD | `https://trustpay.vercel.app` |
-| 4 | `ADMIN_URL` | 📋 CONFIG | 🅿️ PROD | `https://trustpay.vercel.app/admin` |
+| 3 | `WEB_URL` | 📋 CONFIG | 🅿️ PROD | `https://www.trustpayhq.com` |
+| 4 | `ADMIN_URL` | 📋 CONFIG | 🅿️ PROD | `https://www.trustpayhq.com` |
 | 5 | `ENABLE_SWAGGER` | 📋 CONFIG | 🅿️ PROD | Must be `false` in production |
-| 6 | `SENTRY_DSN` | 🔒 SENSITIVE | 🅿️ PROD | Sentry project DSN for error tracking |
+| 6 | `SENTRY_DSN` | 🔒 SENSITIVE | 🅿️ PROD | HTTPS Sentry project DSN; required for production startup and alerting |
 
 ---
 
@@ -125,15 +125,28 @@
 
 ---
 
-### Section 8: KYC — Youverify (5 vars)
+### Section 8: KYC — Ninja (3 vars)
 
 | # | Variable | Classification | Environment | Notes |
 |---|---|---|---|---|
-| 42 | `KYC_PROVIDER` | 📋 CONFIG | 🔄 BOTH | Must be `youverify` |
-| 43 | `YOUVERIFY_API_KEY` | 🚨 CRITICAL | 🔄 BOTH | Server-side API token |
-| 44 | `YOUVERIFY_BASE_URL` | 📋 CONFIG | 🔄 BOTH | Live URL in production |
-| 45 | `YOUVERIFY_WEBHOOK_URL` | 📋 CONFIG | 🔄 BOTH | Public HTTPS callback |
-| 46 | `YOUVERIFY_WEBHOOK_SECRET` | 🚨 CRITICAL | 🔄 BOTH | HTTPS signing key |
+| 42 | `KYC_PROVIDER` | 📋 CONFIG | 🔄 BOTH | Must be `ninja` for the active Nigeria path |
+| 43 | `NINJA_CLIENT_KEY` | 🚨 CRITICAL | 🔄 BOTH | Server-side Ninja client key |
+| 44 | `NINJA_CLIENT_SECRET` | 🚨 CRITICAL | 🔄 BOTH | Server-side Ninja client secret |
+| 45 | `NINJA_BASE_URL` | 📋 CONFIG | 🔄 BOTH | Sandbox in staging; `https://api.ninja.boucloud.io` in production |
+
+---
+
+### Section 9: OTP delivery — Twilio (7 vars)
+
+| # | Variable | Classification | Environment | Notes |
+|---|---|---|---|---|
+| 46 | `SMS_PROVIDER` | 📋 CONFIG | 🔄 BOTH | Must be `twilio` in staging and production |
+| 47 | `TWILIO_ACCOUNT_SID` | 🚨 CRITICAL | 🔄 BOTH | `AC` followed by 32 alphanumeric characters |
+| 48 | `TWILIO_AUTH_TOKEN` | 🚨 CRITICAL | 🔄 BOTH | Server-side Twilio credential |
+| 49 | `TWILIO_PHONE_NUMBER` | 🔒 SENSITIVE | 🔄 BOTH | E.164 sender number |
+| 50 | `OTP_EXPIRES_IN` | 📋 CONFIG | 🔄 BOTH | No more than 300 seconds; default `5m` |
+| 51 | `OTP_LENGTH` | 📋 CONFIG | 🔄 BOTH | Must be `6` |
+| 52 | `OTP_DEV_CODE` | 📋 CONFIG | 🔄 BOTH | Empty in deployed environments |
 
 ---
 
@@ -226,8 +239,9 @@ openssl rand -hex 32      # BANK_ACCOUNT_ENCRYPTION_KEY
 openssl rand -base64 48 | tr -d '/+' | head -c 64  # PostgreSQL password
 openssl rand -base64 32                              # Redis AUTH token
 
-# Webhook Secrets
-openssl rand -base64 32   # YOUVERIFY_WEBHOOK_SECRET (then configure the same value in Youverify)
+# Twilio and Ninja credentials are issued by their dashboards and must be
+# stored directly in the environment-specific secret manager. Ninja's direct
+# verification path does not use a webhook secret.
 ```
 
 ---

@@ -10,13 +10,18 @@
 
 ### Staging
 ```
-https://staging.trustpay.ng/api/webhooks/monnify
+https://api.trustpayhq.com/api/webhooks/monnify
 ```
 
 ### Production
 ```
-https://trustpay.ng/api/webhooks/monnify
+https://api.trustpayhq.com/api/webhooks/monnify
 ```
+
+The checked-in Render Blueprint currently represents the staging service at
+`api.trustpayhq.com` and uses Monnify's sandbox endpoint. Register the same
+public callback path in the Monnify environment that owns the credentials; do
+not use the retired `trustpay.ng` or `staging.trustpay.ng` hostnames.
 
 ---
 

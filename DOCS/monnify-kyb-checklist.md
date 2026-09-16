@@ -38,7 +38,8 @@
 
 ### Step 1: Create Monnify Business Account
 1. Go to [https://monnify.com](https://monnify.com) → Create Business Account
-2. Enter business email (use `engineering@trustpay.ng` or equivalent)
+2. Enter a business email on the active `@trustpayhq.com` domain (for example,
+   `engineering@trustpayhq.com`)
 3. Verify email address
 
 ### Step 2: Complete Business Profile

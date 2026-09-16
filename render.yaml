@@ -22,6 +22,20 @@ services:
         value: "https://www.trustpayhq.com"
       - key: SENTRY_DSN
         sync: false # TODO(launch): set Sentry DSN for error monitoring
+      - key: OTP_EXPIRES_IN
+        value: "5m"
+      - key: OTP_LENGTH
+        value: "6"
+      - key: OTP_DEV_CODE
+        value: ""
+      - key: SMS_PROVIDER
+        value: "twilio"
+      - key: TWILIO_ACCOUNT_SID
+        sync: false
+      - key: TWILIO_AUTH_TOKEN
+        sync: false
+      - key: TWILIO_PHONE_NUMBER
+        sync: false
       - key: PORT
         value: "3000"
       - key: LOG_LEVEL
@@ -84,7 +98,9 @@ services:
       - key: VTU_SIMULATION_ENABLED
         value: "false"
       - key: VTPASS_BASE_URL
-        value: "https://vtpass.com/api"
+        # Staging may exercise the provider contract, but it must never reach
+        # the live VTpass wallet or create a billable purchase.
+        value: "https://sandbox.vtpass.com/api"
       - key: VTPASS_LOW_BALANCE_THRESHOLD
         value: "5000"
       - key: VTPASS_API_KEY

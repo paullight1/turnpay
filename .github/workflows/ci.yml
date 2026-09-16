@@ -21,6 +21,27 @@ jobs:
       - name: Check repository for committed secrets
         run: ./scripts/check-secrets.sh
 
+      - name: Exercise encrypted backup script with synthetic commands
+        run: ./BACKEND/scripts/backup-db.test.sh
+
+  release-candidate-manifest:
+    # The exact-candidate gate runs for branch/tag pushes that can become a
+    # release. Pull requests still exercise the portable manifest checks above;
+    # release pushes additionally require migration 039 and its source/evidence
+    # to be present in a clean tracked commit.
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Check release candidate manifest
+        run: |
+          ./scripts/check-release-candidate.test.sh
+          ./scripts/check-release-candidate.sh
+
   backend-test:
     runs-on: ubuntu-latest
     defaults:
@@ -98,6 +119,9 @@ jobs:
       - name: Create disposable restore-drill database
         run: PGPASSWORD=trustpay_secret psql -h localhost -U trustpay -d postgres -c "CREATE DATABASE trustpay_restore"
 
+      - name: Seed synthetic financial evidence for restore drill
+        run: PGPASSWORD=trustpay_secret psql -h localhost -U trustpay -d trustpay_test -v ON_ERROR_STOP=1 -f scripts/restore-drill-fixture.sql
+
       - name: Verify database backup restore
         run: ./scripts/verify-backup-restore.sh
         env:
@@ -108,6 +132,7 @@ jobs:
         run: ./scripts/validate-production-config.sh true
         env:
           NODE_ENV: production
+          SENTRY_DSN: https://ci-public@sentry.io/123456
           DATABASE_URL: postgresql://postgres.project-ref:test-password@aws-0-eu-west-1.pooler.supabase.com:5432/postgres?sslmode=require&schema=public
           WEB_URL: https://trustpay.example.com
           ADMIN_URL: https://admin.trustpay.example.com
@@ -116,6 +141,13 @@ jobs:
           REDIS_URL: rediss://default:test@redis.example.com:6379
           REDIS_ALLOW_MEMORY_FALLBACK: "false"
           TRUST_PROXY_HOPS: "1"
+          OTP_EXPIRES_IN: 5m
+          OTP_LENGTH: "6"
+          OTP_DEV_CODE: ""
+          SMS_PROVIDER: twilio
+          TWILIO_ACCOUNT_SID: ACaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+          TWILIO_AUTH_TOKEN: ci-twilio-auth-token
+          TWILIO_PHONE_NUMBER: +15557122661
           IDEMPOTENCY_RESPONSE_ENCRYPTION_KEY: BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=
           IDEMPOTENCY_RESPONSE_ENCRYPTION_KEY_ID: v1
           TRANSACTION_PIN_REQUIRED: "true"
@@ -291,8 +323,22 @@ jobs:
       - name: Run tests
         run: flutter test
 
-      - name: Build Flutter web release
-        run: flutter build web --release
+      - name: Compile Flutter web with CI defines (compilation-only)
+        shell: bash
+        run: |
+          set -euo pipefail
+          # This job checks that the web target compiles. The output uses
+          # synthetic CI values and is discarded; deployable web artifacts
+          # come only from the protected mobile release workflow.
+          flutter build web --release \
+            --dart-define=API_BASE_URL=https://ci.invalid \
+            --dart-define=WEBSITE_BASE_URL=https://ci.invalid \
+            --dart-define=SUPABASE_URL=https://ci-project.supabase.co \
+            --dart-define=SUPABASE_PUBLISHABLE_KEY=sb_publishable_ci_only \
+            --dart-define=SENTRY_DSN=https://ci-public@sentry.io/123456 \
+            --dart-define=SENTRY_ENVIRONMENT=ci \
+            --dart-define=API_CERTIFICATE_SHA256_PINS=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa,bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+          rm -rf build/web
 
       - name: Run internal transfer integration certification
         run: flutter test test/internal_transfer_flow_integration_test.dart

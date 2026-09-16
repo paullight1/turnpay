@@ -31,7 +31,7 @@
   - [ ] `BANK_ACCOUNT_ENCRYPTION_KEY` — 256-bit
   - [ ] `DATABASE_URL` — production managed PostgreSQL
   - [ ] `REDIS_URL` — production managed Redis (auth + TLS)
-  - [ ] All provider API keys (Monnify, VTpass, Youverify)
+  - [ ] All provider API keys (Monnify, VTpass, Ninja)
   - [ ] Supabase production keys
   - [ ] Sentry DSN
 
@@ -113,8 +113,8 @@ fly secrets set SUPABASE_SERVICE_ROLE_KEY="eyJhbGciOi..."
 fly secrets set SUPABASE_JWT_SECRET="production-jwt-secret"
 
 # Web URLs (production frontends)
-fly secrets set WEB_URL="https://trustpay.vercel.app"
-fly secrets set ADMIN_URL="https://trustpay.vercel.app"
+fly secrets set WEB_URL="https://www.trustpayhq.com"
+fly secrets set ADMIN_URL="https://www.trustpayhq.com"
 
 # Payment Providers
 fly secrets set MONNIFY_API_KEY="MK_PROD_..."
@@ -130,12 +130,21 @@ fly secrets set VTPASS_SECRET_KEY="..."
 fly secrets set VTPASS_BASE_URL="https://vtpass.com/api"
 fly secrets set VTPASS_WEBHOOK_SECRET="..."
 
-# KYC Provider
-fly secrets set KYC_PROVIDER="youverify"
-fly secrets set YOUVERIFY_API_KEY="..."
-fly secrets set YOUVERIFY_BASE_URL="https://api.youverify.co"
-fly secrets set YOUVERIFY_WEBHOOK_URL="https://api.trustpayhq.com/api/webhooks/kyc/youverify"
-fly secrets set YOUVERIFY_WEBHOOK_SECRET="..."
+# KYC Provider — Ninja is the active Nigerian provider and is a direct API;
+# there is no Ninja webhook URL or client-facing provider choice.
+fly secrets set KYC_PROVIDER="ninja"
+fly secrets set NINJA_CLIENT_KEY="..."
+fly secrets set NINJA_CLIENT_SECRET="..."
+fly secrets set NINJA_BASE_URL="https://api.ninja.boucloud.io"
+
+# OTP delivery — deployed environments use Twilio and never a development OTP.
+fly secrets set SMS_PROVIDER="twilio"
+fly secrets set TWILIO_ACCOUNT_SID="AC..."
+fly secrets set TWILIO_AUTH_TOKEN="..."
+fly secrets set TWILIO_PHONE_NUMBER="+234..."
+fly secrets set OTP_EXPIRES_IN="5m"
+fly secrets set OTP_LENGTH="6"
+fly secrets set OTP_DEV_CODE=""
 
 # Feature Flags
 fly secrets set BANKING_ENABLED="true"
@@ -161,7 +170,10 @@ fly secrets list
 ### 5. Deploy
 
 ```bash
-# First deploy (or after config changes)
+# First deploy (or after config changes). The release machine runs the checked
+# in `release_command = "npx prisma migrate deploy"` before serving machines
+# receive traffic. `RUN_MIGRATIONS_ON_STARTUP=false` avoids a second concurrent
+# migration attempt during rolling deploys.
 fly deploy
 
 # For production HA (2+ instances)
@@ -271,6 +283,7 @@ All env vars required by the backend. See `DOCS/PRODUCTION-GUIDES/17-SECRET-INVE
 |---|---|---|---|
 | `NODE_ENV` | Yes | `fly.toml` [env] | Always `production` |
 | `PORT` | Yes | `fly.toml` [env] | Always `3000` |
+| `SENTRY_DSN` | ✅ Yes | `fly secrets` | HTTPS error-tracking DSN |
 | `DATABASE_URL` | ✅ Yes | `fly secrets` | Managed PostgreSQL, SSL |
 | `REDIS_URL` | ✅ Yes | `fly secrets` | Managed Redis, TLS |
 | `JWT_SECRET` | ✅ Yes | `fly secrets` | 256-bit, rotate quarterly |
@@ -286,8 +299,10 @@ All env vars required by the backend. See `DOCS/PRODUCTION-GUIDES/17-SECRET-INVE
 | `SUPABASE_JWT_SECRET` | No | `fly secrets` | Supabase JWT secret |
 | `MONNIFY_*` (6 vars) | ✅ Yes | `fly secrets` | Monnify production keys |
 | `VTPASS_*` (4 vars) | No | `fly secrets` | VTU provider keys |
-| `YOUVERIFY_*` (4 required vars) | ✅ Yes | `fly secrets` | KYC API and webhook configuration |
-| `SENTRY_DSN` | No | `fly secrets` | Error tracking |
+| `NINJA_CLIENT_KEY`, `NINJA_CLIENT_SECRET` | ✅ Yes | `fly secrets` | Ninja server credentials |
+| `NINJA_BASE_URL` | ✅ Yes | `fly.toml` / `fly secrets` | `https://api.ninja.boucloud.io` in production |
+| `SMS_PROVIDER`, `TWILIO_*` | ✅ Yes | `fly secrets` | Twilio OTP delivery; no development OTP override |
+| `OTP_EXPIRES_IN`, `OTP_LENGTH`, `OTP_DEV_CODE` | ✅ Yes | `fly.toml` / `fly secrets` | `5m`, `6`, and empty respectively |
 | `BANKING_ENABLED` | No | `fly secrets` | Feature flag |
 | `BANKING_SANDBOX_MODE` | No | `fly secrets` | Must be `false` in prod |
 | `TRANSACTION_PIN_REQUIRED` | No | `fly secrets` | Must be `true` in prod |
@@ -413,7 +428,7 @@ LABEL org.opencontainers.image.version="1.0.0"
 | Symptom | Likely Cause | Fix |
 |---|---|---|
 | Health check fails | DB/Redis unreachable | Check `DATABASE_URL` and `REDIS_URL` secrets |
-| 503 on deploy | DB migrations not run | Run `fly ssh console` then `npx prisma migrate deploy` |
+| 503 on deploy | Release migration failed | Inspect release-machine logs, correct the migration/database issue, and redeploy; do not bypass the release command |
 | Slow responses | Instance too small | Scale VM to 1GB (`fly scale vm shared-cpu-1x --memory 1024`) |
 | CORS errors in browser | WEB_URL/ADMIN_URL wrong | Update secrets with correct production URLs |
 | Secrets not applying | Secrets need redeploy | `fly deploy` after setting secrets |

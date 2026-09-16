@@ -50,8 +50,8 @@ JWT_REFRESH_SECRET=$(openssl rand -hex 64)
 JWT_REFRESH_EXPIRES_IN=7d
 
 # URLs
-WEB_URL=https://app.trustpay.com
-ADMIN_URL=https://admin.trustpay.com
+WEB_URL=https://www.trustpayhq.com
+ADMIN_URL=https://www.trustpayhq.com
 
 # Single-source providers
 BANKING_PROVIDER_PRIMARY=monnify
@@ -88,7 +88,7 @@ SENTRY_DSN=https://xxx@sentry.io/xxx
 ### Frontend `.env.production`
 ```bash
 NEXT_PUBLIC_API_URL=https://api.trustpayhq.com
-NEXT_PUBLIC_WEBSITE_URL=https://app.trustpay.com
+NEXT_PUBLIC_WEBSITE_URL=https://www.trustpayhq.com
 ```
 
 ---
@@ -143,11 +143,11 @@ docker-compose -f docker-compose.prod.yml logs -f
 ```bash
 # Backend only
 docker build -t trustpay/backend ./backend
-docker run -d --name trustpay-api -p 3000:3000 --env-file .env trustpay/backend
+docker run -d --name trustpay-api -p 127.0.0.1:3000:3000 --env-file .env trustpay/backend
 
 # Website only
 docker build -t trustpay/website ./website
-docker run -d --name trustpay-web -p 3001:3001 trustpay/website
+docker run -d --name trustpay-web -p 127.0.0.1:3001:3001 trustpay/website
 ```
 
 ---
@@ -270,10 +270,10 @@ cd backend
 npx prisma migrate deploy
 ```
 
-### 3. Verify Swagger Docs
-```
-https://api.trustpayhq.com/api/docs
-```
+### 3. Verify Swagger is disabled
+
+The production image must return `404` for `/api/docs`; keep API exploration
+behind an authenticated staging-only workflow.
 
 ### 4. Test Webhooks
 - Configure Monnify: `https://api.trustpayhq.com/api/webhooks/monnify`
@@ -317,12 +317,16 @@ npx ts-node prisma/create-admin.ts
 ## Backup & Recovery
 
 ### Database Backup
-```bash
-# Daily backup (cron)
-0 2 * * * pg_dump -h db-host -U trustpay trustpay_prod | gzip > /backups/db-$(date +\%Y\%m\%d).sql.gz
 
-# Restore
-gunzip -c db-20240101.sql.gz | psql -h db-host -U trustpay trustpay_prod
+Use `BACKEND/scripts/backup-db.sh` with a private durable backup mount and a
+secret-manager-provided `BACKUP_ENCRYPTION_KEY_FILE`. It preserves and checks
+the database connection's TLS mode, keeps the database password out of
+`pg_dump` arguments, encrypts the custom archive, and enforces at least 30 days
+of retention. Do not replace it with a plaintext `pg_dump | gzip` cron job.
+
+```bash
+# Every six hours on the operator/backup host.
+0 */6 * * * cd /srv/trustpay && DATABASE_URL="...sslmode=verify-full&schema=public" BACKUP_DIR=/var/backups/trustpay BACKUP_ENCRYPTION_KEY_FILE=/run/secrets/trustpay-backup-key RETENTION_DAYS=30 ./BACKEND/scripts/backup-db.sh
 ```
 
 ### Redis Backup
@@ -336,11 +340,11 @@ cp /var/lib/redis/dump.rdb /backups/redis-$(date +%Y%m%d).rdb
 ```
 
 ### Recovery Steps
-1. Stop application
-2. Restore database from latest backup
-3. Verify data integrity
-4. Restart application
-5. Verify health endpoint
+1. Stop application traffic or place the host in maintenance mode.
+2. Decrypt the selected archive only into a disposable or approved recovery database.
+3. Run `BACKEND/scripts/verify-backup-restore.sh` and compare wallet, transaction, ledger, audit, provider, webhook, and VTU evidence.
+4. Record RPO/RTO and owner approval before restoring the production target.
+5. Restart application traffic and verify the health endpoint and reconciliation status.
 
 ---
 
