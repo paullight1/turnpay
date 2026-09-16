@@ -66,6 +66,7 @@ async function readStoredSession(page: Page) {
 async function installAuthSessionMocks(page: Page, email: string) {
   const session = buildSession(email);
   const profile = buildProfile(email);
+  const bootstrapCalls: string[] = [];
 
   await page.route("**/api/auth/login", async (route) => {
     await route.fulfill({
@@ -79,6 +80,7 @@ async function installAuthSessionMocks(page: Page, email: string) {
   });
 
   await page.route("**/api/auth/bootstrap", async (route) => {
+    bootstrapCalls.push(route.request().url());
     expect(route.request().headers().authorization).toBe(
       `Bearer ${session.access_token}`,
     );
@@ -125,14 +127,17 @@ async function installAuthSessionMocks(page: Page, email: string) {
     });
   });
 
-  return { session };
+  return { session, bootstrapCalls };
 }
 
 test.describe("web session hardening", () => {
   test("does not persist auth tokens in localStorage after login", async ({
     page,
   }) => {
-    await installAuthSessionMocks(page, TEST_USER.email);
+    const { bootstrapCalls } = await installAuthSessionMocks(
+      page,
+      TEST_USER.email,
+    );
 
     await page.goto("/login");
     await page.getByLabel(/email/i).fill(TEST_USER.email);
@@ -146,6 +151,7 @@ test.describe("web session hardening", () => {
     expect((await sessionResponse).ok()).toBe(true);
 
     await expect(page).toHaveURL(/\/admin/);
+    expect(bootstrapCalls).toHaveLength(0);
     await expect.poll(() => readStoredSession(page)).toBeNull();
 
     const visibleCookies = await page.evaluate(() => document.cookie);

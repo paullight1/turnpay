@@ -299,24 +299,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           hasSession: true,
         });
         await persistSupabaseSession(login.session);
-        try {
-          const bootstrap = await bootstrapSession(login.session);
-          staffAccess = hasAdminAccess(bootstrap.user);
-          setAuthDebug({
-            stage: "local-session-persisted",
-            authMode: login.authMode,
-            hasSession: true,
-          });
-        } catch (error) {
-          setAuthDebug({
-            stage: "local-bootstrap-failed",
-            authMode: login.authMode,
-            hasSession: true,
-            error: error instanceof Error ? error.message : "Unknown error",
-          });
-          await clearSupabaseSession().catch(() => undefined);
-          throw error;
-        }
+        applySession(login.session, login.user);
+        staffAccess = hasAdminAccess(login.user);
+        setAuthDebug({
+          stage: "local-session-persisted",
+          authMode: login.authMode,
+          hasSession: true,
+        });
       } else {
         const authClient = requireSupabase();
         const { data: sessionData, error } = await authClient.auth.setSession({
@@ -327,8 +316,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
         const sessionToPersist = (sessionData.session ??
           login.session) as AppSession;
-        const bootstrap = await persistAndBootstrapSession(sessionToPersist);
-        staffAccess = hasAdminAccess(bootstrap.user);
+        await persistSupabaseSession(sessionToPersist);
+        applySession(sessionToPersist, login.user);
+        staffAccess = hasAdminAccess(login.user);
       }
 
       router.replace(
