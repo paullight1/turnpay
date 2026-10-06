@@ -101,6 +101,32 @@ export function MarketingShell({ children }: { children: React.ReactNode }) {
               Exchange NGN and GHS. Pay VTU services. Keep clear receipts.
               Built for the Nigeria–Ghana corridor.
             </p>
+            <div className="flex flex-col gap-3 text-sm leading-6 text-muted-foreground">
+              <h2 className="font-semibold text-foreground">Contact us</h2>
+              <div className="flex flex-col gap-1">
+                <a
+                  href="mailto:support@trustpayhq.com"
+                  className="w-fit break-all transition-colors hover:text-foreground focus-visible:rounded-md focus-visible:ring-3 focus-visible:ring-primary/50"
+                >
+                  support@trustpayhq.com
+                </a>
+                <a
+                  href="mailto:trustpaylink@gmail.com"
+                  className="w-fit break-all transition-colors hover:text-foreground focus-visible:rounded-md focus-visible:ring-3 focus-visible:ring-primary/50"
+                >
+                  trustpaylink@gmail.com
+                </a>
+                <a
+                  href="tel:+233555507240"
+                  className="w-fit transition-colors hover:text-foreground focus-visible:rounded-md focus-visible:ring-3 focus-visible:ring-primary/50"
+                >
+                  +233 55 550 7240
+                </a>
+              </div>
+              <address className="max-w-md not-italic">
+                19 Falohun Street, Orie, Surulere
+              </address>
+            </div>
             <div className="flex flex-wrap gap-2 text-muted-foreground">
               {[Facebook, Instagram, Send, Twitter, Linkedin].map((Icon, index) => (
                 <Link
