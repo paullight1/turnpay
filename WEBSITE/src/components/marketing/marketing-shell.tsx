@@ -117,6 +117,12 @@ export function MarketingShell({ children }: { children: React.ReactNode }) {
                   trustpaylink@gmail.com
                 </a>
                 <a
+                  href="tel:+233555507240"
+                  className="w-fit transition-colors hover:text-foreground focus-visible:rounded-md focus-visible:ring-3 focus-visible:ring-primary/50"
+                >
+                  +233 55 550 7240
+                </a>
+                <a
                   href="tel:+2349125110943"
                   className="w-fit transition-colors hover:text-foreground focus-visible:rounded-md focus-visible:ring-3 focus-visible:ring-primary/50"
                 >
