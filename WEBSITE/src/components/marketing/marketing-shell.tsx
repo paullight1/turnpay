@@ -117,14 +117,14 @@ export function MarketingShell({ children }: { children: React.ReactNode }) {
                   trustpaylink@gmail.com
                 </a>
                 <a
-                  href="tel:+233555507240"
+                  href="tel:+2349125110943"
                   className="w-fit transition-colors hover:text-foreground focus-visible:rounded-md focus-visible:ring-3 focus-visible:ring-primary/50"
                 >
-                  +233 55 550 7240
+                  +234 912 511 0943
                 </a>
               </div>
               <address className="max-w-md not-italic">
-                19 Falohun Street, Orie, Surulere
+                19 Falohun Street, Orile, Surulere, Lagos State, Nigeria
               </address>
             </div>
             <div className="flex flex-wrap gap-2 text-muted-foreground">
