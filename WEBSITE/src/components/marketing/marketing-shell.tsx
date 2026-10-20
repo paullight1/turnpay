@@ -130,7 +130,7 @@ export function MarketingShell({ children }: { children: React.ReactNode }) {
                 </a>
               </div>
               <address className="max-w-md not-italic">
-                19 Falohun Street, Orile, Surulere, Lagos State, Nigeria
+                19 Falohun Street along Coker Road, by Orile Bus Stop, Surulere, Lagos State
               </address>
             </div>
             <div className="flex flex-wrap gap-2 text-muted-foreground">

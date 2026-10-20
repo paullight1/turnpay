@@ -28,7 +28,7 @@ export function MarketingFooter() {
               <a href="tel:+2349125110943" className="hover:text-foreground focus-visible:rounded-sm focus-visible:ring-2 focus-visible:ring-primary/50">+234 912 511 0943</a>
             </div>
             <address className="mt-1 max-w-md not-italic">
-              19 Falohun Street, Orile, Surulere, Lagos State, Nigeria
+              19 Falohun Street along Coker Road, by Orile Bus Stop, Surulere, Lagos State
             </address>
           </div>
 
