@@ -1,17 +1,16 @@
 import type { Metadata } from "next";
-import { LandingPage } from "@/components/marketing/landing-page";
-import { MarketingShell } from "@/components/marketing/marketing-shell";
+import { LandingPage } from "@/components/marketing/simple-landing-page";
 
 const description =
-  "Exchange Nigerian naira to Ghanaian cedis with TrustPay. Get a clear NGN to GHS quote, transparent fees, secure settlement, and a receipt.";
+  "Pay bills and buy airtime and data with TrustPay, a simple payments app made for everyday life in Nigeria. Coming soon.";
 
 export const metadata: Metadata = {
-  title: "Naira to Cedi Exchange — Secure NGN to GHS Quotes",
+  title: "TrustPay — Everyday Payments Made Simple",
   description,
   alternates: { canonical: "/" },
   openGraph: {
     type: "website",
-    title: "Naira to Cedi Exchange — Secure NGN to GHS Quotes",
+    title: "TrustPay — Everyday Payments Made Simple",
     description,
     siteName: "TrustPay",
     url: "/",
@@ -20,22 +19,18 @@ export const metadata: Metadata = {
         url: "/opengraph-image",
         width: 1200,
         height: 630,
-        alt: "Exchange Nigerian naira to Ghanaian cedis with TrustPay",
+        alt: "TrustPay makes everyday payments simple in Nigeria",
       },
     ],
   },
   twitter: {
     card: "summary_large_image",
-    title: "Naira to Cedi Exchange — Secure NGN to GHS Quotes",
+    title: "TrustPay — Everyday Payments Made Simple",
     description,
     images: ["/twitter-image"],
   },
 };
 
 export default function HomePage() {
-  return (
-    <MarketingShell>
-      <LandingPage />
-    </MarketingShell>
-  );
+  return <LandingPage />;
 }
