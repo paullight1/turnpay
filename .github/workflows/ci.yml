@@ -262,7 +262,7 @@ jobs:
       - name: Build
         run: npm run build
         env:
-          NEXT_PUBLIC_API_URL: http://127.0.0.1:3100
+          NEXT_PUBLIC_API_URL: http://127.0.0.1:33100
 
       - name: Install Playwright browsers
         run: npx playwright install --with-deps
@@ -271,7 +271,7 @@ jobs:
         run: npm run test:e2e
         env:
           PORT: 3001
-          NEXT_PUBLIC_API_URL: http://127.0.0.1:3100
+          NEXT_PUBLIC_API_URL: http://127.0.0.1:33100
 
   website-security:
     runs-on: ubuntu-24.04

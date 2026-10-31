@@ -22,7 +22,7 @@ test.describe("website hardening contracts", () => {
     expect(
       resolveApiOrigin("http://127.0.0.1:33100", { production: true }),
     ).toBe("http://127.0.0.1:33100");
-    expect(resolveApiOrigin(undefined, { production: true })).toBe(
+    expect(resolveApiOrigin("", { production: true })).toBe(
       DEFAULT_API_ORIGIN,
     );
   });
