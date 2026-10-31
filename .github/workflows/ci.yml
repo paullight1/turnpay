@@ -157,13 +157,10 @@ jobs:
           VIRTUAL_ACCOUNTS_ENABLED: "true"
           WITHDRAWALS_ENABLED: "true"
           INTERNAL_TRANSFERS_ENABLED: "false"
-          MONNIFY_API_KEY: monnify-api-key
-          MONNIFY_SECRET_KEY: monnify-secret-key
-          MONNIFY_CONTRACT_CODE: contract-code
-          MONNIFY_BASE_URL: https://monnify-live.example.com
-          MONNIFY_WEBHOOK_URL: https://api.trustpay.example.com/api/webhooks/monnify
-          MONNIFY_EXCHANGE_COLLECTION_ACCOUNT_NUMBER: 1234567890
-          KYC_PROVIDER: monnify
+          # Synthetic configuration only; this step never calls a provider.
+          BANKING_PROVIDER_PRIMARY: paystack
+          KYC_PROVIDER: paystack
+          PAYSTACK_SECRET_KEY: sk_live_ci
           PII_ENCRYPTION_KEY: test-pii-key-with-at-least-32-characters
           VTU_ENABLED: "true"
           VTU_SIMULATION_ENABLED: "false"
