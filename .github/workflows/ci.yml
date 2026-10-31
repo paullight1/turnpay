@@ -144,10 +144,9 @@ jobs:
           OTP_EXPIRES_IN: 5m
           OTP_LENGTH: "6"
           OTP_DEV_CODE: ""
-          SMS_PROVIDER: twilio
-          TWILIO_ACCOUNT_SID: ACaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
-          TWILIO_AUTH_TOKEN: ci-twilio-auth-token
-          TWILIO_PHONE_NUMBER: +15557122661
+          OTP_PROVIDER: supabase_email
+          SUPABASE_URL: https://project.supabase.co
+          SUPABASE_PUBLISHABLE_KEY: test-publishable
           IDEMPOTENCY_RESPONSE_ENCRYPTION_KEY: BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=
           IDEMPOTENCY_RESPONSE_ENCRYPTION_KEY_ID: v1
           TRANSACTION_PIN_REQUIRED: "true"

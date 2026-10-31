@@ -242,14 +242,15 @@ require_value API_BASE_URL
 require_value WEBSITE_BASE_URL
 require_value SUPABASE_URL
 require_value SUPABASE_PUBLISHABLE_KEY
-require_value SENTRY_DSN
-require_value SENTRY_ENVIRONMENT
 require_value API_CERTIFICATE_SHA256_PINS
 
 require_https_url API_BASE_URL "$api_base_url"
 require_https_url WEBSITE_BASE_URL "$website_base_url"
 require_supabase_url "$supabase_url"
-require_sentry_dsn "$sentry_dsn"
+if [ -n "$sentry_dsn" ]; then
+  require_value SENTRY_ENVIRONMENT
+  require_sentry_dsn "$sentry_dsn"
+fi
 require_pins "$certificate_pins"
 
 case "$environment" in
@@ -258,7 +259,7 @@ case "$environment" in
       fail 'API_BASE_URL is not an allowlisted production host'
     [ "$website_base_url" = 'https://trustpay.xyz' ] ||
       fail 'WEBSITE_BASE_URL is not an allowlisted production host'
-    [ "$sentry_environment" = 'production' ] ||
+    [ -z "$sentry_dsn" ] || [ "$sentry_environment" = 'production' ] ||
       fail 'SENTRY_ENVIRONMENT must be production for a production build'
 
     # Exact production allowlists above reject staging/sandbox/local hosts.
@@ -268,7 +269,7 @@ case "$environment" in
     reject_local_host WEBSITE_BASE_URL "$website_base_url"
     ;;
   staging)
-    [ "$sentry_environment" = 'staging' ] ||
+    [ -z "$sentry_dsn" ] || [ "$sentry_environment" = 'staging' ] ||
       fail 'SENTRY_ENVIRONMENT must be staging for a staging build'
     [ "$api_base_url" != 'https://api.trustpayhq.com' ] ||
       fail 'API_BASE_URL must target the staging environment'

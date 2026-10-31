@@ -21,21 +21,15 @@ services:
       - key: ADMIN_URL
         value: "https://www.trustpayhq.com"
       - key: SENTRY_DSN
-        sync: false # TODO(launch): set Sentry DSN for error monitoring
+        value: "" # Optional: set a real DSN to enable Sentry.
       - key: OTP_EXPIRES_IN
         value: "5m"
       - key: OTP_LENGTH
         value: "6"
       - key: OTP_DEV_CODE
         value: ""
-      - key: SMS_PROVIDER
-        value: "twilio"
-      - key: TWILIO_ACCOUNT_SID
-        sync: false
-      - key: TWILIO_AUTH_TOKEN
-        sync: false
-      - key: TWILIO_PHONE_NUMBER
-        sync: false
+      - key: OTP_PROVIDER
+        value: "supabase_email"
       - key: PORT
         value: "3000"
       - key: LOG_LEVEL

@@ -29,7 +29,7 @@ describe('Auth DTO validation', () => {
   it('rejects OTP values that are not exactly six digits', async () => {
     await expect(
       validationMessages(
-        { phone: '+2348012345678', otp: '12345a' },
+        { email: 'ada@example.com', otp: '12345a' },
         VerifyOtpDto,
       ),
     ).resolves.toContain('OTP must be exactly 6 digits');

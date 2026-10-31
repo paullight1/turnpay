@@ -66,22 +66,22 @@ class AuthService {
   }
 
   Future<void> verifyOtp({
-    required String phone,
+    required String email,
     required String otp,
   }) async {
     await _apiClient.client.post(
       '/api/auth/otp/verify',
       data: {
-        'phone': _normalizePhone(phone),
+        'email': _normalizeEmail(email),
         'otp': otp,
       },
     );
   }
 
-  Future<void> resendOtp(String phone) async {
+  Future<void> resendOtp(String email) async {
     await _apiClient.client.post(
       '/api/auth/otp/send',
-      data: {'phone': _normalizePhone(phone)},
+      data: {'email': _normalizeEmail(email)},
     );
   }
 

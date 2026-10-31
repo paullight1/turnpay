@@ -22,6 +22,24 @@ The secret key stays on the backend. Hosted checkout does not require a public k
 
 Set `WEB_URL` to the deployed website's HTTPS origin. Hosted checkout returns to `/dashboard/fund`; the client then calls the authenticated verification endpoint. Mobile users can reopen the app and verify their saved attempt. A browser return or “I have paid” action never credits a wallet on its own.
 
+## Email verification and optional error reporting
+
+Customer verification codes use the existing Supabase Auth email transport:
+
+```dotenv
+OTP_PROVIDER=supabase_email
+OTP_LENGTH=6
+OTP_EXPIRES_IN=5m
+OTP_DEV_CODE=
+SENTRY_DSN=
+```
+
+Sentry is optional by the owner's current instruction; structured server errors and audit logging remain enabled. A supplied DSN must still use HTTPS. Twilio credentials and `SMS_PROVIDER` are not required or used by the current OTP module. Password login, recovery links and server-verified transaction PINs remain in place.
+
+In the matching Supabase project, include `{{ .Token }}` in both **Confirm signup** and **Magic Link** email templates, configure a six-digit email OTP and a 300-second expiry, and verify the existing SMTP sender/delivery configuration. Keep any existing confirmation/recovery links compatible; changing the project email expiry also affects other email links. Supabase's default development mail service is not sufficient evidence of production delivery to arbitrary customers; confirm a configured production SMTP sender and its sending limits.
+
+`POST /api/auth/otp/send` accepts `{ "email": "customer@example.com" }`; `POST /api/auth/otp/verify` accepts that email and a six-digit `otp`. Both require an `Idempotency-Key`. Requests never create unknown identities. The backend bounds challenges to five minutes and three verification attempts using Redis; provider tokens are independently verified and never returned or stored in logs. Signup uses the confirmation email already sent by Supabase rather than sending a second code. A successful email code verifies email ownership; it does not verify the phone or grant KYC tiers. PIN reset verifies the authenticated account's saved email and retains the existing security hold.
+
 ## Configure the merchant dashboard
 
 Register `https://YOUR_API_HOST/api/webhooks/paystack` as the Paystack webhook URL. It must reach the deployed backend with the unchanged raw body and `x-paystack-signature` header. Successful durable acceptance returns HTTP 200.
@@ -31,6 +49,68 @@ Confirm the business has access to dedicated accounts, customer validation and t
 Ensure the Paystack balance can cover withdrawals plus provider fees. Adding a secret key cannot grant merchant product approval, configure an external webhook or supply payout liquidity.
 
 ## Check readiness
+
+### Private NIN evidence and the first reviewer
+
+The backend requires `SUPABASE_SERVICE_ROLE_KEY` from the same project as
+`SUPABASE_URL` and `DATABASE_URL`. Keep it in the backend secret store only.
+The publishable/anon key cannot create private signed evidence URLs. Configure
+`KYC_DOCUMENT_BUCKET=kyc-documents`; the bucket must be private, with an 8 MiB
+limit and JPEG, PNG, WebP and PDF allowed. Verify a private upload and an
+expiring reviewer URL before accepting real NIN submissions.
+
+Select an existing, email-confirmed, active TRUSTPAY account explicitly. The
+first-admin command never creates an account or password, defaults to a dry
+run, and refuses to grant a different account privileges once an admin exists:
+
+```sh
+# From BACKEND with server environment configured:
+npm run admin:bootstrap -- --email reviewer@example.com --reason "Owner authorized first reviewer"
+npm run admin:bootstrap -- --email reviewer@example.com --reason "Owner authorized first reviewer" --apply
+# In the built production image, use admin:bootstrap:prod instead.
+```
+
+This assigns the existing **full ADMIN role**, including other administration
+permissions, and records `INITIAL_ADMIN_PROVISIONED` atomically with the role
+change, including the server process user and supplied authorization reason.
+The process user identifies the executing OS principal, not an authenticated
+human; include the owner's access request/ticket in the reason. It does not
+grant KYC verification or change the reviewer's tier.
+Database role checks authorize requests; customer-editable metadata and email
+domains never grant access. Refresh the authenticated bootstrap/sign in again
+to reveal the admin navigation.
+
+Review NIN at `/admin/kyc` in the existing admin console. The reviewer opens
+the private evidence, checks the profile match, enters a reason, and approves
+or rejects. Evidence access and decisions are audited. The client supplies
+idempotency keys; competing decisions are serialized and cannot overwrite a
+completed review. A submitted NIN alone grants no tier. Existing tier rules
+remain: either verified BVN/NIN qualifies for Tier 1; both qualify for Tier 2.
+Paystack BVN decisions remain read-only to administrators.
+
+### Prove public webhook delivery
+
+1. Restore the existing deployed API and confirm its public HTTPS readiness
+   endpoint. Do not register `localhost` or use an unverified development
+   tunnel as a permanent merchant endpoint.
+2. In the Paystack dashboard's matching Live/Test environment, register
+   `https://YOUR_API_HOST/api/webhooks/paystack`. Preserve unrelated merchant
+   settings. The public route must preserve raw bytes and reject unsigned
+   requests with HTTP 400.
+3. Inspect Developers → Webhooks or `GET /integration/webhooks/events` for
+   the specific customer's `customeridentification.success`/`.failed` event.
+   If a matching event failed delivery, resend that event only using the
+   dashboard or `POST /integration/webhooks/events/resend` with its event ID.
+   Do not broadly replay payment events or manufacture a signed success event.
+4. Confirm durable HTTP 200 acceptance, a processed payment inbox record,
+   exactly one `PAYSTACK_CUSTOMER_IDENTIFICATION_RESULT` audit, and the
+   corresponding stored verification result. The worker runs every minute.
+5. Check both KYC cards and server tier from the app. The refresh button reads
+   saved backend status; it does not query Paystack or approve a pending check.
+
+Changing the webhook URL cannot itself complete an identity check. A customer
+that Paystack still reports as unidentified, with no terminal provider event,
+remains pending and requires provider investigation if it persists.
 
 `GET /api/payments/capabilities` returns configuration and feature availability to authenticated clients. Configuration is distinct from confirmed merchant activation. Disabled or unconfigured features must remain unavailable in the clients.
 

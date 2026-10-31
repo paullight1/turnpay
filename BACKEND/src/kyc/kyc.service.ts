@@ -482,6 +482,18 @@ export class KycService {
     }
 
     const result = await this.prisma.$transaction(async (tx) => {
+      if (typeof tx.$queryRaw === 'function') {
+        await tx.$queryRaw(
+          Prisma.sql`SELECT "id" FROM "users" WHERE "id" = ${userId} FOR UPDATE`,
+        );
+      }
+      // An independent NIN review may have finished during the provider call.
+      // Preserve its current tier/status rather than the reservation snapshot.
+      const currentUser = await tx.user.findUnique({
+        where: { id: userId },
+        select: { kycTier: true, kycStatus: true },
+      });
+      if (!currentUser) throw new NotFoundException('User not found');
       if (provider === 'PAYSTACK') {
         const current = await tx.kycVerification.findUnique({
           where: { id: verificationId },
@@ -498,7 +510,7 @@ export class KycService {
               status: currentDocument?.status ?? reservation.document.status,
               rejectionNote: currentDocument?.rejectionNote ?? null,
             },
-            kycTier: reservation.user.kycTier,
+            kycTier: currentUser.kycTier,
             persistedStatus: current.status as KycVerificationStatus,
             persistedReference: current.reference,
             persistedChecks: current.checks,
@@ -531,12 +543,12 @@ export class KycService {
               tx,
               userId,
               dto.type,
-              reservation.user.kycTier,
+              currentUser.kycTier,
             )
-          : reservation.user.kycTier;
+          : currentUser.kycTier;
       const kycStatus =
         providerResult.status === 'VERIFIED' ||
-        reservation.user.kycStatus === 'VERIFIED'
+        currentUser.kycStatus === 'VERIFIED'
           ? ('VERIFIED' as const)
           : providerResult.status === 'REJECTED'
             ? ('REJECTED' as const)
@@ -710,6 +722,11 @@ export class KycService {
 
     const reason = this.readProviderString(data, 'reason');
     const result = await this.prisma.$transaction(async (tx) => {
+      if (typeof tx.$queryRaw === 'function') {
+        await tx.$queryRaw(
+          Prisma.sql`SELECT "id" FROM "users" WHERE "id" = ${customer.userId} FOR UPDATE`,
+        );
+      }
       const current = await tx.kycVerification.findUnique({
         where: { id: verification.id },
         select: { status: true, reference: true, checks: true },
@@ -910,6 +927,26 @@ export class KycService {
     const verificationId = randomUUID();
     const consentRecordedAt = new Date();
     const document = await this.prisma.$transaction(async (tx) => {
+      if (typeof tx.$queryRaw === 'function') {
+        await tx.$queryRaw(
+          Prisma.sql`SELECT "id" FROM "users" WHERE "id" = ${userId} FOR UPDATE`,
+        );
+      }
+      const activeDocument = await tx.kycDocument.findFirst({
+        where: {
+          userId,
+          type: 'NIN',
+          status: { in: ['PENDING', 'SUBMITTED', 'VERIFIED'] },
+        },
+        select: { id: true, status: true },
+      });
+      if (activeDocument) {
+        throw new ConflictException(
+          activeDocument.status === 'VERIFIED'
+            ? 'Your NIN is already verified'
+            : 'A manual NIN review is already in progress',
+        );
+      }
       const created = await tx.kycDocument.create({
         data: {
           id: documentId,
@@ -1297,35 +1334,38 @@ export class KycService {
 
     const rejectionNote = dto.rejectionNote.trim();
 
-    const document = await this.prisma.kycDocument.findUnique({
+    const owner = await this.prisma.kycDocument.findUnique({
       where: { id: documentId },
-      include: {
-        user: true,
-        verifications: {
-          select: { provider: true },
-        },
-      },
+      select: { userId: true },
     });
-
-    if (!document) {
+    if (!owner) {
       throw new NotFoundException('KYC document not found');
     }
-
-    if (
-      document.verifications?.some(({ provider }) => provider === 'PAYSTACK')
-    ) {
-      throw new BadRequestException(
-        'Paystack identity verification is finalized by provider evidence and cannot be manually reviewed',
-      );
-    }
-
-    if (document.status === 'VERIFIED' || document.status === 'REJECTED') {
-      throw new BadRequestException('Document already reviewed');
-    }
-
     const updated = await this.prisma.$transaction(async (tx) => {
-      const reviewed = await tx.kycDocument.update({
+      // Use the same user-first lock order as provider finalization. Decisions
+      // for different documents must read the current tier after waiting.
+      if (typeof tx.$queryRaw === 'function') {
+        await tx.$queryRaw(
+          Prisma.sql`SELECT "id" FROM "users" WHERE "id" = ${owner.userId} FOR UPDATE`,
+        );
+      }
+      const document = await tx.kycDocument.findUnique({
         where: { id: documentId },
+        include: { user: true, verifications: { select: { provider: true } } },
+      });
+      if (!document) throw new NotFoundException('KYC document not found');
+      if (
+        document.verifications?.some(({ provider }) => provider === 'PAYSTACK')
+      ) {
+        throw new BadRequestException(
+          'Paystack identity verification is finalized by provider evidence and cannot be manually reviewed',
+        );
+      }
+      if (document.status !== 'PENDING' && document.status !== 'SUBMITTED') {
+        throw new BadRequestException('Document already reviewed');
+      }
+      const reviewed = await tx.kycDocument.update({
+        where: { id: documentId, status: { in: ['PENDING', 'SUBMITTED'] } },
         data: {
           status: dto.status,
           rejectionNote,

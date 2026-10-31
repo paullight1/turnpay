@@ -134,15 +134,7 @@ export class PhoneDto {
   phone: string;
 }
 
-export class VerifyOtpDto {
-  @Transform(({ value }) => trimString(value))
-  @IsString()
-  @MaxLength(16)
-  @Matches(E164_PHONE_REGEX, {
-    message: 'Phone number must be a valid E.164 phone number',
-  })
-  phone: string;
-
+export class VerifyOtpDto extends EmailDto {
   @Transform(({ value }) => trimString(value))
   @IsString()
   @Matches(SIX_DIGIT_OTP_REGEX, {

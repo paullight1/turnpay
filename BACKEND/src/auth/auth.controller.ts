@@ -23,7 +23,6 @@ import {
   LogoutDto,
   ChangePasswordDto,
   EmailDto,
-  PhoneDto,
   RefreshTokenDto,
   ResetTransactionPinDto,
   SetTransactionPinDto,
@@ -140,15 +139,15 @@ export class AuthController {
   @Post('otp/send')
   @Throttle({ default: { limit: 3, ttl: 3600000 } })
   @HttpCode(HttpStatus.OK)
-  async sendOtp(@Body() dto: PhoneDto) {
-    return this.authService.sendOtp(dto.phone);
+  async sendOtp(@Body() dto: EmailDto) {
+    return this.authService.sendOtp(dto.email);
   }
 
   @Post('otp/verify')
   @Throttle({ default: { limit: 10, ttl: 60000 } })
   @HttpCode(HttpStatus.OK)
   async verifyOtp(@Body() verifyOtpDto: VerifyOtpDto) {
-    return this.authService.verifyOtp(verifyOtpDto.phone, verifyOtpDto.otp);
+    return this.authService.verifyOtp(verifyOtpDto.email, verifyOtpDto.otp);
   }
 
   @Post('forgot-password')

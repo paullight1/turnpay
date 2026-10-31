@@ -55,7 +55,7 @@ describe('OtpService', () => {
     OTP_LENGTH: '6',
     OTP_DEV_CODE: '654321',
     NODE_ENV: 'test',
-    SMS_PROVIDER: 'twilio',
+    OTP_PROVIDER: 'supabase_email',
   };
 
   const configService = {
@@ -70,31 +70,33 @@ describe('OtpService', () => {
     warn: jest.fn(),
   };
 
-  const smsProvider = {
-    sendSms: jest.fn().mockResolvedValue(undefined),
+  const emailProvider = {
+    sendOtp: jest.fn().mockResolvedValue(undefined),
+    verifyOtp: jest.fn().mockResolvedValue(false),
   };
 
   beforeEach(() => {
     jest.clearAllMocks();
+    emailProvider.verifyOtp.mockReset().mockResolvedValue(false);
     configValues.OTP_EXPIRES_IN = '5';
     configValues.OTP_LENGTH = '6';
     configValues.OTP_DEV_CODE = '654321';
     configValues.NODE_ENV = 'test';
-    configValues.SMS_PROVIDER = 'twilio';
+    configValues.OTP_PROVIDER = 'supabase_email';
   });
 
-  it('rejects a fourth OTP send in the same hour for one normalized phone', async () => {
+  it('rejects a fourth OTP send in the same hour for one normalized email', async () => {
     const { redis } = createRedisMock();
     const service = new OtpService(
       redis as never,
       configService as never,
       logger as never,
-      smsProvider,
+      emailProvider,
     );
 
     const attempts = await Promise.allSettled(
       Array.from({ length: 4 }, () =>
-        service.assertOtpSendAllowed(' +2348012345678 '),
+        service.assertOtpSendAllowed(' ada@example.com '),
       ),
     );
 
@@ -117,7 +119,7 @@ describe('OtpService', () => {
       redis as never,
       configService as never,
       logger as never,
-      smsProvider,
+      emailProvider,
     );
 
     const attempts = await Promise.allSettled(
@@ -145,19 +147,19 @@ describe('OtpService', () => {
       redis as never,
       configService as never,
       logger as never,
-      smsProvider,
+      emailProvider,
     );
 
-    await service.sendOtp('+2348012345678');
+    await service.sendOtp('ada@example.com');
 
     const invalidAttempts = await Promise.all(
       Array.from({ length: 4 }, () =>
-        service.verifyOtp('+2348012345678', '111111'),
+        service.verifyOtp('ada@example.com', '111111'),
       ),
     );
 
     expect(invalidAttempts).toEqual([false, false, false, false]);
-    await expect(service.verifyOtp('+2348012345678', '654321')).resolves.toBe(
+    await expect(service.verifyOtp('ada@example.com', '654321')).resolves.toBe(
       false,
     );
   });
@@ -169,36 +171,33 @@ describe('OtpService', () => {
       redis as never,
       configService as never,
       logger as never,
-      smsProvider,
+      emailProvider,
     );
 
-    await expect(service.sendOtp('+2348012345678')).resolves.toEqual({
+    await expect(service.sendOtp('ada@example.com')).resolves.toEqual({
       success: true,
       message: 'OTP sent successfully',
     });
 
-    expect(smsProvider.sendSms).toHaveBeenCalledTimes(1);
-    expect(smsProvider.sendSms).toHaveBeenCalledWith(
-      '+2348012345678',
-      expect.stringMatching(/^Your TrustPay verification code is: \d{6}\./),
-    );
+    expect(emailProvider.sendOtp).toHaveBeenCalledTimes(1);
+    expect(emailProvider.sendOtp).toHaveBeenCalledWith('ada@example.com');
     expect(store.size).toBe(1);
   });
 
-  it('does not persist a code or report success when SMS delivery fails', async () => {
+  it('does not persist a code or report success when email delivery fails', async () => {
     const { redis, store } = createRedisMock();
     configValues.OTP_DEV_CODE = '';
-    smsProvider.sendSms.mockRejectedValueOnce(
+    emailProvider.sendOtp.mockRejectedValueOnce(
       new ServiceUnavailableException('OTP delivery unavailable'),
     );
     const service = new OtpService(
       redis as never,
       configService as never,
       logger as never,
-      smsProvider,
+      emailProvider,
     );
 
-    await expect(service.sendOtp('+2348012345678')).rejects.toBeInstanceOf(
+    await expect(service.sendOtp('ada@example.com')).rejects.toBeInstanceOf(
       ServiceUnavailableException,
     );
     expect(store.size).toBe(0);
@@ -215,10 +214,10 @@ describe('OtpService', () => {
       redis as never,
       configService as never,
       logger as never,
-      smsProvider,
+      emailProvider,
     );
 
-    await service.sendOtp('+2348012345678');
+    await service.sendOtp('ada@example.com');
     const stored = [...store.values()][0];
     expect(stored.expiresAt).toBeDefined();
     expect(stored.expiresAt! - Date.now()).toBeLessThanOrEqual(300_000);
@@ -229,16 +228,78 @@ describe('OtpService', () => {
       redis as never,
       configService as never,
       logger as never,
-      smsProvider,
+      emailProvider,
     );
-    await stagingService.sendOtp('+2348012345678');
-    expect(smsProvider.sendSms).toHaveBeenLastCalledWith(
-      '+2348012345678',
-      expect.not.stringContaining('654321'),
-    );
+    await stagingService.sendOtp('ada@example.com');
+    expect(emailProvider.sendOtp).toHaveBeenLastCalledWith('ada@example.com');
 
     configValues.OTP_EXPIRES_IN = '5';
     configValues.OTP_DEV_CODE = '654321';
     configValues.NODE_ENV = 'test';
+  });
+  it('limits provider verification to three attempts and never accepts an expired challenge', async () => {
+    const { redis } = createRedisMock();
+    configValues.OTP_DEV_CODE = '';
+    const service = new OtpService(
+      redis as never,
+      configService as never,
+      logger as never,
+      emailProvider as never,
+    );
+    await service.sendOtp(' Ada@Example.com ');
+    await Promise.all(
+      Array.from({ length: 5 }, () =>
+        service.verifyOtp('ada@example.com', '111111'),
+      ),
+    );
+    expect(emailProvider.verifyOtp).toHaveBeenCalledTimes(3);
+    emailProvider.verifyOtp.mockResolvedValueOnce(true);
+    await expect(service.verifyOtp('ada@example.com', '123456')).resolves.toBe(
+      false,
+    );
+    expect(emailProvider.verifyOtp).toHaveBeenCalledTimes(3);
+  });
+
+  it('expires an emailed challenge after five minutes even if the upstream token remains valid', async () => {
+    jest.useFakeTimers();
+    try {
+      const { redis } = createRedisMock();
+      configValues.OTP_DEV_CODE = '';
+      const service = new OtpService(
+        redis as never,
+        configService as never,
+        logger as never,
+        emailProvider as never,
+      );
+      await service.sendOtp('ada@example.com');
+      jest.advanceTimersByTime(300_001);
+      await expect(
+        service.verifyOtp('ada@example.com', '123456'),
+      ).resolves.toBe(false);
+      expect(emailProvider.verifyOtp).not.toHaveBeenCalled();
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('consumes a successful emailed challenge once and does not store the provider code', async () => {
+    const { redis, store } = createRedisMock();
+    configValues.OTP_DEV_CODE = '';
+    const service = new OtpService(
+      redis as never,
+      configService as never,
+      logger as never,
+      emailProvider as never,
+    );
+    await service.sendOtp('ada@example.com');
+    expect([...store.values()].every((item) => item.value !== '123456')).toBe(
+      true,
+    );
+    emailProvider.verifyOtp.mockResolvedValue(true);
+    const results = await Promise.all([
+      service.verifyOtp('ada@example.com', '123456'),
+      service.verifyOtp('ada@example.com', '123456'),
+    ]);
+    expect(results.filter(Boolean)).toHaveLength(1);
   });
 });

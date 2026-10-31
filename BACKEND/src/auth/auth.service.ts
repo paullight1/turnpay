@@ -39,7 +39,7 @@ const REFRESH_FAILURE_MESSAGE = 'Invalid or expired refresh token';
 const RESET_RESPONSE_MESSAGE =
   'If an account exists, password reset instructions have been sent';
 const OTP_RESPONSE_MESSAGE =
-  'If the phone number is registered, an OTP was sent';
+  'If an account exists for that email, a verification code was sent';
 const CONFIRMATION_RESPONSE_MESSAGE =
   'If an account exists, a confirmation email was sent';
 const REGISTRATION_GENERIC_MESSAGE = 'Unable to complete registration';
@@ -219,7 +219,7 @@ export class AuthService {
         data: { failedAttempts: 0, lockedUntil: null },
       });
 
-      const otpDelivered = await this.trySendRegistrationOtp(phone);
+      const otpDelivered = await this.trySendRegistrationOtp(email);
 
       this.logger.info(
         {
@@ -253,7 +253,9 @@ export class AuthService {
       providerSessionId,
     );
 
-    const otpDelivered = await this.trySendRegistrationOtp(phone);
+    const otpDelivered = data.session
+      ? true
+      : await this.tryStartRegistrationEmailChallenge(email);
 
     this.logger.info(
       { userId: user.id, event: 'user_registered', transactionPinSet: true },
@@ -620,29 +622,31 @@ export class AuthService {
     return { success: true, message: 'Password changed successfully' };
   }
 
-  async sendOtp(phone: string) {
-    const normalizedPhone = this.normalizePhone(phone);
-    await this.otpService.assertOtpSendAllowed(normalizedPhone);
-
-    const user = await this.usersService.findByPhone(normalizedPhone);
-    if (!user) {
-      return { success: true, message: OTP_RESPONSE_MESSAGE };
+  async sendOtp(email: string) {
+    const normalizedEmail = this.normalizeEmail(email);
+    await this.otpService.assertOtpSendAllowed(normalizedEmail);
+    const user = await this.usersService.findByEmail(normalizedEmail);
+    if (user && !user.isSuspended) {
+      try {
+        await this.otpService.sendOtp(normalizedEmail);
+      } catch {
+        this.logger.warn(
+          { event: 'email_otp_delivery_unconfirmed' },
+          'Email code delivery needs retry',
+        );
+      }
     }
-
-    await this.otpService.sendOtp(normalizedPhone);
     return { success: true, message: OTP_RESPONSE_MESSAGE };
   }
 
-  async verifyOtp(phone: string, otp: string) {
+  async verifyOtp(email: string, otp: string) {
     const isValid = await this.otpService.verifyOtp(
-      this.normalizePhone(phone),
+      this.normalizeEmail(email),
       otp.trim(),
     );
-    if (!isValid) {
-      throw new BadRequestException('Invalid or expired OTP');
-    }
-
-    return { success: true, message: 'OTP verified successfully' };
+    if (!isValid)
+      throw new BadRequestException('Invalid or expired email code');
+    return { success: true, message: 'Email verified successfully' };
   }
 
   async sendPasswordResetEmail(email: string) {
@@ -770,7 +774,7 @@ export class AuthService {
       }
     } else {
       const user = await this.usersService.findOne(userId);
-      const verified = await this.otpService.verifyOtp(user.phone, dto.otp!);
+      const verified = await this.otpService.verifyOtp(user.email, dto.otp!);
       if (!verified) {
         throw new UnauthorizedException(
           'Unable to reset transaction PIN with provided verification',
@@ -816,10 +820,26 @@ export class AuthService {
     }
   }
 
-  private async trySendRegistrationOtp(phone: string) {
+  private async tryStartRegistrationEmailChallenge(email: string) {
     try {
-      await this.otpService.assertOtpSendAllowed(phone);
-      await this.otpService.sendOtp(phone);
+      // signUp already dispatched the confirmation email; do not send a second
+      // email or invalidate its code with a simultaneous magic-link request.
+      await this.otpService.assertOtpSendAllowed(email);
+      await this.otpService.startEmailChallenge(email);
+      return true;
+    } catch {
+      this.logger.warn(
+        { event: 'registration_email_challenge_pending' },
+        'Email confirmation needs a resend',
+      );
+      return false;
+    }
+  }
+
+  private async trySendRegistrationOtp(email: string) {
+    try {
+      await this.otpService.assertOtpSendAllowed(email);
+      await this.otpService.sendOtp(email);
       return true;
     } catch (error) {
       this.logger.warn(
@@ -1007,9 +1027,7 @@ export class AuthService {
   }
 
   private isLocalAuthFallbackEnabled() {
-    return (
-      process.env.NODE_ENV !== 'production' && process.env.NODE_ENV !== 'test'
-    );
+    return process.env.NODE_ENV === 'development';
   }
 
   private async refreshLocalToken(

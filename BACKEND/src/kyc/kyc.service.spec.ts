@@ -432,6 +432,49 @@ describe('KycService', () => {
     expect(bankingService.provisionVirtualAccount).not.toHaveBeenCalled();
   });
 
+  it('preserves a NIN tier earned while the Paystack request was in flight', async () => {
+    kycProviderGateway.provider = 'PAYSTACK';
+    const profile = {
+      fullName: 'Ada Okafor',
+      phone: '+2348012345678',
+      kycStatus: 'PENDING',
+      kycTier: 'TIER_0',
+    };
+    prisma.user.findUnique.mockResolvedValue(profile);
+    prisma.kycDocument.create.mockImplementation(async ({ data }) => ({
+      ...data,
+    }));
+    prisma.kycVerification.findUnique.mockResolvedValue({ status: 'PENDING' });
+    kycProviderGateway.verifyIdentity.mockImplementation(async () => {
+      prisma.user.findUnique.mockResolvedValue({
+        ...profile,
+        kycTier: 'TIER_1',
+        kycStatus: 'VERIFIED',
+      });
+      return {
+        provider: 'PAYSTACK',
+        status: 'PENDING',
+        reference: 'paystack-delayed',
+        checks: {},
+        responseHash: 'safe-hash',
+      };
+    });
+    const result = await service.verifyIdentity('user-1', {
+      country: 'NG',
+      type: 'BVN',
+      idNumber: '12345678901',
+      dateOfBirth: '1990-01-02',
+      bankCode: '058',
+      accountNumber: '0123456789',
+      consentAccepted: true,
+    });
+    expect(result.kycTier).toBe('TIER_1');
+    expect(prisma.user.update).toHaveBeenCalledWith({
+      where: { id: 'user-1' },
+      data: { kycTier: 'TIER_1', kycStatus: 'VERIFIED' },
+    });
+  });
+
   it('closes only the matching Paystack attempt after a definitive validation rejection', async () => {
     kycProviderGateway.provider = 'PAYSTACK';
     const validationFingerprint = paystackFingerprint();
@@ -1344,6 +1387,36 @@ describe('KycService', () => {
     );
     expect(JSON.stringify(result)).not.toContain('12345678901');
     expect(JSON.stringify(result)).not.toContain('base64');
+  });
+
+  it('refuses a completed decision discovered after the initial document read', async () => {
+    const document = {
+      id: 'kyc-race',
+      userId: 'user-1',
+      type: 'NIN',
+      status: 'SUBMITTED',
+      user: { id: 'user-1', kycTier: 'TIER_0', kycStatus: 'SUBMITTED' },
+      verifications: [{ provider: 'MANUAL_REVIEW' }],
+    };
+    prisma.kycDocument.findUnique
+      .mockResolvedValueOnce(document)
+      .mockResolvedValueOnce({ ...document, status: 'VERIFIED' });
+    prisma.kycDocument.update.mockResolvedValue({
+      ...document,
+      status: 'REJECTED',
+    });
+    await expect(
+      service.reviewKyc(
+        'kyc-race',
+        {
+          status: 'REJECTED',
+          rejectionNote: 'Competing decision after first read',
+        },
+        'admin-1',
+      ),
+    ).rejects.toThrow('already reviewed');
+    expect(prisma.kycDocument.update).not.toHaveBeenCalled();
+    expect(prisma.auditLog.create).not.toHaveBeenCalled();
   });
 
   it('audits admin KYC review decisions without raw identifiers', async () => {

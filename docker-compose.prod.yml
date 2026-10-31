@@ -31,14 +31,11 @@ services:
     environment:
       NODE_ENV: production
       PORT: 3000
-      SENTRY_DSN: ${SENTRY_DSN:?SENTRY_DSN is required}
+      SENTRY_DSN: ${SENTRY_DSN:-}
       OTP_EXPIRES_IN: ${OTP_EXPIRES_IN:-5m}
       OTP_LENGTH: ${OTP_LENGTH:-6}
       OTP_DEV_CODE: ${OTP_DEV_CODE:-}
-      SMS_PROVIDER: ${SMS_PROVIDER:-twilio}
-      TWILIO_ACCOUNT_SID: ${TWILIO_ACCOUNT_SID:?TWILIO_ACCOUNT_SID is required}
-      TWILIO_AUTH_TOKEN: ${TWILIO_AUTH_TOKEN:?TWILIO_AUTH_TOKEN is required}
-      TWILIO_PHONE_NUMBER: ${TWILIO_PHONE_NUMBER:?TWILIO_PHONE_NUMBER is required}
+      OTP_PROVIDER: supabase_email
       DATABASE_URL: ${DATABASE_URL:?Supabase DATABASE_URL is required}
       REDIS_URL: ${REDIS_URL:?REDIS_URL is required and must address the redis service}
       REDIS_HOST: redis

@@ -21,6 +21,8 @@
     "test:e2e": "jest --config ./test/jest-e2e.json",
     "test:financial:e2e": "jest --config ./test/jest-financial-e2e.json --runInBand",
     "seed": "npx ts-node prisma/seed.ts",
+    "admin:bootstrap": "ts-node scripts/bootstrap-admin.ts",
+    "admin:bootstrap:prod": "node dist/scripts/bootstrap-admin.js",
     "seed:vtu-pricing": "npx ts-node scripts/seed-vtu-pricing.ts",
     "db:migrate": "npx prisma migrate dev",
     "db:deploy": "npx prisma migrate deploy",

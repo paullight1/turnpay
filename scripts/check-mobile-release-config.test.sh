@@ -79,10 +79,10 @@ expect_success "$valid_config"
 
 missing_sentry_config="$test_root/missing-sentry.json"
 jq 'del(.SENTRY_DSN)' "$valid_config" >"$missing_sentry_config"
-expect_failure_without_secret_echo \
-  "$missing_sentry_config" \
-  'SENTRY_DSN is required' \
-  'sb_publishable_public_test_value'
+expect_success "$missing_sentry_config"
+missing_monitoring_config="$test_root/missing-monitoring.json"
+jq 'del(.SENTRY_DSN, .SENTRY_ENVIRONMENT)' "$valid_config" >"$missing_monitoring_config"
+expect_success "$missing_monitoring_config"
 
 missing_pins_config="$test_root/missing-pins.json"
 jq 'del(.API_CERTIFICATE_SHA256_PINS)' "$valid_config" >"$missing_pins_config"

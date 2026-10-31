@@ -45,8 +45,8 @@ The JSON object must contain only these string fields:
 | `WEBSITE_BASE_URL` | HTTPS. Production must be exactly `https://trustpay.xyz`. |
 | `SUPABASE_URL` | HTTPS project URL on an allowlisted `*.supabase.co` host. |
 | `SUPABASE_PUBLISHABLE_KEY` | Nonempty public Supabase key. Service-role and secret markers are rejected. |
-| `SENTRY_DSN` | Nonempty HTTPS DSN on `sentry.io` or a Sentry subdomain. |
-| `SENTRY_ENVIRONMENT` | `production` for a production target, `staging` for a staging target. |
+| `SENTRY_DSN` | Optional. When supplied, an HTTPS DSN on `sentry.io` or a Sentry subdomain. |
+| `SENTRY_ENVIRONMENT` | Required only with a DSN: `production` for production, `staging` for staging. |
 | `API_CERTIFICATE_SHA256_PINS` | At least two distinct lowercase 64-character SHA-256 hex pins, separated by commas. |
 
 The `SENTRY_ENVIRONMENT` check keeps the target explicit in release metadata;
