@@ -8,13 +8,8 @@
   "testEnvironment": "node",
   "testRegex": ".e2e-spec.ts$",
   "testPathIgnorePatterns": [
-    "kyc-flow.financial.e2e-spec.ts$",
-    "kora-.*.financial.e2e-spec.ts$",
-    "internal-transfer.financial.e2e-spec.ts$",
-    "internal-transfer.fault.e2e-spec.ts$",
-    "banking-webhook.financial.e2e-spec.ts$",
-    "vtpass-vtu.financial.e2e-spec.ts$",
-    "email-otp.financial.e2e-spec.ts"
+    "\\.financial\\.e2e-spec\\.ts$",
+    "\\.fault\\.e2e-spec\\.ts$"
   ],
   "transform": {
     "^.+\\.(t|j)s$": "ts-jest"

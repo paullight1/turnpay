@@ -270,6 +270,7 @@ describe('Banking — Virtual Account Provisioning (e2e simulated)', () => {
     expect(mockBankingService.provisionVirtualAccount).toHaveBeenCalledWith(
       'user-unverified',
       requestBody,
+      undefined,
     );
   });
 
