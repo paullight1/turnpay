@@ -22,10 +22,10 @@ describe('internal transfer production configuration', () => {
     OTP_EXPIRES_IN: '5m',
     OTP_LENGTH: '6',
     OTP_DEV_CODE: '',
-    SMS_PROVIDER: 'twilio',
-    TWILIO_ACCOUNT_SID: 'ACaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
-    TWILIO_AUTH_TOKEN: 'ci-twilio-auth-token',
-    TWILIO_PHONE_NUMBER: '+15557122661',
+    OTP_PROVIDER: 'supabase_email',
+    SUPABASE_URL: 'https://project.supabase.co',
+    SUPABASE_PUBLISHABLE_KEY: 'test-publishable',
+    SUPABASE_ANON_KEY: '',
     IDEMPOTENCY_RESPONSE_ENCRYPTION_KEY: Buffer.alloc(32, 7).toString('base64'),
     IDEMPOTENCY_RESPONSE_ENCRYPTION_KEY_ID: 'v1',
     TRANSACTION_PIN_REQUIRED: 'true',
@@ -152,15 +152,20 @@ describe('internal transfer production configuration', () => {
     );
   });
 
-  it('requires production Sentry and rejects development OTP overrides', () => {
+  it('allows email OTP without Sentry or Twilio and rejects development OTP overrides', () => {
     const missingSentryEnv = { ...productionEnv };
     delete missingSentryEnv.SENTRY_DSN;
+    delete missingSentryEnv.TWILIO_ACCOUNT_SID;
+    delete missingSentryEnv.TWILIO_AUTH_TOKEN;
+    delete missingSentryEnv.TWILIO_PHONE_NUMBER;
+    missingSentryEnv.OTP_PROVIDER = 'supabase_email';
+    delete missingSentryEnv.SMS_PROVIDER;
     const missingSentryResult = spawnSync(script, ['true'], {
       env: missingSentryEnv,
       encoding: 'utf8',
     });
-    expect(missingSentryResult.status).toBe(1);
-    expect(missingSentryResult.stderr).toContain('SENTRY_DSN is required');
+    expect(missingSentryResult.status).toBe(0);
+    expect(missingSentryResult.stderr).toBe('');
 
     const devCodeResult = spawnSync(script, ['true'], {
       env: { ...productionEnv, OTP_DEV_CODE: '123456' },
@@ -171,4 +176,23 @@ describe('internal transfer production configuration', () => {
       'OTP_DEV_CODE must be empty in deployed environments',
     );
   });
+  it.each(['SUPABASE_URL', 'SUPABASE_PUBLISHABLE_KEY'])(
+    'rejects missing email auth prerequisite %s',
+    (key) => {
+      const env = {
+        ...productionEnv,
+        SUPABASE_URL: 'https://project.supabase.co',
+        SUPABASE_PUBLISHABLE_KEY: 'test-publishable',
+        SUPABASE_ANON_KEY: '',
+      };
+      delete env[key];
+      const result = spawnSync(script, ['true'], { env, encoding: 'utf8' });
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain(
+        key === 'SUPABASE_URL'
+          ? 'SUPABASE_URL'
+          : 'Supabase publishable or anon key',
+      );
+    },
+  );
 });

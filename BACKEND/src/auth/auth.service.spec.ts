@@ -50,6 +50,7 @@ describe('AuthService Supabase integration', () => {
 
   const otp = {
     sendOtp: jest.fn(),
+    startEmailChallenge: jest.fn(),
     verifyOtp: jest.fn(),
     assertOtpSendAllowed: jest.fn(),
     assertPasswordResetAllowed: jest.fn(),
@@ -224,7 +225,7 @@ describe('AuthService Supabase integration', () => {
     expect(supabase.authClient.auth.signUp).not.toHaveBeenCalled();
   });
 
-  it('returns the created session when registration OTP delivery is unavailable', async () => {
+  it('does not require a second OTP when signup already returns a session', async () => {
     users.findByEmail.mockResolvedValue(null);
     users.findByPhone.mockResolvedValue(null);
     supabase.authClient.auth.signUp.mockResolvedValue({
@@ -258,7 +259,6 @@ describe('AuthService Supabase integration', () => {
     ).resolves.toEqual(
       expect.objectContaining({
         authMode: 'supabase',
-        otpDeliveryPending: true,
       }),
     );
   });
@@ -641,12 +641,12 @@ describe('AuthService Supabase integration', () => {
   });
 
   it('normalizes OTP send identities before throttling and lookup', async () => {
-    users.findByPhone.mockResolvedValue(null);
+    users.findByEmail.mockResolvedValue(null);
 
-    await service.sendOtp('  +2348012345678  ');
+    await service.sendOtp('  Ada@Example.com  ');
 
-    expect(otp.assertOtpSendAllowed).toHaveBeenCalledWith('+2348012345678');
-    expect(users.findByPhone).toHaveBeenCalledWith('+2348012345678');
+    expect(otp.assertOtpSendAllowed).toHaveBeenCalledWith('ada@example.com');
+    expect(users.findByEmail).toHaveBeenCalledWith('ada@example.com');
   });
 
   it('logs out the caller session through Supabase with the explicit access token', async () => {
@@ -764,8 +764,12 @@ describe('AuthService Supabase integration', () => {
     expect(prisma.auditLog.create).not.toHaveBeenCalled();
   });
 
-  it("resets transaction PIN with OTP for the authenticated user's phone", async () => {
-    users.findOne.mockResolvedValue({ id: 'user-1', phone: '+2348012345678' });
+  it("resets transaction PIN with OTP for the authenticated user's saved email", async () => {
+    users.findOne.mockResolvedValue({
+      id: 'user-1',
+      phone: '+2348012345678',
+      email: 'ada@example.com',
+    });
     otp.verifyOtp.mockResolvedValue(true);
     transactionPin.resetPinWithHold.mockResolvedValue({
       success: true,
@@ -777,7 +781,7 @@ describe('AuthService Supabase integration', () => {
       newPin: '5678',
     });
 
-    expect(otp.verifyOtp).toHaveBeenCalledWith('+2348012345678', '123456');
+    expect(otp.verifyOtp).toHaveBeenCalledWith('ada@example.com', '123456');
     expect(transactionPin.resetPinWithHold).toHaveBeenCalledWith(
       'user-1',
       '5678',
@@ -799,7 +803,11 @@ describe('AuthService Supabase integration', () => {
   });
 
   it('rejects transaction PIN reset when OTP verification fails', async () => {
-    users.findOne.mockResolvedValue({ id: 'user-1', phone: '+2348012345678' });
+    users.findOne.mockResolvedValue({
+      id: 'user-1',
+      phone: '+2348012345678',
+      email: 'ada@example.com',
+    });
     otp.verifyOtp.mockResolvedValue(false);
 
     await expect(
@@ -879,5 +887,53 @@ describe('AuthService Supabase integration', () => {
     });
     expect(prisma.refreshToken.update).not.toHaveBeenCalled();
     expect(response).toEqual({ success: true });
+  });
+  it('keeps staging registration sessionless until email ownership is verified', async () => {
+    const previousEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = 'staging';
+    try {
+      users.findByEmail.mockResolvedValue(null);
+      users.findByPhone.mockResolvedValue(null);
+      supabase.authClient.auth.signUp.mockResolvedValue({
+        data: {
+          user: { id: 'staging-user', email: 'ada@example.com' },
+          session: null,
+        },
+        error: null,
+      });
+      supabase.syncUser.mockResolvedValue({ id: 'staging-user' });
+      users.findOne.mockResolvedValue({
+        id: 'staging-user',
+        email: 'ada@example.com',
+        role: 'USER',
+        phone: '+2348012345678',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+      const result = await service.register({
+        email: 'ada@example.com',
+        phone: '+2348012345678',
+        password: 'Password1',
+        transactionPin: '1234',
+      });
+      expect(result.session).toBeNull();
+      expect(otp.startEmailChallenge).toHaveBeenCalledWith('ada@example.com');
+      expect(otp.sendOtp).not.toHaveBeenCalled();
+    } finally {
+      process.env.NODE_ENV = previousEnv;
+    }
+  });
+
+  it('keeps email request responses uniform during provider delivery failures', async () => {
+    users.findByEmail.mockResolvedValueOnce(null);
+    const unknown = await service.sendOtp('unknown@example.com');
+    users.findByEmail.mockResolvedValueOnce({
+      id: 'user-1',
+      email: 'ada@example.com',
+    });
+    otp.sendOtp.mockRejectedValueOnce(
+      new ServiceUnavailableException('provider failed'),
+    );
+    await expect(service.sendOtp('ada@example.com')).resolves.toEqual(unknown);
   });
 });

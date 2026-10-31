@@ -156,9 +156,9 @@ describe('AuthController', () => {
       'Bearer access-token',
       { currentPassword: 'old', newPassword: 'new' },
     );
-    const sendOtp = await controller.sendOtp({ phone: '+2348012345678' });
+    const sendOtp = await controller.sendOtp({ email: 'ada@example.com' });
     const verifyOtp = await controller.verifyOtp({
-      phone: '+2348012345678',
+      email: 'ada@example.com',
       otp: '000000',
     });
     const forgotPassword = await controller.forgotPassword({
@@ -174,9 +174,9 @@ describe('AuthController', () => {
       'old',
       'new',
     );
-    expect(authService.sendOtp).toHaveBeenCalledWith('+2348012345678');
+    expect(authService.sendOtp).toHaveBeenCalledWith('ada@example.com');
     expect(authService.verifyOtp).toHaveBeenCalledWith(
-      '+2348012345678',
+      'ada@example.com',
       '000000',
     );
     expect(authService.sendPasswordResetEmail).toHaveBeenCalledWith(

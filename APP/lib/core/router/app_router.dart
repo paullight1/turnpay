@@ -399,12 +399,14 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       ),
       GoRoute(
         path: AppRoutes.otp,
+        redirect: (context, state) =>
+            _emailFromExtra(state.extra).isEmpty ? AppRoutes.login : null,
         pageBuilder: (context, state) {
           final extra = state.extra as Map<String, dynamic>? ?? {};
           return _slideTransition(
             state,
             OtpScreen(
-              phone: extra['phone'] as String? ?? '',
+              email: _emailFromExtra(extra),
               purpose: extra['purpose'] as String? ?? 'verify',
             ),
           );

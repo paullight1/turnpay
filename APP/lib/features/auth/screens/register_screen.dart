@@ -179,7 +179,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
         context.push(
           AppRoutes.otp,
           extra: {
-            'phone': phone,
+            'email': _emailController.text.trim().toLowerCase(),
             'purpose': 'verify',
           },
         );

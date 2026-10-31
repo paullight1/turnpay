@@ -1,8 +1,12 @@
 {
-  "moduleFileExtensions": ["js", "json", "ts"],
+  "moduleFileExtensions": [
+    "js",
+    "json",
+    "ts"
+  ],
   "rootDir": ".",
   "testEnvironment": "node",
-  "testRegex": "(?:kora-(?:collections|exchange)\\.financial|internal-transfer\\.(financial|fault)|vtpass-vtu\\.financial|banking-webhook\\.financial|manual-exchange\\.financial|exchange\\.financial)\\.e2e-spec\\.ts$",
+  "testRegex": "(?:email-otp\\.financial|kyc-flow\\.financial|kora-(?:collections|exchange)\\.financial|internal-transfer\\.(financial|fault)|vtpass-vtu\\.financial|banking-webhook\\.financial|manual-exchange\\.financial|exchange\\.financial)\\.e2e-spec\\.ts$",
   "testTimeout": 30000,
   "transform": {
     "^.+\\.(t|j)s$": "ts-jest"

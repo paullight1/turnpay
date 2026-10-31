@@ -18,9 +18,9 @@ import 'core/constants/app_constants.dart';
 import 'services/secure_transport_factory.dart';
 
 /// Crash-reporting DSN. Provide it at build time with
-/// `--dart-define=SENTRY_DSN=...`. When empty (debug/dev), Sentry stays a
+/// `--dart-define=SENTRY_DSN=...`. When empty, Sentry stays a
 /// no-op and errors are only logged — the app still runs.
-// The protected release workflow supplies this public reporting endpoint.
+// The release workflow may supply this public reporting endpoint.
 const _sentryDsn = String.fromEnvironment('SENTRY_DSN');
 
 void main() {
@@ -66,9 +66,6 @@ void main() {
         ProviderScope(
           child: StartupGate(
             initialize: () async {
-              if (kReleaseMode && _sentryDsn.isEmpty) {
-                throw StateError('SENTRY_DSN is required for release builds.');
-              }
               final transport = SecureTransportConfiguration.fromEnvironment(
                   baseUrl: AppConstants.apiBaseUrl, releaseMode: kReleaseMode);
               final error = transport.releaseValidationError(

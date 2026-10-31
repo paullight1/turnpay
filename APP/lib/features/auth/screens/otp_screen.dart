@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
@@ -11,14 +13,16 @@ import '../widgets/auth_help_button.dart';
 import '../widgets/tp_button.dart';
 
 /// OTP Verification screen â€” 6-digit split input boxes.
-/// Used for both phone verification on signup and password reset.
+/// Verifies email ownership without marking phone or KYC as verified.
 class OtpScreen extends StatefulWidget {
-  final String phone;
+  final String email;
+  final AuthService? authService;
   final String purpose; // 'verify' | 'reset'
 
   const OtpScreen({
     super.key,
-    required this.phone,
+    required this.email,
+    this.authService,
     required this.purpose,
   });
 
@@ -30,9 +34,10 @@ class _OtpScreenState extends State<OtpScreen> {
   final int _otpLength = 6;
   final List<TextEditingController> _controllers = [];
   final List<FocusNode> _focusNodes = [];
-  final _authService = AuthService();
+  late final AuthService _authService = widget.authService ?? AuthService();
   bool _isLoading = false;
-  int _resendSeconds = 30;
+  int _resendSeconds = 60;
+  Timer? _resendTimer;
 
   @override
   void initState() {
@@ -46,6 +51,7 @@ class _OtpScreenState extends State<OtpScreen> {
 
   @override
   void dispose() {
+    _resendTimer?.cancel();
     for (final c in _controllers) {
       c.dispose();
     }
@@ -60,14 +66,14 @@ class _OtpScreenState extends State<OtpScreen> {
   }
 
   void _startResendTimer() {
-    Future.doWhile(() async {
-      await Future.delayed(const Duration(seconds: 1));
-      if (!mounted) return false;
-      if (_resendSeconds > 0) {
-        setState(() => _resendSeconds--);
-        return true;
+    _resendTimer?.cancel();
+    _resendTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted || _resendSeconds <= 0) {
+        timer.cancel();
+        return;
       }
-      return false;
+      setState(() => _resendSeconds--);
+      if (_resendSeconds == 0) timer.cancel();
     });
   }
 
@@ -148,18 +154,18 @@ class _OtpScreenState extends State<OtpScreen> {
   }
 
   Future<void> _onVerify() async {
-    if (!_isComplete) return;
+    if (!_isComplete || _isLoading) return;
     setState(() => _isLoading = true);
 
     try {
       await _authService.verifyOtp(
-        phone: widget.phone,
+        email: widget.email,
         otp: _otpValue,
       );
 
       if (!mounted) return;
 
-      context.go('/login');
+      context.go('/login', extra: {'email': widget.email});
     } catch (error) {
       if (!mounted) return;
       showTpSnackbar(
@@ -175,13 +181,14 @@ class _OtpScreenState extends State<OtpScreen> {
   }
 
   Future<void> _onResend() async {
-    if (_resendSeconds > 0) return;
+    if (_resendSeconds > 0 || _isLoading) return;
+    setState(() => _isLoading = true);
 
     try {
-      await _authService.resendOtp(widget.phone);
+      await _authService.resendOtp(widget.email);
 
       if (!mounted) return;
-      setState(() => _resendSeconds = 30);
+      setState(() => _resendSeconds = 60);
       _startResendTimer();
     } catch (error) {
       if (!mounted) return;
@@ -190,18 +197,18 @@ class _OtpScreenState extends State<OtpScreen> {
         authErrorMessage(error, 'Could not resend OTP'),
         type: TpSnackbarType.error,
       );
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
   @override
   Widget build(BuildContext context) {
     AppColors.watch(context);
-    final maskedPhone = _maskPhone(widget.phone);
-    final heading = widget.purpose == 'reset'
-        ? 'Check your\nphone.'
-        : 'Verify your\nnumber.';
+    final maskedEmail = _maskEmail(widget.email);
+    const heading = 'Check your\nemail.';
     final subtext =
-        'We sent a 6-digit code to $maskedPhone. It expires in 10 minutes.';
+        'Enter the 6-digit code sent to $maskedEmail. It expires in 5 minutes. Check your spam folder too.';
 
     return Scaffold(
       backgroundColor: AppColors.background,
@@ -295,7 +302,7 @@ class _OtpScreenState extends State<OtpScreen> {
                     onTap: () => _onResend(),
                     child: Text(
                       _resendSeconds > 0
-                          ? 'Resend in 0:${_resendSeconds.toString().padLeft(2, '0')}'
+                          ? 'Resend in ${_resendSeconds ~/ 60}:${(_resendSeconds % 60).toString().padLeft(2, '0')}'
                           : 'Resend now',
                       style: AppTextStyles.bodyM.copyWith(
                         color: _resendSeconds > 0
@@ -314,11 +321,10 @@ class _OtpScreenState extends State<OtpScreen> {
     );
   }
 
-  String _maskPhone(String phone) {
-    if (phone.length < 5) return phone;
-    final visible = phone.substring(phone.length - 4);
-    const masked = 'â—â—â—â— â—â—â—â— ';
-    return '$masked$visible';
+  String _maskEmail(String email) {
+    final parts = email.split('@');
+    if (parts.length != 2 || parts.first.isEmpty) return 'your email address';
+    return '${parts.first[0]}•••@${parts.last}';
   }
 }
 

@@ -4,9 +4,35 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:trustpay_app/core/router/app_router.dart';
 import 'package:trustpay_app/features/auth/screens/forgot_password_screen.dart';
+import 'package:trustpay_app/features/auth/screens/login_screen.dart';
+import 'package:go_router/go_router.dart';
 import 'package:trustpay_app/services/auth_service.dart';
 
 void main() {
+  testWidgets(
+      'returning users can request email verification without entering a password',
+      (tester) async {
+    final auth = _EmailCodeAuth();
+    final router = GoRouter(initialLocation: '/login', routes: [
+      GoRoute(
+          path: '/login',
+          builder: (_, __) => LoginScreen(
+              initialEmail: ' Ada@Example.com ', authService: auth)),
+      GoRoute(
+          path: '/otp',
+          builder: (_, state) =>
+              Scaffold(body: Text((state.extra as Map)['email'] as String))),
+    ]);
+    addTearDown(router.dispose);
+    await tester.pumpWidget(MaterialApp.router(routerConfig: router));
+    await tester.pump(const Duration(milliseconds: 500));
+    await tester.ensureVisible(find.text('Verify email'));
+    await tester.tap(find.text('Verify email'));
+    await tester.pumpAndSettle();
+    expect(auth.requestedEmail, 'ada@example.com');
+    expect(find.text('ada@example.com'), findsOneWidget);
+  });
+
   testWidgets('login email is prefilled on the forgot password screen',
       (tester) async {
     final container = ProviderContainer();
@@ -69,4 +95,12 @@ void main() {
 class _SuccessfulForgotPasswordService extends AuthService {
   @override
   Future<void> forgotPassword(String email) async {}
+}
+
+class _EmailCodeAuth extends AuthService {
+  String? requestedEmail;
+  @override
+  Future<void> resendOtp(String email) async {
+    requestedEmail = email;
+  }
 }

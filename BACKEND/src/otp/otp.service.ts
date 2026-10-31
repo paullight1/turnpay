@@ -1,17 +1,9 @@
-import {
-  HttpException,
-  HttpStatus,
-  Inject,
-  Injectable,
-  ServiceUnavailableException,
-} from '@nestjs/common';
+import { HttpException, HttpStatus, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { RedisService } from '../redis/redis.service';
-import { createHash, randomInt } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
 import { PinoLogger } from 'nestjs-pino';
-import { maskPhone } from '../common/utils/masking';
-import { SMS_PROVIDER } from './sms-provider';
-import type { SmsProvider } from './sms-provider';
+import { EmailOtpProvider } from './email-otp.provider';
 
 const OTP_SEND_LIMIT = 3;
 const OTP_SEND_WINDOW_SECONDS = 60 * 60;
@@ -63,7 +55,6 @@ return { "invalid", attempts }
 @Injectable()
 export class OtpService {
   private readonly expirySeconds: number;
-  private readonly otpLength: number;
   private readonly devOtpCode?: string;
   private readonly maxAttempts = MAX_OTP_ATTEMPTS;
   private readonly localLocks = new Map<string, Promise<void>>();
@@ -72,19 +63,12 @@ export class OtpService {
     private readonly redis: RedisService,
     private readonly configService: ConfigService,
     private readonly logger: PinoLogger,
-    @Inject(SMS_PROVIDER) private readonly smsProvider: SmsProvider,
+    private readonly emailProvider: EmailOtpProvider,
   ) {
     this.logger.setContext(OtpService.name);
     this.expirySeconds = this.parseExpirySeconds(
       this.configService.get<string>('OTP_EXPIRES_IN'),
     );
-    const configuredOtpLength = Number(
-      this.configService.get<string>('OTP_LENGTH') || '6',
-    );
-    // The public DTO accepts six digits. Fall back to that contract when a
-    // malformed or incompatible value is supplied instead of generating an
-    // OTP that the API cannot verify.
-    this.otpLength = configuredOtpLength === 6 ? configuredOtpLength : 6;
     const configuredDevCode = this.configService.get<string>('OTP_DEV_CODE');
     const nodeEnv = (
       this.configService.get<string>('NODE_ENV') ?? 'development'
@@ -100,7 +84,7 @@ export class OtpService {
   }
 
   async assertOtpSendAllowed(phone: string): Promise<void> {
-    const normalizedPhone = this.normalizePhone(phone);
+    const normalizedPhone = this.normalizeEmail(phone);
     const phoneHash = this.hashPhone(normalizedPhone);
 
     await this.enforceRateLimit(
@@ -123,61 +107,58 @@ export class OtpService {
     );
   }
 
-  async sendOtp(phone: string): Promise<{ success: boolean; message: string }> {
-    const normalizedPhone = this.normalizePhone(phone);
-    const code = this.devOtpCode ?? this.generateOtp();
-    const phoneHash = this.hashPhone(normalizedPhone);
-    const codeKey = this.codeKey(phoneHash);
-    const attemptsKey = this.attemptsKey(phoneHash);
-    const message = `Your TrustPay verification code is: ${code}. Valid for ${Math.ceil(this.expirySeconds / 60)} minutes.`;
-
-    if (!this.devOtpCode) {
-      try {
-        await this.smsProvider.sendSms(normalizedPhone, message);
-      } catch (error: unknown) {
-        this.logger.warn(
-          {
-            phoneHash,
-            phoneMasked: maskPhone(normalizedPhone),
-          },
-          'OTP delivery failed',
-        );
-        if (error instanceof HttpException) {
-          throw error;
-        }
-        throw new ServiceUnavailableException('OTP delivery unavailable');
-      }
+  async startEmailChallenge(email: string): Promise<void> {
+    const hash = this.hashIdentity(this.normalizeEmail(email));
+    this.redis.assertAvailable();
+    const codeKey = this.codeKey(hash);
+    const attemptsKey = this.attemptsKey(hash);
+    const challenge = this.devOtpCode ?? randomUUID();
+    if (this.redis.isAvailable()) {
+      await this.redis.execute('email-otp-start', (client) =>
+        client.eval(
+          `
+        redis.call('SET', KEYS[1], ARGV[1], 'EX', ARGV[2])
+        redis.call('DEL', KEYS[2])
+        return 1
+      `,
+          2,
+          codeKey,
+          attemptsKey,
+          challenge,
+          String(this.expirySeconds),
+        ),
+      );
+    } else {
+      await this.withLocalLock(codeKey, async () => {
+        await this.redis.set(codeKey, challenge, this.expirySeconds);
+        await this.redis.del(attemptsKey);
+      });
     }
+  }
 
-    // Persist only after the provider acknowledges the request. This avoids
-    // leaving a newly generated code usable when delivery fails or times out.
-    await this.redis.set(codeKey, code, this.expirySeconds);
-    await this.redis.del(attemptsKey);
-
+  async sendOtp(email: string): Promise<{ success: boolean; message: string }> {
+    const normalizedEmail = this.normalizeEmail(email);
+    this.redis.assertAvailable();
+    if (!this.devOtpCode) await this.emailProvider.sendOtp(normalizedEmail);
+    await this.startEmailChallenge(normalizedEmail);
     this.logger.info(
       {
-        phoneHash,
-        phoneMasked: maskPhone(normalizedPhone),
+        identityHash: this.hashIdentity(normalizedEmail),
         expiresInSeconds: this.expirySeconds,
       },
-      'OTP generated',
+      'Email OTP requested',
     );
-    if (this.devOtpCode) {
-      this.logger.warn('Development OTP override is enabled');
-    }
-
-    return {
-      success: true,
-      message: 'OTP sent successfully',
-    };
+    return { success: true, message: 'OTP sent successfully' };
   }
 
   async verifyOtp(phone: string, otp: string): Promise<boolean> {
-    const normalizedPhone = this.normalizePhone(phone);
+    const normalizedPhone = this.normalizeEmail(phone);
     const normalizedOtp = otp.trim();
     const phoneHash = this.hashPhone(normalizedPhone);
-    const phoneMasked = maskPhone(normalizedPhone);
+    const phoneMasked = '[email]';
     this.redis.assertAvailable();
+    if (!this.devOtpCode)
+      return this.verifyEmailChallenge(normalizedPhone, normalizedOtp);
     const result = this.redis.isAvailable()
       ? await this.verifyWithRedis(phoneHash, normalizedOtp)
       : await this.withLocalLock(`otp:${phoneHash}`, async () =>
@@ -215,10 +196,65 @@ export class OtpService {
     return false;
   }
 
-  private generateOtp(): string {
-    const min = Math.pow(10, this.otpLength - 1);
-    const max = Math.pow(10, this.otpLength) - 1;
-    return String(randomInt(min, max + 1));
+  private async verifyEmailChallenge(
+    email: string,
+    token: string,
+  ): Promise<boolean> {
+    const hash = this.hashIdentity(email);
+    const codeKey = this.codeKey(hash);
+    const attemptsKey = this.attemptsKey(hash);
+    const challenge = this.redis.isAvailable()
+      ? await this.redis.execute('email-otp-reserve', (client) =>
+          client.eval(
+            `
+        local challenge = redis.call('GET', KEYS[1])
+        if not challenge then return '' end
+        local attempts = tonumber(redis.call('GET', KEYS[2]) or '0')
+        if attempts >= 3 then return '' end
+        redis.call('INCR', KEYS[2])
+        redis.call('PEXPIRE', KEYS[2], redis.call('PTTL', KEYS[1]))
+        return challenge
+      `,
+            2,
+            codeKey,
+            attemptsKey,
+          ),
+        )
+      : await this.withLocalLock(codeKey, async () => {
+          const value = await this.redis.get(codeKey);
+          const attempts = Number((await this.redis.get(attemptsKey)) || '0');
+          if (!value || attempts >= 3) return '';
+          await this.redis.set(
+            attemptsKey,
+            String(attempts + 1),
+            this.expirySeconds,
+          );
+          return value;
+        });
+    if (typeof challenge !== 'string' || !challenge) return false;
+    if (!(await this.emailProvider.verifyOtp(email, token))) return false;
+    // Compare the challenge generation so a late result cannot consume a resend.
+    const consumed = this.redis.isAvailable()
+      ? await this.redis.execute('email-otp-consume', (client) =>
+          client.eval(
+            `
+        if redis.call('GET', KEYS[1]) ~= ARGV[1] then return 0 end
+        redis.call('DEL', KEYS[1], KEYS[2])
+        return 1
+      `,
+            2,
+            codeKey,
+            attemptsKey,
+            challenge,
+          ),
+        )
+      : await this.withLocalLock(codeKey, async () => {
+          if ((await this.redis.get(codeKey)) !== challenge) return 0;
+          await this.redis.del(codeKey);
+          await this.redis.del(attemptsKey);
+          return 1;
+        });
+    return Number(consumed) === 1;
   }
 
   private parseExpirySeconds(configured?: string): number {
@@ -342,10 +378,6 @@ export class OtpService {
 
   private attemptsKey(phoneHash: string) {
     return `otp:${phoneHash}:attempts`;
-  }
-
-  private normalizePhone(phone: string) {
-    return phone.trim();
   }
 
   private normalizeEmail(email: string) {

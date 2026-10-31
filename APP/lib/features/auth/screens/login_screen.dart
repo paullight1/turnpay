@@ -12,10 +12,12 @@ import '../widgets/tp_button.dart';
 
 class LoginScreen extends StatefulWidget {
   final String initialEmail;
+  final AuthService? authService;
 
   const LoginScreen({
     super.key,
     this.initialEmail = '',
+    this.authService,
   });
 
   @override
@@ -26,7 +28,7 @@ class _LoginScreenState extends State<LoginScreen> {
   final _formKey = GlobalKey<FormState>();
   late final TextEditingController _emailController;
   final _passwordController = TextEditingController();
-  final _authService = AuthService();
+  late final AuthService _authService = widget.authService ?? AuthService();
   bool _obscurePassword = true;
   bool _isLoading = false;
   bool _expiredNoticeShown = false;
@@ -80,6 +82,27 @@ class _LoginScreenState extends State<LoginScreen> {
     } catch (error) {
       if (!mounted) return;
       _showError(authErrorMessage(error, 'Login failed'));
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _onVerifyEmail() async {
+    if (_isLoading) return;
+    final email = _emailController.text.trim().toLowerCase();
+    if (!RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(email)) {
+      _showError('Enter your account email first.');
+      return;
+    }
+    setState(() => _isLoading = true);
+    try {
+      await _authService.resendOtp(email);
+      if (!mounted) return;
+      context.push(AppRoutes.otp, extra: {'email': email, 'purpose': 'verify'});
+    } catch (error) {
+      if (mounted) {
+        _showError(authErrorMessage(error, 'Could not request an email code'));
+      }
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -203,6 +226,12 @@ class _LoginScreenState extends State<LoginScreen> {
                   onTap: _onLogin,
                 ),
                 const SizedBox(height: AppSpacing.xl),
+
+                TextButton(
+                  onPressed: _isLoading ? null : _onVerifyEmail,
+                  child: const Text('Verify email'),
+                ),
+                const SizedBox(height: AppSpacing.sm),
 
                 // ── Sign up link ──
                 Row(

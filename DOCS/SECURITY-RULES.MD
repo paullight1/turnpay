@@ -154,7 +154,7 @@ async function deductBalance(userId: string, currency: string, amount: Decimal) 
 
 **4.9** Rate limit authentication endpoints:
    - Login: 5 attempts per 15 minutes per IP
-   - OTP send: 3 sends per hour per phone number
+   - OTP send: 3 sends per hour per normalized email address
    - Password reset: 3 requests per hour per email
 
 **4.10** JWT tokens MUST contain only non-sensitive claims (`sub`, `role`). Never include password, email in tokens.
@@ -310,7 +310,7 @@ async handleMonnifyWebhook(
 
 **9.4** Implement an audit trail table for all admin actions (rate changes, user suspension, etc.).
 
-**9.5** Set up error tracking (Sentry) for both backend and frontend.
+**9.5** Keep structured error logging and operational audit records enabled. Sentry is optional for now, as explicitly directed by the owner on 31 October 2026; enable it only when a valid DSN is configured.
 
 **9.6** Log rate limit triggers and authentication failures.
 
@@ -509,6 +509,16 @@ Every code change MUST be reviewed against this checklist:
 *Last updated: 2026-10-30 — Paystack migration, verified incoming-checkout correction and secure mobile checkout recovery reviewed*
 *This document MUST be reviewed and updated at the end of each phase.*
 
+### 2026-10-31 KYC delivery and reviewer activation
+
+Manual NIN submissions and admin decisions now serialize on the same user-first PostgreSQL row lock as Paystack identity finalization. Reviews reread pending state and the current tier inside the transaction; terminal decisions cannot be replaced by a competing reviewer. No provider-owned BVN decision or existing tier requirement was relaxed. A server-only first-admin command defaults to dry run, requires an explicitly selected existing confirmed and active auth identity, refuses a second administrator, and records the role assignment atomically under serializable isolation. It creates no passwords and never infers privileges from email domains or customer metadata. Runtime auth continues to check the database role.
+
+Verification: 627 backend unit tests passed; six KYC API cases passed against disposable local PostgreSQL with real guards, validation, database idempotency, signature checks, webhook inbox/worker and audits. Delayed provider responses use the same user-first lock and fresh account state, preserving independently earned tiers. Auth/provider/storage boundaries were faked for those cases; live approval and delivery are not certified. Backend build and targeted ESLint passed. Live configuration remains pending the owner's dashboard access, server storage credential and designated reviewer. No genuine verification outcome, tier or role was manually changed during setup.
+
+Activation follow-up: the owner nominated an existing reviewer, but email confirmation remains required and the bootstrap correctly refused promotion. A fresh confirmation email was sent only after explicit owner instruction. The existing Render storage credential was matched to the same Supabase project and installed only in the ignored local server configuration with mode 0600; temporary secret files were removed. A synthetic private-storage upload/read test passed, anonymous access was denied, and the fixture was removed. The previously empty Paystack Live webhook was saved to the canonical TRUSTPAY API URL and persistence verified. Delivery remains unverified because the new deployed release fails its mandatory configuration checks. No production guard was disabled, no real KYC result was approved, and the approved Render Paystack-key transfer was not performed after browser control disconnected.
+
+Reviewer activation follow-up: after Supabase confirmed the nominated account's email, the owner-authorized first-admin command completed its dry run and applied the ADMIN role. An independent database read confirmed the active role and exactly one provisioning audit. This access assignment did not verify an identity document or change any KYC tier. Render configuration and delivery remain pending unavailable browser control and deployment credentials; no startup security or monitoring requirement was bypassed.
+
 ### 2026-10-31 mobile identity and receiving-account review
 
 The Flutter account request flow retains authenticated backend eligibility checks and explicit account-setup consent. Provisioning and KYC retries retain their idempotency keys for uncertain outcomes; definite client rejections allow a new attempt. Identity request fingerprints are hashed in memory, bank details remain masked on review, and NIN approval remains an audited staff action. No balance, tier, provider-signature, or backend authorization rules were changed by this UI repair.
@@ -560,3 +570,8 @@ The Flutter review redesign separates submission acknowledgement, per-document s
 Accepted local outcomes remain visible through stale or partial reads until the server acknowledges them; explicit server failures/revocations and server-owned tiers take precedence. Status checks are read-only, serialized per sheet, and preserve cached information after network failure. Canonical references reused by retries do not hide newly accepted results. NIN entry is masked with keyboard suggestions and autocorrect disabled. Illustrations are local, static SVG assets with no external requests. No real identity submission or financial account creation was performed for this UI verification.
 
 KYC review experience validation: all 400 Flutter tests passed, analyzer reported no issues, whitespace checks passed, and responsive light/dark/150% text layouts were rendered and inspected. Independent review findings were covered by canonical-retry, legacy-status, NIN-privacy and stale-read regressions.
+
+
+### 2026-10-31 email OTP and optional Sentry follow-up
+
+At the owner's explicit instruction, Sentry is optional in backend startup and mobile release builds; supplied DSNs retain HTTPS/host validation, and structured logging/audit remain enabled. Customer OTP delivery/verification uses Supabase email rather than Twilio. DTOs validate normalized email plus six digits; existing auth idempotency policies remain in force. Redis bounds each challenge to five minutes and three provider attempts, atomically consumes success and prevents late results from deleting a newer challenge. Provider tokens/sessions are not exposed by the OTP API; SDK clients have isolated state. Email verification grants no phone or KYC verification. Authenticated PIN reset binds its code to the saved email and preserves security holds. Live email acceptance still requires verified SMTP/template settings and genuine provider delivery; no live verification was fabricated.

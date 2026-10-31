@@ -31,7 +31,7 @@ write_command() {
 
 write_command pg_dump 'printf "%s\\n" "$@" >"$CAPTURE_DIR/pg_dump.args"; cp "$PGSERVICEFILE" "$CAPTURE_DIR/service.conf"; cp "$PGPASSFILE" "$CAPTURE_DIR/passfile"; printf "%s\\n" synthetic-custom-archive'
 write_command gpg 'output=""; decrypt_file=""; capture_next=""; for argument in "$@"; do if [ "$capture_next" = output ]; then output="$argument"; capture_next=""; elif [ "$capture_next" = decrypt ]; then decrypt_file="$argument"; capture_next=""; else case "$argument" in --output) capture_next=output ;; --decrypt) capture_next=decrypt ;; esac; fi; done; if [ -n "$decrypt_file" ]; then cat "$decrypt_file"; else cat >"$output"; fi'
-write_command pg_restore 'printf "%s\\n" "$@" >"$CAPTURE_DIR/pg_restore.args"; cat >/dev/null'
+write_command pg_restore 'printf "%s\\n" "$@" >"$CAPTURE_DIR/pg_restore.args"; for arg in "$@"; do [ "$arg" != "-" ] || exit 1; done; cat >/dev/null'
 
 run_backup() {
   DATABASE_URL="$1" \
@@ -49,7 +49,7 @@ run_backup 'postgresql://db-user:super-secret@db.example.com:5432/trustpay?sslmo
 
 backup_file=$(find "$backup_dir" -type f -name '*.sql.custom.gpg' -print)
 [ -f "$backup_file" ] || fail 'encrypted backup file was not created'
-[ "$(stat -f '%Lp' "$backup_file" 2>/dev/null || stat -c '%a' "$backup_file")" = 600 ] || fail 'backup file is not private'
+[ "$(stat -c '%a' "$backup_file" 2>/dev/null || stat -f '%Lp' "$backup_file")" = 600 ] || fail 'backup file is not private'
 [ ! -e "$backup_file.part" ] || fail 'partial backup file was left behind'
 
 grep -F -- '--dbname' "$capture_dir/pg_dump.args" >/dev/null 2>&1 && fail 'pg_dump received a database URL in argv'

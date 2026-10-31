@@ -63,13 +63,10 @@ const defaultNodeEnv =
           .empty('value')
           .default(defaultNodeEnv),
         PORT: Joi.number().empty('').empty('value').default(3000),
-        SENTRY_DSN: Joi.when('NODE_ENV', {
-          is: 'production',
-          then: Joi.string()
-            .uri({ scheme: ['https'] })
-            .required(),
-          otherwise: Joi.string().allow('').optional(),
-        }),
+        SENTRY_DSN: Joi.string()
+          .uri({ scheme: ['https'] })
+          .allow('')
+          .optional(),
         DATABASE_URL: Joi.when('NODE_ENV', {
           is: deployedEnvironment,
           then: Joi.string()
@@ -216,30 +213,9 @@ const defaultNodeEnv =
             .pattern(/^\d{6}$/)
             .optional(),
         }),
-        SMS_PROVIDER: Joi.when('NODE_ENV', {
-          is: deployedEnvironment,
-          then: Joi.string().valid('twilio').required(),
-          otherwise: Joi.string().valid('', 'twilio').optional(),
-        }),
-        TWILIO_ACCOUNT_SID: Joi.when('NODE_ENV', {
-          is: deployedEnvironment,
-          then: Joi.string()
-            .pattern(/^AC[a-zA-Z0-9]{32}$/)
-            .required(),
-          otherwise: Joi.string().allow('').optional(),
-        }),
-        TWILIO_AUTH_TOKEN: Joi.when('NODE_ENV', {
-          is: deployedEnvironment,
-          then: Joi.string().min(1).required(),
-          otherwise: Joi.string().allow('').optional(),
-        }),
-        TWILIO_PHONE_NUMBER: Joi.when('NODE_ENV', {
-          is: deployedEnvironment,
-          then: Joi.string()
-            .pattern(/^\+[1-9]\d{1,14}$/)
-            .required(),
-          otherwise: Joi.string().allow('').optional(),
-        }),
+        OTP_PROVIDER: Joi.string()
+          .valid('supabase_email')
+          .default('supabase_email'),
         BANKING_ENABLED: Joi.boolean()
           .truthy('true')
           .falsy('false')
