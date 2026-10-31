@@ -231,7 +231,7 @@ if "$gpg_bin" \
   --pinentry-mode loopback \
   --passphrase-file "$key_file" \
   --decrypt "$backup_file" 2>/dev/null |
-  "$pg_restore_bin" --list - >/dev/null; then
+  "$pg_restore_bin" --list >/dev/null; then
   printf '%s\n' "${GREEN}✓ Encrypted backup verified (pg_restore list succeeded)${NC}"
 else
   fail 'encrypted backup verification failed'
@@ -253,4 +253,4 @@ printf '  Size:          %s bytes\n' "$backup_size"
 printf '  Total backups: %s\n' "$total_backups"
 
 printf '%s\n' "${YELLOW}To restore this encrypted backup into a disposable database:${NC}"
-printf '%s\n' '  gpg --batch --pinentry-mode loopback --passphrase-file "$BACKUP_ENCRYPTION_KEY_FILE" --decrypt "$backup_file" | pg_restore --no-owner --no-acl --dbname="$RESTORE_DATABASE_URL" -'
+printf '%s\n' '  gpg --batch --pinentry-mode loopback --passphrase-file "$BACKUP_ENCRYPTION_KEY_FILE" --decrypt "$backup_file" | pg_restore --no-owner --no-acl --dbname="$RESTORE_DATABASE_URL"'

@@ -31,7 +31,7 @@ write_command() {
 
 write_command pg_dump 'printf "%s\\n" "$@" >"$CAPTURE_DIR/pg_dump.args"; cp "$PGSERVICEFILE" "$CAPTURE_DIR/service.conf"; cp "$PGPASSFILE" "$CAPTURE_DIR/passfile"; printf "%s\\n" synthetic-custom-archive'
 write_command gpg 'output=""; decrypt_file=""; capture_next=""; for argument in "$@"; do if [ "$capture_next" = output ]; then output="$argument"; capture_next=""; elif [ "$capture_next" = decrypt ]; then decrypt_file="$argument"; capture_next=""; else case "$argument" in --output) capture_next=output ;; --decrypt) capture_next=decrypt ;; esac; fi; done; if [ -n "$decrypt_file" ]; then cat "$decrypt_file"; else cat >"$output"; fi'
-write_command pg_restore 'printf "%s\\n" "$@" >"$CAPTURE_DIR/pg_restore.args"; cat >/dev/null'
+write_command pg_restore 'printf "%s\\n" "$@" >"$CAPTURE_DIR/pg_restore.args"; for arg in "$@"; do [ "$arg" != "-" ] || exit 1; done; cat >/dev/null'
 
 run_backup() {
   DATABASE_URL="$1" \
