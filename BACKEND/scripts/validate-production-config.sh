@@ -104,7 +104,7 @@ require_supabase_database_url() {
 reject_unsafe_url() {
   value="$(value_of "$1")"
   case "$value" in
-    *localhost*|*127.0.0.1*|*turnpay.onrender.com*|*sandbox.monnify.com*|*sandbox.vtpass.com*|*sandbox.youverify.co*|*api.sandbox.ninja.boucloud.io*)
+    *localhost*|*127.0.0.1*|*turnpay.onrender.com*|*sandbox.monnify.com*|*sandbox.vtpass.com*)
       fail "$1 points at a sandbox, localhost, or known bad host"
       ;;
   esac
@@ -138,47 +138,37 @@ if [ "${NODE_ENV:-development}" = "production" ]; then
   if is_truthy "${BANKING_ENABLED:-false}" ||
     is_truthy "${VIRTUAL_ACCOUNTS_ENABLED:-false}" ||
     is_truthy "${WITHDRAWALS_ENABLED:-false}" ||
-    is_truthy "${MONNIFY_KYC_SYNC_ENABLED:-false}"; then
-    require_env MONNIFY_API_KEY
-    require_env MONNIFY_SECRET_KEY
-    require_env MONNIFY_CONTRACT_CODE
-    require_https_url MONNIFY_BASE_URL
-    require_https_url MONNIFY_WEBHOOK_URL
-    reject_unsafe_url MONNIFY_BASE_URL
-    reject_unsafe_url MONNIFY_WEBHOOK_URL
+    is_truthy "${PAYSTACK_CHECKOUT_ENABLED:-false}"; then
+  case "$(lower "${BANKING_PROVIDER_PRIMARY:-paystack}")" in
+    paystack)
+      require_env PAYSTACK_SECRET_KEY
+      case "${PAYSTACK_SECRET_KEY}" in
+        sk_live_*) ;;
+        *) fail "PAYSTACK_SECRET_KEY must be a live secret in production" ;;
+      esac
+      ;;
+    monnify)
+      # Only retain this explicit legacy configuration while draining obligations.
+      require_env MONNIFY_API_KEY
+      require_env MONNIFY_SECRET_KEY
+      require_env MONNIFY_CONTRACT_CODE
+      require_https_url MONNIFY_BASE_URL
+      reject_unsafe_url MONNIFY_BASE_URL
+      ;;
+    *) fail "Unsupported BANKING_PROVIDER_PRIMARY" ;;
+  esac
 
-    if is_truthy "${WITHDRAWALS_ENABLED:-false}"; then
-      require_env MONNIFY_EXCHANGE_COLLECTION_ACCOUNT_NUMBER
-    fi
   fi
 
-  case "$(lower "${KYC_PROVIDER:-}")" in
+  case "$(lower "${KYC_PROVIDER:-paystack}")" in
+    paystack) require_env PAYSTACK_SECRET_KEY ;;
     monnify)
       require_env MONNIFY_API_KEY
       require_env MONNIFY_SECRET_KEY
       require_https_url MONNIFY_BASE_URL
       reject_unsafe_url MONNIFY_BASE_URL
-      require_min_length PII_ENCRYPTION_KEY 32
       ;;
-    ninja)
-      require_env NINJA_CLIENT_KEY
-      require_env NINJA_CLIENT_SECRET
-      require_https_url NINJA_BASE_URL
-      reject_unsafe_url NINJA_BASE_URL
-      [ "${NINJA_BASE_URL}" = "https://api.ninja.boucloud.io" ] ||
-        fail "NINJA_BASE_URL must be https://api.ninja.boucloud.io"
-      ;;
-    youverify)
-      require_min_length YOUVERIFY_API_KEY 16
-      require_https_url YOUVERIFY_BASE_URL
-      require_https_url YOUVERIFY_WEBHOOK_URL
-      require_min_length YOUVERIFY_WEBHOOK_SECRET 16
-      reject_unsafe_url YOUVERIFY_BASE_URL
-      reject_unsafe_url YOUVERIFY_WEBHOOK_URL
-      ;;
-    *)
-      fail "KYC_PROVIDER must be monnify, ninja, or youverify"
-      ;;
+    *) fail "KYC_PROVIDER must be paystack or an explicit legacy monnify configuration" ;;
   esac
 
   require_min_length PII_ENCRYPTION_KEY 32
@@ -237,5 +227,13 @@ case "${NODE_ENV:-development}" in
     esac
     ;;
 esac
+
+if is_truthy "${KORA_GHS_ENABLED:-false}"; then
+  require_env KORA_SECRET_KEY
+  case "${KORA_SECRET_KEY}" in
+    sk_live_*) ;;
+    *) fail "KORA_SECRET_KEY must be a live secret when Ghana payments are enabled in deployment" ;;
+  esac
+fi
 
 exec "$@"

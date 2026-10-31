@@ -1,3 +1,5 @@
+> Provider update, 2026-10-30: new payment and automated BVN flows use Paystack. The Monnify implementation details below apply to legacy obligations. Follow [Paystack activation](../PAYSTACK-ACTIVATION.md) and the provider source of truth for current setup.
+
 # Monnify-Only Virtual Accounts Status
 
 ## Decision

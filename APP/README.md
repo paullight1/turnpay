@@ -55,7 +55,7 @@ transport enforcement still require the corresponding app and platform wiring.
 
 The validator rejects local/private hosts, production builds pointed at staging
 or sandbox hosts, PEM/private-key material, and provider or backend credential
-fields such as `MONNIFY_*`, `VTPASS_*`, `NINJA_*`, `*_SECRET`, `*_TOKEN`,
+fields such as `MONNIFY_*`, `VTPASS_*`, `*_SECRET`, `*_TOKEN`,
 `*_PASSWORD`, `*_PRIVATE_KEY`, and `*_API_KEY`. Provider credentials remain
 backend-only in the server secret manager.
 

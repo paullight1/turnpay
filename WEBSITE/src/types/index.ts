@@ -46,6 +46,12 @@ export interface KycDocument extends KycVerificationMetadata {
 
 export interface KycStatusOverview {
   provider: string;
+  providerValidationStatus?:
+    | "UNVERIFIED"
+    | "PENDING"
+    | "VERIFIED"
+    | "FAILED"
+    | string;
   kycStatus: string;
   kycTier: string | number;
   reference?: string;
@@ -61,6 +67,39 @@ export interface KycStatusOverview {
 
 export interface KycVerificationResult extends KycDocument {
   reference: string;
+  accountProvisioning?: {
+    status: 'READY' | 'PENDING' | 'NOT_REQUIRED' | 'ACTION_REQUIRED';
+    accountNumberMasked?: string;
+    bankName?: string;
+  };
+}
+
+export interface PaymentCapabilities {
+  provider: 'paystack' | string;
+  country: 'NG' | string;
+  currency: 'NGN' | string;
+  configured: boolean;
+  checkout: boolean;
+  virtualAccounts: boolean;
+  withdrawals: boolean;
+  identityVerification: boolean;
+  manualDocumentReview: boolean;
+  automatedIdentityTypes: string[];
+  withdrawalMinimumTier: string;
+  /** Smallest amount accepted by the server-owned checkout flow. */
+  checkoutMinimumAmount?: string;
+}
+
+export interface PaymentInitialization {
+  reference: string;
+  authorizationUrl?: string;
+  status: 'PENDING' | 'SUCCESS' | 'FAILED' | string;
+  message?: string;
+}
+
+export interface PaymentVerification {
+  reference: string;
+  status: 'PENDING' | 'SUCCESS' | 'FAILED' | string;
 }
 
 export interface Wallet {
@@ -82,6 +121,32 @@ export interface VirtualAccount {
   status: string;
   createdAt: string;
   updatedAt: string;
+}
+
+/**
+ * Provisioning can return HTTP 202 before an issued account exists, so this
+ * response intentionally does not pretend pending records have account data.
+ */
+export interface VirtualAccountProvisionResponse {
+  provider: string;
+  status: string;
+  currency: string;
+  message?: string;
+  id?: string;
+  accountNumber?: string | null;
+  accountNumberMasked?: string | null;
+  accountName?: string;
+  bankName?: string;
+  bankCode?: string | null;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface VirtualAccountProvisioningStatus {
+  provider: string;
+  status: "NOT_REQUESTED" | "PENDING" | "ACTIVE" | "ACTION_REQUIRED" | string;
+  message?: string;
+  updatedAt?: string;
 }
 
 export interface Transaction {

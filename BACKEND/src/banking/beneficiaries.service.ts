@@ -1,7 +1,9 @@
+import { PaystackVirtualAccountProvider } from './providers/paystack-virtual-account.provider';
 import {
   BadRequestException,
   ForbiddenException,
   Injectable,
+  Optional,
   NotFoundException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -24,23 +26,28 @@ export class BeneficiariesService {
     private readonly prisma: PrismaService,
     private readonly monnifyBanks: MonnifyVirtualAccountProvider,
     private readonly configService: ConfigService,
+    @Optional() private readonly paystack?: PaystackVirtualAccountProvider,
   ) {}
 
   listBanks() {
-    return this.monnifyBanks.listBanks();
+    return this.banks.listBanks();
   }
 
   resolveBankAccount(dto: ResolveBankAccountDto): Promise<ResolvedBankAccount> {
-    return this.monnifyBanks.resolveBankAccount(
-      dto.accountNumber,
-      dto.bankCode,
-    );
+    return this.banks.resolveBankAccount(dto.accountNumber, dto.bankCode);
   }
 
   async createBeneficiary(userId: string, dto: CreateBeneficiaryDto) {
     const encryptionKey = this.getEncryptionKey();
     await this.assertCanManageBeneficiary(userId);
-    const provider = dto.provider || 'monnify';
+    const provider = this.configService.get<string>(
+      'BANKING_PROVIDER_PRIMARY',
+      'paystack',
+    );
+    if (dto.provider && dto.provider !== provider)
+      throw new BadRequestException('Use the active banking provider');
+    if (dto.currency !== 'NGN')
+      throw new BadRequestException('Beneficiaries currently support NGN only');
     const resolved = await this.resolveBankAccount(dto);
 
     return this.prisma.bankAccount.create({
@@ -89,6 +96,17 @@ export class BeneficiariesService {
     return { deleted: true };
   }
 
+  private get banks() {
+    if (
+      this.configService.get<string>('BANKING_PROVIDER_PRIMARY', 'paystack') ===
+      'monnify'
+    )
+      return this.monnifyBanks;
+    if (!this.paystack)
+      throw new BadRequestException('Paystack is not configured');
+    return this.paystack;
+  }
+
   private getEncryptionKey() {
     const key =
       this.configService.get<string>('BANK_ACCOUNT_ENCRYPTION_KEY') ||
@@ -132,12 +150,12 @@ export class BeneficiariesService {
     }
   }
 
-  private normalizeProvider(provider: string): 'MONNIFY' {
+  private normalizeProvider(provider: string): 'MONNIFY' | 'PAYSTACK' {
     const normalized = provider.toUpperCase();
-    if (normalized !== 'MONNIFY') {
+    if (normalized !== 'MONNIFY' && normalized !== 'PAYSTACK') {
       throw new BadRequestException('Unsupported provider');
     }
-    return 'MONNIFY';
+    return normalized;
   }
 
   private readonly beneficiarySelect = {

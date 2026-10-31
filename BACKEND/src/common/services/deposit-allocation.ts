@@ -11,13 +11,20 @@ export async function allocateDepositReference(
     amount: Decimal;
     kind: 'EXCHANGE' | 'FUNDING';
     legacyReceiptId?: string;
+    existingFundingTransactionId?: string;
     verifiedExchangeProviderEventId?: string;
   },
 ) {
   const reference = input.reference.trim().toUpperCase();
   const matches = { equals: reference, mode: 'insensitive' as const };
   const funding = await tx.transaction.findFirst({
-    where: { type: 'FUND', reference: matches },
+    where: {
+      type: 'FUND',
+      reference: matches,
+      ...(input.existingFundingTransactionId
+        ? { id: { not: input.existingFundingTransactionId } }
+        : {}),
+    },
     select: { id: true },
   });
   const receipt = await tx.exchangeReceipt.findFirst({

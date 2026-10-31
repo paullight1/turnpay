@@ -29,9 +29,12 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
+  static const _storage = FlutterSecureStorage();
   late Future<HomeDashboardData> _dashboardFuture;
   bool _showBalances = true;
   bool _refreshing = false;
+  Set<String> _visibleOtherWallets = {'USD', 'EUR', 'GBP', 'ZAR'};
+  String? _walletPreferencesUserId;
 
   @override
   void initState() {
@@ -51,6 +54,98 @@ class _HomeScreenState extends State<HomeScreen> {
   void _toggleBalances() {
     HapticFeedback.selectionClick();
     setState(() => _showBalances = !_showBalances);
+  }
+
+  Future<void> _loadOtherWalletPreferences(String userId) async {
+    try {
+      final saved = await _storage.read(key: 'dashboard-other-wallets-$userId');
+      if (!mounted || saved == null) return;
+      final selected =
+          saved.split(',').where({'USD', 'EUR', 'GBP', 'ZAR'}.contains).toSet();
+      setState(() => _visibleOtherWallets = selected);
+    } catch (_) {
+      // Keep the default visible wallets if device preferences are unavailable.
+    }
+  }
+
+  Future<void> _manageOtherWallets() async {
+    final selected = Set<String>.of(_visibleOtherWallets);
+    final result = await showModalBottomSheet<Set<String>>(
+      context: context,
+      backgroundColor: AppColors.surface,
+      showDragHandle: true,
+      builder: (context) => StatefulBuilder(builder: (context, update) {
+        return SafeArea(
+          child: SingleChildScrollView(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(
+                AppSpacing.lg,
+                AppSpacing.sm,
+                AppSpacing.lg,
+                AppSpacing.lg,
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Manage wallets', style: AppTextStyles.headingM),
+                  const SizedBox(height: AppSpacing.xs),
+                  Text(
+                    'Choose which wallets appear on your home screen.',
+                    style: AppTextStyles.bodyS.copyWith(
+                      color: AppColors.textSecondary,
+                    ),
+                  ),
+                  const SizedBox(height: AppSpacing.sm),
+                  for (final wallet in _supportedWallets.where(
+                    (wallet) =>
+                        {'USD', 'EUR', 'GBP', 'ZAR'}.contains(wallet.currency),
+                  ))
+                    SwitchListTile.adaptive(
+                      contentPadding: EdgeInsets.zero,
+                      title: Text('${wallet.flag}  ${wallet.currency}'),
+                      subtitle: Text(wallet.name),
+                      value: selected.contains(wallet.currency),
+                      onChanged: (enabled) => update(() {
+                        if (enabled) {
+                          selected.add(wallet.currency);
+                        } else {
+                          selected.remove(wallet.currency);
+                        }
+                      }),
+                    ),
+                  const SizedBox(height: AppSpacing.sm),
+                  SizedBox(
+                    width: double.infinity,
+                    child: FilledButton(
+                      onPressed: () => Navigator.pop(context, selected),
+                      child: const Text('Save'),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      }),
+    );
+    if (!mounted || result == null) return;
+    setState(() => _visibleOtherWallets = result);
+    final userId = _walletPreferencesUserId;
+    if (userId == null) return;
+    try {
+      await _storage.write(
+        key: 'dashboard-other-wallets-$userId',
+        value: result.join(','),
+      );
+    } catch (_) {
+      if (mounted) {
+        showTpSnackbar(
+          context,
+          'Wallets updated. Could not save this preference on your device.',
+        );
+      }
+    }
   }
 
   Future<void> _refreshDashboard() async {
@@ -93,6 +188,10 @@ class _HomeScreenState extends State<HomeScreen> {
             }
 
             final data = snapshot.data!;
+            if (_walletPreferencesUserId != data.user.id) {
+              _walletPreferencesUserId = data.user.id;
+              _loadOtherWalletPreferences(data.user.id);
+            }
             final hasNgnAccount =
                 _hasActiveAccount(data.virtualAccounts, 'NGN');
             return RefreshIndicator(
@@ -146,17 +245,20 @@ class _HomeScreenState extends State<HomeScreen> {
                       beneficiaries: data.beneficiaries,
                     ),
                   ],
-                  const SizedBox(height: AppSpacing.lg),
-                  const _SectionTitle(
-                    title: 'Other wallets',
-                    actionLabel: 'Manage',
-                    route: AppRoutes.wallets,
-                  ),
-                  const SizedBox(height: AppSpacing.md),
-                  _WalletSummaryRow(
-                    wallets: data.wallets,
-                    showBalances: _showBalances,
-                  ),
+                  if (_visibleOtherWallets.isNotEmpty) ...[
+                    const SizedBox(height: AppSpacing.lg),
+                    _SectionTitle(
+                      title: 'Other wallets',
+                      actionLabel: 'Manage',
+                      onTap: _manageOtherWallets,
+                    ),
+                    const SizedBox(height: AppSpacing.md),
+                    _WalletSummaryRow(
+                      wallets: data.wallets,
+                      showBalances: _showBalances,
+                      visibleCurrencies: _visibleOtherWallets,
+                    ),
+                  ],
                   const SizedBox(height: AppSpacing.lg),
                   _RecentTransactionsSection(
                     transactions: data.transactions,
@@ -388,8 +490,6 @@ class _BalancePanelState extends State<_BalancePanel> {
     final ngnAccount = _accountForCurrency(widget.data.virtualAccounts, 'NGN');
     final ghsAccount = _accountForCurrency(widget.data.virtualAccounts, 'GHS');
     final pageWidth = MediaQuery.sizeOf(context).width;
-    final cardWidth = pageWidth * 0.8;
-    _cardExtent = cardWidth + AppSpacing.sm;
 
     final cards = [
       _BalanceCardData(
@@ -413,6 +513,9 @@ class _BalancePanelState extends State<_BalancePanel> {
         ],
       ),
     ].where((card) => _currencies.contains(card.currency)).toList();
+    final cardWidth =
+        cards.length == 1 ? pageWidth - (AppSpacing.md * 2) : pageWidth * 0.8;
+    _cardExtent = cardWidth + AppSpacing.sm;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -468,29 +571,31 @@ class _BalancePanelState extends State<_BalancePanel> {
             ),
           ),
         ),
-        const SizedBox(height: AppSpacing.xs),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            for (var index = 0; index < cards.length; index++) ...[
-              GestureDetector(
-                onTap: () => _animateToPage(index),
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 180),
-                  width: index == _currentPage ? 20 : 6,
-                  height: 6,
-                  decoration: BoxDecoration(
-                    color: index == _currentPage
-                        ? AppColors.primary
-                        : AppColors.border,
-                    borderRadius: BorderRadius.circular(AppRadius.full),
+        if (cards.length > 1) ...[
+          const SizedBox(height: AppSpacing.xs),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              for (var index = 0; index < cards.length; index++) ...[
+                GestureDetector(
+                  onTap: () => _animateToPage(index),
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 180),
+                    width: index == _currentPage ? 20 : 6,
+                    height: 6,
+                    decoration: BoxDecoration(
+                      color: index == _currentPage
+                          ? AppColors.primary
+                          : AppColors.border,
+                      borderRadius: BorderRadius.circular(AppRadius.full),
+                    ),
                   ),
                 ),
-              ),
-              if (index < cards.length - 1) const SizedBox(width: 6),
+                if (index < cards.length - 1) const SizedBox(width: 6),
+              ],
             ],
-          ],
-        ),
+          ),
+        ],
       ],
     );
   }
@@ -540,7 +645,7 @@ class _AccountSetupBanner extends StatelessWidget {
         const SizedBox(width: AppSpacing.sm),
         Expanded(
             child: Text(
-                'Request an account number to fund your wallet and start transacting.',
+                'Request a dedicated Paystack NGN account to fund your wallet and start transacting.',
                 style: AppTextStyles.bodyS)),
         TextButton(onPressed: onRequest, child: const Text('Request')),
       ]),
@@ -829,7 +934,10 @@ class _VirtualAccountSection extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'Virtual account',
+                      activeAccount.provider.toUpperCase() == 'PAYSTACK' &&
+                              activeAccount.currency.toUpperCase() == 'NGN'
+                          ? 'Paystack NGN receiving account'
+                          : 'Virtual account',
                       style: AppTextStyles.labelM.copyWith(
                         color: AppColors.textPrimary,
                         fontWeight: FontWeight.w900,
@@ -887,7 +995,9 @@ class _VirtualAccountSection extends StatelessWidget {
                   );
                   showTpSnackbar(
                     context,
-                    'Virtual account copied',
+                    activeAccount.provider.toUpperCase() == 'PAYSTACK'
+                        ? 'Paystack account copied'
+                        : 'Virtual account copied',
                     type: TpSnackbarType.success,
                   );
                 },
@@ -976,7 +1086,7 @@ class _NoVirtualAccountHomeCard extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'No virtual account yet',
+                  'No Paystack account yet',
                   style: AppTextStyles.labelM.copyWith(
                     color: AppColors.textPrimary,
                     fontWeight: FontWeight.w900,
@@ -984,7 +1094,7 @@ class _NoVirtualAccountHomeCard extends StatelessWidget {
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  'Request a virtual account to receive bank transfers directly into your TrustPay wallet.',
+                  'Request a dedicated Paystack NGN account to receive bank transfers directly into your TrustPay wallet.',
                   style: AppTextStyles.bodyS.copyWith(
                     color: AppColors.textSecondary,
                     height: 1.45,
@@ -1610,10 +1720,12 @@ class _BeneficiaryCard extends StatelessWidget {
 class _WalletSummaryRow extends StatelessWidget {
   final List<HomeWallet> wallets;
   final bool showBalances;
+  final Set<String> visibleCurrencies;
 
   const _WalletSummaryRow({
     required this.wallets,
     required this.showBalances,
+    required this.visibleCurrencies,
   });
 
   @override
@@ -1623,8 +1735,7 @@ class _WalletSummaryRow extends StatelessWidget {
       for (final wallet in wallets) wallet.currency.toUpperCase(): wallet,
     };
     final items = _supportedWallets
-        .where((template) =>
-            template.currency != 'NGN' && template.currency != 'GHS')
+        .where((template) => visibleCurrencies.contains(template.currency))
         .map((template) {
       final wallet = walletByCurrency[template.currency];
       final isUnlocked = template.isUnlocked;
@@ -2052,12 +2163,14 @@ class _ActivityRow extends StatelessWidget {
 class _SectionTitle extends StatelessWidget {
   final String title;
   final String actionLabel;
-  final String route;
+  final String? route;
+  final VoidCallback? onTap;
 
   const _SectionTitle({
     required this.title,
     required this.actionLabel,
-    required this.route,
+    this.route,
+    this.onTap,
   });
 
   @override
@@ -2075,7 +2188,7 @@ class _SectionTitle extends StatelessWidget {
           ),
         ),
         TapScale(
-          onTap: () => context.push(route),
+          onTap: onTap ?? (route == null ? null : () => context.push(route!)),
           borderRadius: BorderRadius.circular(AppRadius.full),
           pressedScale: 0.96,
           child: Text(
@@ -2365,6 +2478,7 @@ bool _hasActiveAccount(List<HomeVirtualAccount> accounts, String currency) {
   final target = currency.toUpperCase();
   return accounts.any((account) =>
       account.currency.toUpperCase() == target &&
+      (target != 'NGN' || account.provider.toUpperCase() == 'PAYSTACK') &&
       account.accountNumber.trim().isNotEmpty &&
       !{'FAILED', 'REJECTED', 'CANCELLED'}
           .contains(account.status.toUpperCase()));
@@ -2421,6 +2535,8 @@ HomeVirtualAccount? _accountForCurrency(
       account.status.toUpperCase(),
     );
     if (account.currency.toUpperCase() == targetCurrency &&
+        (targetCurrency != 'NGN' ||
+            account.provider.toUpperCase() == 'PAYSTACK') &&
         hasNumber &&
         isUsable) {
       return account;

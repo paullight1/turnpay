@@ -85,7 +85,7 @@ allowed_fields='[
 private_field_present=$(jq -r --argjson allowed "$allowed_fields" '
   [keys[] as $key | select(
     ($key | test("(^|_)(SECRET|TOKEN|PASSWORD|PRIVATE|SERVICE_ROLE|PROVIDER|API_KEY)($|_)"; "i"))
-    or ($key | test("^(MONNIFY|VTPASS|NINJA)"; "i"))
+    or ($key | test("^(MONNIFY|PAYSTACK|VTPASS)"; "i"))
     or (($allowed | index($key)) == null)
   )][0] // empty
 ' "$config_path" 2>/dev/null)
@@ -100,7 +100,7 @@ if [ -n "$private_field_present" ]; then
       ;;
     *)
       case "$private_field_upper" in
-        *SECRET*|*TOKEN*|*PASSWORD*|*PRIVATE*|*SERVICE_ROLE*|*PROVIDER*|*API_KEY*|MONNIFY*|VTPASS*|NINJA*)
+        *SECRET*|*TOKEN*|*PASSWORD*|*PRIVATE*|*SERVICE_ROLE*|*PROVIDER*|*API_KEY*|MONNIFY*|PAYSTACK*|VTPASS**)
           fail 'private or provider credential fields are not allowed'
           ;;
         *)

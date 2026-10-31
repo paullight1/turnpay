@@ -15,6 +15,7 @@ import {
 import { Throttle } from '@nestjs/throttler';
 import type { Request } from 'express';
 import { AuthService } from './auth.service';
+import { RegistrationThrottlerGuard } from '../common/guards/registration-throttler.guard';
 import {
   RegisterDto,
   StaffRegisterDto,
@@ -40,7 +41,7 @@ export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
   @Post('register')
-  @Throttle({ default: { limit: 3, ttl: 3600000 } })
+  @UseGuards(RegistrationThrottlerGuard)
   @HttpCode(HttpStatus.CREATED)
   async register(@Body() registerDto: RegisterDto, @Req() request: Request) {
     return this.authService.register(

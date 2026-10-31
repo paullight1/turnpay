@@ -1,3 +1,4 @@
+import '../../features/exchange/screens/kora_exchange_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:go_router/go_router.dart';
@@ -18,12 +19,12 @@ import '../../features/home/screens/kyc_verification_screen.dart';
 import '../../features/home/screens/money_action_screen.dart';
 import '../../features/home/screens/withdrawal_authorization_screen.dart';
 import '../../features/home/screens/withdrawal_receipt_screen.dart';
+import '../../features/home/screens/transfer_receipt_screen.dart';
 import '../../features/security/screens/transaction_security_screen.dart';
 import '../../features/wallet/screens/wallet_detail_screen.dart';
 import '../../features/wallet/screens/receive_money_screen.dart';
 import '../../features/transactions/screens/transaction_detail_screen.dart';
 import '../../features/exchange/screens/manual_exchange_order_screen.dart';
-import '../../features/exchange/screens/manual_exchange_screen.dart';
 import '../../features/exchange/services/manual_exchange_service.dart';
 
 // ─── ROUTE NAMES ──────────────────────────────────────────────────────────────
@@ -40,6 +41,7 @@ class AppRoutes {
   static const fund = '/fund';
   static const send = '/send';
   static const sendTrustpay = '/send/trustpay';
+  static const sendReceipt = '/send/receipt/:reference';
   static const sendBank = '/send/bank';
   static const withdraw = '/withdraw';
   static const withdrawAuthorize = '/withdraw/authorize/:reference';
@@ -90,6 +92,9 @@ class AppRoutes {
   static String withdrawReceiptFor(String reference) {
     return '/withdraw/receipt/${Uri.encodeComponent(reference)}';
   }
+
+  static String sendReceiptFor(String reference) =>
+      '/send/receipt/${Uri.encodeComponent(reference)}';
 
   /// Routes that an unauthenticated / expired session is allowed to sit on.
   static const unauthenticated = <String>{
@@ -209,6 +214,18 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         ),
       ),
       GoRoute(
+        path: AppRoutes.sendReceipt,
+        pageBuilder: (context, state) => _slideTransition(
+          state,
+          TransferReceiptScreen(
+            reference: state.pathParameters['reference'] ?? '',
+            initialReceipt: state.extra is Map<String, dynamic>
+                ? state.extra as Map<String, dynamic>
+                : null,
+          ),
+        ),
+      ),
+      GoRoute(
         path: AppRoutes.sendBank,
         pageBuilder: (context, state) => _slideTransition(
           state,
@@ -267,7 +284,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         path: AppRoutes.exchange,
         pageBuilder: (context, state) => _slideTransition(
           state,
-          const ManualExchangeScreen(),
+          const ExchangeEntryScreen(),
         ),
       ),
       GoRoute(
@@ -471,6 +488,13 @@ WithdrawalCompletionDetails? _withdrawalCompletionDetailsFromExtra(
   final latestAttempt = attempts.isNotEmpty ? _asMap(attempts.first) : {};
   final attemptMetadata = _asMap(latestAttempt['metadata']);
   final status = _asString(data['status'], fallback: 'PENDING');
+  final provider = _asString(
+    latestAttempt['provider'],
+    fallback: _asString(
+      data['provider'],
+      fallback: _asString(metadata['provider'], fallback: 'PAYSTACK'),
+    ),
+  ).toUpperCase();
 
   return WithdrawalCompletionDetails(
     reference: _asString(data['reference']),
@@ -504,6 +528,7 @@ WithdrawalCompletionDetails? _withdrawalCompletionDetailsFromExtra(
         fallback: _asString(data['reference']),
       ),
     ),
+    provider: provider,
     createdAt: _asDateTime(data['createdAt']),
     updatedAt: _asDateTime(data['updatedAt']),
     providerCreatedAt: _asDateTime(latestAttempt['createdAt']),

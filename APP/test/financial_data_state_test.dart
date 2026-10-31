@@ -360,7 +360,9 @@ class _StubWalletService extends WalletService {
   Future<List<VirtualAccountData>> fetchVirtualAccounts() async {
     return const [
       VirtualAccountData(
-        provider: 'monnify',
+        // This stub exercises the active receiving-account/history state; the
+        // dedicated legacy-provider case remains covered by account-list data.
+        provider: 'paystack',
         accountNumber: '1234567890',
         accountNumberMasked: '1234******7890',
         accountName: 'Ada Lovelace',

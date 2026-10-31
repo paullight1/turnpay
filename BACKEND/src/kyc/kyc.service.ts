@@ -6,7 +6,7 @@ import {
   Inject,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { randomUUID } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   CreateKycUploadDto,
@@ -14,29 +14,33 @@ import {
   CreateDisputeDto,
   ResolveDisputeDto,
   CreateIdentityVerificationDto,
+  CreateManualKycDocumentDto,
 } from './dto/kyc.dto';
 import { PinoLogger } from 'nestjs-pino';
-import { DisputeStatus } from '@prisma/client';
+import { DisputeStatus, KycVerificationStatus } from '@prisma/client';
 import { SupabaseService } from '../supabase/supabase.service';
 import {
   decryptSensitiveValue,
   encryptSensitiveValue,
 } from '../common/utils/encryption';
-import { KYC_PROVIDER_GATEWAY } from './providers/kyc-provider.gateway';
+import {
+  KYC_PROVIDER_GATEWAY,
+  KycProviderDefinitiveFailure,
+} from './providers/kyc-provider.gateway';
 import type {
-  KycProviderCallbackResult,
   KycProviderGateway,
   KycProviderResult,
 } from './providers/kyc-provider.gateway';
 import { KYCTier, KYCType, Prisma } from '@prisma/client';
-import { KycWebhookInboxService } from './kyc-webhook-inbox.service';
-import { YouverifyProvider } from './providers/youverify.provider';
+import { BankingService } from '../banking/banking.service';
 
 const DEFAULT_KYC_DOCUMENT_BUCKET = 'kyc-documents';
 const DEFAULT_ADMIN_DOCUMENT_URL_TTL_SECONDS = 300;
 const PROVIDER_CONSENT_SOURCE = 'WEB_OR_MOBILE';
 const PROVIDER_UNAVAILABLE_MESSAGE =
   'Identity verification is temporarily unavailable';
+const PROVIDER_VALIDATION_REJECTED_MESSAGE =
+  'Identity details were rejected. Review your details and try again.';
 const SAFE_KYC_REVIEW_CHECK_KEYS = [
   'providerStatus',
   'allValidationPassed',
@@ -68,8 +72,7 @@ export class KycService {
     private readonly supabaseService: SupabaseService,
     @Inject(KYC_PROVIDER_GATEWAY)
     private readonly kycProviderGateway: KycProviderGateway,
-    private readonly youverifyProvider: YouverifyProvider,
-    private readonly kycWebhookInbox: KycWebhookInboxService,
+    private readonly bankingService: BankingService,
   ) {}
 
   async createDocumentUploadUrl(userId: string, dto: CreateKycUploadDto) {
@@ -99,13 +102,20 @@ export class KycService {
 
   async verifyIdentity(userId: string, dto: CreateIdentityVerificationDto) {
     const provider = this.kycProviderGateway.provider;
-    this.assertSupportedIdentityType(dto.country, dto.type, provider);
+    this.assertSupportedIdentityType(dto.country, dto.type);
     this.assertValidDateOfBirth(dto.dateOfBirth);
     const normalizedIdNumber = this.normalizeIdNumber(dto.type, dto.idNumber);
-    const documentId = randomUUID();
-    const verificationId = randomUUID();
+    let documentId: string = randomUUID();
+    let verificationId: string = randomUUID();
     const consentRecordedAt = new Date();
-    const consentVersion = 'monnify-direct-verify-consent-v1';
+    const consentVersion =
+      provider === 'PAYSTACK'
+        ? 'paystack-bvn-and-account-setup-consent-v1'
+        : 'monnify-identity-and-account-setup-consent-v2';
+
+    if (provider === 'PAYSTACK') {
+      this.assertPaystackIdentityInput(dto);
+    }
 
     let reservation: {
       document: {
@@ -159,6 +169,177 @@ export class KycService {
             throw new ConflictException('Your NIN is already verified');
           }
         }
+        if (provider === 'PAYSTACK') {
+          if (typeof tx.$queryRaw === 'function') {
+            // Serialize the pending-attempt check with the reservation insert
+            // so two idempotency keys cannot create concurrent Paystack
+            // identity submissions for the same user.
+            await tx.$queryRaw(
+              Prisma.sql`SELECT "id" FROM "users" WHERE "id" = ${userId} FOR UPDATE`,
+            );
+          }
+
+          const nameValidation = this.toNameValidation(
+            [dto.firstName, dto.lastName].filter(Boolean).join(' ') ||
+              user.fullName,
+          );
+          if (!nameValidation?.firstName || !nameValidation.lastName) {
+            throw new BadRequestException(
+              'Complete your legal first and last name before identity verification',
+            );
+          }
+
+          const validationFingerprint = this.buildPaystackValidationFingerprint(
+            {
+              bvn: normalizedIdNumber,
+              accountNumber: dto.accountNumber!,
+              bankCode: dto.bankCode!,
+              firstName: nameValidation.firstName,
+              lastName: nameValidation.lastName,
+            },
+          );
+          const paystackBinding =
+            typeof tx.paystackCustomer?.findUnique === 'function'
+              ? await tx.paystackCustomer.findUnique({
+                  where: { userId },
+                  select: {
+                    customerCode: true,
+                    validationFingerprint: true,
+                    validationStatus: true,
+                  },
+                })
+              : null;
+
+          if (paystackBinding?.validationStatus === 'VERIFIED') {
+            throw new ConflictException(
+              'Paystack identity verification is already complete',
+            );
+          }
+          if (
+            paystackBinding?.validationFingerprint &&
+            paystackBinding.validationFingerprint !== validationFingerprint
+          ) {
+            throw new BadRequestException(
+              'Paystack identity details cannot be changed after a validation attempt; contact support',
+            );
+          }
+
+          const activeAttempt =
+            typeof tx.kycVerification.findFirst === 'function'
+              ? await tx.kycVerification.findFirst({
+                  where: {
+                    userId,
+                    provider: 'PAYSTACK',
+                    status: { in: ['PENDING', 'REVIEW_REQUIRED'] },
+                    document: { is: { type: 'BVN' } },
+                  },
+                  select: { id: true },
+                })
+              : null;
+          if (activeAttempt) {
+            throw new ConflictException(
+              'A Paystack identity verification is already in progress',
+            );
+          }
+
+          // Paystack identification callbacks carry a customer identity, not
+          // an internal attempt id. Once a binding has a fingerprint, a retry
+          // is safe only by reopening the canonical failed verification for
+          // that exact customer/fingerprint. Creating a fresh pending row
+          // would let a delayed callback for the old attempt approve it.
+          let reusableAttempt:
+            | (Awaited<
+                ReturnType<typeof tx.kycVerification.findMany>
+              >[number] & {
+                document?: Awaited<
+                  ReturnType<typeof tx.kycDocument.findUnique>
+                >;
+              })
+            | undefined;
+          if (paystackBinding?.validationFingerprint) {
+            const previousAttemptsResult =
+              typeof tx.kycVerification.findMany === 'function'
+                ? await tx.kycVerification.findMany({
+                    where: {
+                      userId,
+                      provider: 'PAYSTACK',
+                      document: { is: { type: 'BVN' } },
+                    },
+                    orderBy: { createdAt: 'asc' },
+                    include: { document: true },
+                  })
+                : [];
+            const previousAttempts = Array.isArray(previousAttemptsResult)
+              ? previousAttemptsResult
+              : [];
+            reusableAttempt = previousAttempts.find((candidate) => {
+              const checks = this.asJsonRecord(candidate.checks);
+              return (
+                candidate.status === 'FAILED' &&
+                checks.customerCode === paystackBinding.customerCode &&
+                checks.validationFingerprint === validationFingerprint
+              );
+            });
+            if (!reusableAttempt?.document) {
+              throw new ConflictException(
+                'Paystack identity validation requires support before retry',
+              );
+            }
+          }
+
+          if (reusableAttempt?.document) {
+            documentId = reusableAttempt.documentId;
+            verificationId = reusableAttempt.id;
+            const retryChecks = {
+              ...this.asJsonRecord(reusableAttempt.checks),
+              customerCode: paystackBinding!.customerCode,
+              validationFingerprint,
+              accountSetupConsent: dto.accountSetupConsent === true,
+            } satisfies Prisma.InputJsonObject;
+            const document = await tx.kycDocument.update({
+              where: { id: documentId },
+              data: {
+                status: 'PENDING',
+                rejectionNote: null,
+                reviewedBy: null,
+                reviewedAt: null,
+              },
+            });
+            await tx.kycVerification.update({
+              where: { id: verificationId },
+              data: {
+                status: 'PENDING',
+                reference: `pending:${documentId}`,
+                checks: retryChecks,
+                responseHash: null,
+                errorMessage: null,
+                consentRecordedAt,
+                consentVersion,
+                consentSource: PROVIDER_CONSENT_SOURCE,
+              },
+            });
+            await tx.auditLog.create({
+              data: {
+                action: 'KYC_CONSENT_RECORDED',
+                targetType: 'KycVerification',
+                targetId: verificationId,
+                metadata: {
+                  userId,
+                  documentId,
+                  provider,
+                  country: dto.country,
+                  documentType: dto.type,
+                  consentVersion,
+                  consentSource: PROVIDER_CONSENT_SOURCE,
+                  consentRecordedAt: consentRecordedAt.toISOString(),
+                  retry: true,
+                  reusedCanonicalAttempt: true,
+                },
+              },
+            });
+            return { document, user };
+          }
+        }
         if (provider === 'MONNIFY') {
           const nameValidation = this.toNameValidation(
             [dto.firstName, dto.lastName].filter(Boolean).join(' ') ||
@@ -192,6 +373,13 @@ export class KycService {
             consentRecordedAt,
             consentVersion,
             consentSource: PROVIDER_CONSENT_SOURCE,
+            ...(provider === 'PAYSTACK'
+              ? {
+                  checks: {
+                    accountSetupConsent: dto.accountSetupConsent === true,
+                  },
+                }
+              : {}),
           },
         });
         await tx.auditLog.create({
@@ -241,6 +429,11 @@ export class KycService {
               reservation.user.fullName,
           ),
           dateOfBirth: dto.dateOfBirth,
+          ...(dto.bankCode ? { bankCode: dto.bankCode } : {}),
+          ...(dto.accountNumber ? { accountNumber: dto.accountNumber } : {}),
+          ...(typeof dto.accountSetupConsent === 'boolean'
+            ? { accountSetupConsent: dto.accountSetupConsent }
+            : {}),
           ...(reservation.user.phone ? { phone: reservation.user.phone } : {}),
         },
       });
@@ -248,22 +441,70 @@ export class KycService {
         throw new BadRequestException('Unexpected identity provider response');
       }
     } catch (error: unknown) {
-      await this.releaseReservedProviderAttempt({
-        userId,
-        documentId,
-        verificationId,
-        country: dto.country,
-        documentType: dto.type,
-        provider,
-      });
-      this.logger.warn(
-        { userId, documentId, country: dto.country, documentType: dto.type },
-        'KYC attempt released after provider failure',
-      );
+      const definitiveError =
+        error instanceof KycProviderDefinitiveFailure &&
+        error.provider === provider
+          ? error
+          : undefined;
+      if (definitiveError || provider !== 'PAYSTACK') {
+        const released = await this.releaseReservedProviderAttempt({
+          userId,
+          documentId,
+          verificationId,
+          country: dto.country,
+          documentType: dto.type,
+          provider,
+          validationFingerprint: definitiveError?.validationFingerprint,
+          failureMessage: definitiveError
+            ? PROVIDER_VALIDATION_REJECTED_MESSAGE
+            : undefined,
+        });
+        this.logger.warn(
+          {
+            userId,
+            documentId,
+            country: dto.country,
+            documentType: dto.type,
+            released,
+            definitiveFailure: Boolean(definitiveError),
+          },
+          released
+            ? 'KYC attempt released after definitive provider failure'
+            : 'KYC attempt was already finalized before provider failure',
+        );
+      } else {
+        this.logger.warn(
+          { userId, documentId, country: dto.country, documentType: dto.type },
+          'KYC attempt remains pending after ambiguous provider failure',
+        );
+      }
       throw error;
     }
 
     const result = await this.prisma.$transaction(async (tx) => {
+      if (provider === 'PAYSTACK') {
+        const current = await tx.kycVerification.findUnique({
+          where: { id: verificationId },
+          select: { status: true, reference: true, checks: true },
+        });
+        if (current && current.status !== 'PENDING') {
+          const currentDocument = await tx.kycDocument.findUnique({
+            where: { id: documentId },
+            select: { status: true, rejectionNote: true },
+          });
+          return {
+            document: {
+              ...reservation.document,
+              status: currentDocument?.status ?? reservation.document.status,
+              rejectionNote: currentDocument?.rejectionNote ?? null,
+            },
+            kycTier: reservation.user.kycTier,
+            persistedStatus: current.status as KycVerificationStatus,
+            persistedReference: current.reference,
+            persistedChecks: current.checks,
+          };
+        }
+      }
       const documentStatus = this.resolveDocumentStatus(providerResult.status);
       await tx.kycDocument.update({
         where: { id: documentId },
@@ -336,15 +577,63 @@ export class KycService {
       };
     });
 
+    const persistedStatus =
+      'persistedStatus' in result ? result.persistedStatus : undefined;
+    const persistedReference =
+      'persistedReference' in result ? result.persistedReference : undefined;
+    const persistedChecks =
+      'persistedChecks' in result ? result.persistedChecks : undefined;
+    const effectiveProviderResult = persistedStatus
+      ? {
+          ...providerResult,
+          status: persistedStatus,
+          reference: persistedReference ?? providerResult.reference,
+          checks:
+            (persistedChecks as Prisma.InputJsonObject | null) ??
+            providerResult.checks,
+        }
+      : providerResult;
+
     this.logger.info(
       {
         userId,
         documentId: result.document.id,
-        reference: providerResult.reference,
-        status: providerResult.status,
+        reference: effectiveProviderResult.reference,
+        status: effectiveProviderResult.status,
       },
       'KYC provider result stored',
     );
+
+    let accountProvisioning: {
+      status: 'READY' | 'PENDING' | 'NOT_REQUIRED';
+      accountNumberMasked?: string;
+      bankName?: string;
+    } = { status: 'NOT_REQUIRED' };
+    if (providerResult.status === 'VERIFIED' && provider !== 'PAYSTACK') {
+      try {
+        const account = await this.bankingService.provisionVirtualAccount(
+          userId,
+          { currency: 'NGN', provider: 'monnify' },
+        );
+        accountProvisioning = {
+          status: 'READY',
+          accountNumberMasked: account.accountNumberMasked,
+          bankName: account.bankName,
+        };
+      } catch (error: unknown) {
+        this.logger.warn(
+          {
+            userId,
+            documentId: result.document.id,
+            errorName: error instanceof Error ? error.name : 'UnknownError',
+          },
+          provider === 'MONNIFY'
+            ? 'KYC is verified; Monnify account preparation will need a retry'
+            : 'KYC is verified; account preparation will need a retry',
+        );
+        accountProvisioning = { status: 'PENDING' };
+      }
+    }
 
     return {
       ...this.toSafeKycDocument({
@@ -352,21 +641,341 @@ export class KycService {
         kycTier: result.kycTier,
         verifications: [
           {
-            provider: providerResult.provider,
-            status: providerResult.status,
-            checks: providerResult.checks,
+            provider: effectiveProviderResult.provider,
+            status: effectiveProviderResult.status,
+            checks: effectiveProviderResult.checks,
           },
         ],
       }),
-      reference: providerResult.reference,
+      reference: effectiveProviderResult.reference,
+      accountProvisioning,
     };
   }
 
-  async verifyWithYouverify(
-    userId: string,
-    dto: CreateIdentityVerificationDto,
+  /**
+   * Completes a Paystack customer-identification callback. The callback is
+   * authenticated and durably accepted by the webhook worker before this
+   * method is called. Domain state is still guarded by the PENDING status so
+   * retries and out-of-order terminal events cannot downgrade a decision.
+   */
+  async processPaystackIdentification(
+    eventType: string,
+    data: Record<string, unknown>,
   ) {
-    return this.verifyIdentity(userId, dto);
+    const customerCode = this.readProviderString(data, 'customer_code');
+    if (!customerCode) {
+      return { received: true, processed: false, ignored: true };
+    }
+
+    const customer = await this.prisma.paystackCustomer.findUnique({
+      where: { customerCode },
+      select: {
+        userId: true,
+        customerCode: true,
+        validationFingerprint: true,
+        validationStatus: true,
+      },
+    });
+    if (!customer || !customer.validationFingerprint) {
+      return { received: true, processed: false, ignored: true };
+    }
+
+    const verifications = await this.prisma.kycVerification.findMany({
+      where: {
+        userId: customer.userId,
+        provider: 'PAYSTACK',
+        status: 'PENDING',
+      },
+      orderBy: { createdAt: 'desc' },
+      include: { document: true },
+    });
+    const matchingVerifications = verifications.filter((candidate) => {
+      const checks = this.asJsonRecord(candidate.checks);
+      return (
+        checks.customerCode === customer.customerCode &&
+        checks.validationFingerprint === customer.validationFingerprint
+      );
+    });
+    if (matchingVerifications.length !== 1) {
+      return { received: true, processed: false, ignored: true };
+    }
+    const verification = matchingVerifications[0];
+
+    const normalizedEvent = eventType.trim().toLowerCase();
+    const succeeded = normalizedEvent === 'customeridentification.success';
+    const failed = normalizedEvent === 'customeridentification.failed';
+    if (!succeeded && !failed) {
+      return { received: true, processed: false, ignored: true };
+    }
+
+    const reason = this.readProviderString(data, 'reason');
+    const result = await this.prisma.$transaction(async (tx) => {
+      const current = await tx.kycVerification.findUnique({
+        where: { id: verification.id },
+        select: { status: true, reference: true, checks: true },
+      });
+      if (!current || current.status !== 'PENDING') {
+        return { received: true, processed: false, duplicate: true };
+      }
+
+      const nextStatus = succeeded ? 'VERIFIED' : 'FAILED';
+      const documentStatus = succeeded ? 'VERIFIED' : 'REJECTED';
+      const checks = {
+        ...this.asJsonRecord(current.checks),
+        providerEvent: normalizedEvent,
+        verified: succeeded,
+        ...(reason ? { failureReason: reason } : {}),
+      } satisfies Prisma.InputJsonObject;
+
+      const verificationUpdate = await tx.kycVerification.updateMany({
+        where: { id: verification.id, status: 'PENDING' },
+        data: {
+          status: nextStatus,
+          checks,
+          errorMessage: succeeded
+            ? null
+            : reason || 'Customer identification failed',
+        },
+      });
+      if (verificationUpdate.count !== 1) {
+        return { received: true, processed: false, duplicate: true };
+      }
+
+      await tx.kycDocument.updateMany({
+        where: {
+          id: verification.documentId,
+          status: { in: ['PENDING', 'SUBMITTED'] },
+        },
+        data: {
+          status: documentStatus,
+          rejectionNote: succeeded
+            ? null
+            : reason || 'Customer identification failed',
+        },
+      });
+
+      const user = await tx.user.findUnique({
+        where: { id: customer.userId },
+        select: { kycStatus: true, kycTier: true },
+      });
+      if (!user) {
+        throw new NotFoundException('User not found');
+      }
+      const kycTier = succeeded
+        ? await this.resolvePromotedKycTier(
+            tx,
+            customer.userId,
+            'BVN',
+            user.kycTier,
+          )
+        : user.kycTier;
+      const kycStatus = succeeded
+        ? 'VERIFIED'
+        : user.kycStatus === 'VERIFIED'
+          ? 'VERIFIED'
+          : 'REJECTED';
+      await tx.user.update({
+        where: { id: customer.userId },
+        data: { kycStatus, kycTier },
+      });
+      await tx.paystackCustomer.updateMany({
+        where: {
+          userId: customer.userId,
+          ...(succeeded ? {} : { validationStatus: { not: 'VERIFIED' } }),
+        },
+        data: { validationStatus: succeeded ? 'VERIFIED' : 'FAILED' },
+      });
+      await tx.auditLog.create({
+        data: {
+          action: 'PAYSTACK_CUSTOMER_IDENTIFICATION_RESULT',
+          targetType: 'KycVerification',
+          targetId: verification.id,
+          reference: verification.reference,
+          metadata: {
+            userId: customer.userId,
+            customerCode,
+            eventType: normalizedEvent,
+            status: nextStatus,
+            kycStatusAfter: kycStatus,
+            kycTierAfter: kycTier,
+            ...(reason ? { reason } : {}),
+          },
+        },
+      });
+
+      return {
+        received: true,
+        processed: true,
+        status: nextStatus,
+        userId: customer.userId,
+        accountSetupConsent:
+          this.asJsonRecord(current.checks).accountSetupConsent === true,
+      };
+    });
+
+    if (
+      result.processed &&
+      result.status === 'VERIFIED' &&
+      result.accountSetupConsent
+    ) {
+      try {
+        await this.bankingService.provisionVirtualAccount(result.userId, {
+          currency: 'NGN',
+          provider: 'paystack',
+        } as never);
+      } catch (error: unknown) {
+        this.logger.warn(
+          {
+            userId: result.userId,
+            errorName: error instanceof Error ? error.name : 'UnknownError',
+          },
+          'Paystack KYC is verified; account preparation will need a retry',
+        );
+      }
+    }
+
+    return result;
+  }
+
+  async createManualKycDocument(
+    userId: string,
+    dto: CreateManualKycDocumentDto,
+  ) {
+    const expectedPrefix = `kyc/${userId}/`;
+    if (!dto.objectKey.startsWith(expectedPrefix)) {
+      throw new BadRequestException('Document does not belong to this account');
+    }
+    this.normalizeIdNumber(dto.type, dto.idNumber);
+
+    try {
+      const bucket = this.supabaseService
+        .getAdminClient()
+        .storage.from(this.getKycDocumentBucket());
+      const info = await bucket.info(dto.objectKey);
+      const metadata = info.data?.metadata as
+        | { mimetype?: unknown; size?: unknown }
+        | undefined;
+      const actualSize =
+        typeof info.data?.size === 'number'
+          ? info.data.size
+          : typeof metadata?.size === 'number'
+            ? metadata.size
+            : undefined;
+      const actualContentType =
+        typeof info.data?.contentType === 'string'
+          ? info.data.contentType
+          : typeof metadata?.mimetype === 'string'
+            ? metadata.mimetype
+            : undefined;
+      if (
+        info.error ||
+        !info.data ||
+        actualSize === undefined ||
+        !Number.isFinite(actualSize) ||
+        actualSize <= 0 ||
+        actualSize > 8 * 1024 * 1024 ||
+        !actualContentType ||
+        !Object.prototype.hasOwnProperty.call(
+          CONTENT_TYPE_EXTENSIONS,
+          actualContentType.toLowerCase(),
+        )
+      ) {
+        throw new Error('missing uploaded object');
+      }
+    } catch {
+      throw new BadRequestException(
+        'Uploaded identity document could not be found',
+      );
+    }
+
+    const pending =
+      typeof this.prisma.kycDocument.findFirst === 'function'
+        ? await this.prisma.kycDocument.findFirst({
+            where: {
+              userId,
+              type: 'NIN',
+              status: { in: ['PENDING', 'SUBMITTED', 'VERIFIED'] },
+            },
+            select: { id: true, status: true },
+          })
+        : null;
+    if (pending?.status === 'VERIFIED') {
+      throw new ConflictException('Your NIN is already verified');
+    }
+    if (pending) {
+      throw new ConflictException('A manual NIN review is already in progress');
+    }
+
+    const documentId = randomUUID();
+    const verificationId = randomUUID();
+    const consentRecordedAt = new Date();
+    const document = await this.prisma.$transaction(async (tx) => {
+      const created = await tx.kycDocument.create({
+        data: {
+          id: documentId,
+          userId,
+          type: 'NIN',
+          documentUrl: dto.objectKey,
+          idNumber: this.encryptKycId(dto.idNumber),
+          status: 'SUBMITTED',
+        },
+      });
+      await tx.kycVerification.create({
+        data: {
+          id: verificationId,
+          userId,
+          documentId,
+          provider: 'MANUAL_REVIEW',
+          status: 'REVIEW_REQUIRED',
+          reference: `manual:${documentId}`,
+          checks: {
+            manualReviewRequired: true,
+            evidenceRequired: 'NIN document ownership and identity match',
+            identifierMasked: this.maskIdentifier(dto.idNumber),
+          },
+          consentRecordedAt,
+          consentVersion: 'manual-nin-review-consent-v1',
+          consentSource: PROVIDER_CONSENT_SOURCE,
+        },
+      });
+      await tx.user.updateMany({
+        where: { id: userId, kycStatus: 'PENDING' },
+        data: { kycStatus: 'SUBMITTED' },
+      });
+      await tx.auditLog.create({
+        data: {
+          action: 'MANUAL_KYC_DOCUMENT_SUBMITTED',
+          targetType: 'KycDocument',
+          targetId: documentId,
+          reference: `manual:${documentId}`,
+          metadata: {
+            userId,
+            documentType: 'NIN',
+            consentVersion: 'manual-nin-review-consent-v1',
+            consentRecordedAt: consentRecordedAt.toISOString(),
+          },
+        },
+      });
+      return created;
+    });
+
+    return {
+      ...this.toSafeKycDocument({
+        ...document,
+        verifications: [
+          {
+            provider: 'MANUAL_REVIEW',
+            status: 'REVIEW_REQUIRED',
+            checks: {
+              manualReviewRequired: true,
+              evidenceRequired: 'NIN document ownership and identity match',
+              identifierMasked: this.maskIdentifier(dto.idNumber),
+            },
+          },
+        ],
+      }),
+      reference: `manual:${documentId}`,
+    };
   }
 
   private async releaseReservedProviderAttempt(input: {
@@ -376,8 +985,85 @@ export class KycService {
     country: 'NG' | 'GH';
     documentType: KYCType;
     provider: KycProviderResult['provider'];
+    validationFingerprint?: string;
+    failureMessage?: string;
   }) {
-    await this.prisma.$transaction(async (tx) => {
+    return this.prisma.$transaction(async (tx) => {
+      if (input.provider === 'PAYSTACK') {
+        if (!input.validationFingerprint) return false;
+
+        const current = await tx.kycVerification.findUnique({
+          where: { id: input.verificationId },
+          select: { status: true, checks: true },
+        });
+        if (!current || current.status !== 'PENDING') return false;
+
+        const checks = this.asJsonRecord(current.checks);
+        const currentFingerprint = this.readProviderString(
+          checks,
+          'validationFingerprint',
+        );
+        if (currentFingerprint !== input.validationFingerprint) return false;
+
+        const binding = await tx.paystackCustomer.findUnique({
+          where: { userId: input.userId },
+          select: { validationStatus: true, validationFingerprint: true },
+        });
+        if (
+          !binding ||
+          binding.validationFingerprint !== input.validationFingerprint ||
+          binding.validationStatus === 'VERIFIED'
+        ) {
+          return false;
+        }
+
+        const transitioned = await tx.kycVerification.updateMany({
+          where: { id: input.verificationId, status: 'PENDING' },
+          data: {
+            status: 'FAILED',
+            errorMessage:
+              input.failureMessage ?? PROVIDER_VALIDATION_REJECTED_MESSAGE,
+          },
+        });
+        if (transitioned.count !== 1) return false;
+
+        await tx.kycDocument.updateMany({
+          where: {
+            id: input.documentId,
+            status: { in: ['PENDING', 'SUBMITTED'] },
+          },
+          data: {
+            status: 'REJECTED',
+            rejectionNote:
+              input.failureMessage ?? PROVIDER_VALIDATION_REJECTED_MESSAGE,
+          },
+        });
+        await tx.paystackCustomer.updateMany({
+          where: {
+            userId: input.userId,
+            validationFingerprint: input.validationFingerprint,
+            validationStatus: { not: 'VERIFIED' },
+          },
+          data: { validationStatus: 'FAILED' },
+        });
+        await tx.auditLog.create({
+          data: {
+            action: 'KYC_PROVIDER_FAILURE',
+            targetType: 'KycVerification',
+            targetId: input.verificationId,
+            metadata: {
+              userId: input.userId,
+              documentId: input.documentId,
+              provider: input.provider,
+              country: input.country,
+              documentType: input.documentType,
+              failureClass: 'DEFINITIVE_VALIDATION_REJECTION',
+            },
+          },
+        });
+        return true;
+      }
+
       await tx.kycDocument.update({
         where: { id: input.documentId },
         data: {
@@ -406,184 +1092,8 @@ export class KycService {
           },
         },
       });
+      return true;
     });
-  }
-
-  async processYouverifyCallback(input: {
-    body: Record<string, unknown>;
-    rawBody?: Buffer | string;
-    signatureHeader?: string;
-  }) {
-    if (
-      !this.youverifyProvider.verifyCallbackSignature({
-        rawBody: input.rawBody,
-        signature: input.signatureHeader,
-      })
-    ) {
-      throw new BadRequestException('Invalid Youverify webhook signature');
-    }
-
-    const providerResult = this.youverifyProvider.normalizeCallback(input.body);
-    if (providerResult.provider !== 'YOUVERIFY') {
-      throw new BadRequestException('Unexpected KYC webhook provider');
-    }
-
-    const eventType = input.body.event;
-    if (typeof eventType !== 'string' || !eventType.trim()) {
-      throw new BadRequestException('Youverify webhook event is required');
-    }
-    const accepted = await this.kycWebhookInbox.accept({
-      eventType: eventType.trim(),
-      result: providerResult,
-    });
-
-    return { received: true, ...accepted };
-  }
-
-  async applyYouverifyCallback(providerResult: KycProviderCallbackResult) {
-    if (providerResult.provider !== 'YOUVERIFY') {
-      throw new BadRequestException('Unexpected KYC webhook provider');
-    }
-
-    const existing = await this.prisma.kycVerification.findUnique({
-      where: {
-        provider_reference: {
-          provider: providerResult.provider,
-          reference: providerResult.reference,
-        },
-      },
-      include: {
-        document: {
-          include: {
-            user: {
-              select: {
-                kycStatus: true,
-                kycTier: true,
-              },
-            },
-          },
-        },
-      },
-    });
-    if (!existing) {
-      throw new BadRequestException('Unknown Youverify verification reference');
-    }
-
-    if (existing.responseHash === providerResult.responseHash) {
-      return {
-        duplicate: true,
-        status: existing.status,
-      };
-    }
-
-    const terminalStatuses = ['VERIFIED', 'REJECTED'];
-    if (terminalStatuses.includes(existing.status)) {
-      return {
-        duplicate: false,
-        ignored: true,
-        status: existing.status,
-      };
-    }
-
-    const updated = await this.prisma.$transaction(async (tx) => {
-      const claimed = await tx.kycVerification.updateMany({
-        where: {
-          id: existing.id,
-          status: { notIn: ['VERIFIED', 'REJECTED'] },
-        },
-        data: {
-          status: providerResult.status,
-          checks: providerResult.checks,
-          responseHash: providerResult.responseHash,
-          errorMessage: providerResult.errorMessage ?? null,
-        },
-      });
-      if (claimed.count === 0) return null;
-
-      const documentStatus = this.resolveDocumentStatus(providerResult.status);
-      const kycTier =
-        providerResult.status === 'VERIFIED'
-          ? await this.resolvePromotedKycTier(
-              tx,
-              existing.userId,
-              existing.document.type,
-              existing.document.user.kycTier,
-            )
-          : existing.document.user.kycTier;
-      const kycStatus =
-        providerResult.status === 'VERIFIED' ||
-        existing.document.user.kycStatus === 'VERIFIED'
-          ? ('VERIFIED' as const)
-          : providerResult.status === 'REJECTED'
-            ? ('REJECTED' as const)
-            : ('SUBMITTED' as const);
-
-      const reviewed = await tx.kycDocument.update({
-        where: { id: existing.documentId },
-        data: {
-          status: documentStatus,
-          rejectionNote:
-            providerResult.status === 'REJECTED' ||
-            providerResult.status === 'FAILED'
-              ? providerResult.errorMessage
-              : null,
-        },
-      });
-      await tx.user.update({
-        where: { id: existing.userId },
-        data: { kycStatus, kycTier },
-      });
-      await tx.auditLog.create({
-        data: {
-          action: 'KYC_YOUVERIFY_WEBHOOK',
-          targetType: 'KycVerification',
-          targetId: existing.id,
-          reference: providerResult.reference,
-          metadata: {
-            userId: existing.userId,
-            documentId: existing.documentId,
-            provider: providerResult.provider,
-            verificationStatus: providerResult.status,
-            documentStatus,
-            kycStatusAfter: kycStatus,
-            kycTierAfter: kycTier,
-            responseHash: providerResult.responseHash,
-          },
-        },
-      });
-
-      return { reviewed, kycStatus, kycTier };
-    });
-
-    if (!updated) {
-      const current = await this.prisma.kycVerification.findUnique({
-        where: { id: existing.id },
-        select: { status: true },
-      });
-      return {
-        duplicate: false,
-        ignored: true,
-        status: current?.status ?? existing.status,
-      };
-    }
-
-    this.logger.info(
-      {
-        userId: existing.userId,
-        documentId: existing.documentId,
-        reference: providerResult.reference,
-        status: providerResult.status,
-      },
-      'Youverify KYC webhook processed',
-    );
-
-    return {
-      duplicate: false,
-      status: providerResult.status,
-      documentStatus: updated.reviewed.status,
-      kycStatus: updated.kycStatus,
-      kycTier: updated.kycTier,
-    };
   }
 
   async getUserKyc(userId: string) {
@@ -651,12 +1161,28 @@ export class KycService {
       throw new NotFoundException('User not found');
     }
 
+    // The active provider owns the automated validation state. Keep this
+    // lookup Paystack-only so legacy Monnify status reads remain compatible
+    // with their existing query shape and test doubles.
+    const providerValidationStatus =
+      this.kycProviderGateway.provider === 'PAYSTACK'
+        ? ((
+            await this.prisma.paystackCustomer.findUnique({
+              where: { userId },
+              select: { validationStatus: true },
+            })
+          )?.validationStatus ?? 'UNVERIFIED')
+        : undefined;
+
     const latestDocument = documents[0];
     const latestVerification = latestDocument?.verifications?.[0];
 
     return {
       provider:
         latestVerification?.provider ?? this.kycProviderGateway.provider,
+      ...(this.kycProviderGateway.provider === 'PAYSTACK'
+        ? { providerValidationStatus }
+        : {}),
       kycStatus: user.kycStatus,
       kycTier: user.kycTier,
       fullName: user.fullName,
@@ -773,11 +1299,24 @@ export class KycService {
 
     const document = await this.prisma.kycDocument.findUnique({
       where: { id: documentId },
-      include: { user: true },
+      include: {
+        user: true,
+        verifications: {
+          select: { provider: true },
+        },
+      },
     });
 
     if (!document) {
       throw new NotFoundException('KYC document not found');
+    }
+
+    if (
+      document.verifications?.some(({ provider }) => provider === 'PAYSTACK')
+    ) {
+      throw new BadRequestException(
+        'Paystack identity verification is finalized by provider evidence and cannot be manually reviewed',
+      );
     }
 
     if (document.status === 'VERIFIED' || document.status === 'REJECTED') {
@@ -992,6 +1531,58 @@ export class KycService {
     return resolved;
   }
 
+  private assertPaystackIdentityInput(dto: CreateIdentityVerificationDto) {
+    if (dto.type !== 'BVN') {
+      throw new BadRequestException(
+        'Paystack automated verification supports BVN with a Nigerian bank account',
+      );
+    }
+    if (!dto.bankCode || !dto.accountNumber) {
+      throw new BadRequestException(
+        'Bank code and account number are required for Paystack BVN verification',
+      );
+    }
+  }
+
+  private buildPaystackValidationFingerprint(input: {
+    bvn: string;
+    accountNumber: string;
+    bankCode: string;
+    firstName: string;
+    lastName: string;
+  }) {
+    return createHash('sha256')
+      .update(
+        [
+          input.bvn,
+          input.accountNumber,
+          input.bankCode,
+          input.firstName,
+          input.lastName,
+        ]
+          .map((value) => value.trim().toUpperCase())
+          .join('|'),
+      )
+      .digest('hex');
+  }
+
+  private readProviderString(
+    value: Record<string, unknown>,
+    key: string,
+  ): string | undefined {
+    const candidate = value[key];
+    return typeof candidate === 'string' && candidate.trim()
+      ? candidate.trim()
+      : undefined;
+  }
+
+  private asJsonRecord(value: Prisma.JsonValue | null | undefined) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      return {} as Record<string, unknown>;
+    }
+    return value as Record<string, unknown>;
+  }
+
   private normalizeIdNumber(type: string, idNumber: string) {
     const normalized = idNumber.trim().toUpperCase().replace(/\s+/g, '');
 
@@ -1034,24 +1625,8 @@ export class KycService {
     }
   }
 
-  private assertSupportedIdentityType(
-    country: 'NG' | 'GH',
-    type: KYCType,
-    provider: KycProviderResult['provider'],
-  ) {
-    if (provider === 'NINJA') {
-      if (country !== 'NG' || !['BVN', 'NIN'].includes(type)) {
-        throw new BadRequestException(
-          'Identity type is not supported for the selected country',
-        );
-      }
-      return;
-    }
-    const supportedTypes: Record<'NG' | 'GH', KYCType[]> = {
-      NG: ['BVN', 'NIN', 'DRIVERS_LICENSE', 'VOTERS_CARD'],
-      GH: ['PASSPORT', 'VOTERS_CARD'],
-    };
-    if (!supportedTypes[country].includes(type)) {
+  private assertSupportedIdentityType(country: 'NG' | 'GH', type: KYCType) {
+    if (country !== 'NG' || !['BVN', 'NIN'].includes(type)) {
       throw new BadRequestException(
         'Identity type is not supported for the selected country',
       );

@@ -102,15 +102,101 @@ void main() {
         ),
       ),
     );
-    await tester.pump(const Duration(seconds: 1));
+    await tester.pumpAndSettle();
 
-    expect(find.text('Request virtual account'), findsOneWidget);
+    expect(find.text('Request Paystack account'), findsOneWidget);
     expect(find.text('Recent Deposits'), findsNothing);
     expect(find.text('No deposits yet'), findsNothing);
     final previousTick = walletRefreshSignal.tick;
-    await tester.tap(find.text('Request virtual account'));
+    await tester.tap(find.text('Request Paystack account'));
     await tester.pumpAndSettle();
     expect(walletRefreshSignal.tick, previousTick);
     expect(find.byType(DashboardDetailScreen), findsOneWidget);
+    await tester.ensureVisible(find.text('Create receiving account'));
+    await tester.tap(find.text('Create receiving account'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Authorize setup'));
+    await tester.pumpAndSettle();
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    expect(find.text('Request Paystack account'), findsNothing);
+    expect(find.text('Copy account number'), findsOneWidget);
+    expect(find.text('0123456789'), findsOneWidget);
+  });
+
+  testWidgets('virtual account entry creates an account after explicit consent',
+      (tester) async {
+    final bundle = buildTrustPayTestBundle(includeVirtualAccounts: false);
+    await tester.pumpWidget(MaterialApp(
+      home: DashboardDetailScreen(
+        kind: DashboardDetailKind.virtualAccount,
+        homeDataService: bundle.homeDataService,
+      ),
+    ));
+    await tester.pumpAndSettle();
+    expect(find.text('Create receiving account'), findsOneWidget);
+    await tester.ensureVisible(find.text('Create receiving account'));
+    await tester.tap(find.text('Create receiving account'));
+    await tester.pumpAndSettle();
+    expect(
+        bundle.adapter.requestedUris
+            .where((uri) => uri.path == '/api/banking/accounts/provision'),
+        isEmpty);
+    await tester.tap(find.text('Authorize setup'));
+    await tester.pumpAndSettle();
+    expect(find.text('Copy account number'), findsOneWidget);
+    expect(find.text('Create receiving account'), findsNothing);
+  });
+
+  testWidgets('returning from KYC reloads masked receiving account details',
+      (tester) async {
+    final bundle = buildTrustPayTestBundle();
+    bundle.adapter.revealAccountNumbers = false;
+    await tester.pumpWidget(MaterialApp.router(
+        routerConfig: GoRouter(
+      initialLocation: AppRoutes.receiveMoney,
+      routes: [
+        GoRoute(
+            path: AppRoutes.receiveMoney,
+            builder: (_, __) => ReceiveMoneyScreen(
+                  walletService: bundle.walletService,
+                  homeDataService: bundle.homeDataService,
+                )),
+        GoRoute(
+            path: AppRoutes.kyc,
+            builder: (context, _) => Scaffold(
+                  body: FilledButton(
+                      onPressed: () {
+                        bundle.adapter.revealAccountNumbers = true;
+                        context.pop();
+                      },
+                      child: const Text('Finish verification')),
+                )),
+      ],
+    )));
+    await tester.pumpAndSettle();
+    expect(find.text('Copy account number'), findsNothing);
+    await tester.tap(find.text('Complete KYC'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Finish verification'));
+    await tester.pumpAndSettle();
+    expect(find.text('Copy account number'), findsOneWidget);
+  });
+
+  testWidgets('unverified users get a KYC action instead of account creation',
+      (tester) async {
+    final bundle = buildTrustPayTestBundle(
+      includeVirtualAccounts: false,
+      kycStatus: 'PENDING',
+    );
+    await tester.pumpWidget(MaterialApp(
+      home: DashboardDetailScreen(
+        kind: DashboardDetailKind.virtualAccount,
+        homeDataService: bundle.homeDataService,
+      ),
+    ));
+    await tester.pumpAndSettle();
+    expect(find.text('Verify identity'), findsOneWidget);
+    expect(find.text('Create receiving account'), findsNothing);
   });
 }

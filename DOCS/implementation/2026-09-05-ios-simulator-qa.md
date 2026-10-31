@@ -180,7 +180,7 @@ The service `turnpay` serves `api.trustpayhq.com`; its previous deployment was
 `d26243f` from `paullight1/turnpay` main. Actual settings: Oregon free Docker
 instance, root `BACKEND`, Dockerfile `./Dockerfile`, build context `.`.
 The dashboard project label says Production, but the runtime NODE_ENV value is
-`Staging` (the backend schema normalizes it). Monnify, VTpass and Ninja URLs
+`Staging` (the backend schema normalizes it). Monnify and VTpass URLs (this historical record predates the Monnify-only KYC cleanup)
 were individually verified as sandbox; withdrawals=false, migrations-on-startup=true.
 Secret values were not revealed or exported. The local render.yaml provider
 URL/region differ from deployed settings, so the manifest is not authoritative

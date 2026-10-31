@@ -88,6 +88,7 @@ class FakeTrustPayApiAdapter implements HttpClientAdapter {
   final bool includeDeposits;
   final bool includeVirtualAccounts;
   bool _accountProvisioned = false;
+  bool revealAccountNumbers = true;
   final bool includeReferralRewards;
   final bool includeVtuProviders;
   bool transactionPinConfigured;
@@ -200,6 +201,91 @@ class FakeTrustPayApiAdapter implements HttpClientAdapter {
 
     if (method == 'GET' && path == '/api/banking/accounts') {
       return _jsonResponse(_virtualAccounts());
+    }
+
+    if (method == 'GET' && path == '/api/banking/accounts/provisioning') {
+      return _jsonResponse({
+        'provider': 'PAYSTACK',
+        'status': (_accountProvisioned || includeVirtualAccounts)
+            ? 'ACTIVE'
+            : 'NOT_REQUESTED',
+        'updatedAt': _accountProvisioned ? '2026-10-30T10:00:00.000Z' : null,
+      });
+    }
+
+    if (method == 'GET' && path == '/api/payments/capabilities') {
+      return _jsonResponse({
+        'provider': 'paystack',
+        'country': 'NG',
+        'currency': 'NGN',
+        'configured': true,
+        'checkout': true,
+        'checkoutMinimumAmount': '50.00',
+        'virtualAccounts': true,
+        'withdrawals': true,
+        'internalTransfers': true,
+        'identityVerification': true,
+        'manualDocumentReview': true,
+        'automatedIdentityTypes': ['BVN'],
+        'withdrawalMinimumTier': 'TIER_2',
+      });
+    }
+
+    if (method == 'POST' && path == '/api/payments/initialize') {
+      return _jsonResponse({
+        'reference': 'fund-test-001',
+        'status': 'PENDING',
+        'authorizationUrl': 'https://checkout.paystack.com/fund-test-001',
+      });
+    }
+
+    if (method == 'GET' && path.startsWith('/api/payments/verify/')) {
+      return _jsonResponse({
+        'reference': path.split('/').last,
+        'status': 'PENDING',
+      });
+    }
+
+    if (method == 'GET' && path == '/api/payments/banks') {
+      return _jsonResponse([
+        {
+          'name': 'Access Bank',
+          'code': '044',
+          'slug': 'access-bank',
+        },
+        {
+          'name': 'GTBank',
+          'code': '058',
+          'slug': 'gtbank',
+        },
+      ]);
+    }
+
+    if (method == 'POST' && path == '/api/payments/banks/resolve') {
+      return _jsonResponse({
+        'accountName': 'Ada Lovelace',
+        'accountNumber': '0123456789',
+        'bankCode': '058',
+      });
+    }
+
+    if (method == 'GET' && path == '/api/kyc/status') {
+      final verified = kycStatus.toUpperCase() == 'VERIFIED';
+      return _jsonResponse({
+        'provider': 'PAYSTACK',
+        'providerValidationStatus': verified ? 'VERIFIED' : 'UNVERIFIED',
+        'kycStatus': kycStatus,
+        'kycTier': verified ? 'TIER_2' : 'TIER_0',
+        'documents': verified
+            ? [
+                {
+                  'type': 'BVN',
+                  'status': 'VERIFIED',
+                  'updatedAt': '2026-10-30T10:00:00.000Z',
+                },
+              ]
+            : <Map<String, dynamic>>[],
+      });
     }
 
     if (method == 'GET' && path == '/api/banking/beneficiaries') {
@@ -443,8 +529,8 @@ class FakeTrustPayApiAdapter implements HttpClientAdapter {
 
     return [
       {
-        'provider': 'monnify',
-        'accountNumber': '0123456789',
+        'provider': 'paystack',
+        'accountNumber': revealAccountNumbers ? '0123456789' : '',
         'accountNumberMasked': '******6789',
         'accountName': 'Ada Lovelace',
         'bankName': 'Providus Bank',
@@ -452,6 +538,9 @@ class FakeTrustPayApiAdapter implements HttpClientAdapter {
         'status': 'ACTIVE',
       },
       {
+        // Paystack only provisions NGN. Keep this tagged legacy record so
+        // provider-aware history remains covered without advertising GHS
+        // Paystack functionality.
         'provider': 'monnify',
         'accountNumber': '1000000001',
         'accountNumberMasked': '******0001',
@@ -472,7 +561,7 @@ class FakeTrustPayApiAdapter implements HttpClientAdapter {
         'accountNumberMasked': '******1234',
         'bankCode': '011',
         'currency': 'NGN',
-        'provider': 'monnify',
+        'provider': 'paystack',
         'createdAt': '2026-06-22T08:00:00.000Z',
       },
     ];

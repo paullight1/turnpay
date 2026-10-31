@@ -10,7 +10,6 @@ import {
   Max,
   IsBoolean,
   Equals,
-  IsObject,
   IsDateString,
 } from 'class-validator';
 import { KYCType } from '@prisma/client';
@@ -84,23 +83,43 @@ export class CreateIdentityVerificationDto {
     message: 'Consent is required before starting identity verification',
   })
   consentAccepted: true;
+
+  /** Required for Paystack's Nigerian bank-account identification flow. */
+  @IsOptional()
+  @IsString()
+  @Matches(/^\d{10}$/)
+  accountNumber?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(32)
+  bankCode?: string;
+
+  /** Optional consent to prepare a dedicated account after validation. */
+  @IsOptional()
+  @IsBoolean()
+  accountSetupConsent?: boolean;
 }
 
-export { CreateIdentityVerificationDto as CreateYouverifyKycDto };
-
-export class YouverifyWebhookDto {
+export class CreateManualKycDocumentDto {
   @IsString()
-  @MinLength(1)
-  @MaxLength(80)
-  event: string;
+  @IsIn(['NIN'])
+  type: 'NIN';
 
   @IsString()
-  @MinLength(1)
-  @MaxLength(16)
-  apiVersion: string;
+  @Matches(/^\d{11}$/)
+  idNumber: string;
 
-  @IsObject()
-  data: Record<string, unknown>;
+  @IsString()
+  @MaxLength(255)
+  @Matches(/^kyc\/[A-Za-z0-9_-]+\/[A-Za-z0-9._-]+$/)
+  objectKey: string;
+
+  @IsBoolean()
+  @Equals(true, {
+    message: 'Consent is required before submitting a manual identity document',
+  })
+  consentAccepted: true;
 }
 
 export class ReviewKycDto {

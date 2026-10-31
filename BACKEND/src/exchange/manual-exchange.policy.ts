@@ -19,11 +19,28 @@ export const MANUAL_ACTIONS = [
   'REJECT',
   'CLAIM_PAYOUT',
   'MARK_SENT',
+  'RECORD_CEDIS_SENT',
   'COMPLETE',
 ] as const;
 export type ManualAction = (typeof MANUAL_ACTIONS)[number];
 export type ManualStatus = (typeof MANUAL_STATUSES)[number];
 export type SettlementMode = 'WALLET' | 'BANK' | 'MOMO';
+
+/** New manual orders follow the approved delivery contract; old orders keep their stored mode. */
+export function manualDeliveryOptions(source: 'NGN' | 'GHS'): SettlementMode[] {
+  return source === 'GHS' ? ['WALLET'] : ['MOMO', 'BANK'];
+}
+export function assertManualDelivery(
+  source: 'NGN' | 'GHS',
+  mode: SettlementMode,
+) {
+  if (!manualDeliveryOptions(source).includes(mode))
+    throw new BadRequestException(
+      source === 'GHS'
+        ? 'Cedis to naira is paid into your TrustPay naira wallet. Choose TrustPay wallet.'
+        : 'Cedis are sent to a bank or MoMo account. Choose a receiving bank or mobile money.',
+    );
+}
 
 export function nextManualExchangeStatus(
   status: string,
@@ -44,6 +61,8 @@ export function nextManualExchangeStatus(
       return 'PAYOUT_PROCESSING';
     if (status === 'PAYOUT_PROCESSING' && action === 'MARK_SENT')
       return 'PAYOUT_SENT';
+    if (status === 'PAYOUT_PROCESSING' && action === 'RECORD_CEDIS_SENT')
+      return 'COMPLETED';
     if (status === 'PAYOUT_SENT' && action === 'COMPLETE') return 'COMPLETED';
   }
   throw new ConflictException(

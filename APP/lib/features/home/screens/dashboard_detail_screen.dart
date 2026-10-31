@@ -7,16 +7,20 @@ import 'package:dio/dio.dart';
 
 import '../../../core/money/money_value.dart';
 import '../../../core/router/app_router.dart';
+import '../../../core/state/exchange_visibility.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/theme/theme_controller.dart';
 import '../../../core/utils/haptics.dart';
 import '../../../core/widgets/tp_page_header.dart';
+import '../../../core/widgets/tp_empty_state.dart';
+import '../../../core/widgets/tp_illustration.dart';
 import '../../../core/widgets/trustpay_lottie.dart';
 import '../../../services/auth_service.dart';
 import '../../../services/home_data_service.dart';
 import '../../../services/api_client.dart';
 import '../../../services/vtu_service.dart';
 import '../../auth/widgets/tawk_service.dart';
+import '../../wallet/screens/virtual_account_screen.dart';
 
 enum DashboardDetailKind {
   wallets,
@@ -195,7 +199,9 @@ class _DashboardDetailScreenState extends State<DashboardDetailScreen>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _future = widget.homeDataService.fetchDashboard();
+    if (widget.kind != DashboardDetailKind.virtualAccount) {
+      _future = widget.homeDataService.fetchDashboard();
+    }
   }
 
   @override
@@ -210,6 +216,7 @@ class _DashboardDetailScreenState extends State<DashboardDetailScreen>
   }
 
   void _reload() {
+    if (widget.kind == DashboardDetailKind.virtualAccount) return;
     setState(() {
       _future = widget.homeDataService.fetchDashboard();
     });
@@ -219,6 +226,10 @@ class _DashboardDetailScreenState extends State<DashboardDetailScreen>
   Widget build(BuildContext context) {
     AppColors.watch(context);
     final config = _configFor(widget.kind);
+
+    if (widget.kind == DashboardDetailKind.virtualAccount) {
+      return VirtualAccountScreen(service: widget.homeDataService);
+    }
 
     return Scaffold(
       backgroundColor: AppColors.background,
@@ -300,12 +311,12 @@ class DashboardProfileScreen extends StatefulWidget {
 
 class _DashboardProfileScreenState extends State<DashboardProfileScreen> {
   final _authService = AuthService();
-  late Future<HomeDashboardData> _future;
+  late Future<HomeUser> _future;
 
   @override
   void initState() {
     super.initState();
-    _future = widget.homeDataService.fetchDashboard();
+    _future = widget.homeDataService.fetchCurrentUser();
   }
 
   @override
@@ -316,7 +327,7 @@ class _DashboardProfileScreenState extends State<DashboardProfileScreen> {
       body: SafeArea(
         child: Padding(
           padding: const EdgeInsets.all(AppSpacing.lg),
-          child: FutureBuilder<HomeDashboardData>(
+          child: FutureBuilder<HomeUser>(
             future: _future,
             builder: (context, snapshot) {
               if (snapshot.connectionState == ConnectionState.waiting) {
@@ -329,12 +340,12 @@ class _DashboardProfileScreenState extends State<DashboardProfileScreen> {
                     'Could not load profile',
                   ),
                   onRetry: () => setState(() {
-                    _future = widget.homeDataService.fetchDashboard();
+                    _future = widget.homeDataService.fetchCurrentUser();
                   }),
                 );
               }
 
-              final user = snapshot.data!.user;
+              final user = snapshot.data!;
               return ListView(
                 padding: EdgeInsets.zero,
                 children: [
@@ -385,6 +396,26 @@ class _DashboardProfileScreenState extends State<DashboardProfileScreen> {
                     label: 'Appearance',
                     detail: 'Dark mode and light mode',
                     onTap: () => context.push(AppRoutes.profileAppearance),
+                  ),
+                  ValueListenableBuilder<bool>(
+                    valueListenable: exchangeServicesEnabled,
+                    builder: (context, enabled, _) => SwitchListTile.adaptive(
+                      contentPadding: EdgeInsets.zero,
+                      secondary: Icon(
+                        Icons.currency_exchange_rounded,
+                        color: AppColors.primary,
+                      ),
+                      title: Text('Exchange services',
+                          style: AppTextStyles.labelM),
+                      subtitle: Text(
+                        enabled
+                            ? 'Exchange is available in the navigation bar.'
+                            : 'Hide exchange from the navigation bar.',
+                        style: AppTextStyles.bodyS,
+                      ),
+                      value: enabled,
+                      onChanged: setExchangeServicesEnabled,
+                    ),
                   ),
                   _ProfileActionRow(
                     icon: Icons.security_rounded,
@@ -622,9 +653,23 @@ class TransactionsDetailScaffold extends StatelessWidget {
                           onRetry: onRetry,
                         );
                       }
+                      final transactions = snapshot.data!;
+                      if (transactions.isEmpty) {
+                        return SizedBox(
+                          height: MediaQuery.sizeOf(context).height * 0.68,
+                          child: const TpEmptyState(
+                            variant: TpIllustrationVariant.emptyTransactions,
+                            illustrationAsset:
+                                'assets/images/empty_states/empty-transactions.svg',
+                            title: 'No transactions yet',
+                            message:
+                                'Your completed activity will appear here.',
+                            illustrationSize: 220,
+                          ),
+                        );
+                      }
                       return _TransactionsHistoryBody(
-                        transactions: snapshot.data!,
-                      );
+                          transactions: transactions);
                     },
                   ),
                 ],
@@ -773,8 +818,8 @@ _DetailConfig _configFor(DashboardDetailKind kind) {
       );
     case DashboardDetailKind.virtualAccount:
       return const _DetailConfig(
-        title: 'Virtual account',
-        subtitle: 'Receive bank transfers directly into your wallet.',
+        title: 'Paystack NGN account',
+        subtitle: 'Receive NGN bank transfers directly into your wallet.',
       );
     case DashboardDetailKind.activity:
       return const _DetailConfig(
@@ -980,6 +1025,7 @@ class _AccountDetailsBodyState extends State<_AccountDetailsBody> {
   bool _isSavingProfile = false;
   bool _isRequestingDeletion = false;
   bool _isLoadingTransactions = false;
+  HomeVirtualAccountProvisioning? _provisioning;
   late Future<List<SupportTicket>> _closureRequests;
   String? _message;
 
@@ -995,6 +1041,7 @@ class _AccountDetailsBodyState extends State<_AccountDetailsBody> {
     _countryController.text = _user.country.isEmpty ? 'NG' : _user.country;
     _phoneController.text = _user.phone;
     _loadTransactionVolume();
+    _loadProvisioningStatus();
   }
 
   @override
@@ -1157,16 +1204,51 @@ class _AccountDetailsBodyState extends State<_AccountDetailsBody> {
     }
   }
 
+  Future<void> _loadProvisioningStatus() async {
+    try {
+      final provisioning =
+          await widget.homeDataService.fetchVirtualAccountProvisioning();
+      if (!mounted) return;
+      setState(() => _provisioning = provisioning);
+    } on DioException {
+      // Keep this page usable on deployments without the optional status
+      // endpoint. The issued account list remains authoritative.
+    }
+  }
+
   Future<void> _generateVirtualAccount() async {
     if (_isProvisioning) return;
 
-    final nameParts = _nameParts(_user.fullName);
-    if (nameParts == null) {
+    if (_provisioning?.isPending == true) {
       setState(() {
-        _message = 'Add your legal name before generating a virtual account.';
+        _message = _provisioning?.message.isNotEmpty == true
+            ? _provisioning!.message
+            : 'Paystack is already preparing your NGN receiving account. Refresh shortly.';
       });
+      await _loadProvisioningStatus();
       return;
     }
+
+    final consentAccepted = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Set up your Paystack account'),
+        content: const Text(
+          'I authorize TRUSTPAY to create a dedicated NGN receiving account with Paystack for wallet funding. Paystack will confirm incoming transfers before your wallet is credited.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Not now'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('Authorize setup'),
+          ),
+        ],
+      ),
+    );
+    if (consentAccepted != true || !mounted) return;
 
     setState(() {
       _isProvisioning = true;
@@ -1175,23 +1257,34 @@ class _AccountDetailsBodyState extends State<_AccountDetailsBody> {
 
     try {
       final account = await widget.homeDataService.provisionVirtualAccount(
-        firstName: nameParts.first,
-        lastName: nameParts.last,
+        consentAccepted: true,
         idempotencyKey: _provisionAttempt.keyFor(
-          'virtual-account|${widget.data.user.id}|NGN',
+          'paystack-virtual-account|${widget.data.user.id}|NGN',
         ),
       );
       _provisionAttempt.markFinalOutcome();
       if (!mounted) return;
       setState(() {
+        _provisioning = HomeVirtualAccountProvisioning(
+          provider: account.provider.isEmpty ? 'PAYSTACK' : account.provider,
+          status: account.status,
+        );
         _accounts = [
           account,
           ..._accounts.where((item) =>
               item.displayAccountNumber != account.displayAccountNumber),
         ];
-        _message = 'Virtual account generated.';
+        _message = account.status.toUpperCase() == 'PENDING'
+            ? 'Paystack is preparing your NGN receiving account. Refresh shortly.'
+            : account.status.toUpperCase() == 'ACTION_REQUIRED'
+                ? 'Paystack account setup needs attention. Review your details or contact support, then retry.'
+                : 'Paystack receiving account is ready.';
       });
     } on DioException catch (error) {
+      if ((error.response?.statusCode ?? 0) >= 400 &&
+          (error.response?.statusCode ?? 0) < 500) {
+        _provisionAttempt.markFinalOutcome();
+      }
       if (!mounted) return;
       setState(() {
         _message = _readDioErrorMessage(error) ?? 'Unable to generate account.';
@@ -1203,10 +1296,31 @@ class _AccountDetailsBodyState extends State<_AccountDetailsBody> {
     }
   }
 
+  HomeVirtualAccount? get _paystackNgnAccount {
+    for (final account in _accounts) {
+      if (account.provider.toUpperCase() == 'PAYSTACK' &&
+          account.currency.toUpperCase() == 'NGN' &&
+          account.status.toUpperCase() == 'ACTIVE') {
+        return account;
+      }
+    }
+    for (final account in _accounts) {
+      if (account.provider.toUpperCase() == 'PAYSTACK' &&
+          account.currency.toUpperCase() == 'NGN') {
+        if (account.status.toUpperCase() != 'ACTIVE' &&
+            account.status.toUpperCase() != 'PENDING') {
+          continue;
+        }
+        return account;
+      }
+    }
+    return null;
+  }
+
   @override
   Widget build(BuildContext context) {
     AppColors.watch(context);
-    final primaryAccount = _accounts.isEmpty ? null : _accounts.first;
+    final primaryAccount = _paystackNgnAccount;
     final canEdit = _user.canEditProfileDetails;
 
     return Column(
@@ -1225,6 +1339,8 @@ class _AccountDetailsBodyState extends State<_AccountDetailsBody> {
         _VirtualAccountSummaryCard(
           account: primaryAccount,
           isProvisioning: _isProvisioning,
+          provisioningPending: _provisioning?.isPending == true,
+          provisioningActionRequired: _provisioning?.isActionRequired == true,
           onGenerate: _generateVirtualAccount,
         ),
         if (_message != null)
@@ -1558,13 +1674,6 @@ class _DeleteAccountPanel extends StatelessWidget {
   }
 }
 
-class _NameParts {
-  final String first;
-  final String last;
-
-  const _NameParts({required this.first, required this.last});
-}
-
 class _CompactInfoLine extends StatelessWidget {
   final String label;
   final String value;
@@ -1601,11 +1710,15 @@ class _CompactInfoLine extends StatelessWidget {
 class _VirtualAccountSummaryCard extends StatelessWidget {
   final HomeVirtualAccount? account;
   final bool isProvisioning;
+  final bool provisioningPending;
+  final bool provisioningActionRequired;
   final VoidCallback onGenerate;
 
   const _VirtualAccountSummaryCard({
     required this.account,
     required this.isProvisioning,
+    required this.provisioningPending,
+    required this.provisioningActionRequired,
     required this.onGenerate,
   });
 
@@ -1613,6 +1726,10 @@ class _VirtualAccountSummaryCard extends StatelessWidget {
   Widget build(BuildContext context) {
     AppColors.watch(context);
     final current = account;
+    final accountPending = provisioningPending ||
+        (current != null &&
+            current.displayAccountNumber.isEmpty &&
+            current.status.toUpperCase() == 'PENDING');
 
     return _DataPanel(
       child: Column(
@@ -1635,7 +1752,7 @@ class _VirtualAccountSummaryCard extends StatelessWidget {
               const SizedBox(width: AppSpacing.md),
               Expanded(
                 child: Text(
-                  'Virtual account',
+                  'Paystack NGN receiving account',
                   style: AppTextStyles.headingM,
                 ),
               ),
@@ -1643,9 +1760,36 @@ class _VirtualAccountSummaryCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: AppSpacing.md),
-          if (current == null) ...[
+          if (provisioningActionRequired) ...[
+            const Icon(Icons.warning_amber_rounded),
+            const SizedBox(height: AppSpacing.sm),
             Text(
-              'Get an account number for receiving bank transfers into your wallet.',
+              'Paystack account setup needs attention. Review the details or contact support, then retry.',
+              style: AppTextStyles.bodyM,
+            ),
+            const SizedBox(height: AppSpacing.md),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                onPressed: isProvisioning ? null : onGenerate,
+                icon: isProvisioning
+                    ? const Icon(Icons.hourglass_empty_rounded)
+                    : const Icon(Icons.refresh_rounded),
+                label: Text(
+                  isProvisioning ? 'Retrying setup' : 'Retry account setup',
+                ),
+              ),
+            ),
+          ] else if (accountPending) ...[
+            const Icon(Icons.schedule_rounded),
+            const SizedBox(height: AppSpacing.sm),
+            Text(
+              'Paystack is preparing your NGN receiving account. Refresh shortly.',
+              style: AppTextStyles.bodyM,
+            ),
+          ] else if (current == null) ...[
+            Text(
+              'Get a dedicated Paystack account number for receiving NGN transfers into your wallet.',
               style: AppTextStyles.bodyM,
             ),
             const SizedBox(height: AppSpacing.md),
@@ -2989,7 +3133,7 @@ class _VirtualAccountBody extends StatelessWidget {
               Text(account.accountName, style: AppTextStyles.bodyM),
               const SizedBox(height: AppSpacing.xs),
               Text(
-                '${account.currency} â€¢ ${account.accountNumberMasked}',
+                '${account.currency} • ${account.accountNumberMasked}',
                 style: AppTextStyles.bodyS,
               ),
             ],
@@ -3008,6 +3152,19 @@ class _ActivityBody extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     AppColors.watch(context);
+    if (transactions.isEmpty) {
+      return SizedBox(
+        height: MediaQuery.sizeOf(context).height * 0.62,
+        child: const TpEmptyState(
+          variant: TpIllustrationVariant.emptyTransactions,
+          illustrationAsset:
+              'assets/images/empty_states/empty-transactions.svg',
+          title: 'No transactions yet',
+          message: 'Your completed activity will appear here.',
+          illustrationSize: 220,
+        ),
+      );
+    }
     return _TransactionsHistoryBody(
       transactions: transactions,
       compactTopSpacing: true,
@@ -4002,19 +4159,6 @@ String _formatExactAmount(String decimalString) {
 
   final fraction = parts.length > 1 ? parts[1].padRight(2, '0') : '00';
   return '${isNegative ? '-' : ''}$grouped.${fraction.substring(0, 2)}';
-}
-
-_NameParts? _nameParts(String fullName) {
-  final parts = fullName
-      .trim()
-      .split(RegExp(r'\s+'))
-      .where((part) => part.isNotEmpty)
-      .toList();
-  if (parts.isEmpty) return null;
-
-  final firstName = parts.first;
-  final lastName = parts.length > 1 ? parts.sublist(1).join(' ') : firstName;
-  return _NameParts(first: firstName, last: lastName);
 }
 
 Map<String, _TransactionVolume> _transactionVolumes(

@@ -75,7 +75,11 @@ function documentTypeLabel(type: string) {
 }
 
 function verificationLine(doc: AdminKycDocument) {
-  const providerStatus = doc.verificationStatus ?? doc.providerStatus;
+  const providerStatus =
+    doc.verificationStatus ??
+    doc.providerStatus ??
+    doc.reviewEvidence?.providerStatus ??
+    doc.reviewEvidence?.status;
   const manualReview =
     doc.manualReviewStatus ??
     (doc.manualReviewRequired || doc.requiresManualReview ? "pending" : null);
@@ -166,7 +170,17 @@ export default function AdminKycPage() {
     return null;
   }
 
+  const selectedDocIsPaystackAutomated = Boolean(
+    selectedDoc &&
+      (selectedDoc.provider?.toUpperCase() === "PAYSTACK" ||
+        selectedDoc.reviewEvidence?.provider?.toUpperCase() === "PAYSTACK"),
+  );
+
   const requestReview = (status: "VERIFIED" | "REJECTED") => {
+    if (selectedDocIsPaystackAutomated) {
+      toast.info("Paystack verification is updated by the provider webhook.");
+      return;
+    }
     if (!reviewReason.trim()) {
       toast.error("Enter a review reason before continuing");
       return;
@@ -199,7 +213,13 @@ export default function AdminKycPage() {
   };
 
   const confirmReview = () => {
-    if (!selectedDoc || !pendingReviewStatus) return;
+    if (
+      !selectedDoc ||
+      !pendingReviewStatus ||
+      selectedDocIsPaystackAutomated
+    ) {
+      return;
+    }
 
     reviewMutation.mutate({
       documentId: selectedDoc.id,
@@ -215,7 +235,9 @@ export default function AdminKycPage() {
           <div>
             <h1 className="text-3xl font-semibold">KYC review</h1>
             <p className="mt-1 text-muted-foreground">
-              Review submitted identity documents with masked user details.
+              Review pending Paystack BVN results and manual NIN evidence with
+              masked user details. A provider result does not replace manual
+              evidence review for Tier 2.
             </p>
           </div>
         </div>
@@ -458,58 +480,70 @@ export default function AdminKycPage() {
                 )}
               </div>
 
-              <div className="flex flex-col gap-2">
-                <label className="text-sm font-medium">
-                  Review reason
-                </label>
-                <textarea
-                  className="flex min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-                  placeholder="Required reason for approval or rejection..."
-                  value={reviewReason}
-                  onChange={(e) => {
-                    setReviewReason(e.target.value);
-                    setPendingReviewStatus(null);
-                  }}
-                />
-              </div>
-
-              {pendingReviewStatus && (
-                <div className="rounded-lg border p-3 text-sm">
-                  <p className="font-medium">
-                    Confirm {pendingReviewStatus === "VERIFIED" ? "approval" : "rejection"}
-                  </p>
-                  <p className="mt-1 text-muted-foreground">
-                    This will mark the masked {documentTypeLabel(selectedDoc.type)} submission as {pendingReviewStatus.toLowerCase()}.
-                  </p>
+              {selectedDocIsPaystackAutomated ? (
+                <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-950">
+                  Paystack verification is read-only here. The provider result
+                  and account access update arrive through the verified webhook;
+                  manual review controls are available for NIN evidence only.
                 </div>
-              )}
+              ) : (
+                <>
+                  <div className="flex flex-col gap-2">
+                    <label className="text-sm font-medium">
+                      Review reason
+                    </label>
+                    <textarea
+                      className="flex min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                      placeholder="Required reason for approval or rejection..."
+                      value={reviewReason}
+                      onChange={(e) => {
+                        setReviewReason(e.target.value);
+                        setPendingReviewStatus(null);
+                      }}
+                    />
+                  </div>
 
+                  {pendingReviewStatus && (
+                    <div className="rounded-lg border p-3 text-sm">
+                      <p className="font-medium">
+                        Confirm {pendingReviewStatus === "VERIFIED" ? "approval" : "rejection"}
+                      </p>
+                      <p className="mt-1 text-muted-foreground">
+                        This will mark the masked {documentTypeLabel(selectedDoc.type)} submission as {pendingReviewStatus.toLowerCase()}.
+                      </p>
+                    </div>
+                  )}
+
+                  <div className="flex gap-3">
+                    {pendingReviewStatus ? (
+                      <Button
+                        variant={pendingReviewStatus === "REJECTED" ? "destructive" : "default"}
+                        onClick={confirmReview}
+                        disabled={reviewMutation.isPending}
+                      >
+                        {reviewMutation.isPending ? "Processing..." : `Confirm ${pendingReviewStatus === "VERIFIED" ? "approval" : "rejection"}`}
+                      </Button>
+                    ) : (
+                      <>
+                        <Button
+                          onClick={() => requestReview("VERIFIED")}
+                          disabled={reviewMutation.isPending}
+                        >
+                          Verify
+                        </Button>
+                        <Button
+                          variant="destructive"
+                          onClick={() => requestReview("REJECTED")}
+                          disabled={reviewMutation.isPending}
+                        >
+                          Reject
+                        </Button>
+                      </>
+                    )}
+                  </div>
+                </>
+              )}
               <div className="flex gap-3">
-                {pendingReviewStatus ? (
-                  <Button
-                    variant={pendingReviewStatus === "REJECTED" ? "destructive" : "default"}
-                    onClick={confirmReview}
-                    disabled={reviewMutation.isPending}
-                  >
-                    {reviewMutation.isPending ? "Processing..." : `Confirm ${pendingReviewStatus === "VERIFIED" ? "approval" : "rejection"}`}
-                  </Button>
-                ) : (
-                  <>
-                    <Button
-                      onClick={() => requestReview("VERIFIED")}
-                      disabled={reviewMutation.isPending}
-                    >
-                      Verify
-                    </Button>
-                    <Button
-                      variant="destructive"
-                      onClick={() => requestReview("REJECTED")}
-                      disabled={reviewMutation.isPending}
-                    >
-                      Reject
-                    </Button>
-                  </>
-                )}
                 <Button
                   variant="outline"
                   onClick={() => {

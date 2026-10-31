@@ -118,7 +118,7 @@ export class MonnifyWebhookDto {
 export class PaymentWebhookInboxDto {
   @IsString()
   @MaxLength(32)
-  provider!: 'MONNIFY';
+  provider!: 'MONNIFY' | 'PAYSTACK';
 
   @IsString()
   @MaxLength(128)
@@ -130,4 +130,14 @@ export class PaymentWebhookInboxDto {
 
   @IsObject()
   payload!: Record<string, unknown>;
+}
+
+export class PaystackWebhookDto {
+  @IsString()
+  @MaxLength(128)
+  event!: string;
+
+  @IsDefined()
+  @IsObject()
+  data!: Record<string, unknown>;
 }

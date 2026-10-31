@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/router/app_router.dart';
@@ -158,7 +159,21 @@ class _RecipientsMessage extends StatelessWidget {
       ),
       child: Column(
         children: [
-          TpIllustration(variant: variant, size: 124, semanticLabel: title),
+          if (variant == TpIllustrationVariant.emptyRecipients)
+            Semantics(
+              image: true,
+              label: title,
+              child: SizedBox(
+                width: 180,
+                height: 140,
+                child: SvgPicture.asset(
+                  'assets/images/empty_states/send-recipient.svg',
+                  fit: BoxFit.contain,
+                ),
+              ),
+            )
+          else
+            TpIllustration(variant: variant, size: 124, semanticLabel: title),
           const SizedBox(height: AppSpacing.sm),
           Text(title, style: AppTextStyles.labelM, textAlign: TextAlign.center),
           if (detail != null) ...[

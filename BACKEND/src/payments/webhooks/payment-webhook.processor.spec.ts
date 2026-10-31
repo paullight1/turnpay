@@ -194,7 +194,11 @@ describe('PaymentWebhookProcessorService', () => {
       expect.stringContaining('processor unavailable'),
     );
     expect(prisma.webhookLog.updateMany).toHaveBeenCalledWith({
-      where: { reference: 'MNF-3' },
+      where: {
+        provider: 'MONNIFY',
+        eventType: 'SUCCESSFUL_TRANSACTION',
+        reference: 'MNF-3',
+      },
       data: {
         errorMessage: 'processor unavailable',
       },

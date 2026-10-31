@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 
 import '../theme/app_theme.dart';
 import '../utils/haptics.dart';
@@ -21,6 +22,7 @@ class TpEmptyState extends StatelessWidget {
   final double illustrationSize;
   final bool compact;
   final Color? accent;
+  final String? illustrationAsset;
 
   const TpEmptyState({
     super.key,
@@ -34,6 +36,7 @@ class TpEmptyState extends StatelessWidget {
     this.illustrationSize = 168,
     this.compact = false,
     this.accent,
+    this.illustrationAsset,
   });
 
   @override
@@ -50,11 +53,26 @@ class TpEmptyState extends StatelessWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              TpIllustration(
-                variant: variant,
-                size: compact ? illustrationSize * 0.72 : illustrationSize,
-                accent: accent,
-              ),
+              if (illustrationAsset != null)
+                Semantics(
+                  image: true,
+                  label: title,
+                  child: SizedBox(
+                    width: compact ? illustrationSize * 0.72 : illustrationSize,
+                    height:
+                        compact ? illustrationSize * 0.72 : illustrationSize,
+                    child: SvgPicture.asset(
+                      illustrationAsset!,
+                      fit: BoxFit.contain,
+                    ),
+                  ),
+                )
+              else
+                TpIllustration(
+                  variant: variant,
+                  size: compact ? illustrationSize * 0.72 : illustrationSize,
+                  accent: accent,
+                ),
               SizedBox(height: compact ? AppSpacing.sm : AppSpacing.md),
               Text(
                 title,

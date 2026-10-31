@@ -200,7 +200,7 @@ MONNIFY_EXCHANGE_COLLECTION_ACCOUNT_NUMBER="xxx"
 
 # Optional payment providers if enabled later
 MONNIFY_API_KEY=""
-YOUVERIFY_API_KEY=""
+KYC_PROVIDER="monnify"
 VTPASS_API_KEY=""
 
 # VTU Provider

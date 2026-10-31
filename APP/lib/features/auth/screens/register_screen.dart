@@ -434,6 +434,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                 label:
                     _currentStep == _termsStep ? 'Create account' : 'Continue',
                 isLoading: _isLoading,
+                loadingLabel: 'Creating account…',
                 isDisabled: _isLoading,
                 onTap: _onNext,
               ),

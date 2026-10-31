@@ -1,6 +1,6 @@
 # TRUSTPAY Codebase Status Review
 
-Date: 2026-09-01
+Date: 2026-09-27
 
 This review summarizes the current repository state across backend, web/admin, Flutter mobile, docs, and launch readiness. It is based on the local codebase, not provider-dashboard access.
 
@@ -8,7 +8,7 @@ This review summarizes the current repository state across backend, web/admin, F
 
 TRUSTPAY is no longer at project-bootstrap stage. The backend, web/admin, and mobile app have substantial functionality implemented. The biggest remaining work is production activation: staging migrations, live secrets, Monnify KYB/webhook validation, reconciliation operations, e2e coverage, mobile parity, and go-live controls.
 
-The active provider decision is Monnify-only for banking/payments, VTpass-only for VTU, and Youverify-only for direct KYC. Removed providers no longer have selectable runtime paths.
+The active provider decision is Monnify-only for banking, payments, and KYC, and VTpass-only for VTU. Alternate KYC adapters, webhook paths, and deployment settings have been removed. Historical database enum values and migrations remain immutable for existing records.
 
 ## Backend Review
 
@@ -32,7 +32,7 @@ The active provider decision is Monnify-only for banking/payments, VTpass-only f
 - More e2e coverage is needed for duplicate webhooks, duplicate admin review, concurrent debits, withdrawals, and transaction PIN lockout.
 - High-value admin actions need dual-control approval before live launch.
 - Reconciliation reports need stronger operator-facing exports/dashboards.
-- Youverify, Monnify, and VTpass dashboard callbacks still require public HTTPS URLs and live-provider validation.
+- Monnify and VTpass dashboard callbacks still require public HTTPS URLs and live-provider validation.
 
 ## Web/Admin Review
 

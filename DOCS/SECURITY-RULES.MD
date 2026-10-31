@@ -369,7 +369,7 @@ async handleMonnifyWebhook(
    - `PENDING` → `REVERSED` when the provider confirms reversal of reserved funds.
    - `SUCCESS` → `REVERSED` only after an authenticated, independently confirmed provider reversal; credit exactly one compensating ledger entry in the same database transaction.
    - Replayed or stale pending/failure events must never overwrite success or create another refund. Do not refund an already refunded `FAILED` or `REVERSED` transaction.
-   - No other transitions are allowed without a documented product-specific state machine and financial regression coverage.
+   - No other transitions are allowed without a documented product-specific state machine and financial regression coverage. The incoming Paystack checkout correction (`FAILED` → `SUCCESS` only after independent receipt verification and exactly-once credit) is defined in `DOCS/PAYSTACK-ACTIVATION.md` and covered by `paystack-funding.service.spec.ts`; it does not apply to withdrawals.
 
 **11.7** Implement a daily reconciliation job to verify:
    - Sum of all wallet balances = expected total
@@ -506,5 +506,57 @@ Every code change MUST be reviewed against this checklist:
 
 ---
 
-*Last updated: Phase 1 completion*
+*Last updated: 2026-10-30 — Paystack migration, verified incoming-checkout correction and secure mobile checkout recovery reviewed*
 *This document MUST be reviewed and updated at the end of each phase.*
+
+### 2026-10-31 mobile identity and receiving-account review
+
+The Flutter account request flow retains authenticated backend eligibility checks and explicit account-setup consent. Provisioning and KYC retries retain their idempotency keys for uncertain outcomes; definite client rejections allow a new attempt. Identity request fingerprints are hashed in memory, bank details remain masked on review, and NIN approval remains an audited staff action. No balance, tier, provider-signature, or backend authorization rules were changed by this UI repair.
+
+### Kora Ghana phase — 31 October 2026
+
+Reviewed additive GHS account/collection/exchange/withdrawal paths against this checklist. Provider callbacks require data-object HMAC verification, validated event envelopes and a durable inbox; only safe identifiers are retained in that inbox, with financial details independently queried. Full provider account/phone data, OTPs, PINs and secrets must not enter logs. Wallet/order allocation and payout compensation use exact Decimal values and serializable ledger transactions. Admin release and customer mutations retain authentication, roles, rate limits and idempotency.
+
+The independent integration review's five Important recovery/queue findings were fixed with regression tests. Configuration and a balance response remain distinct from merchant activation; Kora is disabled by default. Actual signed sandbox fixtures, supported recipient verification, merchant product/corridor approval, provider liquidity and live reconciliation remain acceptance gates. See `DOCS/KORA-GHANA-SETUP.md` and the phase verification record.
+
+
+### 2026-10-31 mobile send-money review
+
+The Flutter transfer refactor preserves authenticated recipient lookup, server-verified transaction PINs, KYC tiers, exact decimal payloads, durable idempotency keys, and read-only outcome resolution. Grouped amount entry and naira/kobo or cedi/pesewa descriptions use integer minor units. Failed storage preflight blocks submission; PIN verification disables further keypad input; uncertain requests retain their original attempt. Startup recovery now reports terminal outcomes and pauses new review when an earlier payment has just resolved. The loading and preflight guards apply to all journal-backed payment operations, including shared VTU purchases.
+
+Receipts use authoritative transfer responses, verify requested references (including transaction-reference aliases), distinguish completed reversals from the original successful status, and exclude wallet balances and unmasked recipient identifiers from exports. No backend mutation, ledger, provider-signature, authorization, fee, or balance rule was changed. UI verification uses simulated API responses; no live financial transaction was performed.
+
+Validation for the mobile send-money phase: all 359 Flutter tests passed, analyzer reported no issues, and whitespace checks passed. Phone/dark/150% text layouts were rendered and inspected.
+
+### Interim manual exchange admin triggers — 31 October 2026
+
+GHS→NGN uses the existing exact-once, receipt-backed NGN wallet credit action after an admin checks actual cedi receipt. The new NGN→GHS external completion action requires the assigned payout operator, a previously confirmed deposit, the exact frozen cedi amount, a unique transfer reference and protected payout proof. It atomically records completion and parent transaction success without any additional wallet movement or provider request. Existing guards, DTO validation, rate limits, idempotency, serializable/version checks, settlement holds and financial audits are retained. Kora remains disabled; no live transfer or deployment is performed. Operator instructions are in `DOCS/MANUAL-EXCHANGE-ADMIN-TRIGGERS.md`.
+
+The manual-trigger review additionally required server-owned workflow isolation and storage-independent committed replay. Migration `046_manual_admin_payout_workflow` preserves existing orders as LEGACY; newly created NGN→GHS external orders use ADMIN_CEDIS and cannot use the legacy Mark sent/Complete shortcut. Committed review events are checked before downloading evidence again, while new actions still verify protected proof. Regressions were observed failing and passing for both findings. Migration was applied only to the disposable financial test database.
+
+
+### 2026-10-31 KYC personal-details repair
+
+The mobile BVN flow now loads the authenticated saved profile, validates legal names and Nigerian phone format before bank/identity collection, and saves changed name, phone, country and reviewed birth year through the existing audited profile endpoint before KYC. Profile saves use their own idempotency attempt; an uncertain save is reconciled by reading the profile on retry. Unchanged profiles avoid unnecessary mutations, and verified/previously edited profiles retain server correction restrictions. Failed saves prevent the KYC request. Review masks the phone and preserves identity/bank input when editing. No real identity check or account creation was submitted during verification.
+
+Definitive Paystack identification HTTP 400/422 failures release only the matching pending verification/fingerprint and mark its non-verified binding failed, with an audit record. Ambiguous transport, authentication, rate-limit and unknown failures remain pending. Conditional transitions preserve a concurrent verified webhook result and retain canonical callback correlation. Upstream exception metadata contains only the HTTP status, never provider payloads or PII.
+
+Validation for KYC personal-details repair: 376 Flutter tests and 618 backend tests passed; backend build passed. KYC analysis is clean; the whole-app analyzer has only four unrelated manual-exchange style infos. The unknown-attempt regression confirms profile-read rejection does not rotate an uncertain KYC key. No live identity submission was performed.
+
+
+### Exchange flow and codebase hardening — 31 October 2026
+
+New exchange creation now enforces the approved delivery matrix on the server and publishes it to mobile: GHS→NGN wallet, NGN→GHS bank/MoMo. Stored historical idempotent replay remains ahead of this new policy and cannot change original terms. Payout ownership now rechecks customer eligibility, PIN reset hold and both settlement currency holds transactionally before any external-payment instruction becomes actionable. Existing Decimal ledger movement, DTOs, JWT/ADMIN guards, throttling, proof verification, deposit uniqueness and financial audits remain in place.
+
+The ADMIN queue adds bounded pages, validated UUID cursors and global counts in a RepeatableRead snapshot. Strict creation-time/ID keyset boundaries prevent status-changing cursor rows from skipping unpaid obligations. Admin caches are scoped to the authenticated account; automatic refresh is budgeted by loaded page count and stale data remains visibly marked on refresh failure. Definitive 400/401/403/404/422 failures can start a corrected admin attempt; conflicts, rate limits and uncertain outcomes retain their original idempotency key. Ghana receiving enablement alone cannot activate provider exchange, while historical provider recovery remains reachable.
+
+Both Important independent-review findings (filtered pagination omission and deep-page polling throttling) were reproduced failing and verified passing after fixes. Final backend suite: 88 suites/619 tests; real PostgreSQL manual financial suite: 20 tests. Flutter: 377 full-suite tests, plus the final eight-case manual screen run including 150% phone text. Backend/web TypeScript, scoped ESLint and Flutter analysis are clean. Browser verification and the detailed record are in `DOCS/EXCHANGE-FLOW-REVIEW-2026-10-31.md`. No live funds, provider activation or production migration/deployment were performed; existing migration 046 remains a release prerequisite.
+
+
+### 2026-10-31 KYC review experience
+
+The Flutter review redesign separates submission acknowledgement, per-document status, and verification history. NIN evidence can be offered after BVN submission because the existing authenticated manual-review endpoint already permits it; evidence selection, explicit consent, upload bounds, idempotency and audited approval remain unchanged. No tier or receiving-account eligibility rule is modified. Legacy document status stays readable while new Paystack enrollment is a separate prerequisite for receiving-account setup.
+
+Accepted local outcomes remain visible through stale or partial reads until the server acknowledges them; explicit server failures/revocations and server-owned tiers take precedence. Status checks are read-only, serialized per sheet, and preserve cached information after network failure. Canonical references reused by retries do not hide newly accepted results. NIN entry is masked with keyboard suggestions and autocorrect disabled. Illustrations are local, static SVG assets with no external requests. No real identity submission or financial account creation was performed for this UI verification.
+
+KYC review experience validation: all 400 Flutter tests passed, analyzer reported no issues, whitespace checks passed, and responsive light/dark/150% text layouts were rendered and inspected. Independent review findings were covered by canonical-retry, legacy-status, NIN-privacy and stale-read regressions.

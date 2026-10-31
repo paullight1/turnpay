@@ -69,11 +69,12 @@ check_env_value() {
 }
 
 if has_env_value "NODE_ENV" "staging" "render.yaml"; then
-  check_present "https://sandbox.monnify.com" "render.yaml"
+  check_present "PAYSTACK_SECRET_KEY" "render.yaml"
   check_present "https://sandbox.vtpass.com/api" "render.yaml"
   check_absent "https://vtpass.com/api" "render.yaml"
-  check_present "https://api.sandbox.ninja.boucloud.io" "render.yaml"
-  check_env_value "KYC_PROVIDER" "ninja" "render.yaml"
+  check_absent "NINJA_" "render.yaml"
+  check_absent "YOUVERIFY_" "render.yaml"
+  check_env_value "KYC_PROVIDER" "paystack" "render.yaml"
   check_env_value "BANKING_SANDBOX_MODE" "true" "render.yaml"
   check_env_value "WITHDRAWALS_ENABLED" "false" "render.yaml"
   check_env_value "INTERNAL_TRANSFERS_ENABLED" "false" "render.yaml"
@@ -87,7 +88,8 @@ if has_env_value "NODE_ENV" "staging" "render.yaml"; then
 else
   check_absent "https://sandbox.monnify.com" "render.yaml"
   check_absent "https://sandbox.vtpass.com/api" "render.yaml"
-  check_absent "https://api.sandbox.ninja.boucloud.io" "render.yaml"
+  check_absent "NINJA_" "render.yaml"
+  check_absent "YOUVERIFY_" "render.yaml"
 fi
 
 # Keep an explicit non-Render fallback. On Render, the platform-provided RENDER

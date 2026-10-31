@@ -39,11 +39,17 @@ class PaymentRecoveryService {
 
   /// Resolves all unresolved attempts in order. A resolver call only checks
   /// state; it never resubmits the original financial mutation.
-  Future<List<PaymentAttempt>> restoreAndResolve(String userId) async {
+  /// Reports every checked result through [onResolved], including terminal
+  /// outcomes that are no longer returned in the unresolved list.
+  Future<List<PaymentAttempt>> restoreAndResolve(
+    String userId, {
+    void Function(PaymentAttempt)? onResolved,
+  }) async {
     final unresolved = await _store.loadUnresolved(userId);
     final resolved = <PaymentAttempt>[];
     for (final attempt in unresolved) {
       final result = await resolveAttempt(userId: userId, attempt: attempt);
+      onResolved?.call(result);
       if (result.isUnresolved) resolved.add(result);
     }
     return List<PaymentAttempt>.unmodifiable(resolved);

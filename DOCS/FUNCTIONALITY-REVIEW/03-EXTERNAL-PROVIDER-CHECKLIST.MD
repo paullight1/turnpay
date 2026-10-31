@@ -20,14 +20,16 @@ Use this before enabling real traffic. Provider selection is fixed by
   behavior tested.
 - `/api/webhooks/vtu/vtpass` callback authentication and replay handling proven.
 
-## Youverify
+## Monnify KYC
 
-- Live API token stored only in backend secrets.
-- Direct identity products and commercial access approved for intended countries.
-- `/api/webhooks/kyc/youverify` registered with the HTTPS signing key matching
-  `YOUVERIFY_WEBHOOK_SECRET`.
-- Success, pending, review, failure, duplicate, invalid-signature, and stale-event
-  paths tested without logging raw identifiers.
+- Monnify identity-verification access and commercial terms approved for the
+  intended BVN/NIN checks.
+- Shared Monnify API credentials and the PII encryption key are installed only
+  in the backend secret manager.
+- Consent, exact identity match behavior, failure handling, duplicate attempts,
+  tier promotion, and audit evidence are validated in sandbox.
+- Production activation is recorded with a controlled low-risk verification
+  and privacy/compliance approval. KYC does not use a separate webhook.
 
 ## Operations and security
 

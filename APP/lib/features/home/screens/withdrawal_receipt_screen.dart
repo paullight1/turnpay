@@ -61,6 +61,13 @@ class _WithdrawalReceiptScreenState extends State<WithdrawalReceiptScreen> {
     final attempts = _asList(withdrawal['transferAttempts']);
     final latestAttempt = attempts.isNotEmpty ? _asMap(attempts.first) : {};
     final attemptMetadata = _asMap(latestAttempt['metadata']);
+    final provider = _asString(
+      latestAttempt['provider'],
+      fallback: _asString(
+        withdrawal['provider'],
+        fallback: _asString(metadata['provider'], fallback: 'PAYSTACK'),
+      ),
+    ).toUpperCase();
 
     return WithdrawalCompletionDetails(
       reference: _asString(withdrawal['reference']),
@@ -94,6 +101,7 @@ class _WithdrawalReceiptScreenState extends State<WithdrawalReceiptScreen> {
           fallback: _asString(withdrawal['reference']),
         ),
       ),
+      provider: provider,
       createdAt: _asDateTime(withdrawal['createdAt']),
       updatedAt: _asDateTime(withdrawal['updatedAt']),
       providerCreatedAt: _asDateTime(latestAttempt['createdAt']),
@@ -391,7 +399,9 @@ class _WithdrawalReceiptScreenState extends State<WithdrawalReceiptScreen> {
       case TpReceiptTone.failed:
         return 'This payout expired before approval was completed.';
       case TpReceiptTone.pending:
-        return 'This receipt is ready while Monnify finishes confirmation.';
+        return details.provider.toUpperCase() == 'MONNIFY'
+            ? 'This receipt is ready while Monnify finishes confirmation.'
+            : 'This receipt is ready while Paystack finishes confirmation.';
     }
   }
 

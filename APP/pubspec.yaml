@@ -38,6 +38,7 @@ dependencies:
   supabase_flutter: ^2.12.4
   # Crash reporting (enabled only when SENTRY_DSN dart-define is provided)
   sentry_flutter: ^8.14.2
+  flutter_svg: ^2.3.0
 
 dev_dependencies:
   flutter_test:
@@ -53,7 +54,11 @@ flutter:
     enable-swift-package-manager: false
   uses-material-design: true
   assets:
+    - assets/fonts/
     - assets/animations/
     - assets/images/
     - assets/images/feature_cards/
+    - assets/images/empty_states/
+    - assets/images/vtu/
+    - assets/images/kyc/
     - assets/icons/

@@ -1,5 +1,7 @@
 import {
   IsIn,
+  IsBoolean,
+  Equals,
   IsOptional,
   IsString,
   Matches,
@@ -7,11 +9,16 @@ import {
 } from 'class-validator';
 
 const SUPPORTED_CURRENCIES = ['NGN', 'GHS'] as const;
-const VIRTUAL_ACCOUNT_CURRENCIES = ['NGN'] as const;
-const VIRTUAL_ACCOUNT_PROVIDERS = ['monnify'] as const;
-const BANK_RESOLVE_PROVIDERS = ['monnify'] as const;
+const VIRTUAL_ACCOUNT_CURRENCIES = ['NGN', 'GHS'] as const;
+const VIRTUAL_ACCOUNT_PROVIDERS = ['monnify', 'paystack', 'kora'] as const;
+const BANK_RESOLVE_PROVIDERS = ['monnify', 'paystack'] as const;
 
 export class ProvisionVirtualAccountDto {
+  @IsOptional()
+  @IsBoolean()
+  @Equals(true)
+  consentAccepted?: true;
+
   @IsString()
   @IsIn(VIRTUAL_ACCOUNT_CURRENCIES)
   currency: (typeof VIRTUAL_ACCOUNT_CURRENCIES)[number];

@@ -16,6 +16,9 @@ describe('manual exchange HTTP authorization and validation', () => {
   let role = 'USER';
   const service = {
     list: jest.fn().mockResolvedValue([]),
+    queue: jest
+      .fn()
+      .mockResolvedValue({ items: [], nextCursor: null, counts: {} }),
     create: jest.fn().mockResolvedValue({ id: 'order' }),
     review: jest.fn(),
   };
@@ -91,6 +94,28 @@ describe('manual exchange HTTP authorization and validation', () => {
       .get('/api/admin/exchange/manual-orders')
       .set('Authorization', 'Bearer synthetic')
       .expect(200);
+  });
+  it('protects and validates the paginated admin queue', async () => {
+    await request(app.getHttpServer())
+      .get('/api/admin/exchange/manual-orders/queue')
+      .expect(401);
+    await request(app.getHttpServer())
+      .get('/api/admin/exchange/manual-orders/queue')
+      .set('Authorization', 'Bearer synthetic')
+      .expect(403);
+    role = 'ADMIN';
+    await request(app.getHttpServer())
+      .get('/api/admin/exchange/manual-orders/queue?cursor=invalid')
+      .set('Authorization', 'Bearer synthetic')
+      .expect(400);
+    expect(service.queue).not.toHaveBeenCalled();
+    await request(app.getHttpServer())
+      .get('/api/admin/exchange/manual-orders/queue?status=PAYOUT_PENDING')
+      .set('Authorization', 'Bearer synthetic')
+      .expect(200);
+    expect(service.queue).toHaveBeenCalledWith(
+      expect.objectContaining({ status: 'PAYOUT_PENDING' }),
+    );
   });
   it('rejects malformed amounts, missing external destination and injected settlement status before service execution', async () => {
     for (const body of [

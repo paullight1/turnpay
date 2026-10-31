@@ -22,7 +22,7 @@ import { canonicalizeMoneyAmount } from "@/lib/money";
 export default function WithdrawPage() {
   const { profile } = useAuth();
   const [amount, setAmount] = useState("");
-  const [currency, setCurrency] = useState("NGN");
+  const currency = "NGN";
   const [bankCode, setBankCode] = useState("");
   const [accountNumber, setAccountNumber] = useState("");
   const [accountName, setAccountName] = useState("");
@@ -49,6 +49,14 @@ export default function WithdrawPage() {
     staleTime: 60000 * 60,
   });
 
+  const capabilitiesQuery = useQuery({
+    queryKey: ["payment-capabilities"],
+    queryFn: async () => (await paymentApi.getCapabilities()).data,
+    staleTime: 60_000,
+  });
+
+  const withdrawalsAvailable = capabilitiesQuery.data?.withdrawals === true;
+
   const handleResolve = async () => {
     if (!accountNumber || !bankCode) {
       toast.error("Please enter account number and select a bank");
@@ -70,6 +78,11 @@ export default function WithdrawPage() {
   const handleWithdraw = async () => {
     if (moneyGate) {
       toast.error(moneyGate.title);
+      return;
+    }
+
+    if (!withdrawalsAvailable) {
+      toast.error("NGN withdrawals are temporarily unavailable.");
       return;
     }
 
@@ -164,20 +177,26 @@ export default function WithdrawPage() {
         <Card>
           <CardHeader>
             <CardTitle>Bank withdrawal details</CardTitle>
-            <CardDescription>Enter your bank account information</CardDescription>
+            <CardDescription>
+              Paystack sends NGN to a verified bank account. Merchant transfer
+              approvals, if required, are handled by TRUSTPAY operations.
+            </CardDescription>
           </CardHeader>
           <CardContent className="flex flex-col gap-4">
             <div className="flex flex-col gap-2">
               <Label>Currency</Label>
-              <Select value={currency} onValueChange={(value) => { setCurrency(value); resetAttempt(); }}>
+              <Select value={currency} disabled>
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="NGN">NGN (₦)</SelectItem>
-                  <SelectItem value="GHS">GHS (₵)</SelectItem>
                 </SelectContent>
               </Select>
+              <p className="text-xs text-muted-foreground">
+                Paystack withdrawals are currently available for Nigerian NGN
+                accounts. Ghana/FX settlement remains in Exchange.
+              </p>
             </div>
 
             <div className="flex flex-col gap-2">
@@ -265,9 +284,20 @@ export default function WithdrawPage() {
               />
             </div>
 
-            <Button onClick={handleWithdraw} disabled={isLoading || !!moneyGate} className="w-full" size="lg">
+            <Button
+              onClick={handleWithdraw}
+              disabled={isLoading || !!moneyGate || !withdrawalsAvailable}
+              className="w-full"
+              size="lg"
+            >
               {isLoading ? "Processing..." : isConfirming ? "Confirm Withdrawal" : "Review Withdrawal"}
             </Button>
+            {!capabilitiesQuery.isLoading && !withdrawalsAvailable && (
+              <p className="text-center text-sm text-muted-foreground">
+                NGN withdrawals are not enabled for this account yet. Try again
+                after Paystack transfer access is available.
+              </p>
+            )}
           </CardContent>
         </Card>
       </div>

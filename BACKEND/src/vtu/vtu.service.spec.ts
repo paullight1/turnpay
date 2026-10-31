@@ -43,6 +43,8 @@ describe('VtuService purchase ledger handling', () => {
     getPackages: jest.fn(),
     validateSmartCard: jest.fn(),
     validateMeter: jest.fn(),
+    validateSmile: jest.fn(),
+    getInternationalCountries: jest.fn(),
     purchase: jest.fn(),
     requery: jest.fn(),
     getProviderName: jest.fn(),
@@ -134,6 +136,206 @@ describe('VtuService purchase ledger handling', () => {
       } as any,
       settlementHold as any,
     );
+  });
+
+  it('does not advertise service-specific forms to older mobile clients', async () => {
+    vtuApi.getProviders.mockResolvedValue([
+      { id: 'mtn', type: 'airtime', isActive: true },
+      { id: 'smile-airtime', type: 'airtime', isActive: true },
+    ]);
+    await expect(service.getProviders('airtime')).resolves.toEqual([
+      { id: 'mtn', type: 'airtime', isActive: true },
+    ]);
+    await expect(
+      (service as any).getProviders('airtime', true),
+    ).resolves.toHaveLength(2);
+  });
+
+  it.each([
+    ['smile-airtime', 'airtime'],
+    ['smile', 'data'],
+    ['glo-sme', 'data'],
+    ['9mobile-sme', 'data'],
+    ['showmax', 'cable'],
+    ['foreign-airtime', 'airtime'],
+  ])(
+    'reserves NGN and completes a %s purchase through the existing ledger',
+    async (provider, type) => {
+      prisma.user.findUnique.mockResolvedValue({
+        id: 'user-1',
+        email: 'buyer@example.com',
+        kycStatus: 'VERIFIED',
+        kycTier: 'TIER_2',
+        isSuspended: false,
+      });
+      vtuApi.getProviders.mockResolvedValue([
+        { id: provider, type, isActive: true },
+      ]);
+      vtuApi.getPackages.mockResolvedValue([
+        { id: 'plan-1', price: '1000', serviceType: type },
+      ]);
+      vtuApi.validateSmile.mockResolvedValue({
+        name: 'Smile Customer',
+        accounts: [{ id: '1111111111', name: 'Home' }],
+      });
+      vtuApi.getInternationalCountries.mockResolvedValue([
+        { code: 'GH', prefix: '233' },
+      ]);
+      walletsService.getWallet.mockResolvedValue({
+        id: 'wallet-1',
+        balance: new Decimal(5000),
+      });
+      prisma.transaction.create.mockResolvedValue({
+        id: 'tx-1',
+        reference: 'VTU-1',
+      });
+      vtuApi.purchase.mockResolvedValue({
+        status: 'success',
+        reference: 'TX-1',
+        providerRequestId: 'REQ-1',
+        providerTransactionId: 'TX-1',
+        message: 'Delivered',
+        safeResponse: {},
+        rawResponse: {},
+      });
+      const result = await service.purchase('user-1', {
+        type,
+        provider,
+        amount: '1000',
+        expectedTotal: '1000',
+        packageId: 'plan-1',
+        contactPhone: '+2348031234567',
+        recipientNumber:
+          provider === 'foreign-airtime' ? '+233241234567' : '+2348031234567',
+        smileEmail: 'smile@example.com',
+        smileAccountId: '1111111111',
+        countryCode: 'GH',
+        operatorId: '5',
+      } as any);
+      expect(result).toMatchObject({
+        success: true,
+        amount: '1000',
+        totalDebit: '1000',
+      });
+      expect(ledger.debitWallet).toHaveBeenCalledWith(
+        expect.objectContaining({ currency: 'NGN', amount: new Decimal(1000) }),
+        prisma,
+      );
+      expect(prisma.vtuOrder.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          scope: provider === 'foreign-airtime' ? 'INTERNATIONAL' : 'LOCAL',
+          countryCode: provider === 'foreign-airtime' ? 'GH' : 'NG',
+          currency: 'NGN',
+        }),
+      });
+      if (provider === 'showmax')
+        expect(vtuApi.validateSmartCard).not.toHaveBeenCalled();
+      if (provider === 'foreign-airtime')
+        expect(vtuApi.purchase).toHaveBeenCalledWith(
+          expect.objectContaining({
+            email: 'buyer@example.com',
+            countryCode: 'GH',
+            operatorId: '5',
+          }),
+        );
+    },
+  );
+  it('does not debit when the reviewed total no longer matches the server fee', async () => {
+    walletsService.getWallet.mockResolvedValue({
+      id: 'wallet-1',
+      balance: new Decimal(5000),
+    });
+    await expect(
+      service.purchase('user-1', {
+        type: 'airtime',
+        provider: 'mtn',
+        contactPhone: '+2348031234567',
+        recipientNumber: '+2348031234567',
+        amount: '1000',
+        expectedTotal: '999',
+      }),
+    ).rejects.toThrow('Total price changed');
+    expect(ledger.debitWallet).not.toHaveBeenCalled();
+  });
+
+  it('quotes international flexible plans from the provider rate in NGN', async () => {
+    vtuApi.getProviders.mockResolvedValue([
+      { id: 'foreign-airtime', type: 'airtime', isActive: true },
+    ]);
+    vtuApi.getPackages.mockResolvedValue([
+      {
+        id: 'flex',
+        serviceType: 'airtime',
+        price: '0',
+        fixedPrice: false,
+        rate: '125.25',
+        minFaceValue: '5',
+        maxFaceValue: '100',
+      },
+    ]);
+    const quote = await (service as any).quote({
+      type: 'airtime',
+      provider: 'foreign-airtime',
+      countryCode: 'GH',
+      operatorId: '5',
+      packageId: 'flex',
+      faceValue: '10',
+    });
+    expect(quote).toMatchObject({
+      amount: '1252.50',
+      fee: '0.00',
+      totalDebit: '1252.50',
+      currency: 'NGN',
+    });
+    expect(ledger.debitWallet).not.toHaveBeenCalled();
+  });
+  it('rejects a Smile account that is not returned for the verified email before debiting', async () => {
+    vtuApi.getProviders.mockResolvedValue([
+      { id: 'smile', type: 'data', isActive: true },
+    ]);
+    vtuApi.validateSmile.mockResolvedValue({
+      name: 'Customer',
+      accounts: [{ id: '1111111111', name: 'Account' }],
+    });
+    await expect(
+      service.purchase('user-1', {
+        type: 'data',
+        provider: 'smile',
+        smileEmail: 'user@example.com',
+        smileAccountId: '9999999999',
+        packageId: '413',
+        amount: '1000',
+        contactPhone: '+2348031234567',
+      } as any),
+    ).rejects.toThrow('Smile account');
+    expect(ledger.debitWallet).not.toHaveBeenCalled();
+  });
+  it('rejects international flexible amounts outside provider limits before debiting', async () => {
+    vtuApi.getProviders.mockResolvedValue([
+      { id: 'foreign-airtime', type: 'airtime', isActive: true },
+    ]);
+    vtuApi.getPackages.mockResolvedValue([
+      {
+        id: 'flex',
+        serviceType: 'airtime',
+        price: '0',
+        fixedPrice: false,
+        rate: '125.25',
+        minFaceValue: '5',
+        maxFaceValue: '100',
+      },
+    ]);
+    await expect(
+      (service as any).quote({
+        type: 'airtime',
+        provider: 'foreign-airtime',
+        countryCode: 'GH',
+        operatorId: '5',
+        packageId: 'flex',
+        faceValue: '101',
+      }),
+    ).rejects.toThrow();
+    expect(ledger.debitWallet).not.toHaveBeenCalled();
   });
 
   it('creates a pending VTU transaction and debits wallet through the ledger', async () => {

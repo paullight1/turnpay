@@ -4,6 +4,7 @@
   "testEnvironment": "node",
   "testRegex": ".e2e-spec.ts$",
   "testPathIgnorePatterns": [
+    "kora-.*.financial.e2e-spec.ts$",
     "internal-transfer.financial.e2e-spec.ts$",
     "internal-transfer.fault.e2e-spec.ts$",
     "banking-webhook.financial.e2e-spec.ts$",

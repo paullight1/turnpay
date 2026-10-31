@@ -1,6 +1,6 @@
 # TRUSTPAY Task Status And Remaining Work
 
-Date updated: 2026-05-22
+Date updated: 2026-09-27
 
 This checklist reflects the current codebase after the Monnify-only virtual-account work, exchange deposit review flow, admin finance updates, and dashboard wallet UI improvements. It replaces the older bootstrap checklist that still showed already-implemented foundations as pending.
 
@@ -27,7 +27,7 @@ This checklist reflects the current codebase after the Monnify-only virtual-acco
 - [x] Next.js website/admin with auth, dashboard, wallet detail screen, Monnify account funding screen, exchange screen, KYC, withdraw, VTU, transactions, support, profile, admin finance, admin KYC, admin support, and admin VTU pages.
 - [x] Dashboard wallet cards now expose `Send Money` and `Receive Money`, and click through to wallet detail/history screens.
 - [x] Flutter app shell, auth screens, dashboard/home, money actions, VTU service client, transaction security service, biometrics/PIN support, profile, analytics, and transactions screens.
-- [x] Focused backend unit coverage for wallets, ledger, idempotency, auth, Youverify KYC, Monnify banking, beneficiaries, exchange, payments, support, transfers, VTpass, reconciliation, and admin service.
+- [x] Focused backend unit coverage for wallets, ledger, idempotency, auth, Monnify KYC and banking, beneficiaries, exchange, payments, support, transfers, VTpass, reconciliation, and admin service.
 - [x] Web lint/build currently passes with placeholder environment values.
 
 ### Verified Recently
@@ -152,7 +152,7 @@ These must be completed before real-money launch.
   - [ ] run low-value airtime/data/electricity/cable sandbox tests.
   - [ ] verify provider refund/requery paths.
 - [x] Keep unsupported VTpass markets marked unavailable until product scope changes.
-- [x] Use the direct Youverify API as the single KYC provider.
+- [x] Use the Monnify verification API as the only KYC provider; remove all alternate provider runtime paths and deployment settings.
 - [ ] Add live FX-rate provider or admin-controlled rate operations with change approval.
 
 ## P2 Infrastructure And Release

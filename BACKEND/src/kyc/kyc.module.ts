@@ -1,41 +1,44 @@
 import { Module } from '@nestjs/common';
 import { HttpModule } from '@nestjs/axios';
 import { ConfigService } from '@nestjs/config';
-import {
-  AdminKycController,
-  KycController,
-  KycWebhookController,
-} from './kyc.controller';
+import { BankingModule } from '../banking/banking.module';
+import { PaystackModule } from '../paystack/paystack.module';
+import { AdminKycController, KycController } from './kyc.controller';
 import { KycService } from './kyc.service';
 import { KYC_PROVIDER_GATEWAY } from './providers/kyc-provider.gateway';
-import { YouverifyProvider } from './providers/youverify.provider';
-import { NinjaProvider } from './providers/ninja.provider';
 import { MonnifyProvider } from './providers/monnify.provider';
+import { PaystackProvider } from './providers/paystack.provider';
 import { selectKycProvider } from './providers/kyc-provider.selector';
-import { KycWebhookInboxService } from './kyc-webhook-inbox.service';
-import { KycWebhookProcessorService } from './kyc-webhook-processor.service';
 
 @Module({
   imports: [
+    BankingModule,
+    PaystackModule,
     HttpModule.register({
       timeout: 15000,
       maxRedirects: 0,
     }),
   ],
-  controllers: [KycController, KycWebhookController, AdminKycController],
+  controllers: [KycController, AdminKycController],
   providers: [
     KycService,
-    KycWebhookInboxService,
-    KycWebhookProcessorService,
-    YouverifyProvider,
-    NinjaProvider,
     MonnifyProvider,
+    PaystackProvider,
     {
       provide: KYC_PROVIDER_GATEWAY,
-      inject: [ConfigService, MonnifyProvider],
-      useFactory: (config: ConfigService, monnify: MonnifyProvider) =>
-        selectKycProvider(config.get<string>('KYC_PROVIDER'), monnify),
+      inject: [ConfigService, MonnifyProvider, PaystackProvider],
+      useFactory: (
+        config: ConfigService,
+        monnify: MonnifyProvider,
+        paystack: PaystackProvider,
+      ) =>
+        selectKycProvider(
+          config.get<string>('KYC_PROVIDER'),
+          monnify,
+          paystack,
+        ),
     },
   ],
+  exports: [KycService],
 })
 export class KycModule {}

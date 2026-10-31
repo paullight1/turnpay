@@ -27,6 +27,17 @@ export function toProviderDecimalString(amount: Decimal): string {
   return amount.toFixed(2);
 }
 
-export function fromMinorUnit(amount: number | string): Decimal {
-  return new Decimal(amount).div(100);
+export function fromMinorUnit(
+  amount: number | string,
+  allowZero = false,
+): Decimal {
+  const minor = new Decimal(amount);
+  if (
+    !minor.isFinite() ||
+    !minor.isInteger() ||
+    minor.lt(allowZero ? 0 : 1) ||
+    minor.gt(Number.MAX_SAFE_INTEGER)
+  )
+    throw new BadRequestException('Invalid provider monetary amount');
+  return minor.div(100);
 }

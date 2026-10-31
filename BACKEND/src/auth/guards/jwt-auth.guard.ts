@@ -50,13 +50,14 @@ export class JwtAuthGuard implements CanActivate {
     let providerSessionId: string | undefined;
 
     try {
-      const supabaseUser = await this.supabaseService.verifyToken(accessToken);
-      const user = await this.supabaseService.syncUser(supabaseUser);
-      userId = user.id;
-      role = user.role;
+      const [supabaseUser, sessionId] = await Promise.all([
+        this.supabaseService.verifyToken(accessToken),
+        this.supabaseService.getVerifiedProviderSessionId(accessToken),
+      ]);
+      userId = supabaseUser.id;
+      role = 'USER';
       verifiedIdentity = supabaseUser;
-      providerSessionId =
-        await this.supabaseService.getVerifiedProviderSessionId(accessToken);
+      providerSessionId = sessionId;
     } catch (supabaseError) {
       if (this.canUseLocalAuthFallback()) {
         const localUser = this.verifyLocalToken(accessToken);
@@ -67,15 +68,27 @@ export class JwtAuthGuard implements CanActivate {
       }
     }
 
-    const user = await this.prisma.user.findUnique({
+    const accountSelect = {
+      id: true,
+      email: true,
+      role: true,
+      isSuspended: true,
+    } as const;
+    let user = await this.prisma.user.findUnique({
       where: { id: userId },
-      select: {
-        id: true,
-        email: true,
-        role: true,
-        isSuspended: true,
-      },
+      select: accountSelect,
     });
+
+    // Normal authenticated reads must not update the user and upsert both
+    // wallets every time. Login/registration already synchronize the profile.
+    // Retain first-use and legacy email-to-ID linking when no local row exists.
+    if (!user && verifiedIdentity) {
+      const synced = await this.supabaseService.syncUser(verifiedIdentity);
+      user = await this.prisma.user.findUnique({
+        where: { id: synced.id },
+        select: accountSelect,
+      });
+    }
 
     if (!user) {
       throw new UnauthorizedException('Session expired. Please sign in again.');

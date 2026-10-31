@@ -44,6 +44,11 @@ describe('HTTP log redaction', () => {
       res: { headers: { 'set-cookie': 'raw-response-cookie' } },
     });
 
+    // Metadata timestamps/PIDs can coincidentally contain the test PIN digits.
+    // Check the actual request/response payload rather than unrelated metadata.
+    const logged = JSON.parse(serialized);
+    const payload = JSON.stringify({ req: logged.req, res: logged.res });
+
     for (const secret of [
       'raw-access-token',
       'raw-cookie',
@@ -56,7 +61,7 @@ describe('HTTP log redaction', () => {
       'raw-refresh-token',
       'raw-response-cookie',
     ]) {
-      expect(serialized).not.toContain(secret);
+      expect(payload).not.toContain(secret);
     }
     expect(serialized).toContain(HTTP_LOG_REDACTION_CENSOR);
     expect(serialized).toContain('visible');

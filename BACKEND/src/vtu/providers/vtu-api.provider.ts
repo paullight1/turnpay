@@ -42,6 +42,11 @@ interface VtpassVariation {
   variation_code?: string;
   name?: string;
   variation_amount?: string;
+  charged_amount?: string;
+  fixedPrice?: string;
+  variation_rate?: string;
+  variation_amount_min?: string;
+  variation_amount_max?: string;
 }
 
 interface VtpassResponse {
@@ -101,7 +106,7 @@ const VTPASS_SERVICES: VtpassServiceDefinition[] = [
   { id: 'glo', name: 'Glo', type: 'airtime', serviceID: 'glo', isActive: true },
   {
     id: '9mobile',
-    name: '9mobile',
+    name: 'T2 (9mobile)',
     type: 'airtime',
     serviceID: 'etisalat',
     isActive: true,
@@ -129,7 +134,7 @@ const VTPASS_SERVICES: VtpassServiceDefinition[] = [
   },
   {
     id: '9mobile',
-    name: '9mobile Data',
+    name: 'T2 (9mobile) Data',
     type: 'data',
     serviceID: 'etisalat-data',
     isActive: true,
@@ -237,6 +242,48 @@ const VTPASS_SERVICES: VtpassServiceDefinition[] = [
     name: 'Yola Electric',
     type: 'electricity',
     serviceID: 'yola-electric',
+    isActive: true,
+  },
+  {
+    id: 'smile-airtime',
+    name: 'Smile Network Payment',
+    type: 'airtime',
+    serviceID: 'smile-direct',
+    isActive: true,
+  },
+  {
+    id: 'foreign-airtime',
+    name: 'International Airtime',
+    type: 'airtime',
+    serviceID: 'foreign-airtime',
+    isActive: true,
+  },
+  {
+    id: 'smile',
+    name: 'Smile Payment',
+    type: 'data',
+    serviceID: 'smile-direct',
+    isActive: true,
+  },
+  {
+    id: 'glo-sme',
+    name: 'GLO Data (Best Value)',
+    type: 'data',
+    serviceID: 'glo-sme-data',
+    isActive: true,
+  },
+  {
+    id: '9mobile-sme',
+    name: 'T2 SME Data',
+    type: 'data',
+    serviceID: 'etisalat-sme-data',
+    isActive: true,
+  },
+  {
+    id: 'showmax',
+    name: 'ShowMax',
+    type: 'cable',
+    serviceID: 'showmax',
     isActive: true,
   },
 ];
@@ -392,8 +439,11 @@ export class VtuApiProvider {
     }
   }
 
-  async getPackages(provider: string): Promise<VtuPackage[]> {
-    return this.getVtpassPackages(provider);
+  async getPackages(
+    provider: string,
+    options: { countryCode?: string; operatorId?: string } = {},
+  ): Promise<VtuPackage[]> {
+    return this.getVtpassPackages(provider, options);
   }
 
   async purchase(params: VtuProviderPurchase): Promise<VtuProviderResult> {
@@ -488,6 +538,134 @@ export class VtuApiProvider {
     }
 
     return content;
+  }
+
+  private positiveDecimal(value: string | undefined) {
+    if (!value || !/^\d+(\.\d+)?$/.test(value)) return undefined;
+    const amount = new Decimal(value);
+    return amount.isFinite() && amount.gt(0) ? amount.toString() : undefined;
+  }
+
+  private async readInternational(
+    path: string,
+    params: Record<string, string> = {},
+  ): Promise<unknown> {
+    if (!this.baseUrl)
+      throw new ServiceUnavailableException('VTpass is not configured');
+    try {
+      const response = await this.executeProviderRequest(() =>
+        firstValueFrom(
+          this.httpService.get<{
+            content?: unknown;
+            response_description?: string;
+          }>(`${this.baseUrl}/${path}`, {
+            headers: this.vtpassGetHeaders,
+            params,
+          }),
+        ),
+      );
+      if (
+        response.data.response_description &&
+        response.data.response_description !== '000'
+      )
+        throw new Error('Catalogue unavailable');
+      return response.data.content;
+    } catch {
+      throw new ServiceUnavailableException(
+        'International airtime catalogue is temporarily unavailable',
+      );
+    }
+  }
+
+  async getInternationalCountries() {
+    const content = (await this.readInternational(
+      'get-international-airtime-countries',
+    )) as {
+      countries?: Array<{
+        code: string;
+        name: string;
+        prefix: string;
+        currency?: string;
+      }>;
+    };
+    if (!Array.isArray(content?.countries))
+      throw new ServiceUnavailableException(
+        'International countries unavailable',
+      );
+    return content.countries
+      .filter(
+        (country) =>
+          /^[A-Z]{2}$/.test(country.code) && /^\d{1,4}$/.test(country.prefix),
+      )
+      .map(({ code, name, prefix, currency }) => ({
+        code,
+        name,
+        prefix,
+        currency,
+      }));
+  }
+
+  async getInternationalOperators(countryCode: string) {
+    const countries = await this.getInternationalCountries();
+    if (!countries.some((country) => country.code === countryCode))
+      throw new BadRequestException('Unsupported destination country');
+    const content = (await this.readInternational(
+      'get-international-airtime-operators',
+      { code: countryCode, product_type_id: '1' },
+    )) as Array<{ operator_id: string | number; name: string }>;
+    if (!Array.isArray(content))
+      throw new ServiceUnavailableException(
+        'International operators unavailable',
+      );
+    return content
+      .filter((item) => /^\d{1,12}$/.test(String(item.operator_id)))
+      .map((item) => ({ id: String(item.operator_id), name: item.name }));
+  }
+
+  async validateSmile(smileEmail: string) {
+    if (!this.baseUrl)
+      throw new ServiceUnavailableException('VTpass is not configured');
+    let response: {
+      code?: string;
+      content?: {
+        Customer_Name?: string;
+        AccountList?: {
+          Account?: Array<{ AccountId: string; FriendlyName?: string }>;
+        };
+      };
+    };
+    try {
+      const result = await this.executeProviderRequest(() =>
+        firstValueFrom(
+          this.httpService.post<typeof response>(
+            `${this.baseUrl}/merchant-verify/smile/email`,
+            { serviceID: 'smile-direct', billersCode: smileEmail },
+            { headers: this.vtpassPostHeaders },
+          ),
+        ),
+      );
+      response = result.data;
+    } catch {
+      throw new ServiceUnavailableException(
+        'Smile verification is temporarily unavailable',
+      );
+    }
+    const accounts = response.content?.AccountList?.Account;
+    if (
+      String(response.code) !== '000' ||
+      !Array.isArray(accounts) ||
+      !accounts.length
+    )
+      throw new BadRequestException('Smile email could not be verified');
+    return {
+      name: (response.content?.Customer_Name || 'Smile customer').slice(0, 120),
+      accounts: accounts
+        .filter((account) => /^\d{5,32}$/.test(String(account.AccountId)))
+        .map((account) => ({
+          id: String(account.AccountId),
+          name: (account.FriendlyName || 'Smile account').slice(0, 120),
+        })),
+    };
   }
 
   private getFallbackPackages(provider: string): VtuPackage[] {
@@ -625,17 +803,32 @@ export class VtuApiProvider {
     }));
   }
 
-  private async getVtpassPackages(provider: string): Promise<VtuPackage[]> {
+  private async getVtpassPackages(
+    provider: string,
+    options: { countryCode?: string; operatorId?: string } = {},
+  ): Promise<VtuPackage[]> {
     if (!this.baseUrl) {
       this.assertSimulationEnabled();
       return this.getFallbackPackages(provider);
     }
 
-    const service = this.findVtpassService(provider, ['data', 'cable']);
+    const service = this.findVtpassService(
+      provider,
+      ['smile-airtime', 'foreign-airtime'].includes(provider)
+        ? ['airtime']
+        : ['data', 'cable'],
+    );
     if (!service) {
       return [];
     }
 
+    if (provider === 'foreign-airtime') {
+      const operators = await this.getInternationalOperators(
+        options.countryCode || '',
+      );
+      if (!operators.some((operator) => operator.id === options.operatorId))
+        throw new BadRequestException('Invalid destination operator');
+    }
     try {
       const response = await this.executeProviderRequest(() =>
         firstValueFrom(
@@ -643,7 +836,12 @@ export class VtuApiProvider {
             `${this.baseUrl}/service-variations`,
             {
               headers: this.vtpassGetHeaders,
-              params: { serviceID: service.serviceID },
+              params: {
+                serviceID: service.serviceID,
+                ...(provider === 'foreign-airtime'
+                  ? { operator_id: options.operatorId, product_type_id: '1' }
+                  : {}),
+              },
             },
           ),
         ),
@@ -653,14 +851,50 @@ export class VtuApiProvider {
 
       return (variations || [])
         .filter((variation) => variation.variation_code)
-        .map((variation) => ({
-          id: variation.variation_code as string,
-          name: variation.name || variation.variation_code || 'VTU package',
-          price: this.requiredMoney(variation.variation_amount),
-          validity: this.extractValidity(variation.name),
-          serviceType: service.type as 'data' | 'cable',
-        }))
-        .filter((variation) => new Decimal(variation.price).greaterThan(0));
+        .flatMap((variation): VtuPackage[] => {
+          const international = provider === 'foreign-airtime';
+          const flexible =
+            international && variation.fixedPrice?.toLowerCase() === 'no';
+          const rawPrice = this.positiveDecimal(
+            international
+              ? variation.charged_amount
+              : variation.variation_amount,
+          );
+          const price =
+            rawPrice && new Decimal(rawPrice).decimalPlaces() <= 2
+              ? new Decimal(rawPrice).toFixed(2)
+              : undefined;
+          const rate = flexible
+            ? this.positiveDecimal(variation.variation_rate)
+            : undefined;
+          // International face values are not NGN prices. Never infer a wallet charge from them.
+          if (
+            (!flexible && (!price || new Decimal(price).lte(0))) ||
+            (flexible && !rate)
+          )
+            return [];
+          return [
+            {
+              id: variation.variation_code!,
+              name: variation.name || variation.variation_code!,
+              price: flexible ? '0.00' : price!,
+              validity: this.extractValidity(variation.name),
+              serviceType: service.type as VtuPackage['serviceType'],
+              ...(international
+                ? {
+                    fixedPrice: !flexible,
+                    ...(rate ? { rate } : {}),
+                    minFaceValue: this.positiveDecimal(
+                      variation.variation_amount_min,
+                    ),
+                    maxFaceValue: this.positiveDecimal(
+                      variation.variation_amount_max,
+                    ),
+                  }
+                : {}),
+            },
+          ];
+        });
     } catch (error) {
       this.logger.warn(
         this.safeProviderError(error),
@@ -715,6 +949,37 @@ export class VtuApiProvider {
     service: VtpassServiceDefinition,
     requestId: string,
   ) {
+    if (params.provider === 'foreign-airtime') {
+      return {
+        request_id: requestId,
+        serviceID: service.serviceID,
+        billersCode: params.recipientNumber?.replace(/^\+/, ''),
+        phone: this.toVtpassPhone(params.contactPhone),
+        variation_code: params.packageId,
+        country_code: params.countryCode,
+        operator_id: params.operatorId,
+        product_type_id: '1',
+        email: params.email,
+        ...(params.faceValue ? { amount: params.faceValue } : {}),
+      };
+    }
+    if (
+      params.provider === 'smile' ||
+      params.provider === 'smile-airtime' ||
+      params.provider === 'showmax'
+    ) {
+      return {
+        request_id: requestId,
+        serviceID: service.serviceID,
+        billersCode:
+          params.provider === 'showmax'
+            ? this.toVtpassPhone(params.recipientNumber)
+            : params.smileAccountId,
+        variation_code: params.packageId,
+        amount: this.requiredMoney(params.amount),
+        phone: this.toVtpassPhone(params.contactPhone),
+      };
+    }
     if (params.type === 'airtime') {
       return {
         request_id: requestId,

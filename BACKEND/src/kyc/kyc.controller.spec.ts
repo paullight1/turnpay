@@ -1,16 +1,12 @@
 import { validate } from 'class-validator';
 import { plainToInstance } from 'class-transformer';
-import { KycController, KycWebhookController } from './kyc.controller';
-import {
-  CreateIdentityVerificationDto,
-  YouverifyWebhookDto,
-} from './dto/kyc.dto';
+import { KycController } from './kyc.controller';
+import { CreateIdentityVerificationDto } from './dto/kyc.dto';
 
 describe('KYC controllers', () => {
   const kycService = {
     verifyIdentity: jest.fn(),
-    verifyWithYouverify: jest.fn(),
-    processYouverifyCallback: jest.fn(),
+    createManualKycDocument: jest.fn(),
   };
 
   beforeEach(() => {
@@ -27,7 +23,7 @@ describe('KYC controllers', () => {
       consentAccepted: true,
     };
     kycService.verifyIdentity.mockResolvedValue({
-      provider: 'NINJA',
+      provider: 'MONNIFY',
       status: 'VERIFIED',
     });
 
@@ -36,26 +32,21 @@ describe('KYC controllers', () => {
     expect(kycService.verifyIdentity).toHaveBeenCalledWith('user-1', dto);
   });
 
-  it('forwards the raw webhook body and Youverify signature to verification', async () => {
-    const controller = new KycWebhookController(kycService as any);
-    const body = {
-      event: 'identity.completed',
-      apiVersion: 'v2',
-      data: { id: 'verification-1', status: 'found' },
+  it('passes owned manual NIN submissions to the KYC service', async () => {
+    const controller = new KycController(kycService as any);
+    const dto = {
+      type: 'NIN' as const,
+      idNumber: '12345678901',
+      objectKey: 'kyc/user-1/nin.pdf',
+      consentAccepted: true as const,
     };
-    kycService.processYouverifyCallback.mockResolvedValue({ received: true });
 
-    await controller.handleYouverifyWebhook(
-      'signature-value',
-      { rawBody: JSON.stringify(body) } as any,
-      body,
+    await controller.createManualKycDocument({ userId: 'user-1' }, dto);
+
+    expect(kycService.createManualKycDocument).toHaveBeenCalledWith(
+      'user-1',
+      dto,
     );
-
-    expect(kycService.processYouverifyCallback).toHaveBeenCalledWith({
-      body,
-      rawBody: JSON.stringify(body),
-      signatureHeader: 'signature-value',
-    });
   });
 
   it('rejects direct verification without explicit consent', async () => {
@@ -95,17 +86,4 @@ describe('KYC controllers', () => {
       expect(errors.some((error) => error.property === field)).toBe(true);
     },
   );
-
-  it('rejects malformed Youverify webhook envelopes', async () => {
-    const dto = plainToInstance(YouverifyWebhookDto, {
-      event: '',
-      data: 'not-an-object',
-    });
-
-    const errors = await validate(dto);
-
-    expect(errors.map((error) => error.property)).toEqual(
-      expect.arrayContaining(['event', 'apiVersion', 'data']),
-    );
-  });
 });

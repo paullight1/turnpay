@@ -5,6 +5,7 @@ import {
   IsInt,
   IsOptional,
   IsString,
+  IsUUID,
   Matches,
   Max,
   MaxLength,
@@ -89,6 +90,11 @@ export class ReviewManualExchangeDto {
   @IsString()
   @Matches(/^[A-Za-z0-9._-]{4,100}$/)
   payoutReference?: string;
+  @IsOptional()
+  @IsString()
+  @Matches(/^\d+(\.\d{1,2})?$/)
+  @MaxLength(14)
+  payoutAmount?: string;
   @IsOptional() @IsString() @MaxLength(300) payoutProofObjectKey?: string;
   @IsOptional() @IsBoolean() acceptExpiredQuote?: boolean;
 }
@@ -99,4 +105,8 @@ export class ManualExchangeQueryDto {
 }
 export class ManualProofReadDto {
   @IsIn(['DEPOSIT', 'PAYOUT']) kind: 'DEPOSIT' | 'PAYOUT';
+}
+
+export class ManualQueueQueryDto extends ManualExchangeQueryDto {
+  @IsOptional() @IsUUID() cursor?: string;
 }

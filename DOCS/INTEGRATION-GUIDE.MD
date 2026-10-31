@@ -187,19 +187,21 @@ Register `https://your-domain.com/api/webhooks/vtu/vtpass` in the VTpass dashboa
 The active product scope is Nigerian airtime, data, cable, and electricity supported
 by the VTpass catalogue.
 
-### Ninja — direct Nigerian KYC
+### Monnify — Nigerian identity verification
 
 ```env
-KYC_PROVIDER=ninja
-NINJA_BASE_URL=https://api.sandbox.ninja.boucloud.io
-NINJA_CLIENT_KEY=
-NINJA_CLIENT_SECRET=
+KYC_PROVIDER=monnify
+MONNIFY_BASE_URL=https://api.monnify.com
+MONNIFY_API_KEY=
+MONNIFY_SECRET_KEY=
+PII_ENCRYPTION_KEY=
 ```
 
-The mobile/web client submits explicit consent, BVN or NIN, and date of birth to
-`POST /api/kyc/verify`. Only the backend authenticates with Ninja. Ninja direct
-identity verification does not require a webhook; never expose either Ninja
-credential in a client environment.
+The mobile and web clients submit consent, BVN or NIN, and date of birth to
+`POST /api/kyc/verify`. The backend authenticates with Monnify and stores the
+normalized result. The identity API credentials are server-side only. KYC uses
+the shared Monnify credentials configured for banking; no separate KYC provider
+credentials or callback are required.
 
 See `DOCS/PROVIDER-SOURCE-OF-TRUTH.MD` and `DOCS/KYC-GUIDE.MD` for the supported
 routes and launch checks.

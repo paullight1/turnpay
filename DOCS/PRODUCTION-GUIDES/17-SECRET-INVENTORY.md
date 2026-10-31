@@ -125,14 +125,15 @@
 
 ---
 
-### Section 8: KYC — Ninja (3 vars)
+### Section 8: KYC — Monnify
+
+KYC uses the shared Monnify API credentials listed in Section 7. No separate
+identity-provider credential or KYC webhook secret is used.
 
 | # | Variable | Classification | Environment | Notes |
 |---|---|---|---|---|
-| 42 | `KYC_PROVIDER` | 📋 CONFIG | 🔄 BOTH | Must be `ninja` for the active Nigeria path |
-| 43 | `NINJA_CLIENT_KEY` | 🚨 CRITICAL | 🔄 BOTH | Server-side Ninja client key |
-| 44 | `NINJA_CLIENT_SECRET` | 🚨 CRITICAL | 🔄 BOTH | Server-side Ninja client secret |
-| 45 | `NINJA_BASE_URL` | 📋 CONFIG | 🔄 BOTH | Sandbox in staging; `https://api.ninja.boucloud.io` in production |
+| 42 | `KYC_PROVIDER` | 📋 CONFIG | 🔄 BOTH | Must be `monnify`; alternate providers are unsupported |
+| 43 | `PII_ENCRYPTION_KEY` | 🚨 CRITICAL | 🔄 BOTH | At least 32 characters; protects identity values at rest |
 
 ---
 
@@ -239,8 +240,8 @@ openssl rand -hex 32      # BANK_ACCOUNT_ENCRYPTION_KEY
 openssl rand -base64 48 | tr -d '/+' | head -c 64  # PostgreSQL password
 openssl rand -base64 32                              # Redis AUTH token
 
-# Twilio and Ninja credentials are issued by their dashboards and must be
-# stored directly in the environment-specific secret manager. Ninja's direct
+# Twilio credentials are issued by their dashboards and must be
+# stored directly in the environment-specific secret manager. The Monnify identity API
 # verification path does not use a webhook secret.
 ```
 

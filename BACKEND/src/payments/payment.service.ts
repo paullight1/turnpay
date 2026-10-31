@@ -1,3 +1,4 @@
+import { PaystackVirtualAccountProvider } from '../banking/providers/paystack-virtual-account.provider';
 import {
   BadRequestException,
   ForbiddenException,
@@ -15,7 +16,10 @@ import { Prisma, TransactionStatus } from '@prisma/client';
 import { Decimal } from '@prisma/client/runtime/library';
 import { LedgerService } from '../wallets/ledger.service';
 import { MonnifyVirtualAccountProvider } from '../banking/providers/monnify-virtual-account.provider';
-import { decryptSensitiveValue } from '../common/utils/encryption';
+import {
+  decryptSensitiveValue,
+  encryptSensitiveValue,
+} from '../common/utils/encryption';
 import { maskAccountNumber } from '../common/utils/masking';
 import { TransactionPinService } from '../common/services/transaction-pin.service';
 import { formatKycTier, isKycTierAtLeast } from '../common/utils/kyc-tier';
@@ -25,7 +29,7 @@ import {
   SettlementHoldService,
 } from '../common/services/settlement-hold.service';
 
-type WithdrawalProvider = 'monnify';
+type WithdrawalProvider = 'monnify' | 'paystack';
 
 interface WithdrawalDestination {
   beneficiaryId?: string;
@@ -46,6 +50,7 @@ interface WithdrawalRecord {
   metadata: unknown;
   transferAttempts: Array<{
     id: string;
+    provider?: 'MONNIFY' | 'PAYSTACK';
     providerReference: string;
     providerStatus: string;
     status: string;
@@ -70,6 +75,7 @@ export class PaymentService {
     private readonly ledger: LedgerService,
     private readonly transactionPin: TransactionPinService,
     @Optional() settlementHold?: SettlementHoldService,
+    @Optional() private readonly paystackBanks?: PaystackVirtualAccountProvider,
   ) {
     // Keep direct construction fail-closed. Production DI supplies the
     // shared service; fixtures that omit it still exercise the persisted
@@ -125,17 +131,35 @@ export class PaymentService {
     }
 
     const destination = await this.resolveWithdrawalDestination(userId, dto);
-    const provider = dto.provider || destination.provider || 'monnify';
-    if (provider !== 'monnify') {
+    const provider = this.primaryProvider;
+    if (dto.provider && dto.provider !== provider)
+      throw new BadRequestException('Use the active payment provider');
+    if (provider !== 'monnify' && provider !== 'paystack') {
       throw new BadRequestException('Unsupported withdrawal provider');
     }
     if (dto.currency !== 'NGN') {
       throw new BadRequestException(
-        'Monnify withdrawals are currently supported for NGN only',
+        'Withdrawals are currently supported for NGN only',
       );
     }
 
-    const reference = `WD-${Date.now()}-${uuidv4().slice(0, 8)}`;
+    if (
+      provider === 'paystack' &&
+      (!this.paystackBanks?.configured ||
+        this.configService.get<boolean>('WITHDRAWALS_ENABLED', true) === false)
+    )
+      throw new BadRequestException('Paystack withdrawals are unavailable');
+    const encryptedDestination =
+      provider === 'paystack'
+        ? encryptSensitiveValue(
+            destination.accountNumber,
+            this.getBankAccountEncryptionKey(),
+          )
+        : undefined;
+    const reference =
+      provider === 'paystack'
+        ? `wd-${uuidv4()}`
+        : `WD-${Date.now()}-${uuidv4()}`;
     let transferStatus = 'pending';
     let finalStatus: TransactionStatus = 'PENDING';
     let transferRequestSent = false;
@@ -275,11 +299,14 @@ export class PaymentService {
       const transferAttempt = await tx.transferAttempt.create({
         data: {
           transactionId: transaction.id,
-          provider: provider.toUpperCase() as 'MONNIFY',
+          provider: provider.toUpperCase() as 'MONNIFY' | 'PAYSTACK',
           providerReference: transaction.reference,
           providerStatus: 'RESERVED',
           status: 'PENDING',
           metadata: {
+            ...(encryptedDestination
+              ? { accountNumberEncrypted: encryptedDestination }
+              : {}),
             beneficiaryId: destination.beneficiaryId,
             bankCode: destination.bankCode,
             bankName: destination.bankName,
@@ -289,6 +316,22 @@ export class PaymentService {
         },
         select: { id: true },
       });
+
+      if (provider === 'paystack')
+        await tx.auditLog.create({
+          data: {
+            action: 'PAYSTACK_WITHDRAWAL_RESERVED',
+            targetType: 'Transaction',
+            targetId: transaction.id,
+            reference: transaction.reference,
+            metadata: {
+              userId,
+              amount: amount.toFixed(2),
+              currency: dto.currency,
+              accountNumberMasked: destination.accountNumberMasked,
+            },
+          },
+        });
 
       return {
         id: transaction.id,
@@ -302,8 +345,11 @@ export class PaymentService {
         withdrawalRecord.reference,
         'WITHDRAWAL',
       );
-      const sourceAccountNumber = this.getMonnifySourceAccountNumber();
-      const transfer = await this.monnifyBanks.initiateTransfer({
+      const sourceAccountNumber =
+        provider === 'monnify'
+          ? this.getMonnifySourceAccountNumber()
+          : undefined;
+      const transfer = await this.providerAdapter(provider).initiateTransfer({
         amount: toProviderDecimalString(amount),
         bankCode: destination.bankCode,
         accountNumber: destination.accountNumber,
@@ -315,6 +361,27 @@ export class PaymentService {
 
       transferRequestSent = true;
       transferStatus = transfer.status;
+      if (provider === 'paystack') {
+        await this.processTransferWebhook({
+          provider,
+          eventType: 'transfer.confirmation',
+          providerReference: withdrawalRecord.reference,
+          providerStatus: transfer.status,
+          rawPayload: {},
+        });
+        const current = await this.prisma.transaction.findUnique({
+          where: { reference: withdrawalRecord.reference },
+          select: { status: true },
+        });
+        return {
+          reference: withdrawalRecord.reference,
+          status: current?.status ?? 'PENDING',
+          message:
+            current?.status === 'SUCCESS'
+              ? 'Withdrawal completed successfully'
+              : 'Withdrawal is awaiting provider confirmation. Refresh its status shortly.',
+        };
+      }
       finalStatus = this.mapTransferStatus(transferStatus);
 
       // Guarded: only transition a still-PENDING withdrawal. A disbursement
@@ -332,6 +399,9 @@ export class PaymentService {
           status: finalStatus,
           lastCheckedAt: new Date(),
           metadata: {
+            ...(encryptedDestination
+              ? { accountNumberEncrypted: encryptedDestination }
+              : {}),
             beneficiaryId: destination.beneficiaryId,
             bankCode: destination.bankCode,
             bankName: destination.bankName,
@@ -361,7 +431,11 @@ export class PaymentService {
         );
       }
     } catch (error) {
-      if (error instanceof BadRequestException && transferRequestSent) {
+      if (
+        provider === 'monnify' &&
+        error instanceof BadRequestException &&
+        transferRequestSent
+      ) {
         throw error;
       }
 
@@ -374,6 +448,15 @@ export class PaymentService {
       // and mark the attempt terminal instead of treating the hold as an
       // ambiguous provider timeout with funds still reserved.
       if (!transferRequestSent && isReconciliationSettlementHoldError(error)) {
+        if (provider === 'paystack') {
+          await this.releaseRejectedPaystackWithdrawal(
+            userId,
+            dto.currency,
+            amount,
+            withdrawalRecord,
+          );
+          throw error;
+        }
         await this.prisma.transaction.updateMany({
           where: { reference: withdrawalRecord.reference, status: 'PENDING' },
           data: { status: 'FAILED' },
@@ -400,9 +483,57 @@ export class PaymentService {
         throw error;
       }
 
+      if (provider === 'paystack') {
+        if (!transferRequestSent && error instanceof BadRequestException) {
+          const released = await this.releaseRejectedPaystackWithdrawal(
+            userId,
+            dto.currency,
+            amount,
+            withdrawalRecord,
+          );
+          const current = released
+            ? null
+            : await this.prisma.transaction.findUnique({
+                where: { reference: withdrawalRecord.reference },
+                select: { status: true },
+              });
+          return {
+            reference: withdrawalRecord.reference,
+            status: released ? 'FAILED' : (current?.status ?? 'PENDING'),
+            message:
+              'Paystack rejected the transfer. Your reserved funds have been returned.',
+          };
+        }
+        try {
+          await this.processPaystackTransfer({
+            provider,
+            eventType: 'transfer.reconcile',
+            providerReference: withdrawalRecord.reference,
+            providerStatus: 'pending',
+            rawPayload: {},
+          });
+        } catch {
+          this.logger.warn(
+            { reference: withdrawalRecord.reference },
+            'Paystack withdrawal requires provider confirmation',
+          );
+        }
+        const current = await this.prisma.transaction.findUnique({
+          where: { reference: withdrawalRecord.reference },
+          select: { status: true },
+        });
+        return {
+          reference: withdrawalRecord.reference,
+          status: current?.status ?? 'PENDING',
+          message:
+            'Check this withdrawal status before sending again. Funds remain reserved until provider confirmation.',
+        };
+      }
+
       if (!transferRequestSent) {
         const reconciledTransfer = await this.refreshWithdrawalTransferStatus(
           withdrawalRecord.reference,
+          provider,
         );
 
         if (reconciledTransfer) {
@@ -422,6 +553,9 @@ export class PaymentService {
               status: reconciledStatus,
               lastCheckedAt: new Date(),
               metadata: {
+                ...(encryptedDestination
+                  ? { accountNumberEncrypted: encryptedDestination }
+                  : {}),
                 beneficiaryId: destination.beneficiaryId,
                 bankCode: destination.bankCode,
                 bankName: destination.bankName,
@@ -483,6 +617,9 @@ export class PaymentService {
             status: 'PENDING',
             lastCheckedAt: new Date(),
             metadata: {
+              ...(encryptedDestination
+                ? { accountNumberEncrypted: encryptedDestination }
+                : {}),
               beneficiaryId: destination.beneficiaryId,
               bankCode: destination.bankCode,
               bankName: destination.bankName,
@@ -527,6 +664,9 @@ export class PaymentService {
           status: 'PENDING',
           lastCheckedAt: new Date(),
           metadata: {
+            ...(encryptedDestination
+              ? { accountNumberEncrypted: encryptedDestination }
+              : {}),
             beneficiaryId: destination.beneficiaryId,
             bankCode: destination.bankCode,
             bankName: destination.bankName,
@@ -603,6 +743,10 @@ export class PaymentService {
     authorizationCode: string,
   ) {
     const withdrawal = await this.loadWithdrawal(userId, reference);
+    if (withdrawal?.transferAttempts[0]?.provider === 'PAYSTACK')
+      throw new ForbiddenException(
+        'This transfer needs merchant approval. Contact support.',
+      );
 
     if (!withdrawal) {
       throw new NotFoundException('Withdrawal not found');
@@ -714,6 +858,10 @@ export class PaymentService {
 
   async resendWithdrawalOtp(userId: string, reference: string) {
     const withdrawal = await this.loadWithdrawal(userId, reference);
+    if (withdrawal?.transferAttempts[0]?.provider === 'PAYSTACK')
+      throw new ForbiddenException(
+        'This transfer needs merchant approval. Contact support.',
+      );
 
     if (!withdrawal) {
       throw new NotFoundException('Withdrawal not found');
@@ -763,12 +911,14 @@ export class PaymentService {
   }
 
   async processTransferWebhook(input: {
-    provider: 'monnify';
+    provider: WithdrawalProvider;
     eventType: string;
     providerReference: string;
     providerStatus: string;
     rawPayload: Record<string, unknown>;
   }) {
+    if (input.provider === 'paystack')
+      return this.processPaystackTransfer(input);
     const provider = 'MONNIFY' as const;
     const payload = this.sanitizeProviderPayload(input.rawPayload);
 
@@ -928,10 +1078,27 @@ export class PaymentService {
         beneficiary.accountNumberEncrypted,
         this.getBankAccountEncryptionKey(),
       );
-      const resolved = await this.monnifyBanks.resolveBankAccount(
-        decryptedAccountNumber,
-        beneficiary.bankCode,
-      );
+      let bankCode = beneficiary.bankCode;
+      if (
+        this.primaryProvider === 'paystack' &&
+        beneficiary.provider !== 'PAYSTACK'
+      ) {
+        const normalizedName = (name: string) =>
+          name.toLowerCase().replace(/[^a-z0-9]/g, '');
+        const banks = await this.providerAdapter('paystack').listBanks();
+        const matches = banks.filter(
+          (bank) =>
+            normalizedName(bank.name) === normalizedName(beneficiary.bankName),
+        );
+        if (matches.length !== 1)
+          throw new BadRequestException(
+            'Re-add this saved beneficiary using the current bank list before withdrawing',
+          );
+        bankCode = matches[0].code;
+      }
+      const resolved = await this.providerAdapter(
+        this.primaryProvider,
+      ).resolveBankAccount(decryptedAccountNumber, bankCode);
       this.assertAccountNameMatches(
         beneficiary.accountName,
         resolved.accountName,
@@ -939,8 +1106,8 @@ export class PaymentService {
 
       return {
         beneficiaryId: beneficiary.id,
-        provider: 'monnify',
-        bankCode: resolved.bankCode || beneficiary.bankCode,
+        provider: this.primaryProvider,
+        bankCode: resolved.bankCode || bankCode,
         bankName: resolved.bankName || beneficiary.bankName,
         accountName: resolved.accountName,
         accountNumber: decryptedAccountNumber,
@@ -954,17 +1121,16 @@ export class PaymentService {
       );
     }
 
-    const resolved = await this.monnifyBanks.resolveBankAccount(
-      dto.accountNumber,
-      dto.bankCode,
-    );
+    const resolved = await this.providerAdapter(
+      this.primaryProvider,
+    ).resolveBankAccount(dto.accountNumber, dto.bankCode);
 
     if (dto.accountName) {
       this.assertAccountNameMatches(dto.accountName, resolved.accountName);
     }
 
     return {
-      provider: 'monnify',
+      provider: this.primaryProvider,
       bankCode: resolved.bankCode || dto.bankCode,
       bankName: resolved.bankName,
       accountName: resolved.accountName,
@@ -1022,9 +1188,12 @@ export class PaymentService {
     });
   }
 
-  private async refreshWithdrawalTransferStatus(reference: string) {
+  private async refreshWithdrawalTransferStatus(
+    reference: string,
+    provider: WithdrawalProvider = 'monnify',
+  ) {
     try {
-      return await this.monnifyBanks.getTransferStatus(reference);
+      return await this.providerAdapter(provider).getTransferStatus(reference);
     } catch (error) {
       this.logger.warn(
         {
@@ -1055,6 +1224,7 @@ export class PaymentService {
     const pending = (await this.prisma.transaction.findMany({
       where: {
         type: 'WITHDRAW',
+        currency: 'NGN',
         status: 'PENDING',
         updatedAt: { lt: cutoff },
       },
@@ -1133,6 +1303,19 @@ export class PaymentService {
       return withdrawal;
     }
 
+    if (String(latestAttempt.provider) === 'KORA') return withdrawal;
+    if (latestAttempt.provider === 'PAYSTACK') {
+      await this.processPaystackTransfer({
+        provider: 'paystack',
+        eventType: 'transfer.reconcile',
+        providerReference: withdrawal.reference,
+        providerStatus: 'pending',
+        rawPayload: {},
+      });
+      return (
+        (await this.loadWithdrawal(userId, withdrawal.reference)) ?? withdrawal
+      );
+    }
     const providerReference = this.getWithdrawalProviderReference(
       withdrawal.reference,
       latestAttempt.metadata,
@@ -1416,14 +1599,14 @@ export class PaymentService {
   }
 
   async resolveBank(dto: ResolveBankDto) {
-    return this.monnifyBanks.resolveBankAccount(
+    return this.providerAdapter(this.primaryProvider).resolveBankAccount(
       dto.accountNumber,
       dto.bankCode,
     );
   }
 
   async listBanks() {
-    return this.monnifyBanks.listBanks();
+    return this.providerAdapter(this.primaryProvider).listBanks();
   }
 
   private assertAmountWithinLimit(amount: Decimal) {
@@ -1444,8 +1627,225 @@ export class PaymentService {
       operation,
       scope: 'ADMIN_BANKING',
       currency: 'NGN',
-      provider: 'MONNIFY',
+      provider: this.primaryProvider.toUpperCase(),
       reference,
+    });
+  }
+
+  private get primaryProvider(): WithdrawalProvider {
+    return this.configService.get<string>(
+      'BANKING_PROVIDER_PRIMARY',
+      'paystack',
+    ) === 'monnify'
+      ? 'monnify'
+      : 'paystack';
+  }
+
+  private providerAdapter(provider: WithdrawalProvider) {
+    if (provider === 'monnify') return this.monnifyBanks;
+    if (!this.paystackBanks)
+      throw new BadRequestException('Paystack is not configured');
+    return this.paystackBanks;
+  }
+
+  private async releaseRejectedPaystackWithdrawal(
+    userId: string,
+    currency: 'NGN' | 'GHS',
+    amount: Decimal,
+    record: { id: string; reference: string; transferAttemptId: string },
+  ) {
+    return this.prisma.$transaction(async (tx) => {
+      const changed = await tx.transaction.updateMany({
+        where: { id: record.id, status: 'PENDING' },
+        data: { status: 'FAILED' },
+      });
+      if (changed.count !== 1) return false;
+      await tx.transferAttempt.update({
+        where: { id: record.transferAttemptId },
+        data: {
+          status: 'FAILED',
+          providerStatus: 'REJECTED_BEFORE_ACCEPTANCE',
+          lastCheckedAt: new Date(),
+        },
+      });
+      await this.ledger.creditWallet(
+        {
+          userId,
+          currency,
+          amount,
+          transactionId: record.id,
+          reference: `${record.reference}-REVERSAL`,
+          source: 'WITHDRAWAL_REVERSAL',
+        },
+        tx,
+      );
+      await tx.user.updateMany({
+        where: { id: userId, dailyWithdrawn: { gte: amount } },
+        data: { dailyWithdrawn: { decrement: amount } },
+      });
+      await tx.user.updateMany({
+        where: { id: userId, monthlyWithdrawn: { gte: amount } },
+        data: { monthlyWithdrawn: { decrement: amount } },
+      });
+      await tx.auditLog.create({
+        data: {
+          action: 'PAYSTACK_WITHDRAWAL_REJECTED',
+          targetType: 'Transaction',
+          targetId: record.id,
+          reference: record.reference,
+          metadata: {
+            userId,
+            amount: amount.toFixed(2),
+            currency,
+            reason:
+              'Submission was rejected before acceptance or blocked by reconciliation',
+          },
+        },
+      });
+      return true;
+    });
+  }
+
+  private async processPaystackTransfer(input: {
+    provider: WithdrawalProvider;
+    eventType: string;
+    providerReference: string;
+    providerStatus: string;
+    rawPayload: Record<string, unknown>;
+  }) {
+    const transaction = await this.prisma.transaction.findUnique({
+      where: { reference: input.providerReference },
+      include: {
+        transferAttempts: {
+          where: { provider: 'PAYSTACK' },
+          orderBy: { createdAt: 'desc' },
+          take: 1,
+        },
+      },
+    });
+    if (
+      !transaction ||
+      transaction.type !== 'WITHDRAW' ||
+      !transaction.transferAttempts[0]
+    )
+      return { ignored: true };
+    const attempt = transaction.transferAttempts[0];
+    const confirmed = await this.providerAdapter('paystack').getTransferStatus(
+      transaction.reference,
+    );
+    const raw = confirmed.raw;
+    const recipient = raw.recipient as Record<string, unknown> | undefined;
+    const details = recipient?.details as Record<string, unknown> | undefined;
+    const metadata = attempt.metadata as Record<string, unknown> | null;
+    const verifiedMinor = new Decimal(
+      typeof raw.amount === 'number' || typeof raw.amount === 'string'
+        ? raw.amount
+        : 'NaN',
+    );
+    const expectedDomain = this.configService
+      .get<string>('PAYSTACK_SECRET_KEY')
+      ?.startsWith('sk_live_')
+      ? 'live'
+      : 'test';
+    const validEnvironment = raw.domain === expectedDomain;
+    const expectedAccount =
+      typeof metadata?.accountNumberEncrypted === 'string'
+        ? decryptSensitiveValue(
+            metadata.accountNumberEncrypted,
+            this.getBankAccountEncryptionKey(),
+          )
+        : '';
+    if (
+      !validEnvironment ||
+      raw.reference !== transaction.reference ||
+      raw.currency !== transaction.currency ||
+      !verifiedMinor.isInteger() ||
+      !verifiedMinor.eq(transaction.amount.mul(100)) ||
+      !details ||
+      typeof details.account_number !== 'string' ||
+      details.account_number !== expectedAccount ||
+      details.bank_code !== metadata?.bankCode
+    )
+      throw new BadRequestException(
+        'Transfer confirmation does not match the withdrawal',
+      );
+    const status = this.mapTransferStatus(confirmed.status);
+    return this.prisma.$transaction(async (tx) => {
+      const transitioned = await tx.transaction.updateMany({
+        where: {
+          id: transaction.id,
+          status:
+            status === 'REVERSED' ? { in: ['PENDING', 'SUCCESS'] } : 'PENDING',
+        },
+        data: { status },
+      });
+      if (transitioned.count !== 1) return { received: true, duplicate: true };
+      await tx.transferAttempt.update({
+        where: { id: attempt.id },
+        data: {
+          status,
+          providerStatus: confirmed.status,
+          lastCheckedAt: new Date(),
+          metadata: {
+            ...metadata,
+            providerRecipientCode:
+              typeof recipient?.recipient_code === 'string'
+                ? recipient.recipient_code
+                : null,
+          },
+        },
+      });
+      if (status === 'FAILED' || status === 'REVERSED') {
+        const reversed = await tx.ledgerEntry.findFirst({
+          where: {
+            transactionId: transaction.id,
+            source: 'WITHDRAWAL_REVERSAL',
+          },
+        });
+        if (!reversed) {
+          await this.ledger.creditWallet(
+            {
+              userId: transaction.userId,
+              currency: transaction.currency,
+              amount: transaction.amount,
+              transactionId: transaction.id,
+              reference: `${transaction.reference}-REVERSAL`,
+              source: 'WITHDRAWAL_REVERSAL',
+            },
+            tx,
+          );
+          await tx.user.updateMany({
+            where: {
+              id: transaction.userId,
+              dailyWithdrawn: { gte: transaction.amount },
+            },
+            data: { dailyWithdrawn: { decrement: transaction.amount } },
+          });
+          await tx.user.updateMany({
+            where: {
+              id: transaction.userId,
+              monthlyWithdrawn: { gte: transaction.amount },
+            },
+            data: { monthlyWithdrawn: { decrement: transaction.amount } },
+          });
+        }
+      }
+      await tx.auditLog.create({
+        data: {
+          action: 'PAYSTACK_WITHDRAWAL_CONFIRMED',
+          targetType: 'Transaction',
+          targetId: transaction.id,
+          reference: transaction.reference,
+          metadata: {
+            provider: 'PAYSTACK',
+            status,
+            eventType: input.eventType,
+            amount: transaction.amount.toString(),
+            currency: transaction.currency,
+          },
+        },
+      });
+      return { received: true, status };
     });
   }
 

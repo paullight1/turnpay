@@ -1,5 +1,8 @@
+import type { Response } from 'express';
 import {
   Body,
+  Headers,
+  Res,
   Controller,
   Delete,
   Get,
@@ -31,13 +34,26 @@ export class BankingController {
     return this.bankingService.getVirtualAccounts(user.userId);
   }
 
+  @Get('accounts/provisioning')
+  provisioning(@CurrentUser() user: { userId: string }) {
+    return this.bankingService.getAccountProvisioning(user.userId);
+  }
+
   @Post('accounts/provision')
   @Throttle({ default: { limit: 3, ttl: 60000 } })
   async provisionVirtualAccount(
     @CurrentUser() user: { userId: string },
     @Body() dto: ProvisionVirtualAccountDto,
+    @Res({ passthrough: true }) response?: Response,
+    @Headers('idempotency-key') key?: string,
   ) {
-    return this.bankingService.provisionVirtualAccount(user.userId, dto);
+    const account = await this.bankingService.provisionVirtualAccount(
+      user.userId,
+      dto,
+      key,
+    );
+    response?.status(account.status === 'PENDING' ? 202 : 201);
+    return account;
   }
 
   @Get('banks')

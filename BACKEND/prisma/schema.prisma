@@ -39,6 +39,7 @@ enum KycVerificationProvider {
   MANUAL_REVIEW
   NIBSS
   MONNIFY
+  PAYSTACK
   SMILE_ID
   YOUVERIFY
   NINJA
@@ -109,6 +110,7 @@ enum ExchangePayoutStatus {
 }
 
 enum PaymentProvider {
+  KORA
   PAYSTACK
   FLUTTERWAVE
   MONNIFY
@@ -213,6 +215,12 @@ model User {
   createdAt               DateTime  @default(now())
   updatedAt               DateTime  @updatedAt
 
+  koraAccountRequest         KoraAccountRequest?
+  koraCollectionIntents      KoraCollectionIntent[]
+  providerExchangeQuotes     ProviderExchangeQuote[]
+  providerExchangeOrders     ProviderExchangeOrder[]
+  currencyLimitUsage         CurrencyLimitUsage[]
+  paymentNotificationReads   PaymentNotificationRead[]
   wallets                    Wallet[]
   transactions               Transaction[]
   internalTransferAttempts   InternalTransferAttempt[]
@@ -235,6 +243,8 @@ model User {
   referralsGiven             ReferralReward[]             @relation("ReferralReferrer")
   referralReward             ReferralReward?              @relation("ReferralReferred")
   transactionPinCredential   TransactionPinCredential?
+  paystackCustomer           PaystackCustomer?
+  paystackAccountRequest     PaystackAccountRequest?
 
   @@index([referredById])
   @@index([createdAt(sort: Desc)])
@@ -335,15 +345,17 @@ model Transaction {
   createdAt       DateTime          @default(now())
   updatedAt       DateTime          @updatedAt
 
-  user                User                 @relation(fields: [userId], references: [id])
-  wallet              Wallet?              @relation(fields: [walletId], references: [id])
-  disputes            Dispute[]
-  ledgerEntries       LedgerEntry[]
-  transferAttempts    TransferAttempt[]
-  vtuOrders           VtuOrder[]
-  manualExchangeOrder ManualExchangeOrder?
-  exchangeReceipt     ExchangeReceipt?
-  exchangePayout      ExchangePayout?
+  user                  User                   @relation(fields: [userId], references: [id])
+  wallet                Wallet?                @relation(fields: [walletId], references: [id])
+  disputes              Dispute[]
+  ledgerEntries         LedgerEntry[]
+  transferAttempts      TransferAttempt[]
+  vtuOrders             VtuOrder[]
+  manualExchangeOrder   ManualExchangeOrder?
+  exchangeReceipt       ExchangeReceipt?
+  exchangePayout        ExchangePayout?
+  providerExchangeOrder ProviderExchangeOrder?
+  koraCollectionIntent  KoraCollectionIntent?
 
   @@index([userId, status])
   @@index([userId, createdAt(sort: Desc)])
@@ -970,6 +982,44 @@ model KycWebhookInbox {
   @@map("kyc_webhook_inbox")
 }
 
+model PaystackCustomer {
+  id                    String    @id @default(uuid())
+  userId                String    @unique
+  customerCode          String    @unique
+  customerId            String?
+  validationStatus      String    @default("UNVERIFIED")
+  validationFingerprint String?
+  accountSetupConsentAt DateTime?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([validationStatus])
+  @@index([validationFingerprint])
+  @@map("paystack_customers")
+}
+
+model PaystackAccountRequest {
+  id                String    @id @default(uuid())
+  userId            String    @unique
+  customerCode      String
+  status            String    @default("PENDING")
+  attempts          Int       @default(0)
+  nextAttemptAt     DateTime?
+  claimedAt         DateTime?
+  lastError         String?
+  consentRecordedAt DateTime
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([status, nextAttemptAt])
+  @@index([customerCode])
+  @@map("paystack_account_requests")
+}
+
 model Dispute {
   id            String        @id @default(uuid())
   userId        String
@@ -995,12 +1045,13 @@ model WebhookLog {
   id           String   @id @default(uuid())
   provider     String
   eventType    String
-  reference    String   @unique
+  reference    String
   payload      Json
   processed    Boolean  @default(false)
   errorMessage String?
   createdAt    DateTime @default(now())
 
+  @@unique([provider, eventType, reference], map: "webhook_logs_provider_event_reference_key")
   @@index([provider, reference])
   @@index([processed])
   @@map("webhook_logs")
@@ -1026,6 +1077,7 @@ enum ManualExchangeStatus {
 }
 
 model ManualExchangeOrder {
+  payoutWorkflow         String                   @default("LEGACY")
   id                     String                   @id @default(uuid())
   userId                 String
   transactionId          String                   @unique
@@ -1109,4 +1161,155 @@ model ExchangeDepositAllocation {
   createdAt    DateTime @default(now())
 
   @@map("exchange_deposit_allocations")
+}
+
+// Kora Ghana accounts are requested durably before a provider call.
+model KoraAccountRequest {
+  id          String    @id @default(uuid())
+  userId      String    @unique
+  reference   String    @unique
+  status      String    @default("PENDING")
+  claimedAt   DateTime?
+  submittedAt DateTime?
+  lastError   String?
+  attempts    Int       @default(0)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  user        User      @relation(fields: [userId], references: [id])
+
+  @@index([status, updatedAt])
+  @@map("kora_account_requests")
+}
+
+model KoraCollectionIntent {
+  providerReference String? @unique
+  id              String                 @id @default(uuid())
+  userId          String
+  reference       String                 @unique
+  requestHash     String
+  amount          Decimal                @db.Decimal(15, 2)
+  currency        WalletCurrency         @default(GHS)
+  purpose         String
+  status          String                 @default("PENDING")
+  orderId         String?                @unique
+  transactionId   String?                @unique
+  mobileEncrypted String
+  claimedAt       DateTime?
+  submittedAt     DateTime?
+  authorization   Json?
+  createdAt       DateTime               @default(now())
+  updatedAt       DateTime               @updatedAt
+  user            User                   @relation(fields: [userId], references: [id])
+  order           ProviderExchangeOrder? @relation(fields: [orderId], references: [id])
+  transaction     Transaction?           @relation(fields: [transactionId], references: [id])
+
+  @@index([status, updatedAt])
+  @@index([userId, createdAt])
+  @@map("kora_collection_intents")
+}
+
+model ProviderExchangeQuote {
+  cancelledAt          DateTime?
+  id                   String                 @id @default(uuid())
+  userId               String
+  sourceCurrency       WalletCurrency
+  targetCurrency       WalletCurrency
+  fundingSource        String
+  amount               Decimal                @db.Decimal(15, 2)
+  fee                  Decimal                @db.Decimal(15, 2)
+  total                Decimal                @db.Decimal(15, 2)
+  rate                 Decimal                @db.Decimal(18, 6)
+  targetAmount         Decimal                @db.Decimal(15, 2)
+  destinationType      String
+  destinationCode      String
+  destinationName      String
+  destinationEncrypted String
+  destinationMasked    String
+  expiresAt            DateTime
+  createdAt            DateTime               @default(now())
+  user                 User                   @relation(fields: [userId], references: [id])
+  order                ProviderExchangeOrder?
+
+  @@index([userId, expiresAt])
+  @@map("provider_exchange_quotes")
+}
+
+model ProviderExchangeOrder {
+  id               String                  @id @default(uuid())
+  userId           String
+  quoteId          String                  @unique
+  transactionId    String                  @unique
+  createKeyHash    String
+  status           String                  @default("AWAITING_PAYMENT")
+  fundingReference String?                 @unique
+  fundedAt         DateTime?
+  payoutReference  String?                 @unique
+  releasedBy       String?
+  reason           String?
+  createdAt        DateTime                @default(now())
+  updatedAt        DateTime                @updatedAt
+  user             User                    @relation(fields: [userId], references: [id])
+  quote            ProviderExchangeQuote   @relation(fields: [quoteId], references: [id])
+  transaction      Transaction             @relation(fields: [transactionId], references: [id])
+  collectionIntent KoraCollectionIntent?
+  treasuryEntries  ExchangeTreasuryEntry[]
+
+  @@unique([userId, createKeyHash])
+  @@index([status, createdAt])
+  @@map("provider_exchange_orders")
+}
+
+// Explicit currency legs: payable movements, not fabricated bank transfers.
+model ExchangeTreasuryEntry {
+  id        String                @id @default(uuid())
+  orderId   String
+  currency  WalletCurrency
+  kind      String
+  amount    Decimal               @db.Decimal(15, 2)
+  createdAt DateTime              @default(now())
+  order     ProviderExchangeOrder @relation(fields: [orderId], references: [id])
+
+  @@unique([orderId, kind])
+  @@index([currency, createdAt])
+  @@map("exchange_treasury_entries")
+}
+
+model PaymentNotification {
+  id        String   @id @default(uuid())
+  eventKey  String   @unique
+  audience  String   @default("ADMIN")
+  orderId   String
+  title     String
+  createdAt DateTime @default(now())
+
+  reads PaymentNotificationRead[]
+
+  @@index([audience, createdAt])
+  @@map("payment_notifications")
+}
+
+// GHS cash-out usage cannot increment the existing NGN counters.
+model CurrencyLimitUsage {
+  id       String         @id @default(uuid())
+  userId   String
+  currency WalletCurrency
+  day      String
+  month    String
+  amount   Decimal        @default(0) @db.Decimal(15, 2)
+  user     User           @relation(fields: [userId], references: [id])
+
+  @@unique([userId, currency, day])
+  @@index([userId, currency, month])
+  @@map("currency_limit_usage")
+}
+
+model PaymentNotificationRead {
+  notificationId String
+  adminId String
+  readAt DateTime @default(now())
+  notification PaymentNotification @relation(fields: [notificationId], references: [id], onDelete: Cascade)
+  admin User @relation(fields: [adminId], references: [id])
+  @@id([notificationId, adminId])
+  @@index([adminId])
+  @@map("payment_notification_reads")
 }

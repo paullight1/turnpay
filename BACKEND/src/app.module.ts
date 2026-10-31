@@ -1,5 +1,6 @@
+import { koraConfigurationFields } from './kora/kora-capabilities.service';
 import { Module } from '@nestjs/common';
-import { ConfigModule } from '@nestjs/config';
+import { ConfigModule, ConfigService } from '@nestjs/config';
 import { LoggerModule } from 'nestjs-pino';
 import { ThrottlerModule } from '@nestjs/throttler';
 import { APP_GUARD } from '@nestjs/core';
@@ -53,6 +54,7 @@ const defaultNodeEnv =
       // the example template during development.
       envFilePath: ['.env', '.env.example'],
       validationSchema: Joi.object({
+        ...koraConfigurationFields,
         NODE_ENV: Joi.string()
           .trim()
           .lowercase()
@@ -128,72 +130,8 @@ const defaultNodeEnv =
         KYC_PROVIDER: Joi.string()
           .trim()
           .lowercase()
-          .valid('monnify')
-          .default('monnify'),
-        NINJA_CLIENT_KEY: Joi.when('KYC_PROVIDER', {
-          is: 'ninja',
-          then: Joi.when('NODE_ENV', {
-            is: deployedEnvironment,
-            then: Joi.string().trim().min(1).required(),
-            otherwise: Joi.string().allow('').optional(),
-          }),
-          otherwise: Joi.string().allow('').optional(),
-        }),
-        NINJA_CLIENT_SECRET: Joi.when('KYC_PROVIDER', {
-          is: 'ninja',
-          then: Joi.when('NODE_ENV', {
-            is: deployedEnvironment,
-            then: Joi.string().trim().min(1).required(),
-            otherwise: Joi.string().allow('').optional(),
-          }),
-          otherwise: Joi.string().allow('').optional(),
-        }),
-        NINJA_BASE_URL: Joi.string()
-          .valid(
-            'https://api.ninja.boucloud.io',
-            'https://api.sandbox.ninja.boucloud.io',
-          )
-          .default('https://api.sandbox.ninja.boucloud.io'),
-        YOUVERIFY_API_KEY: Joi.when('KYC_PROVIDER', {
-          is: 'youverify',
-          then: Joi.when('NODE_ENV', {
-            is: deployedEnvironment,
-            then: Joi.string().min(16).required(),
-            otherwise: Joi.string().allow('').optional(),
-          }),
-          otherwise: Joi.string().allow('').optional(),
-        }),
-        YOUVERIFY_BASE_URL: Joi.when('KYC_PROVIDER', {
-          is: 'youverify',
-          then: Joi.string()
-            .uri({ scheme: ['https'] })
-            .default('https://api.sandbox.youverify.co'),
-          otherwise: Joi.string().allow('').optional(),
-        }),
-        YOUVERIFY_WEBHOOK_URL: Joi.when('KYC_PROVIDER', {
-          is: 'youverify',
-          then: Joi.when('NODE_ENV', {
-            is: deployedEnvironment,
-            then: Joi.string()
-              .uri({ scheme: ['https'] })
-              .required(),
-            otherwise: Joi.string()
-              .uri({ scheme: ['http', 'https'] })
-              .allow('')
-              .optional(),
-          }),
-          otherwise: Joi.string().allow('').optional(),
-        }),
-        YOUVERIFY_WEBHOOK_SECRET: Joi.when('KYC_PROVIDER', {
-          is: 'youverify',
-          then: Joi.when('NODE_ENV', {
-            is: deployedEnvironment,
-            then: Joi.string().min(16).required(),
-            otherwise: Joi.string().allow('').optional(),
-          }),
-          otherwise: Joi.string().allow('').optional(),
-        }),
-        YOUVERIFY_WEBHOOK_ID: Joi.string().allow('').optional(),
+          .valid('paystack', 'monnify')
+          .default('paystack'),
         EXCHANGE_RECEIPT_BUCKET: Joi.string().default('exchange-receipts'),
         MANUAL_EXCHANGE_ENABLED: Joi.boolean().default(false),
         MANUAL_EXCHANGE_COLLECTION_BANK_NAME: Joi.when(
@@ -235,14 +173,9 @@ const defaultNodeEnv =
           .min(60)
           .max(900)
           .default(300),
-        MONNIFY_EXCHANGE_COLLECTION_ACCOUNT_NUMBER: Joi.when(
-          'WITHDRAWALS_ENABLED',
-          {
-            is: true,
-            then: Joi.string().min(1).required(),
-            otherwise: Joi.string().allow('').optional(),
-          },
-        ),
+        MONNIFY_EXCHANGE_COLLECTION_ACCOUNT_NUMBER: Joi.string()
+          .allow('')
+          .optional(),
         REDIS_URL: Joi.when('NODE_ENV', {
           is: deployedEnvironment,
           then: Joi.string()
@@ -310,16 +243,38 @@ const defaultNodeEnv =
         BANKING_ENABLED: Joi.boolean()
           .truthy('true')
           .falsy('false')
-          .default(false),
+          .default(true),
         VIRTUAL_ACCOUNTS_ENABLED: Joi.boolean()
           .truthy('true')
           .falsy('false')
-          .default(false),
+          .default(true),
         WITHDRAWALS_ENABLED: Joi.boolean()
           .truthy('true')
           .falsy('false')
-          .default(false),
+          .default(true),
         INTERNAL_TRANSFERS_ENABLED: internalTransfersEnabledSchema,
+        PAYSTACK_SECRET_KEY: Joi.when('NODE_ENV', {
+          is: 'production',
+          then: Joi.string()
+            .trim()
+            .pattern(/^sk_live_[A-Za-z0-9]+$/)
+            .allow('')
+            .optional(),
+          otherwise: Joi.string()
+            .trim()
+            .pattern(/^sk_(test|live)_[A-Za-z0-9]+$/)
+            .allow('')
+            .optional(),
+        }),
+        PAYSTACK_DVA_PREFERRED_BANK: Joi.string()
+          .trim()
+          .max(64)
+          .allow('')
+          .optional(),
+        PAYSTACK_CHECKOUT_ENABLED: Joi.boolean()
+          .truthy('true')
+          .falsy('false')
+          .default(true),
         MONNIFY_API_KEY: Joi.when('KYC_PROVIDER', {
           is: 'monnify',
           then: Joi.when('NODE_ENV', {
@@ -356,8 +311,8 @@ const defaultNodeEnv =
         MONNIFY_TEST_BVN: Joi.string().allow('').optional(),
         MONNIFY_TEST_NIN: Joi.string().allow('').optional(),
         BANKING_PROVIDER_PRIMARY: Joi.string()
-          .valid('monnify')
-          .default('monnify'),
+          .valid('paystack', 'monnify')
+          .default('paystack'),
         VIRTUAL_ACCOUNT_NAME_PREFIX: Joi.string()
           .max(24)
           .allow('')
@@ -476,8 +431,11 @@ const defaultNodeEnv =
       },
     }),
     ThrottlerModule.forRootAsync({
-      inject: [RedisService],
-      useFactory: (redisService: RedisService) => ({
+      inject: [RedisService, ConfigService],
+      useFactory: (
+        redisService: RedisService,
+        configService: ConfigService,
+      ) => ({
         throttlers: [
           {
             // Generous global ceiling so ordinary authenticated browsing is
@@ -492,6 +450,14 @@ const defaultNodeEnv =
             name: 'verifiedUser',
             ttl: 60000,
             limit: 5,
+          },
+          {
+            // Keep registration attempts isolated from the broad per-IP
+            // request bucket. Allow extra retries during local development,
+            // while retaining the stricter production ceiling.
+            name: 'registration',
+            ttl: 3600000,
+            limit: configService.get('NODE_ENV') === 'production' ? 3 : 10,
           },
         ],
         // Redis-backed so limits survive restarts and are shared across

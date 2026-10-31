@@ -4,11 +4,8 @@ import {
   Post,
   Put,
   Body,
-  Headers,
-  HttpCode,
   Param,
   Query,
-  Req,
   UseGuards,
 } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
@@ -23,9 +20,8 @@ import {
   CreateDisputeDto,
   ResolveDisputeDto,
   CreateIdentityVerificationDto,
-  YouverifyWebhookDto,
+  CreateManualKycDocumentDto,
 } from './dto/kyc.dto';
-import type { RawBodyRequest } from '../common/types/request-context';
 
 @Controller('kyc')
 @UseGuards(JwtAuthGuard)
@@ -41,15 +37,6 @@ export class KycController {
     return this.kycService.createDocumentUploadUrl(user.userId, dto);
   }
 
-  @Post('youverify/verify')
-  @Throttle({ default: { limit: 3, ttl: 86400000 } })
-  async verifyWithYouverify(
-    @CurrentUser() user: { userId: string },
-    @Body() dto: CreateIdentityVerificationDto,
-  ) {
-    return this.kycService.verifyIdentity(user.userId, dto);
-  }
-
   @Post('verify')
   @Throttle({ default: { limit: 3, ttl: 86400000 } })
   async verifyIdentity(
@@ -57,6 +44,15 @@ export class KycController {
     @Body() dto: CreateIdentityVerificationDto,
   ) {
     return this.kycService.verifyIdentity(user.userId, dto);
+  }
+
+  @Post('manual-documents')
+  @Throttle({ default: { limit: 3, ttl: 86400000 } })
+  async createManualKycDocument(
+    @CurrentUser() user: { userId: string },
+    @Body() dto: CreateManualKycDocumentDto,
+  ) {
+    return this.kycService.createManualKycDocument(user.userId, dto);
   }
 
   @Get('status')
@@ -89,26 +85,6 @@ export class KycController {
       Math.max(1, parseInt(page, 10)),
       Math.min(100, Math.max(1, parseInt(limit, 10))),
     );
-  }
-}
-
-@Controller('webhooks/kyc')
-export class KycWebhookController {
-  constructor(private readonly kycService: KycService) {}
-
-  @Post('youverify')
-  @HttpCode(200)
-  @Throttle({ default: { limit: 100, ttl: 60000 } })
-  async handleYouverifyWebhook(
-    @Headers('x-youverify-signature') youverifySignature: string | undefined,
-    @Req() req: RawBodyRequest,
-    @Body() body: YouverifyWebhookDto,
-  ) {
-    return this.kycService.processYouverifyCallback({
-      body: body as unknown as Record<string, unknown>,
-      rawBody: req.rawBody,
-      signatureHeader: youverifySignature,
-    });
   }
 }
 

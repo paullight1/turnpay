@@ -42,6 +42,7 @@ describe('BankingService', () => {
 
   const configService = {
     get: jest.fn((key: string, defaultValue?: unknown) => {
+      if (key === 'BANKING_PROVIDER_PRIMARY') return 'monnify';
       if (key === 'BANKING_ENABLED' || key === 'VIRTUAL_ACCOUNTS_ENABLED') {
         return true;
       }
@@ -192,6 +193,7 @@ describe('BankingService', () => {
   it('uses explicit sandbox test KYC only when the development bypass is enabled', async () => {
     configService.get.mockImplementation(
       (key: string, defaultValue?: unknown) => {
+        if (key === 'BANKING_PROVIDER_PRIMARY') return 'monnify';
         if (key === 'BANKING_ENABLED' || key === 'VIRTUAL_ACCOUNTS_ENABLED') {
           return true;
         }

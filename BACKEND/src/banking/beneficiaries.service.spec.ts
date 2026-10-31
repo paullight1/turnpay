@@ -21,9 +21,11 @@ describe('BeneficiariesService', () => {
 
   const config = {
     get: jest.fn((key: string) =>
-      key === 'BANK_ACCOUNT_ENCRYPTION_KEY'
-        ? 'test-bank-account-encryption-key'
-        : undefined,
+      key === 'BANKING_PROVIDER_PRIMARY'
+        ? 'monnify'
+        : key === 'BANK_ACCOUNT_ENCRYPTION_KEY'
+          ? 'test-bank-account-encryption-key'
+          : undefined,
     ),
   };
 

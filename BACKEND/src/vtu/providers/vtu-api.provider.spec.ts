@@ -48,6 +48,133 @@ describe('VtuApiProvider VTpass adapter', () => {
     );
   });
 
+  it.each([
+    ['smile-airtime', 'airtime', 'smile-direct'],
+    ['smile', 'data', 'smile-direct'],
+    ['glo-sme', 'data', 'glo-sme-data'],
+    ['9mobile-sme', 'data', 'etisalat-sme-data'],
+    ['showmax', 'cable', 'showmax'],
+    ['foreign-airtime', 'airtime', 'foreign-airtime'],
+  ])(
+    'loads and purchases %s with its own VTpass fields',
+    async (id, type, serviceID) => {
+      httpService.get.mockImplementation((url: string) =>
+        of({
+          data: url.includes('countries')
+            ? {
+                content: {
+                  countries: [{ code: 'GH', name: 'Ghana', prefix: '233' }],
+                },
+              }
+            : url.includes('operators')
+              ? { content: [{ operator_id: '5', name: 'Ghana MTN' }] }
+              : {
+                  content: {
+                    variations: [
+                      {
+                        variation_code: 'plan-1',
+                        name: 'Plan',
+                        variation_amount: '500',
+                        charged_amount: '1500',
+                        fixedPrice: 'Yes',
+                      },
+                    ],
+                  },
+                },
+        }),
+      );
+      httpService.post.mockReturnValue(
+        of({
+          data: {
+            code: '000',
+            content: {
+              transactions: { status: 'delivered', transactionId: 'TX-1' },
+            },
+          },
+        }),
+      );
+      const options =
+        id === 'foreign-airtime' ? { countryCode: 'GH', operatorId: '5' } : {};
+      const packages = await (provider as any).getPackages(id, options);
+      expect(packages[0].price).toBe(
+        id === 'foreign-airtime' ? '1500.00' : '500.00',
+      );
+      await provider.purchase({
+        type,
+        provider: id,
+        amount: packages[0].price,
+        packageId: 'plan-1',
+        recipientNumber: '+233241234567',
+        contactPhone: '+2348031234567',
+        reference: 'VTU-test',
+        smileAccountId: '1234567890',
+        countryCode: 'GH',
+        operatorId: '5',
+        email: 'buyer@example.com',
+      } as any);
+      const payload = httpService.post.mock.calls[0][1];
+      expect(payload).toMatchObject({ serviceID, variation_code: 'plan-1' });
+      if (id.startsWith('smile'))
+        expect(payload.billersCode).toBe('1234567890');
+      if (id === 'foreign-airtime')
+        expect(payload).toMatchObject({
+          country_code: 'GH',
+          operator_id: '5',
+          product_type_id: '1',
+          email: 'buyer@example.com',
+          billersCode: '233241234567',
+        });
+      if (id === 'showmax')
+        expect(payload).not.toHaveProperty('subscription_type');
+    },
+  );
+  it('does not round a fractional-kobo provider charge into an underpriced package', async () => {
+    httpService.get.mockReturnValue(
+      of({
+        data: {
+          content: {
+            variations: [
+              { variation_code: 'too-precise', variation_amount: '1000.001' },
+            ],
+          },
+        },
+      }),
+    );
+    await expect(provider.getPackages('glo-sme')).resolves.toEqual([]);
+  });
+
+  it('does not expose international plans without a positive NGN charge', async () => {
+    httpService.get.mockImplementation((url: string) =>
+      of({
+        data: url.includes('countries')
+          ? {
+              content: {
+                countries: [{ code: 'GH', name: 'Ghana', prefix: '233' }],
+              },
+            }
+          : url.includes('operators')
+            ? { content: [{ operator_id: '5', name: 'MTN' }] }
+            : {
+                content: {
+                  variations: [
+                    {
+                      variation_code: 'free?',
+                      variation_amount: '0',
+                      fixedPrice: 'Yes',
+                    },
+                  ],
+                },
+              },
+      }),
+    );
+    await expect(
+      (provider as any).getPackages('foreign-airtime', {
+        countryCode: 'GH',
+        operatorId: '5',
+      }),
+    ).resolves.toEqual([]);
+  });
+
   it('maps TRUSTPAY providers to VTpass service providers', async () => {
     await expect(provider.getProviders('airtime')).resolves.toEqual(
       expect.arrayContaining([

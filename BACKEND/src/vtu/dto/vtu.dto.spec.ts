@@ -34,6 +34,68 @@ describe('VTU DTO contract', () => {
     expect(instance.contactPhone).toBe('+2348031234567');
   });
 
+  it.each([
+    {
+      type: 'airtime',
+      provider: 'smile-airtime',
+      smileEmail: 'user@example.com',
+      smileAccountId: '1234567890',
+      packageId: '516',
+    },
+    {
+      type: 'data',
+      provider: 'smile',
+      smileEmail: 'user@example.com',
+      smileAccountId: '1234567890',
+      packageId: '413',
+    },
+    {
+      type: 'data',
+      provider: 'glo-sme',
+      recipientNumber: '08031234567',
+      packageId: 'glo-dg-50',
+    },
+    {
+      type: 'data',
+      provider: '9mobile-sme',
+      recipientNumber: '08031234567',
+      packageId: 't2-1gb',
+    },
+    {
+      type: 'cable',
+      provider: 'showmax',
+      recipientNumber: '08031234567',
+      packageId: 'full_3',
+    },
+    {
+      type: 'airtime',
+      provider: 'foreign-airtime',
+      recipientNumber: '+233241234567',
+      countryCode: 'GH',
+      operatorId: '5',
+      packageId: '2470',
+    },
+  ])('accepts the extended service $provider', async (fields) => {
+    const { errors } = await validateInput(PurchaseVtuDto, {
+      ...fields,
+      contactPhone: '08031234567',
+      amount: '1000.00',
+    });
+    expect(errors).toHaveLength(0);
+  });
+  it('requires Smile account verification identity', async () => {
+    const { errors } = await validateInput(PurchaseVtuDto, {
+      type: 'data',
+      provider: 'smile',
+      packageId: '413',
+      contactPhone: '08031234567',
+      amount: '1000',
+    });
+    expect(errors.map((error) => error.property)).toEqual(
+      expect.arrayContaining(['smileEmail', 'smileAccountId']),
+    );
+  });
+
   it('rejects legacy international routing fields', async () => {
     const { errors } = await validateInput(PurchaseVtuDto, {
       type: 'airtime',

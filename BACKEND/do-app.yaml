@@ -115,27 +115,16 @@ services:
         value: "false"
         scope: RUN_TIME
       - key: BANKING_PROVIDER_PRIMARY
-        value: monnify
+        value: paystack
         scope: RUN_TIME
 
-      # Monnify
-      - key: MONNIFY_API_KEY
-        value: MK_PROD_REPLACE
+      # Paystack. Configure the webhook in the merchant dashboard after deployment.
+      - key: PAYSTACK_SECRET_KEY
+        value: REPLACE_WITH_PAYSTACK_LIVE_SECRET
         scope: RUN_TIME
         type: SECRET
-      - key: MONNIFY_SECRET_KEY
-        value: REPLACE
-        scope: RUN_TIME
-        type: SECRET
-      - key: MONNIFY_CONTRACT_CODE
-        value: REPLACE
-        scope: RUN_TIME
-        type: SECRET
-      - key: MONNIFY_BASE_URL
-        value: https://api.monnify.com
-        scope: RUN_TIME
-      - key: MONNIFY_WEBHOOK_URL
-        value: https://api.trustpayhq.com/api/webhooks/monnify
+      - key: PAYSTACK_CHECKOUT_ENABLED
+        value: "true"
         scope: RUN_TIME
 
       # Encryption
@@ -190,19 +179,8 @@ services:
 
       # KYC
       - key: KYC_PROVIDER
-        value: ninja
+        value: paystack
         scope: RUN_TIME
-      - key: NINJA_BASE_URL
-        value: https://api.ninja.boucloud.io
-        scope: RUN_TIME
-      - key: NINJA_CLIENT_KEY
-        value: REPLACE
-        scope: RUN_TIME
-        type: SECRET
-      - key: NINJA_CLIENT_SECRET
-        value: REPLACE
-        scope: RUN_TIME
-        type: SECRET
 
       # URLs
       - key: WEB_URL

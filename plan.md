@@ -1,6 +1,6 @@
 # TRUSTPAY Production Readiness Implementation Plan
 
-> Provider note (2026-09-01): provider references in this historical plan are superseded by `DOCS/PROVIDER-SOURCE-OF-TRUTH.MD`. Implement only Monnify, VTpass, and Youverify.
+> Provider note (2026-09-01): provider references in this historical plan are superseded by `DOCS/PROVIDER-SOURCE-OF-TRUTH.MD`. This historical plan is superseded. Active providers are Monnify for banking/payments/KYC and VTpass for VTU.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:subagent-driven-development` for isolated workstreams and review each task before integration. Steps use checkbox syntax for tracking.
 

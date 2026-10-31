@@ -5,7 +5,7 @@ import { PinoLogger } from 'nestjs-pino';
 import { PrismaService } from '../../prisma/prisma.service';
 
 export interface WebhookInboxAcceptInput {
-  provider: 'MONNIFY';
+  provider: 'MONNIFY' | 'PAYSTACK' | 'KORA';
   eventType: string;
   providerReference: string;
   payload: Record<string, unknown>;

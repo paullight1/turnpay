@@ -119,8 +119,14 @@ describe('ExchangeService', () => {
       imports: [
         ConfigModule.forRoot({
           isGlobal: true,
+          ignoreEnvFile: true,
+          skipProcessEnv: true,
           load: [
-            () => ({ JWT_EXPIRES_IN: '15m', JWT_REFRESH_EXPIRES_IN: '7d' }),
+            () => ({
+              JWT_EXPIRES_IN: '15m',
+              JWT_REFRESH_EXPIRES_IN: '7d',
+              BANKING_PROVIDER_PRIMARY: 'monnify',
+            }),
           ],
         }),
       ],

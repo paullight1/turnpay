@@ -12,7 +12,11 @@ export interface VtuPackage {
   name: string;
   price: string;
   validity: string;
-  serviceType: 'data' | 'cable';
+  serviceType: 'airtime' | 'data' | 'cable';
+  fixedPrice?: boolean;
+  rate?: string;
+  minFaceValue?: string;
+  maxFaceValue?: string;
 }
 
 export interface VtuProviderPurchase {
@@ -28,6 +32,11 @@ export interface VtuProviderPurchase {
   meterNumber?: string;
   meterType?: VtuMeterType;
   providerRequestId?: string;
+  smileAccountId?: string;
+  countryCode?: string;
+  operatorId?: string;
+  faceValue?: string;
+  email?: string;
 }
 
 export interface VtuProviderResult {

@@ -4,12 +4,26 @@ import '../core/constants/app_constants.dart';
 import '../core/money/money_value.dart';
 import '../core/state/resource_state.dart';
 import 'api_client.dart';
+import 'kyc_service.dart';
 
 class HomeDataService {
   HomeDataService({ApiClient? apiClient})
       : _apiClient = apiClient ?? ApiClient();
 
   final ApiClient _apiClient;
+
+  Future<KycOverview> fetchKycOverview() =>
+      KycService(apiClient: _apiClient).fetchOverview();
+
+  Future<HomeUser> fetchCurrentUser() async {
+    final response = await _apiClient.client.post('/api/auth/bootstrap');
+    final data = response.data;
+    if (data is! Map<String, dynamic> ||
+        data['user'] is! Map<String, dynamic>) {
+      throw const FormatException('Invalid profile response: expected a user.');
+    }
+    return HomeUser.fromJson(data['user'] as Map<String, dynamic>);
+  }
 
   Future<HomeDashboardData> fetchDashboard() async {
     final responses = await Future.wait<dynamic>([
@@ -161,12 +175,42 @@ class HomeDataService {
         .toList();
   }
 
+  /// Reads the server-owned provisioning state separately from the issued
+  /// account list. A pending Paystack request is not an account yet, so it
+  /// must survive a screen reload without being inferred from a blank row.
+  Future<HomeVirtualAccountProvisioning>
+      fetchVirtualAccountProvisioning() async {
+    try {
+      final response = await _apiClient.client.get(
+        '/api/banking/accounts/provisioning',
+        options: _freshRequestOptions(),
+      );
+      return HomeVirtualAccountProvisioning.fromJson(_asMap(response.data));
+    } on DioException catch (error) {
+      // Older deployments do not expose the optional status endpoint yet.
+      // Treat that as an untouched request, while surfacing auth/outage
+      // errors to the caller so the UI does not invent a ready account.
+      if (_isNotFound(error)) {
+        return const HomeVirtualAccountProvisioning(
+          provider: 'PAYSTACK',
+          status: 'NOT_REQUESTED',
+        );
+      }
+      rethrow;
+    }
+  }
+
   Future<HomeVirtualAccount> provisionVirtualAccount({
-    required String firstName,
-    required String lastName,
-    String? middleName,
+    bool consentAccepted = false,
     String idempotencyKey = '',
   }) async {
+    if (!consentAccepted) {
+      throw ArgumentError.value(
+        consentAccepted,
+        'consentAccepted',
+        'Dedicated-account setup requires explicit user consent.',
+      );
+    }
     final response = await _apiClient.client.post(
       '/api/banking/accounts/provision',
       options: idempotencyKey.isEmpty
@@ -174,12 +218,8 @@ class HomeDataService {
           : Options(headers: {'Idempotency-Key': idempotencyKey}),
       data: {
         'currency': 'NGN',
-        'provider': 'monnify',
         'country': 'NG',
-        'firstName': firstName,
-        'lastName': lastName,
-        if (middleName != null && middleName.trim().isNotEmpty)
-          'middleName': middleName.trim(),
+        'consentAccepted': true,
       },
     );
 
@@ -749,6 +789,36 @@ class HomeVirtualAccount {
     if (accountNumber.isNotEmpty) return accountNumber;
     return accountNumberMasked;
   }
+}
+
+class HomeVirtualAccountProvisioning {
+  final String provider;
+  final String status;
+  final String message;
+  final DateTime? updatedAt;
+
+  const HomeVirtualAccountProvisioning({
+    required this.provider,
+    required this.status,
+    this.message = '',
+    this.updatedAt,
+  });
+
+  factory HomeVirtualAccountProvisioning.fromJson(Map<String, dynamic> json) {
+    return HomeVirtualAccountProvisioning(
+      provider: _asString(json['provider'], fallback: 'PAYSTACK').toUpperCase(),
+      status: _asString(
+        json['status'],
+        fallback: 'NOT_REQUESTED',
+      ).toUpperCase(),
+      message: _asString(json['message']),
+      updatedAt: _asDate(json['updatedAt']),
+    );
+  }
+
+  bool get isPending => status == 'PENDING';
+  bool get isActive => status == 'ACTIVE';
+  bool get isActionRequired => status == 'ACTION_REQUIRED';
 }
 
 class SupportTicket {

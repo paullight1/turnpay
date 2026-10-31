@@ -1,7 +1,12 @@
+import { KoraAccountsService } from '../kora/kora-accounts.service';
+import { Cron, CronExpression } from '@nestjs/schedule';
+import { PaystackVirtualAccountProvider } from './providers/paystack-virtual-account.provider';
 import {
   BadRequestException,
   ForbiddenException,
   Injectable,
+  Optional,
+  ServiceUnavailableException,
   NotFoundException,
 } from '@nestjs/common';
 import { Decimal } from '@prisma/client/runtime/library';
@@ -28,7 +33,7 @@ import {
 import { formatKycTier, isKycTierAtLeast } from '../common/utils/kyc-tier';
 import { allocateDepositReference } from '../common/services/deposit-allocation';
 
-type PrismaProvider = 'MONNIFY';
+type PrismaProvider = 'MONNIFY' | 'PAYSTACK' | 'KORA';
 
 @Injectable()
 export class BankingService {
@@ -38,6 +43,8 @@ export class BankingService {
     private readonly monnifyVirtualAccounts: MonnifyVirtualAccountProvider,
     private readonly configService: ConfigService,
     private readonly logger: PinoLogger,
+    @Optional() private readonly paystack?: PaystackVirtualAccountProvider,
+    @Optional() private readonly koraAccounts?: KoraAccountsService,
   ) {}
 
   async getVirtualAccounts(userId: string) {
@@ -75,18 +82,58 @@ export class BankingService {
     }));
   }
 
+  async getAccountProvisioning(userId: string) {
+    const request = await this.prisma.paystackAccountRequest.findUnique({
+      where: { userId },
+      select: { status: true, lastError: true, updatedAt: true },
+    });
+    return {
+      provider: 'PAYSTACK',
+      status: request?.status ?? 'NOT_REQUESTED',
+      message: request?.lastError ?? undefined,
+      updatedAt: request?.updatedAt,
+    };
+  }
+
   async getTransferStatus(reference: string) {
+    const attempt = await this.prisma.transferAttempt.findFirst({
+      where: { providerReference: reference },
+      select: { provider: true },
+    });
+    if (attempt?.provider === 'KORA')
+      throw new BadRequestException(
+        'Use Ghana payment status for this transfer',
+      );
+    if (attempt?.provider === 'PAYSTACK') {
+      if (!this.paystack)
+        throw new ServiceUnavailableException('Paystack is not configured');
+      return this.paystack.getTransferStatus(reference);
+    }
     return this.monnifyVirtualAccounts.getTransferStatus(reference);
   }
 
   async provisionVirtualAccount(
     userId: string,
     dto: ProvisionVirtualAccountDto,
+    idempotencyKey?: string,
   ) {
+    if (dto.currency === 'GHS') {
+      if (dto.provider && dto.provider !== 'kora')
+        throw new BadRequestException('GHS accounts use Kora');
+      if (dto.consentAccepted !== true)
+        throw new BadRequestException('Account setup consent is required');
+      if (!this.koraAccounts)
+        throw new ServiceUnavailableException('Ghana accounts are unavailable');
+      return this.koraAccounts.ensureAccount(userId, idempotencyKey ?? '');
+    }
     this.assertVirtualAccountsEnabled();
 
     const provider = dto.provider || this.defaultVirtualAccountProvider;
     const normalizedProvider = this.normalizeProvider(provider);
+    if (provider !== this.defaultVirtualAccountProvider)
+      throw new BadRequestException(
+        'New accounts must use the configured banking provider',
+      );
 
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
@@ -172,13 +219,29 @@ export class BankingService {
       );
     }
 
-    const verifiedIdentifiers = await this.resolveVerifiedKycIdentifiers(
-      userId,
-      {
-        bvn: dto.bvn,
-        nin: dto.nin,
-      },
-    );
+    if (provider === 'paystack') {
+      if (!this.paystack?.configured)
+        throw new ServiceUnavailableException('Paystack is not configured');
+      const binding = await this.prisma.paystackCustomer.findUnique({
+        where: { userId },
+      });
+      if (binding?.validationStatus !== 'VERIFIED')
+        throw new ForbiddenException(
+          'Complete Paystack BVN and bank-account verification before requesting an account',
+        );
+      if (dto.consentAccepted === true)
+        await this.prisma.paystackCustomer.update({
+          where: { userId },
+          data: { accountSetupConsentAt: new Date() },
+        });
+    }
+    const verifiedIdentifiers: { bvn?: string; nin?: string } =
+      provider === 'paystack'
+        ? {}
+        : await this.resolveVerifiedKycIdentifiers(userId, {
+            bvn: dto.bvn,
+            nin: dto.nin,
+          });
 
     const providerInput: ProvisionVirtualAccountInput = {
       userId,
@@ -196,11 +259,14 @@ export class BankingService {
       nin:
         verifiedIdentifiers.nin ||
         this.sandboxTestIdentifier('MONNIFY_TEST_NIN'),
-      limitProfileCode: this.resolveMonnifyLimitProfileCode(
-        verifiedIdentifiers.bvn && verifiedIdentifiers.nin
-          ? 'TIER_2'
-          : 'TIER_1',
-      ),
+      limitProfileCode:
+        provider === 'paystack'
+          ? undefined
+          : this.resolveMonnifyLimitProfileCode(
+              verifiedIdentifiers.bvn && verifiedIdentifiers.nin
+                ? 'TIER_2'
+                : 'TIER_1',
+            ),
       identityAccountNumber: dto.identityAccountNumber,
       identityBankCode: dto.identityBankCode,
     };
@@ -218,10 +284,28 @@ export class BankingService {
       );
     }
 
-    const providerAccount = await this.provisionWithProvider(
-      provider,
-      providerInput,
-    );
+    let providerAccount: ProviderVirtualAccount;
+    try {
+      providerAccount = await this.provisionWithProvider(
+        provider,
+        providerInput,
+      );
+    } catch (error) {
+      if (
+        provider !== 'paystack' ||
+        !(error instanceof ServiceUnavailableException)
+      )
+        throw error;
+      return {
+        status: 'PENDING' as const,
+        accountNumber: '',
+        provider: 'PAYSTACK' as const,
+        currency: 'NGN' as const,
+        message: 'Your account is being prepared. Refresh its status shortly.',
+        accountNumberMasked: undefined,
+        bankName: undefined,
+      };
+    }
 
     if (!providerAccount.accountNumber || !providerAccount.accountName) {
       throw new BadRequestException(
@@ -229,7 +313,7 @@ export class BankingService {
       );
     }
 
-    return this.prisma.virtualAccount.upsert({
+    const account = await this.prisma.virtualAccount.upsert({
       where: {
         userId_provider_currency: {
           userId,
@@ -280,6 +364,77 @@ export class BankingService {
         updatedAt: true,
       },
     });
+    if (provider === 'paystack')
+      await this.prisma.paystackAccountRequest.update({
+        where: { userId },
+        data: {
+          status: 'ACTIVE',
+          claimedAt: null,
+          nextAttemptAt: null,
+          lastError: null,
+        },
+      });
+    return account;
+  }
+
+  async processPaystackAccountAssignment(
+    eventType: string,
+    data: Record<string, unknown>,
+  ) {
+    const customer = data.customer as Record<string, unknown> | undefined;
+    const code =
+      typeof data.customer_code === 'string'
+        ? data.customer_code
+        : customer?.customer_code;
+    if (typeof code !== 'string')
+      throw new BadRequestException(
+        'Customer identity missing from account event',
+      );
+    const binding = await this.prisma.paystackCustomer.findUnique({
+      where: { customerCode: code },
+    });
+    if (!binding) throw new NotFoundException('Paystack customer not found');
+    if (eventType.endsWith('.failed')) {
+      await this.prisma.paystackAccountRequest.updateMany({
+        where: { userId: binding.userId, status: 'PENDING' },
+        data: {
+          claimedAt: null,
+          lastError: 'Paystack could not prepare the account',
+          nextAttemptAt: new Date(Date.now() + 300000),
+        },
+      });
+      return { pending: true };
+    }
+    return this.provisionVirtualAccount(binding.userId, {
+      currency: 'NGN',
+      provider: 'paystack',
+    });
+  }
+
+  @Cron(CronExpression.EVERY_MINUTE)
+  async retryPaystackAccountPreparation() {
+    if (this.defaultVirtualAccountProvider !== 'paystack') return;
+    const due = await this.prisma.paystackAccountRequest.findMany({
+      where: {
+        status: 'PENDING',
+        OR: [{ nextAttemptAt: null }, { nextAttemptAt: { lte: new Date() } }],
+      },
+      orderBy: { updatedAt: 'asc' },
+      take: 10,
+    });
+    for (const request of due) {
+      try {
+        await this.provisionVirtualAccount(request.userId, {
+          currency: 'NGN',
+          provider: 'paystack',
+        });
+      } catch {
+        this.logger.warn(
+          { requestId: request.id },
+          'Paystack account retry needs confirmation',
+        );
+      }
+    }
   }
 
   async processVirtualAccountDeposit(event: NormalizedDepositEvent) {
@@ -454,7 +609,7 @@ export class BankingService {
 
         await tx.auditLog.create({
           data: {
-            action: 'MONNIFY_VIRTUAL_ACCOUNT_DEPOSIT_CREDITED',
+            action: `${provider}_VIRTUAL_ACCOUNT_DEPOSIT_CREDITED`,
             targetType: 'Transaction',
             targetId: transaction.id,
             reference: event.providerReference,
@@ -506,7 +661,7 @@ export class BankingService {
   private normalizeProvider(provider: string): PrismaProvider;
   private normalizeProvider(provider: string): PrismaProvider {
     const normalized = provider.toUpperCase();
-    if (normalized !== 'MONNIFY') {
+    if (normalized !== 'MONNIFY' && normalized !== 'PAYSTACK') {
       throw new BadRequestException('Unsupported provider');
     }
     return normalized;
@@ -516,6 +671,11 @@ export class BankingService {
     provider: BankingProviderName,
     input: ProvisionVirtualAccountInput,
   ): Promise<ProviderVirtualAccount> {
+    if (provider === 'paystack') {
+      if (!this.paystack)
+        throw new ServiceUnavailableException('Paystack is not configured');
+      return this.paystack.provisionVirtualAccount(input);
+    }
     if (provider !== 'monnify') {
       throw new BadRequestException(
         'Only Monnify virtual accounts are enabled',
@@ -657,16 +817,14 @@ export class BankingService {
   private get defaultVirtualAccountProvider(): BankingProviderName {
     const configured = this.configService.get<string>(
       'BANKING_PROVIDER_PRIMARY',
-      'monnify',
+      'paystack',
     );
 
-    if (configured === 'monnify') {
+    if (configured === 'monnify' || configured === 'paystack') {
       return configured;
     }
 
-    throw new BadRequestException(
-      'Only Monnify can be configured as the virtual account provider',
-    );
+    throw new BadRequestException('Unsupported virtual account provider');
   }
 
   private assertVirtualAccountsEnabled() {

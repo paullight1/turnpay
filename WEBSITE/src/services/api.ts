@@ -22,7 +22,12 @@ import type {
   KycDocument,
   KycStatusOverview,
   KycVerificationResult,
+  PaymentCapabilities,
+  PaymentInitialization,
+  PaymentVerification,
   VirtualAccount,
+  VirtualAccountProvisionResponse,
+  VirtualAccountProvisioningStatus,
 } from "@/types";
 import type {
   InternalTransferReceipt,
@@ -303,22 +308,19 @@ export const transferApi = {
 export const bankingApi = {
   getVirtualAccounts: () =>
     apiClient.get<VirtualAccount[]>("/api/banking/accounts"),
+  getProvisioningStatus: () =>
+    apiClient.get<VirtualAccountProvisioningStatus>(
+      "/api/banking/accounts/provisioning",
+    ),
   provisionVirtualAccount: (
     data: {
       currency: "NGN";
-      provider?: "monnify";
-      firstName: string;
-      lastName: string;
-      middleName?: string;
+      consentAccepted?: true;
       country?: string;
-      bvn?: string;
-      nin?: string;
-      identityAccountNumber?: string;
-      identityBankCode?: string;
     },
     idempotencyKey?: string,
   ) =>
-    apiClient.post<VirtualAccount>(
+    apiClient.post<VirtualAccountProvisionResponse>(
       "/api/banking/accounts/provision",
       data,
       withIdempotencyKey(idempotencyKey),
@@ -333,6 +335,11 @@ export const kycApi = {
       type: "BVN" | "NIN";
       idNumber: string;
       dateOfBirth: string;
+      firstName?: string;
+      lastName?: string;
+      bankCode?: string;
+      accountNumber?: string;
+      accountSetupConsent?: boolean;
       consentAccepted: true;
     },
     idempotencyKey: string,
@@ -343,6 +350,33 @@ export const kycApi = {
       withIdempotencyKey(idempotencyKey),
     ),
   getDocuments: () => apiClient.get<KycDocument[]>("/api/kyc/documents"),
+  createDocumentUploadUrl: (
+    data: {
+      fileName: string;
+      contentType: string;
+      fileSize: number;
+    },
+    idempotencyKey?: string,
+  ) =>
+    apiClient.post(
+      "/api/kyc/document-upload-url",
+      data,
+      withIdempotencyKey(idempotencyKey),
+    ),
+  submitManualDocument: (
+    data: {
+      type: "NIN";
+      idNumber: string;
+      objectKey: string;
+      consentAccepted: true;
+    },
+    idempotencyKey: string,
+  ) =>
+    apiClient.post<KycVerificationResult>(
+      "/api/kyc/manual-documents",
+      data,
+      withIdempotencyKey(idempotencyKey),
+    ),
 };
 
 export const exchangeApi = {
@@ -451,6 +485,7 @@ export type AdminManualExchangeOrder = {
   reference: string;
   status: string;
   settlementMode: ManualExchangeSettlementMode;
+  payoutWorkflow?: "LEGACY" | "ADMIN_CEDIS";
   sourceCurrency: string;
   targetCurrency: string;
   amount: string;
@@ -482,6 +517,8 @@ export type AdminManualExchangeOrder = {
   events: ManualExchangeOrderEvent[];
 };
 
+export type AdminManualExchangeQueue = {items:AdminManualExchangeOrder[];nextCursor:string|null;counts:Record<string,number>};
+
 export type AdminManualExchangeReviewAction =
   | "CREDIT_WALLET"
   | "CONFIRM_DEPOSIT"
@@ -489,6 +526,7 @@ export type AdminManualExchangeReviewAction =
   | "REJECT"
   | "CLAIM_PAYOUT"
   | "MARK_SENT"
+  | "RECORD_CEDIS_SENT"
   | "COMPLETE";
 
 export type AdminManualExchangeReviewInput = {
@@ -498,6 +536,7 @@ export type AdminManualExchangeReviewInput = {
   actualAmount?: string;
   acceptExpiredQuote?: boolean;
   payoutReference?: string;
+  payoutAmount?: string;
   payoutProofObjectKey?: string;
 };
 
@@ -526,6 +565,10 @@ export type ManualExchangeUploadResponse = {
 export type ManualExchangeProofKind = "DEPOSIT" | "PAYOUT";
 
 export const adminManualExchangeApi = {
+  queue:(status?:string,cursor?:string)=>{
+    const params=new URLSearchParams();if(status&&status!=='ALL')params.set('status',status);if(cursor)params.set('cursor',cursor);
+    const query=params.toString();return apiClient.get<AdminManualExchangeQueue>(`/api/admin/exchange/manual-orders/queue${query?`?${query}`:''}`);
+  },
   list: (status?: string) => {
     const params = new URLSearchParams();
     if (status && status !== "ALL") params.set("status", status);
@@ -730,6 +773,21 @@ export const adminInternalTransferReversalApi = {
 };
 
 export const paymentApi = {
+  getCapabilities: () =>
+    apiClient.get<PaymentCapabilities>("/api/payments/capabilities"),
+  initialize: (
+    data: { amount: string; currency: "NGN" },
+    idempotencyKey?: string,
+  ) =>
+    apiClient.post<PaymentInitialization>(
+      "/api/payments/initialize",
+      data,
+      withIdempotencyKey(idempotencyKey),
+    ),
+  verify: (reference: string) =>
+    apiClient.get<PaymentVerification>(
+      `/api/payments/verify/${encodeURIComponent(reference)}`,
+    ),
   withdraw: (
     data: {
       amount: string;

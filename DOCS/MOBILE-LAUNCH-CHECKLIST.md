@@ -20,7 +20,7 @@ Use NOT STARTED → IN PROGRESS → VERIFIED, or EXTERNAL BLOCKER/FAILED. VERIFI
 | G08 Device journeys | Every enabled financial/auth/KYC flow passes on physical Android and iPhone | Engineering + tester | EXTERNAL BLOCKER: physical Android and iPhone unavailable |
 | G09 Observability/support | Test alert received; support/closure lifecycle works; no sensitive telemetry | Engineering + support owner | IN PROGRESS: startup/activity/closure implemented; delivered alert and operator evidence pending |
 | G10 Operations | Restore/kill-switch rehearsal and three clean reconciliation cycles | Infrastructure + Finance/Ops | EXTERNAL BLOCKER: restore, kill-switch and three statement reconciliation cycles pending |
-| G11 Live/provider gates | Existing transfer certification and Ninja activation records complete; Monnify/VTpass live access and settlement evidence | Accountable owners | EXTERNAL BLOCKER: live approvals unverified |
+| G11 Live/provider gates | Existing transfer certification and Monnify KYC validation records complete; Monnify/VTpass live access and settlement evidence | Accountable owners | EXTERNAL BLOCKER: live approvals unverified |
 | G12 Store/pilot | Accurate declarations, release approval, authorized live smoke and controlled rollout evidence | Release owner | NOT STARTED |
 
 ## What the owner needs to do
@@ -31,7 +31,7 @@ These are access/status requests, not requests to paste secrets. Reuse existing 
 | --- | --- | --- |
 | Now | Confirm the receiving bank/account, who verifies incoming transfers, and which bank/MoMo destinations you can pay | Server-managed collection details, actual statement access and named payout operator |
 | Now | Identify the staging backend/domain and give the engineering task access to its deployment configuration | Known staging target with database/Redis isolated from production |
-| Now | Confirm Monnify, VTpass and Ninja account status: sandbox available / live approved / approval outstanding | Provider dashboard access or approval record; secrets installed backend-side |
+| Now | Confirm Monnify and VTpass account status: sandbox available / live approved / approval outstanding | Provider dashboard access or approval record; secrets installed backend-side |
 | Before Task 6 | Identify who controls API TLS/certificates and rotation; make current/backup public pins available through the release configuration | Validated host/pin inventory and tested rotation procedure |
 | Before Task 7 | Make Android upload signing and Apple developer/signing access available through protected CI or the approved local keychain | Successful signed artifact on each platform |
 | Before Task 7 | Give access to the app's Sentry project and public build configuration | A sanitized test exception arrives and symbolicates |
@@ -68,10 +68,10 @@ The existing [receipt flow guide](PRODUCTION-GUIDES/14-MANUAL-EXCHANGE-RECEIPT-F
 
 - [Internal-transfer certification and required approvals](PRODUCTION-GUIDES/20-INTERNAL-TRANSFER-CERTIFICATION.md).
 - [Transfer incident/rollback operations](PRODUCTION-GUIDES/19-INTERNAL-TRANSFER-OPERATIONS.md).
-- [Ninja live activation](PRODUCTION-GUIDES/23-NINJA-KYC-PRODUCTION-READINESS.md).
+- [Monnify KYC launch checks](KYC-GUIDE.MD).
 - [Mobile deployment](PRODUCTION-GUIDES/11-MOBILE-WEB-DEPLOYMENT.MD).
 - [Reconciliation](PRODUCTION-GUIDES/10-RECONCILIATION.MD).
 
-Current provider scope overrides historical mentions of other providers in older guides: Monnify, VTpass and Ninja. Youverify remains rollback-only.
+Current active provider scope is Monnify for banking/payments/KYC and VTpass for VTU. Older provider guides are historical only.
 
 **Go/no-go:** All required gates VERIFIED, no unresolved critical/high issue, and all required release approvals recorded. Otherwise keep the affected feature disabled and continue the next independent task. The plan being complete does not mean the app is production-ready.

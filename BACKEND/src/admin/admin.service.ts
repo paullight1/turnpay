@@ -1,8 +1,11 @@
+import { PaystackFundingService } from '../payments/paystack-funding.service';
+import { PaymentService } from '../payments/payment.service';
 import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
   Injectable,
+  Optional,
   NotFoundException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -69,6 +72,8 @@ export class AdminService {
     private readonly supabaseService: SupabaseService,
     private readonly vtuService: VtuService,
     private readonly bankingService: BankingService,
+    @Optional() private readonly paystackFunding?: PaystackFundingService,
+    @Optional() private readonly payments?: PaymentService,
   ) {}
 
   async getUsers(
@@ -994,6 +999,27 @@ export class AdminService {
       throw new BadRequestException('Withdrawal has no transfer attempt');
     }
 
+    if (latestAttempt.provider === 'PAYSTACK') {
+      if (!this.payments)
+        throw new BadRequestException('Payment verification is unavailable');
+      const result = await this.payments.getWithdrawal(
+        transaction.userId,
+        reference,
+      );
+      await this.prisma.auditLog.create({
+        data: {
+          adminId,
+          action: 'TRANSFER_VERIFY',
+          targetType: 'Transaction',
+          targetId: transaction.id,
+          reference,
+          reason: dto.reason,
+          before: { status: transaction.status },
+          after: { status: result.status },
+        },
+      });
+      return result;
+    }
     const providerVerification =
       await this.verifyProviderTransfer(latestAttempt);
     const verifiedStatus = this.mapTransferStatus(
@@ -1471,9 +1497,34 @@ export class AdminService {
   ) {
     this.assertReason(dto.reason);
 
-    const webhookLog = await this.prisma.webhookLog.findUnique({
-      where: { reference },
+    const webhookLog = await this.prisma.webhookLog.findFirst({
+      where: {
+        reference,
+        eventType: { in: ['SUCCESSFUL_TRANSACTION', 'charge.success'] },
+      },
+      orderBy: { createdAt: 'desc' },
     });
+    if (webhookLog?.provider === 'PAYSTACK') {
+      if (!this.paystackFunding)
+        throw new BadRequestException('Payment verification is unavailable');
+      const result = await this.paystackFunding.confirmCharge(reference);
+      await this.prisma.webhookLog.update({
+        where: { id: webhookLog.id },
+        data: { processed: true, errorMessage: null },
+      });
+      await this.prisma.auditLog.create({
+        data: {
+          adminId,
+          action: 'BANKING_DEPOSIT_REPLAY',
+          targetType: 'WebhookLog',
+          targetId: webhookLog.id,
+          reference,
+          reason: dto.reason,
+          metadata: { provider: 'PAYSTACK' },
+        },
+      });
+      return result;
+    }
 
     if (!webhookLog || webhookLog.provider !== 'MONNIFY') {
       throw new NotFoundException(
@@ -1481,7 +1532,32 @@ export class AdminService {
       );
     }
 
-    const payload = webhookLog.payload as {
+    let replayPayload = webhookLog.payload;
+    const loggedEvent = webhookLog.payload as {
+      eventData?: {
+        destinationAccountInformation?: { accountNumber?: string };
+      };
+    };
+    if (
+      loggedEvent.eventData?.destinationAccountInformation?.accountNumber ===
+      '[REDACTED]'
+    ) {
+      const inbox = await this.prisma.paymentWebhookInbox.findFirst({
+        where: {
+          provider: 'MONNIFY',
+          providerReference: reference,
+          eventType: 'SUCCESSFUL_TRANSACTION',
+        },
+        orderBy: { receivedAt: 'desc' },
+        select: { payload: true },
+      });
+      if (!inbox)
+        throw new BadRequestException(
+          'The signed deposit event is unavailable; reconcile this payment before replay',
+        );
+      replayPayload = inbox.payload;
+    }
+    const payload = replayPayload as {
       eventType?: string;
       eventData?: {
         transactionReference?: string;
@@ -1522,11 +1598,11 @@ export class AdminService {
           ? new Decimal(data.settlementAmount)
           : undefined,
       currency: (data?.currency || 'NGN') as 'NGN' | 'GHS',
-      rawPayload: webhookLog.payload as Record<string, unknown>,
+      rawPayload: replayPayload as Record<string, unknown>,
     });
 
     await this.prisma.webhookLog.update({
-      where: { reference },
+      where: { id: webhookLog.id },
       data: { processed: true, errorMessage: null },
     });
 
@@ -2838,10 +2914,16 @@ export class AdminService {
       )
       .toFixed(2);
 
+    const activeBankingProvider = this.configService.get<string>(
+      'BANKING_PROVIDER_PRIMARY',
+      'paystack',
+    );
     const settlementAccountNumber =
-      this.configService
-        .get<string>('MONNIFY_EXCHANGE_COLLECTION_ACCOUNT_NUMBER', '')
-        ?.trim() || '';
+      activeBankingProvider === 'paystack'
+        ? ''
+        : this.configService
+            .get<string>('MONNIFY_EXCHANGE_COLLECTION_ACCOUNT_NUMBER', '')
+            ?.trim() || '';
 
     return {
       generatedAt: new Date(),
@@ -2852,14 +2934,20 @@ export class AdminService {
       },
       treasury: {
         settlementAccount: {
-          provider: 'MONNIFY',
-          configured: settlementAccountNumber.length > 0,
+          provider: activeBankingProvider.toUpperCase(),
+          configured:
+            activeBankingProvider === 'paystack'
+              ? Boolean(this.configService.get<string>('PAYSTACK_SECRET_KEY'))
+              : settlementAccountNumber.length > 0,
           accountNumberMasked: settlementAccountNumber
             ? maskAccountNumber(settlementAccountNumber)
             : null,
-          note: settlementAccountNumber
-            ? 'Exchange deposits settle to the configured Monnify collection account.'
-            : 'Configure MONNIFY_EXCHANGE_COLLECTION_ACCOUNT_NUMBER to lock exchange deposits to one settlement account.',
+          note:
+            activeBankingProvider === 'paystack'
+              ? 'Paystack withdrawals use the merchant balance. Check provider readiness and liquidity before settlement.'
+              : settlementAccountNumber
+                ? 'Exchange deposits settle to the configured Monnify collection account.'
+                : 'Configure MONNIFY_EXCHANGE_COLLECTION_ACCOUNT_NUMBER to lock exchange deposits to one settlement account.',
         },
         walletExposure: walletExposureByCurrency,
         totalWalletExposure,

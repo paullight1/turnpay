@@ -21,7 +21,7 @@ in `DOCS/PROVIDER-SOURCE-OF-TRUTH.MD`.
 
 - Banking and payments: Monnify only.
 - VTU and Nigerian bill payments: VTpass only.
-- KYC and identity verification: Ninja direct identity API for Nigerian BVN and NIN; Youverify is retained only as a backend rollback adapter.
+- KYC and identity verification: Monnify direct identity API for Nigerian BVN and NIN; no alternate KYC provider is shipped.
 - FX rates: configured server-side FX feed.
 
 Provider secrets are backend-only. Mobile and web clients receive only the public

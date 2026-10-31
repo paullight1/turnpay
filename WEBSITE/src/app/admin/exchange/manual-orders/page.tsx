@@ -6,7 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-provider";
-import { getErrorMessage } from "@/lib/errors";
+import { getErrorMessage, getErrorStatus } from "@/lib/errors";
 import { createManualExchangeIdempotencyKey } from "@/lib/idempotency";
 import { maskAccountNumber } from "@/lib/privacy";
 import {
@@ -16,7 +16,12 @@ import {
   type AdminManualExchangeReviewInput,
   type ManualExchangeProofKind,
 } from "@/services/api";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  useMutation,
+  useQuery,
+  useInfiniteQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import {
   ArrowLeftRight,
   CheckCircle2,
@@ -103,7 +108,11 @@ const amountSchema = z
   .regex(/^\d+(?:\.\d{1,2})?$/, "Enter a valid amount with up to 2 decimals")
   .max(14, "Amount must be 14 characters or fewer")
   .refine(
-    (value) => value.replace(".", "").split("").some((digit) => digit !== "0"),
+    (value) =>
+      value
+        .replace(".", "")
+        .split("")
+        .some((digit) => digit !== "0"),
     "Amount must be greater than zero",
   );
 
@@ -114,6 +123,7 @@ type ActionPanel =
   | "REJECT"
   | "CLAIM_PAYOUT"
   | "MARK_SENT"
+  | "RECORD_CEDIS_SENT"
   | "COMPLETE";
 
 type AttemptIdentity = {
@@ -161,11 +171,12 @@ function formatMoney(value: string, currency: string) {
   const whole = (match[1] ?? "0").replace(/^0+(?=\d)/, "") || "0";
   const groupedWhole = whole.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
   const fraction = match[2] ?? "";
-  const displayFraction = fraction.length === 0
-    ? "00"
-    : fraction.length === 1
-      ? `${fraction}0`
-      : fraction;
+  const displayFraction =
+    fraction.length === 0
+      ? "00"
+      : fraction.length === 1
+        ? `${fraction}0`
+        : fraction;
   return `${currency} ${groupedWhole}.${displayFraction}`;
 }
 
@@ -206,20 +217,31 @@ function isOrderExpired(order: AdminManualExchangeOrder) {
   return Number.isFinite(expiresAt) && expiresAt < Date.now();
 }
 
-function actionLabel(action: ActionPanel) {
+function actionLabel(
+  action: ActionPanel,
+  order?: AdminManualExchangeOrder | null,
+) {
   switch (action) {
     case "CREDIT_WALLET":
-      return "Approve and credit wallet";
+      return order?.sourceCurrency === "GHS" && order.targetCurrency === "NGN"
+        ? "Confirm cedis and credit naira"
+        : "Approve and credit wallet";
     case "CONFIRM_DEPOSIT":
-      return "Confirm deposit and queue payout";
+      return order?.sourceCurrency === "NGN" && order.targetCurrency === "GHS"
+        ? "Confirm naira received"
+        : "Confirm deposit and queue payout";
     case "REQUEST_INFO":
       return "Request more information";
     case "REJECT":
       return "Reject order";
     case "CLAIM_PAYOUT":
-      return "Claim payout";
+      return order?.targetCurrency === "GHS"
+        ? "Start cedi transfer"
+        : "Claim payout";
     case "MARK_SENT":
       return "Mark payout as sent";
+    case "RECORD_CEDIS_SENT":
+      return "Confirm cedis sent";
     case "COMPLETE":
       return "Complete settlement";
   }
@@ -239,6 +261,8 @@ function reviewSuccessMessage(action: AdminManualExchangeReviewAction) {
       return "Payout claimed for this admin";
     case "MARK_SENT":
       return "Payout marked as sent";
+    case "RECORD_CEDIS_SENT":
+      return "Cedi transfer recorded and exchange completed";
     case "COMPLETE":
       return "Settlement completed";
   }
@@ -265,7 +289,9 @@ function validateUpload(file: File) {
 function destinationPreview(order: AdminManualExchangeOrder) {
   return (
     order.destinationAccountMasked ??
-    (order.destinationAccount ? maskAccountNumber(order.destinationAccount) : null)
+    (order.destinationAccount
+      ? maskAccountNumber(order.destinationAccount)
+      : null)
   );
 }
 
@@ -283,7 +309,11 @@ function DetailValue({
       <dt className="text-xs uppercase tracking-[0.12em] text-muted-foreground">
         {label}
       </dt>
-      <dd className={mono ? "mt-1 break-all font-mono text-sm" : "mt-1 text-sm font-medium"}>
+      <dd
+        className={
+          mono ? "mt-1 break-all font-mono text-sm" : "mt-1 text-sm font-medium"
+        }
+      >
         {value}
       </dd>
     </div>
@@ -294,7 +324,8 @@ export default function AdminManualExchangeOrdersPage() {
   const { user, profile, isLoading: authLoading } = useAuth();
   const router = useRouter();
   const queryClient = useQueryClient();
-  const [statusFilter, setStatusFilter] = useState<(typeof ORDER_STATUS_FILTERS)[number]>("ALL");
+  const [statusFilter, setStatusFilter] =
+    useState<(typeof ORDER_STATUS_FILTERS)[number]>("ALL");
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
   const [actionPanel, setActionPanel] = useState<ActionPanel | null>(null);
   const [reason, setReason] = useState("");
@@ -302,10 +333,14 @@ export default function AdminManualExchangeOrdersPage() {
   const [actualAmount, setActualAmount] = useState("");
   const [acceptExpiredQuote, setAcceptExpiredQuote] = useState(false);
   const [payoutReference, setPayoutReference] = useState("");
+  const [payoutAmount, setPayoutAmount] = useState("");
   const [payoutProofFile, setPayoutProofFile] = useState<File | null>(null);
-  const [payoutProofObjectKey, setPayoutProofObjectKey] = useState<string | null>(null);
+  const [payoutProofObjectKey, setPayoutProofObjectKey] = useState<
+    string | null
+  >(null);
   const [formError, setFormError] = useState<string | null>(null);
-  const [proofLoading, setProofLoading] = useState<ManualExchangeProofKind | null>(null);
+  const [proofLoading, setProofLoading] =
+    useState<ManualExchangeProofKind | null>(null);
   const [isForeground, setIsForeground] = useState(true);
   const attemptKeysRef = useRef<Map<string, string>>(new Map());
 
@@ -317,7 +352,8 @@ export default function AdminManualExchangeOrdersPage() {
     };
     updateVisibility();
     document.addEventListener("visibilitychange", updateVisibility);
-    return () => document.removeEventListener("visibilitychange", updateVisibility);
+    return () =>
+      document.removeEventListener("visibilitychange", updateVisibility);
   }, []);
 
   useEffect(() => {
@@ -373,7 +409,9 @@ export default function AdminManualExchangeOrdersPage() {
       attemptKeysRef.current.delete(identity);
       if (typeof window !== "undefined") {
         try {
-          window.sessionStorage.removeItem(`trustpay:manual-exchange:${identity}`);
+          window.sessionStorage.removeItem(
+            `trustpay:manual-exchange:${identity}`,
+          );
         } catch {
           // There is no sensitive data to recover if storage is unavailable.
         }
@@ -382,19 +420,25 @@ export default function AdminManualExchangeOrdersPage() {
     [user?.id],
   );
 
-  const ordersQuery = useQuery({
-    queryKey: ["admin-manual-exchange-orders", statusFilter],
-    queryFn: async () => {
-      const response = await adminManualExchangeApi.list(statusFilter);
-      return response.data;
-    },
+  const ordersQuery = useInfiniteQuery({
+    queryKey: ["admin-manual-exchange-orders", user?.id, statusFilter],
+    initialPageParam: undefined as string | undefined,
+    queryFn: async ({ pageParam }) =>
+      (await adminManualExchangeApi.queue(statusFilter, pageParam)).data,
+    getNextPageParam: (page) => page.nextCursor ?? undefined,
     enabled: isAdmin,
-    staleTime: 10_000,
-    refetchInterval: isForeground ? 15_000 : false,
+    staleTime: 10000,
+    // An infinite-query refresh fetches every loaded page. Budget at most six
+    // automatic queue requests per minute, even when browsing deep history.
+    refetchInterval: (query) =>
+      isForeground
+        ? Math.max(15000, (query.state.data?.pages.length ?? 1) * 10000)
+        : false,
+    refetchOnWindowFocus: false,
   });
 
   const reconciliationQuery = useQuery({
-    queryKey: ["admin-manual-exchange-reconciliation"],
+    queryKey: ["admin-manual-exchange-reconciliation", user?.id],
     queryFn: async () => {
       const response = await adminManualExchangeApi.getReconciliation();
       return response.data;
@@ -404,24 +448,26 @@ export default function AdminManualExchangeOrdersPage() {
     refetchInterval: isForeground ? 60_000 : false,
   });
 
-  const orders = useMemo(() => ordersQuery.data ?? [], [ordersQuery.data]);
-  const latestReconciliation = reconciliationQuery.data?.[0] ?? null;
-  const selectedOrder = orders.find((order) => order.id === selectedOrderId) ?? null;
-
-  const queueCounts = useMemo(
-    () => ({
-      needsReview: orders.filter((order) =>
-        ["AWAITING_CONFIRMATION", "NEEDS_MORE_INFO"].includes(order.status),
-      ).length,
-      payouts: orders.filter((order) =>
-        ["PAYOUT_PENDING", "PAYOUT_PROCESSING", "PAYOUT_SENT"].includes(order.status),
-      ).length,
-      completed: orders.filter((order) =>
-        ["CREDITED", "COMPLETED"].includes(order.status),
-      ).length,
-    }),
-    [orders],
+  const orders = useMemo(
+    () => ordersQuery.data?.pages.flatMap((page) => page.items) ?? [],
+    [ordersQuery.data],
   );
+  const latestReconciliation = reconciliationQuery.data?.[0] ?? null;
+  const selectedOrder =
+    orders.find((order) => order.id === selectedOrderId) ?? null;
+
+  const queueCounts = useMemo(() => {
+    const counts = ordersQuery.data?.pages[0]?.counts ?? {};
+    return {
+      needsReview:
+        (counts.AWAITING_CONFIRMATION ?? 0) + (counts.NEEDS_MORE_INFO ?? 0),
+      payouts:
+        (counts.PAYOUT_PENDING ?? 0) +
+        (counts.PAYOUT_PROCESSING ?? 0) +
+        (counts.PAYOUT_SENT ?? 0),
+      completed: (counts.CREDITED ?? 0) + (counts.COMPLETED ?? 0),
+    };
+  }, [ordersQuery.data]);
 
   const resetActionState = () => {
     setActionPanel(null);
@@ -430,6 +476,7 @@ export default function AdminManualExchangeOrdersPage() {
     setActualAmount("");
     setAcceptExpiredQuote(false);
     setPayoutReference("");
+    setPayoutAmount("");
     setPayoutProofFile(null);
     setPayoutProofObjectKey(null);
     setFormError(null);
@@ -445,26 +492,32 @@ export default function AdminManualExchangeOrdersPage() {
       input: AdminManualExchangeReviewInput;
       idempotencyKey: string;
     }) => adminManualExchangeApi.review(orderId, input, idempotencyKey),
-    onSuccess: async (response, variables) => {
+    onSuccess: async (_response, variables) => {
       clearAttemptKey({
         orderId: variables.orderId,
         action: `review:${variables.input.action}`,
       });
       resetActionState();
-      queryClient.setQueryData<AdminManualExchangeOrder[]>(
-        ["admin-manual-exchange-orders", statusFilter],
-        (current) =>
-          current?.map((order) =>
-            order.id === response.data.id ? response.data : order,
-          ),
-      );
       await queryClient.invalidateQueries({
         queryKey: ["admin-manual-exchange-orders"],
       });
       toast.success(reviewSuccessMessage(variables.input.action));
     },
-    onError: (error: unknown) => {
-      const message = getErrorMessage(error, "Could not save the manual exchange action");
+    onError: (error: unknown, variables) => {
+      const status = getErrorStatus(error);
+      // A definitive rejection can be corrected as a new attempt. Keep unknown outcomes and conflicts on the original key.
+      if (status !== undefined && [400, 401, 403, 404, 422].includes(status))
+        clearAttemptKey({
+          orderId: variables.orderId,
+          action: `review:${variables.input.action}`,
+        });
+      void queryClient.invalidateQueries({
+        queryKey: ["admin-manual-exchange-orders", user?.id],
+      });
+      const message = getErrorMessage(
+        error,
+        "Could not save the manual exchange action",
+      );
       setFormError(message);
       toast.error(message);
     },
@@ -529,7 +582,9 @@ export default function AdminManualExchangeOrdersPage() {
 
     const reasonResult = reasonSchema.safeParse(reason);
     if (!reasonResult.success) {
-      setFormError(reasonResult.error.issues[0]?.message ?? "Enter a valid reason");
+      setFormError(
+        reasonResult.error.issues[0]?.message ?? "Enter a valid reason",
+      );
       return;
     }
 
@@ -542,11 +597,16 @@ export default function AdminManualExchangeOrdersPage() {
       const depositResult = referenceSchema.safeParse(depositReference);
       const amountResult = amountSchema.safeParse(actualAmount);
       if (!depositResult.success) {
-        setFormError(depositResult.error.issues[0]?.message ?? "Enter a deposit reference");
+        setFormError(
+          depositResult.error.issues[0]?.message ?? "Enter a deposit reference",
+        );
         return;
       }
       if (!amountResult.success) {
-        setFormError(amountResult.error.issues[0]?.message ?? "Enter the actual deposit amount");
+        setFormError(
+          amountResult.error.issues[0]?.message ??
+            "Enter the actual deposit amount",
+        );
         return;
       }
       input.depositReference = depositResult.data;
@@ -562,15 +622,27 @@ export default function AdminManualExchangeOrdersPage() {
       }
     }
 
-    if (actionPanel === "MARK_SENT") {
+    if (actionPanel === "MARK_SENT" || actionPanel === "RECORD_CEDIS_SENT") {
       const payoutResult = referenceSchema.safeParse(payoutReference);
       if (!payoutResult.success) {
-        setFormError(payoutResult.error.issues[0]?.message ?? "Enter a payout reference");
+        setFormError(
+          payoutResult.error.issues[0]?.message ?? "Enter a payout reference",
+        );
         return;
       }
       if (!payoutProofObjectKey) {
-        setFormError("Upload the protected payout proof before marking the payout as sent");
+        setFormError(
+          "Upload the protected payout proof before marking the payout as sent",
+        );
         return;
+      }
+      if (actionPanel === "RECORD_CEDIS_SENT") {
+        const amount = amountSchema.safeParse(payoutAmount);
+        if (!amount.success) {
+          setFormError("Enter the actual cedi amount sent.");
+          return;
+        }
+        input.payoutAmount = amount.data;
       }
       input.payoutReference = payoutResult.data;
       input.payoutProofObjectKey = payoutProofObjectKey;
@@ -626,7 +698,10 @@ export default function AdminManualExchangeOrdersPage() {
       window.open(url, "_blank", "noopener,noreferrer");
       clearAttemptKey({ orderId: order.id, action });
     } catch (error: unknown) {
-      const message = getErrorMessage(error, "Could not open the protected proof");
+      const message = getErrorMessage(
+        error,
+        "Could not open the protected proof",
+      );
       toast.error(message);
     } finally {
       setProofLoading(null);
@@ -646,14 +721,17 @@ export default function AdminManualExchangeOrdersPage() {
   const canReviewDeposit = selectedOrder
     ? isDepositReviewStatus(selectedOrder.status)
     : false;
-  const selectedOrderExpired = selectedOrder ? isOrderExpired(selectedOrder) : false;
+  const selectedOrderExpired = selectedOrder
+    ? isOrderExpired(selectedOrder)
+    : false;
   const canClaimPayout = selectedOrder?.status === "PAYOUT_PENDING";
   const ownsPayoutClaim =
     Boolean(user.id) && selectedOrder?.payoutClaimedBy === user.id;
   const canMarkSent =
     selectedOrder?.status === "PAYOUT_PROCESSING" && ownsPayoutClaim;
   const canComplete = selectedOrder?.status === "PAYOUT_SENT";
-  const reviewDisabled = reviewMutation.isPending || uploadProofMutation.isPending;
+  const reviewDisabled =
+    reviewMutation.isPending || uploadProofMutation.isPending;
 
   return (
     <DashboardLayout>
@@ -664,13 +742,19 @@ export default function AdminManualExchangeOrdersPage() {
               <h1 className="text-3xl font-semibold tracking-tight">
                 Exchange requests
               </h1>
-              <Badge variant="secondary">NGN → GHS</Badge>
+              <Badge variant="secondary">
+                Cedis ↔ Naira · Admin confirmation
+              </Badge>
             </div>
             <p className="mt-1 text-sm text-muted-foreground">
-              Verify the deposit, then release the payout.
+              Confirm received cedis to credit a naira wallet. For cedi payouts,
+              make the transfer yourself and record it here.
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
+            <Button variant="outline" asChild>
+              <Link href="/admin/exchange/provider">Kora payment queue</Link>
+            </Button>
             <Button variant="outline" asChild>
               <Link href="/admin?tab=exchange">
                 <ArrowLeftRight className="size-4" />
@@ -684,8 +768,12 @@ export default function AdminManualExchangeOrdersPage() {
           <Card size="sm">
             <CardContent className="flex items-center justify-between gap-3">
               <div>
-                <p className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Needs review</p>
-                <p className="mt-1 text-2xl font-semibold">{queueCounts.needsReview}</p>
+                <p className="text-xs uppercase tracking-[0.12em] text-muted-foreground">
+                  Needs review
+                </p>
+                <p className="mt-1 text-2xl font-semibold">
+                  {queueCounts.needsReview}
+                </p>
               </div>
               <FileCheck2 className="size-5 text-amber-400" />
             </CardContent>
@@ -693,8 +781,12 @@ export default function AdminManualExchangeOrdersPage() {
           <Card size="sm">
             <CardContent className="flex items-center justify-between gap-3">
               <div>
-                <p className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Payout lane</p>
-                <p className="mt-1 text-2xl font-semibold">{queueCounts.payouts}</p>
+                <p className="text-xs uppercase tracking-[0.12em] text-muted-foreground">
+                  Payouts
+                </p>
+                <p className="mt-1 text-2xl font-semibold">
+                  {queueCounts.payouts}
+                </p>
               </div>
               <Landmark className="size-5 text-red-400" />
             </CardContent>
@@ -702,8 +794,12 @@ export default function AdminManualExchangeOrdersPage() {
           <Card size="sm">
             <CardContent className="flex items-center justify-between gap-3">
               <div>
-                <p className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Settled in view</p>
-                <p className="mt-1 text-2xl font-semibold">{queueCounts.completed}</p>
+                <p className="text-xs uppercase tracking-[0.12em] text-muted-foreground">
+                  Completed
+                </p>
+                <p className="mt-1 text-2xl font-semibold">
+                  {queueCounts.completed}
+                </p>
               </div>
               <CheckCircle2 className="size-5 text-emerald-400" />
             </CardContent>
@@ -718,7 +814,8 @@ export default function AdminManualExchangeOrdersPage() {
             }
           />
           <span>
-            Reconciliation: {reconciliationQuery.isLoading
+            Reconciliation:{" "}
+            {reconciliationQuery.isLoading
               ? "checking…"
               : latestReconciliation
                 ? `${latestReconciliation.checkedCount} checked · ${latestReconciliation.mismatchCount} mismatches`
@@ -738,18 +835,25 @@ export default function AdminManualExchangeOrdersPage() {
                 <Select
                   value={statusFilter}
                   onValueChange={(value) => {
-                    setStatusFilter(value as (typeof ORDER_STATUS_FILTERS)[number]);
+                    setStatusFilter(
+                      value as (typeof ORDER_STATUS_FILTERS)[number],
+                    );
                     resetActionState();
                     setSelectedOrderId(null);
                   }}
                 >
-                  <SelectTrigger className="w-full sm:w-52" aria-label="Filter manual exchange orders">
+                  <SelectTrigger
+                    className="w-full sm:w-52"
+                    aria-label="Filter manual exchange orders"
+                  >
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
                     {ORDER_STATUS_FILTERS.map((status) => (
                       <SelectItem key={status} value={status}>
-                        {status === "ALL" ? "All statuses" : statusLabel(status)}
+                        {status === "ALL"
+                          ? "All statuses"
+                          : statusLabel(status)}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -757,19 +861,31 @@ export default function AdminManualExchangeOrdersPage() {
               </div>
             </CardHeader>
             <CardContent className="p-0">
+              {ordersQuery.isError && ordersQuery.data && (
+                <p
+                  role="alert"
+                  className="px-4 py-3 text-sm text-amber-700 dark:text-amber-300"
+                >
+                  Refresh failed. Showing the last loaded requests; updates will
+                  retry automatically.
+                </p>
+              )}
               {ordersQuery.isLoading ? (
                 <div className="space-y-3 p-4">
                   {[1, 2, 3, 4].map((item) => (
                     <Skeleton key={item} className="h-16 w-full" />
                   ))}
                 </div>
-              ) : ordersQuery.isError ? (
+              ) : ordersQuery.isError && !ordersQuery.data ? (
                 <div className="flex flex-col items-center gap-3 px-4 py-12 text-center">
                   <CircleAlert className="size-6 text-red-400" />
                   <p className="text-sm text-muted-foreground">
                     Could not load the manual exchange queue.
                   </p>
-                  <Button variant="outline" onClick={() => void ordersQuery.refetch()}>
+                  <Button
+                    variant="outline"
+                    onClick={() => void ordersQuery.refetch()}
+                  >
                     Retry
                   </Button>
                 </div>
@@ -782,76 +898,106 @@ export default function AdminManualExchangeOrdersPage() {
                   </p>
                 </div>
               ) : (
-                <div className="overflow-x-auto">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Order</TableHead>
-                        <TableHead>User</TableHead>
-                        <TableHead>Path</TableHead>
-                        <TableHead>Amount</TableHead>
-                        <TableHead>Status</TableHead>
-                        <TableHead className="text-right">Review</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {orders.map((order) => {
-                        const selected = order.id === selectedOrderId;
-                        return (
-                          <TableRow
-                            key={order.id}
-                            data-state={selected ? "selected" : undefined}
-                            className={selected ? "bg-primary/5" : undefined}
-                          >
-                            <TableCell className="min-w-40">
-                              <p className="font-mono text-xs font-medium">{order.reference}</p>
-                              <p className="mt-1 text-xs text-muted-foreground">
-                                {formatDate(order.createdAt)}
-                              </p>
-                            </TableCell>
-                            <TableCell className="min-w-28">
-                              <p className="font-mono text-xs">{order.userId.slice(0, 10)}…</p>
-                              {order.destinationInstitution && (
+                <>
+                  <div className="overflow-x-auto">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Order</TableHead>
+                          <TableHead>User</TableHead>
+                          <TableHead>Path</TableHead>
+                          <TableHead>Amount</TableHead>
+                          <TableHead>Status</TableHead>
+                          <TableHead className="text-right">Review</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {orders.map((order) => {
+                          const selected = order.id === selectedOrderId;
+                          return (
+                            <TableRow
+                              key={order.id}
+                              data-state={selected ? "selected" : undefined}
+                              className={selected ? "bg-primary/5" : undefined}
+                            >
+                              <TableCell className="min-w-40">
+                                <p className="font-mono text-xs font-medium">
+                                  {order.reference}
+                                </p>
                                 <p className="mt-1 text-xs text-muted-foreground">
-                                  {order.destinationInstitution}
+                                  {formatDate(order.createdAt)}
                                 </p>
-                              )}
-                            </TableCell>
-                            <TableCell>
-                              <Badge variant="outline">{order.settlementMode}</Badge>
-                              {destinationPreview(order) && (
-                                <p className="mt-1 font-mono text-xs text-muted-foreground">
-                                  {destinationPreview(order)}
+                              </TableCell>
+                              <TableCell className="min-w-28">
+                                <p className="font-mono text-xs">
+                                  {order.userId.slice(0, 10)}…
                                 </p>
-                              )}
-                            </TableCell>
-                            <TableCell className="whitespace-nowrap">
-                              <p className="font-medium">{formatMoney(order.amount, order.sourceCurrency)}</p>
-                              <p className="mt-1 text-xs text-muted-foreground">
-                                → {formatMoney(order.targetAmount, order.targetCurrency)}
-                              </p>
-                            </TableCell>
-                            <TableCell>
-                              <Badge variant={statusVariant(order.status)}>
-                                {statusLabel(order.status)}
-                              </Badge>
-                            </TableCell>
-                            <TableCell className="text-right">
-                              <Button
-                                size="sm"
-                                variant={selected ? "default" : "outline"}
-                                onClick={() => selectOrder(order.id)}
-                                aria-label={`Review ${order.reference}`}
-                              >
-                                {selected ? "Selected" : "Review"}
-                              </Button>
-                            </TableCell>
-                          </TableRow>
-                        );
-                      })}
-                    </TableBody>
-                  </Table>
-                </div>
+                                {order.destinationInstitution && (
+                                  <p className="mt-1 text-xs text-muted-foreground">
+                                    {order.destinationInstitution}
+                                  </p>
+                                )}
+                              </TableCell>
+                              <TableCell>
+                                <Badge variant="outline">
+                                  {order.settlementMode}
+                                </Badge>
+                                {destinationPreview(order) && (
+                                  <p className="mt-1 font-mono text-xs text-muted-foreground">
+                                    {destinationPreview(order)}
+                                  </p>
+                                )}
+                              </TableCell>
+                              <TableCell className="whitespace-nowrap">
+                                <p className="font-medium">
+                                  {formatMoney(
+                                    order.amount,
+                                    order.sourceCurrency,
+                                  )}
+                                </p>
+                                <p className="mt-1 text-xs text-muted-foreground">
+                                  →{" "}
+                                  {formatMoney(
+                                    order.targetAmount,
+                                    order.targetCurrency,
+                                  )}
+                                </p>
+                              </TableCell>
+                              <TableCell>
+                                <Badge variant={statusVariant(order.status)}>
+                                  {statusLabel(order.status)}
+                                </Badge>
+                              </TableCell>
+                              <TableCell className="text-right">
+                                <Button
+                                  size="sm"
+                                  variant={selected ? "default" : "outline"}
+                                  onClick={() => selectOrder(order.id)}
+                                  aria-label={`Review ${order.reference}`}
+                                >
+                                  {selected ? "Selected" : "Review"}
+                                </Button>
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })}
+                      </TableBody>
+                    </Table>
+                  </div>
+                  {ordersQuery.hasNextPage && (
+                    <div className="border-t p-4">
+                      <Button
+                        variant="outline"
+                        disabled={ordersQuery.isFetchingNextPage}
+                        onClick={() => void ordersQuery.fetchNextPage()}
+                      >
+                        {ordersQuery.isFetchingNextPage
+                          ? "Loading requests…"
+                          : "Load more requests"}
+                      </Button>
+                    </div>
+                  )}
+                </>
               )}
             </CardContent>
           </Card>
@@ -862,7 +1008,8 @@ export default function AdminManualExchangeOrdersPage() {
                 <WalletCards className="size-8 text-muted-foreground" />
                 <p className="font-medium">Select an order to review</p>
                 <p className="max-w-sm text-sm text-muted-foreground">
-                  Deposit evidence, payout details, and actions will appear here.
+                  Deposit evidence, payout details, and actions will appear
+                  here.
                 </p>
               </CardContent>
             ) : (
@@ -870,30 +1017,56 @@ export default function AdminManualExchangeOrdersPage() {
                 <CardHeader className="border-b border-border/80 pb-4">
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
-                      <CardTitle className="truncate font-mono text-base">{selectedOrder.reference}</CardTitle>
-                      <CardDescription className="mt-1">User {selectedOrder.userId}</CardDescription>
+                      <CardTitle className="truncate font-mono text-base">
+                        {selectedOrder.reference}
+                      </CardTitle>
+                      <CardDescription className="mt-1">
+                        User {selectedOrder.userId}
+                      </CardDescription>
                     </div>
-                    <Badge variant={statusVariant(selectedOrder.status)} className="shrink-0">
+                    <Badge
+                      variant={statusVariant(selectedOrder.status)}
+                      className="shrink-0"
+                    >
                       {statusLabel(selectedOrder.status)}
                     </Badge>
                   </div>
                 </CardHeader>
                 <CardContent className="space-y-5 pt-5">
                   <div className="grid gap-3 sm:grid-cols-2">
-                    <div className={`rounded-xl border p-3 ${statusTone(selectedOrder.status)}`}>
-                      <p className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Deposit</p>
+                    <div
+                      className={`rounded-xl border p-3 ${statusTone(selectedOrder.status)}`}
+                    >
+                      <p className="text-xs uppercase tracking-[0.12em] text-muted-foreground">
+                        Deposit
+                      </p>
                       <p className="mt-1 text-lg font-semibold">
-                        {formatMoney(selectedOrder.amount, selectedOrder.sourceCurrency)}
+                        {formatMoney(
+                          selectedOrder.amount,
+                          selectedOrder.sourceCurrency,
+                        )}
                       </p>
                       <p className="mt-1 text-xs text-muted-foreground">
-                        Expected {formatMoney(selectedOrder.targetAmount, selectedOrder.targetCurrency)}
+                        Expected{" "}
+                        {formatMoney(
+                          selectedOrder.targetAmount,
+                          selectedOrder.targetCurrency,
+                        )}
                       </p>
                     </div>
                     <div className="rounded-xl border border-border bg-muted/20 p-3">
-                      <p className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Rate (GHS per NGN)</p>
-                      <p className="mt-1 text-lg font-semibold">{selectedOrder.rate}</p>
+                      <p className="text-xs uppercase tracking-[0.12em] text-muted-foreground">
+                        {`Rate (${selectedOrder.targetCurrency} per ${selectedOrder.sourceCurrency})`}
+                      </p>
+                      <p className="mt-1 text-lg font-semibold">
+                        {selectedOrder.rate}
+                      </p>
                       <p className="mt-1 text-xs text-muted-foreground">
-                        Fee {formatMoney(selectedOrder.fee, selectedOrder.sourceCurrency)}
+                        Fee{" "}
+                        {formatMoney(
+                          selectedOrder.fee,
+                          selectedOrder.sourceCurrency,
+                        )}
                       </p>
                     </div>
                   </div>
@@ -902,23 +1075,40 @@ export default function AdminManualExchangeOrdersPage() {
                     <div className="flex items-start gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-100">
                       <CircleAlert className="mt-0.5 size-4 shrink-0" />
                       <p>
-                        This order is past its quoted expiry. Deposit confirmation requires an explicit attestation to honor the original frozen terms.
+                        This order is past its quoted expiry. Deposit
+                        confirmation requires an explicit attestation to honor
+                        the original frozen terms.
                       </p>
                     </div>
                   )}
 
                   <dl className="grid gap-4 rounded-xl border border-border bg-muted/10 p-4 sm:grid-cols-2">
-                    <DetailValue label="Settlement mode" value={humanize(selectedOrder.settlementMode)} />
-                    <DetailValue label="Expires" value={formatDate(selectedOrder.expiresAt)} />
-                    <DetailValue label="Created" value={formatDate(selectedOrder.createdAt)} />
-                    <DetailValue label="Collection bank" value={selectedOrder.collectionAccount.bankName} />
+                    <DetailValue
+                      label="Settlement mode"
+                      value={humanize(selectedOrder.settlementMode)}
+                    />
+                    <DetailValue
+                      label="Expires"
+                      value={formatDate(selectedOrder.expiresAt)}
+                    />
+                    <DetailValue
+                      label="Created"
+                      value={formatDate(selectedOrder.createdAt)}
+                    />
+                    <DetailValue
+                      label="Collection bank"
+                      value={selectedOrder.collectionAccount.bankName}
+                    />
                     <DetailValue
                       label="Collection account"
                       value={`${selectedOrder.collectionAccount.accountName} · ${selectedOrder.collectionAccount.accountNumber}`}
                       mono
                     />
                     {selectedOrder.destinationInstitution && (
-                      <DetailValue label="Destination institution" value={selectedOrder.destinationInstitution} />
+                      <DetailValue
+                        label="Destination institution"
+                        value={selectedOrder.destinationInstitution}
+                      />
                     )}
                     {selectedOrder.destinationAccount && (
                       <DetailValue
@@ -928,16 +1118,31 @@ export default function AdminManualExchangeOrdersPage() {
                       />
                     )}
                     {selectedOrder.destinationName && (
-                      <DetailValue label="Destination name" value={selectedOrder.destinationName} />
+                      <DetailValue
+                        label="Destination name"
+                        value={selectedOrder.destinationName}
+                      />
                     )}
                     {selectedOrder.bankReference && (
-                      <DetailValue label="Customer bank reference" value={selectedOrder.bankReference} mono />
+                      <DetailValue
+                        label="Customer bank reference"
+                        value={selectedOrder.bankReference}
+                        mono
+                      />
                     )}
                     {selectedOrder.depositReference && (
-                      <DetailValue label="Verified deposit reference" value={selectedOrder.depositReference} mono />
+                      <DetailValue
+                        label="Verified deposit reference"
+                        value={selectedOrder.depositReference}
+                        mono
+                      />
                     )}
                     {selectedOrder.payoutReference && (
-                      <DetailValue label="Payout reference" value={selectedOrder.payoutReference} mono />
+                      <DetailValue
+                        label="Payout reference"
+                        value={selectedOrder.payoutReference}
+                        mono
+                      />
                     )}
                   </dl>
 
@@ -945,9 +1150,13 @@ export default function AdminManualExchangeOrdersPage() {
                     <div className="flex items-start gap-3">
                       <LockKeyhole className="mt-0.5 size-4 shrink-0 text-emerald-400" />
                       <div>
-                        <p className="text-sm font-medium">Protected evidence</p>
+                        <p className="text-sm font-medium">
+                          Protected evidence
+                        </p>
                         <p className="mt-1 text-xs text-muted-foreground">
-                          Links expire and are fetched only after this admin request. Object keys and signed URLs are never shown in the queue.
+                          Links expire and are fetched only after this admin
+                          request. Object keys and signed URLs are never shown
+                          in the queue.
                         </p>
                       </div>
                     </div>
@@ -956,7 +1165,9 @@ export default function AdminManualExchangeOrdersPage() {
                         <Button
                           size="sm"
                           variant="outline"
-                          onClick={() => void openProtectedProof(selectedOrder, "DEPOSIT")}
+                          onClick={() =>
+                            void openProtectedProof(selectedOrder, "DEPOSIT")
+                          }
                           disabled={proofLoading !== null}
                         >
                           {proofLoading === "DEPOSIT" ? (
@@ -967,13 +1178,17 @@ export default function AdminManualExchangeOrdersPage() {
                           View deposit receipt
                         </Button>
                       ) : (
-                        <Badge variant="outline">No deposit receipt attached</Badge>
+                        <Badge variant="outline">
+                          No deposit receipt attached
+                        </Badge>
                       )}
                       {selectedOrder.hasPayoutProof && (
                         <Button
                           size="sm"
                           variant="outline"
-                          onClick={() => void openProtectedProof(selectedOrder, "PAYOUT")}
+                          onClick={() =>
+                            void openProtectedProof(selectedOrder, "PAYOUT")
+                          }
                           disabled={proofLoading !== null}
                         >
                           {proofLoading === "PAYOUT" ? (
@@ -990,14 +1205,21 @@ export default function AdminManualExchangeOrdersPage() {
                   <div className="rounded-xl border border-border p-4">
                     <div className="flex items-center justify-between gap-3">
                       <p className="text-sm font-medium">Audit timeline</p>
-                      <Badge variant="outline">{selectedOrder.events.length} events</Badge>
+                      <Badge variant="outline">
+                        {selectedOrder.events.length} events
+                      </Badge>
                     </div>
                     <div className="mt-3 space-y-3">
                       {selectedOrder.events.length === 0 ? (
-                        <p className="text-sm text-muted-foreground">No events recorded yet.</p>
+                        <p className="text-sm text-muted-foreground">
+                          No events recorded yet.
+                        </p>
                       ) : (
                         selectedOrder.events.map((event, index) => (
-                          <div key={`${event.createdAt}-${event.status}-${index}`} className="flex gap-3 text-sm">
+                          <div
+                            key={`${event.createdAt}-${event.status}-${index}`}
+                            className="flex gap-3 text-sm"
+                          >
                             <div className="mt-1 flex size-5 shrink-0 items-center justify-center rounded-full bg-muted">
                               {index === selectedOrder.events.length - 1 ? (
                                 <Clock3 className="size-3 text-primary" />
@@ -1006,9 +1228,15 @@ export default function AdminManualExchangeOrdersPage() {
                               )}
                             </div>
                             <div className="min-w-0">
-                              <p className="font-medium">{statusLabel(event.status)}</p>
-                              <p className="mt-0.5 text-xs text-muted-foreground">{event.reason}</p>
-                              <p className="mt-0.5 text-xs text-muted-foreground">{formatDate(event.createdAt)}</p>
+                              <p className="font-medium">
+                                {statusLabel(event.status)}
+                              </p>
+                              <p className="mt-0.5 text-xs text-muted-foreground">
+                                {event.reason}
+                              </p>
+                              <p className="mt-0.5 text-xs text-muted-foreground">
+                                {formatDate(event.createdAt)}
+                              </p>
                             </div>
                           </div>
                         ))
@@ -1022,14 +1250,37 @@ export default function AdminManualExchangeOrdersPage() {
                         <Info className="mt-0.5 size-4 shrink-0 text-amber-300" />
                         <div>
                           <p className="font-medium">Latest review reason</p>
-                          <p className="mt-1 text-muted-foreground">{selectedOrder.reviewReason}</p>
+                          <p className="mt-1 text-muted-foreground">
+                            {selectedOrder.reviewReason}
+                          </p>
                         </div>
                       </div>
                     </div>
                   )}
 
                   <div className="space-y-2">
-                    <p className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Available actions</p>
+                    <p className="text-xs uppercase tracking-[0.12em] text-muted-foreground">
+                      Available actions
+                    </p>
+                    {selectedOrder.sourceCurrency === "GHS" &&
+                      selectedOrder.targetCurrency === "NGN" &&
+                      selectedOrder.settlementMode === "WALLET" && (
+                        <p className="text-sm text-muted-foreground">
+                          Confirm only after the cedis appear in your statement.
+                          The frozen naira amount will be credited to this
+                          customer’s TrustPay wallet.
+                        </p>
+                      )}
+                    {selectedOrder.sourceCurrency === "NGN" &&
+                      selectedOrder.targetCurrency === "GHS" &&
+                      selectedOrder.settlementMode !== "WALLET" && (
+                        <p className="text-sm text-muted-foreground">
+                          Claim this order before paying. Send the exact cedi
+                          amount through your bank or MoMo app, then record the
+                          completed transfer below. Do not send again after a
+                          page error.
+                        </p>
+                      )}
                     <div className="flex flex-wrap gap-2">
                       {canReviewDeposit && (
                         <>
@@ -1044,8 +1295,13 @@ export default function AdminManualExchangeOrdersPage() {
                             disabled={reviewDisabled}
                           >
                             {selectedOrder.settlementMode === "WALLET"
-                              ? "Approve & credit wallet"
-                              : "Confirm deposit"}
+                              ? selectedOrder.sourceCurrency === "GHS" &&
+                                selectedOrder.targetCurrency === "NGN"
+                                ? "Confirm cedis & credit naira"
+                                : "Approve & credit wallet"
+                              : selectedOrder.sourceCurrency === "NGN"
+                                ? "Confirm naira received"
+                                : "Confirm cedis received"}
                           </Button>
                           <Button
                             variant="outline"
@@ -1064,33 +1320,61 @@ export default function AdminManualExchangeOrdersPage() {
                         </>
                       )}
                       {canClaimPayout && (
-                        <Button onClick={() => openAction("CLAIM_PAYOUT")} disabled={reviewDisabled}>
-                          Claim payout
+                        <Button
+                          onClick={() => openAction("CLAIM_PAYOUT")}
+                          disabled={reviewDisabled}
+                        >
+                          {selectedOrder.targetCurrency === "GHS"
+                            ? "Start cedi transfer"
+                            : "Claim payout"}
                         </Button>
                       )}
-                      {selectedOrder.status === "PAYOUT_PROCESSING" && !ownsPayoutClaim && (
-                        <div className="flex items-start gap-2 rounded-lg border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-xs text-amber-100">
-                          <CircleAlert className="mt-0.5 size-4 shrink-0" />
-                          <span>
-                            {selectedOrder.payoutClaimedBy
-                              ? "This payout is claimed by another admin. The owner must continue it."
-                              : "Claim ownership is required before sending evidence."}
-                          </span>
-                        </div>
-                      )}
+                      {selectedOrder.status === "PAYOUT_PROCESSING" &&
+                        !ownsPayoutClaim && (
+                          <div className="flex items-start gap-2 rounded-lg border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-xs text-amber-100">
+                            <CircleAlert className="mt-0.5 size-4 shrink-0" />
+                            <span>
+                              {selectedOrder.payoutClaimedBy
+                                ? "This payout is claimed by another admin. The owner must continue it."
+                                : "Claim ownership is required before sending evidence."}
+                            </span>
+                          </div>
+                        )}
                       {canMarkSent && (
-                        <Button onClick={() => openAction("MARK_SENT")} disabled={reviewDisabled}>
-                          Mark sent
+                        <Button
+                          onClick={() =>
+                            openAction(
+                              selectedOrder.sourceCurrency === "NGN" &&
+                                selectedOrder.targetCurrency === "GHS"
+                                ? "RECORD_CEDIS_SENT"
+                                : "MARK_SENT",
+                            )
+                          }
+                          disabled={reviewDisabled}
+                        >
+                          {selectedOrder.sourceCurrency === "NGN" &&
+                          selectedOrder.targetCurrency === "GHS"
+                            ? "I sent the cedis"
+                            : "Mark sent"}
                         </Button>
                       )}
                       {canComplete && (
-                        <Button onClick={() => openAction("COMPLETE")} disabled={reviewDisabled}>
+                        <Button
+                          onClick={() => openAction("COMPLETE")}
+                          disabled={reviewDisabled}
+                        >
                           Complete
                         </Button>
                       )}
-                      {!canReviewDeposit && !canClaimPayout && !canMarkSent && !canComplete && selectedOrder.status !== "PAYOUT_PROCESSING" && (
-                        <p className="text-sm text-muted-foreground">No action is available for this status.</p>
-                      )}
+                      {!canReviewDeposit &&
+                        !canClaimPayout &&
+                        !canMarkSent &&
+                        !canComplete &&
+                        selectedOrder.status !== "PAYOUT_PROCESSING" && (
+                          <p className="text-sm text-muted-foreground">
+                            No action is available for this status.
+                          </p>
+                        )}
                     </div>
                   </div>
 
@@ -1103,32 +1387,46 @@ export default function AdminManualExchangeOrdersPage() {
                       }}
                     >
                       <div>
-                        <p className="text-sm font-medium">{actionLabel(actionPanel)}</p>
+                        <p className="text-sm font-medium">
+                          {actionLabel(actionPanel, selectedOrder)}
+                        </p>
                         <p className="mt-1 text-xs text-muted-foreground">
-                          This action is recorded in the append-only order timeline. Network errors leave the same idempotency key ready for retry.
+                          This action is recorded in the append-only order
+                          timeline. Network errors leave the same idempotency
+                          key ready for retry.
                         </p>
                       </div>
 
-                      {["CREDIT_WALLET", "CONFIRM_DEPOSIT"].includes(actionPanel) && (
+                      {["CREDIT_WALLET", "CONFIRM_DEPOSIT"].includes(
+                        actionPanel,
+                      ) && (
                         <div className="grid gap-3 sm:grid-cols-2">
                           <div className="space-y-2">
-                            <Label htmlFor="manual-deposit-reference">Actual deposit reference</Label>
+                            <Label htmlFor="manual-deposit-reference">
+                              Actual deposit reference
+                            </Label>
                             <Input
                               id="manual-deposit-reference"
                               value={depositReference}
-                              onChange={(event) => setDepositReference(event.target.value)}
-                              placeholder="Reference from bank or Monnify statement"
+                              onChange={(event) =>
+                                setDepositReference(event.target.value)
+                              }
+                              placeholder="Reference from the received bank or MoMo payment"
                               maxLength={120}
                               disabled={reviewMutation.isPending}
                             />
                           </div>
                           <div className="space-y-2">
-                            <Label htmlFor="manual-actual-amount">Actual deposit amount</Label>
+                            <Label htmlFor="manual-actual-amount">
+                              Actual deposit amount
+                            </Label>
                             <Input
                               id="manual-actual-amount"
                               inputMode="decimal"
                               value={actualAmount}
-                              onChange={(event) => setActualAmount(event.target.value)}
+                              onChange={(event) =>
+                                setActualAmount(event.target.value)
+                              }
                               placeholder={`Exact ${selectedOrder.sourceCurrency} inflow`}
                               maxLength={40}
                               disabled={reviewMutation.isPending}
@@ -1137,7 +1435,9 @@ export default function AdminManualExchangeOrdersPage() {
                         </div>
                       )}
 
-                      {["CREDIT_WALLET", "CONFIRM_DEPOSIT"].includes(actionPanel) &&
+                      {["CREDIT_WALLET", "CONFIRM_DEPOSIT"].includes(
+                        actionPanel,
+                      ) &&
                         selectedOrderExpired && (
                           <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm">
                             <input
@@ -1152,30 +1452,64 @@ export default function AdminManualExchangeOrdersPage() {
                             <span>
                               <span className="flex items-center gap-1.5 font-medium text-amber-100">
                                 <CircleAlert className="size-4" />
-                                Honor the original quoted amount for this expired order
+                                Honor the original quoted amount for this
+                                expired order
                               </span>
                               <span className="mt-1 block text-xs text-amber-100/75">
-                                Record the actual deposit and preserve the frozen rate. This does not reprice the order.
+                                Record the actual deposit and preserve the
+                                frozen rate. This does not reprice the order.
                               </span>
                             </span>
                           </label>
                         )}
 
-                      {actionPanel === "MARK_SENT" && (
+                      {(actionPanel === "MARK_SENT" ||
+                        actionPanel === "RECORD_CEDIS_SENT") && (
                         <div className="space-y-4">
+                          {actionPanel === "RECORD_CEDIS_SENT" && (
+                            <div className="space-y-2">
+                              <p className="text-sm text-muted-foreground">
+                                Record the completed transfer to this recipient.
+                                This button does not send money.
+                              </p>
+                              <Label htmlFor="manual-payout-amount">
+                                Cedis actually sent
+                              </Label>
+                              <Input
+                                id="manual-payout-amount"
+                                value={payoutAmount}
+                                onChange={(event) =>
+                                  setPayoutAmount(event.target.value)
+                                }
+                                inputMode="decimal"
+                                maxLength={14}
+                                placeholder={selectedOrder.targetAmount}
+                                disabled={reviewDisabled}
+                              />
+                            </div>
+                          )}
                           <div className="space-y-2">
-                            <Label htmlFor="manual-payout-reference">Actual payout reference</Label>
+                            <Label htmlFor="manual-payout-reference">
+                              Actual payout reference
+                            </Label>
                             <Input
                               id="manual-payout-reference"
                               value={payoutReference}
-                              onChange={(event) => setPayoutReference(event.target.value)}
+                              onChange={(event) =>
+                                setPayoutReference(event.target.value)
+                              }
                               placeholder="Reference from the external transfer"
                               maxLength={120}
-                              disabled={reviewMutation.isPending || uploadProofMutation.isPending}
+                              disabled={
+                                reviewMutation.isPending ||
+                                uploadProofMutation.isPending
+                              }
                             />
                           </div>
                           <div className="space-y-2">
-                            <Label htmlFor="manual-payout-proof">Protected payout proof</Label>
+                            <Label htmlFor="manual-payout-proof">
+                              Protected payout proof
+                            </Label>
                             <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
                               <Input
                                 id="manual-payout-proof"
@@ -1190,7 +1524,8 @@ export default function AdminManualExchangeOrdersPage() {
                                     (payoutProofFile.name !== file.name ||
                                       payoutProofFile.type !== file.type ||
                                       payoutProofFile.size !== file.size ||
-                                      payoutProofFile.lastModified !== file.lastModified)
+                                      payoutProofFile.lastModified !==
+                                        file.lastModified)
                                   ) {
                                     clearAttemptKey({
                                       orderId: selectedOrder.id,
@@ -1199,16 +1534,25 @@ export default function AdminManualExchangeOrdersPage() {
                                   }
                                   setPayoutProofFile(file);
                                   setPayoutProofObjectKey(null);
-                                  setFormError(file ? validateUpload(file) : null);
+                                  setFormError(
+                                    file ? validateUpload(file) : null,
+                                  );
                                 }}
-                                disabled={reviewMutation.isPending || uploadProofMutation.isPending}
+                                disabled={
+                                  reviewMutation.isPending ||
+                                  uploadProofMutation.isPending
+                                }
                                 className="h-auto py-1.5 text-xs"
                               />
                               <Button
                                 type="button"
                                 variant="outline"
                                 onClick={uploadPayoutProof}
-                                disabled={!payoutProofFile || uploadProofMutation.isPending || reviewMutation.isPending}
+                                disabled={
+                                  !payoutProofFile ||
+                                  uploadProofMutation.isPending ||
+                                  reviewMutation.isPending
+                                }
                                 className="shrink-0"
                               >
                                 {uploadProofMutation.isPending ? (
@@ -1216,16 +1560,20 @@ export default function AdminManualExchangeOrdersPage() {
                                 ) : (
                                   <Upload className="size-4" />
                                 )}
-                                {payoutProofObjectKey ? "Uploaded" : "Upload proof"}
+                                {payoutProofObjectKey
+                                  ? "Uploaded"
+                                  : "Upload proof"}
                               </Button>
                             </div>
                             <p className="text-xs text-muted-foreground">
-                              JPEG, PNG, WebP, or PDF up to 8 MiB. The signed upload request carries no API bearer token.
+                              JPEG, PNG, WebP, or PDF up to 8 MiB. The signed
+                              upload request carries no API bearer token.
                             </p>
                             {payoutProofObjectKey && (
                               <p className="flex items-center gap-1.5 text-xs text-emerald-300">
                                 <CheckCircle2 className="size-3.5" />
-                                Proof uploaded and ready to attach to this action.
+                                Proof uploaded and ready to attach to this
+                                action.
                               </p>
                             )}
                           </div>
@@ -1252,7 +1600,10 @@ export default function AdminManualExchangeOrdersPage() {
                       </div>
 
                       {formError && (
-                        <p role="alert" className="flex items-start gap-2 text-sm text-red-300">
+                        <p
+                          role="alert"
+                          className="flex items-start gap-2 text-sm text-red-300"
+                        >
                           <XCircle className="mt-0.5 size-4 shrink-0" />
                           {formError}
                         </p>
@@ -1263,14 +1614,22 @@ export default function AdminManualExchangeOrdersPage() {
                           type="button"
                           variant="outline"
                           onClick={() => setActionPanel(null)}
-                          disabled={reviewMutation.isPending || uploadProofMutation.isPending}
+                          disabled={
+                            reviewMutation.isPending ||
+                            uploadProofMutation.isPending
+                          }
                         >
                           Cancel
                         </Button>
                         <Button
                           type="submit"
-                          variant={actionPanel === "REJECT" ? "destructive" : "default"}
-                          disabled={reviewMutation.isPending || uploadProofMutation.isPending}
+                          variant={
+                            actionPanel === "REJECT" ? "destructive" : "default"
+                          }
+                          disabled={
+                            reviewMutation.isPending ||
+                            uploadProofMutation.isPending
+                          }
                         >
                           {reviewMutation.isPending ? (
                             <LoaderCircle className="size-4 animate-spin" />
@@ -1279,7 +1638,9 @@ export default function AdminManualExchangeOrdersPage() {
                           ) : (
                             <CheckCircle2 className="size-4" />
                           )}
-                          {reviewMutation.isPending ? "Saving…" : actionLabel(actionPanel)}
+                          {reviewMutation.isPending
+                            ? "Saving…"
+                            : actionLabel(actionPanel, selectedOrder)}
                         </Button>
                       </div>
                     </form>

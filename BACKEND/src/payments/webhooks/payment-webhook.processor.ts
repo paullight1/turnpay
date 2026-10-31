@@ -1,4 +1,10 @@
-import { Injectable } from '@nestjs/common';
+import { ProviderExchangeSettlementService } from '../../exchange/provider-exchange-settlement.service';
+import { GhsWithdrawalsService } from '../../kora/ghs-withdrawals.service';
+import { KoraAccountsService } from '../../kora/kora-accounts.service';
+import { KoraCollectionsService } from '../../kora/kora-collections.service';
+import { PaystackFundingService } from '../paystack-funding.service';
+import { KycService } from '../../kyc/kyc.service';
+import { Injectable, Optional } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import type { PaymentWebhookInbox, Prisma } from '@prisma/client';
 import { Decimal } from '@prisma/client/runtime/library';
@@ -23,6 +29,13 @@ export class PaymentWebhookProcessorService {
     private readonly exchangeService: ExchangeService,
     private readonly prisma: PrismaService,
     private readonly logger: PinoLogger,
+    @Optional() private readonly funding?: PaystackFundingService,
+    @Optional() private readonly kyc?: KycService,
+    @Optional() private readonly koraAccounts?: KoraAccountsService,
+    @Optional() private readonly koraCollections?: KoraCollectionsService,
+    @Optional()
+    private readonly providerExchange?: ProviderExchangeSettlementService,
+    @Optional() private readonly ghsWithdrawals?: GhsWithdrawalsService,
   ) {}
 
   @Cron(CronExpression.EVERY_MINUTE)
@@ -50,7 +63,11 @@ export class PaymentWebhookProcessorService {
         const result = await this.routeEvent(event);
         await this.inbox.complete(event.id, result);
         await this.prisma.webhookLog.updateMany({
-          where: { reference: event.providerReference },
+          where: {
+            provider: event.provider,
+            eventType: event.eventType,
+            reference: event.providerReference,
+          },
           data: {
             processed: true,
             errorMessage: null,
@@ -72,7 +89,11 @@ export class PaymentWebhookProcessorService {
 
         await this.inbox.fail(event.id, errorMessage);
         await this.prisma.webhookLog.updateMany({
-          where: { reference: event.providerReference },
+          where: {
+            provider: event.provider,
+            eventType: event.eventType,
+            reference: event.providerReference,
+          },
           data: {
             errorMessage,
           },
@@ -83,11 +104,87 @@ export class PaymentWebhookProcessorService {
 
   private async routeEvent(event: InboxEventRecord) {
     switch (event.provider) {
+      case 'KORA':
+        if (event.eventType === 'account_number.creation') {
+          if (!this.koraAccounts)
+            throw new Error('Ghana account processor unavailable');
+          return this.koraAccounts.accountEvent(
+            this.getRecord(this.asRecord(event.payload), 'data'),
+          );
+        }
+        if (['charge.success', 'charge.failed'].includes(event.eventType)) {
+          if (!this.koraCollections)
+            throw new Error('Ghana collection processor unavailable');
+          return this.koraCollections.confirmCharge(event.providerReference);
+        }
+        if (event.eventType.startsWith('transfer.')) {
+          if (!this.providerExchange || !this.ghsWithdrawals)
+            throw new Error('Ghana settlement processor unavailable');
+          const order = await this.prisma.providerExchangeOrder.findUnique({
+            where: { payoutReference: event.providerReference },
+          });
+          return order
+            ? this.providerExchange.reconcile(event.providerReference)
+            : this.ghsWithdrawals.reconcile(event.providerReference);
+        }
+        return { ignored: true, reason: 'Unhandled Kora event' };
+      case 'PAYSTACK':
+        return this.processPaystackEvent(event);
       case 'MONNIFY':
         return this.processMonnifyEvent(event);
       default:
         return { ignored: true, reason: 'Unsupported provider' };
     }
+  }
+
+  private async processPaystackEvent(event: InboxEventRecord) {
+    const data = this.getRecord(this.asRecord(event.payload), 'data');
+    if (event.eventType === 'charge.success') {
+      if (!this.funding)
+        throw new Error('Paystack funding processor unavailable');
+      return this.funding.confirmCharge(event.providerReference);
+    }
+    if (
+      ['transfer.success', 'transfer.failed', 'transfer.reversed'].includes(
+        event.eventType,
+      )
+    ) {
+      const order = this.providerExchange
+        ? await this.prisma.providerExchangeOrder.findUnique({
+            where: { payoutReference: event.providerReference },
+          })
+        : null;
+      if (order)
+        return this.providerExchange!.reconcile(event.providerReference);
+      return this.paymentService.processTransferWebhook({
+        provider: 'paystack',
+        eventType: event.eventType,
+        providerReference: event.providerReference,
+        providerStatus:
+          typeof data.status === 'string' ? data.status : 'pending',
+        rawPayload: {},
+      });
+    }
+    if (
+      [
+        'customeridentification.success',
+        'customeridentification.failed',
+      ].includes(event.eventType)
+    ) {
+      if (!this.kyc) throw new Error('Paystack identity processor unavailable');
+      return this.kyc.processPaystackIdentification(event.eventType, data);
+    }
+    if (
+      [
+        'dedicatedaccount.assign.success',
+        'dedicatedaccount.assign.failed',
+      ].includes(event.eventType)
+    )
+      return this.bankingService.processPaystackAccountAssignment(
+        event.eventType,
+        data,
+      );
+    return { ignored: true, reason: 'Unhandled Paystack event' };
   }
 
   private async processMonnifyEvent(event: InboxEventRecord) {

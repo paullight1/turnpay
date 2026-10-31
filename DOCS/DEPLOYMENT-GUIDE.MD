@@ -69,10 +69,11 @@ VTPASS_PUBLIC_KEY=
 VTPASS_SECRET_KEY=
 VTPASS_WEBHOOK_SECRET=
 
-KYC_PROVIDER=ninja
-NINJA_BASE_URL=https://api.ninja.boucloud.io
-NINJA_CLIENT_KEY=
-NINJA_CLIENT_SECRET=
+KYC_PROVIDER=monnify
+MONNIFY_BASE_URL=https://api.monnify.com
+MONNIFY_API_KEY=
+MONNIFY_SECRET_KEY=
+PII_ENCRYPTION_KEY=
 
 # FX Rate API
 FX_RATE_API_URL=https://v6.exchangerate-api.com/v6/KEY/latest/GHS
@@ -278,7 +279,7 @@ behind an authenticated staging-only workflow.
 ### 4. Test Webhooks
 - Configure Monnify: `https://api.trustpayhq.com/api/webhooks/monnify`
 - Configure VTpass: `https://api.trustpayhq.com/api/webhooks/vtu/vtpass`
-- Ninja direct BVN/NIN verification does not require a webhook URL.
+- Monnify direct BVN/NIN verification does not require a KYC callback URL.
 - Verify signatures and duplicate-event idempotency for all three providers
 
 ### 5. Create Admin User

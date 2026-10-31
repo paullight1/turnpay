@@ -2,9 +2,23 @@ import { BadRequestException, ConflictException } from '@nestjs/common';
 import {
   nextManualExchangeStatus,
   quoteManualExchange,
+  manualDeliveryOptions,
+  assertManualDelivery,
 } from './manual-exchange.policy';
 
 describe('manual exchange policy', () => {
+  it('matches the approved delivery method for each new direction', () => {
+    expect(manualDeliveryOptions('GHS')).toEqual(['WALLET']);
+    expect(manualDeliveryOptions('NGN')).toEqual(['MOMO', 'BANK']);
+    expect(() => assertManualDelivery('GHS', 'BANK')).toThrow(
+      BadRequestException,
+    );
+    expect(() => assertManualDelivery('NGN', 'WALLET')).toThrow(
+      BadRequestException,
+    );
+    expect(() => assertManualDelivery('GHS', 'WALLET')).not.toThrow();
+    expect(() => assertManualDelivery('NGN', 'MOMO')).not.toThrow();
+  });
   it('credits only wallet orders and keeps external confirmation pending', () => {
     expect(
       nextManualExchangeStatus(
@@ -46,6 +60,28 @@ describe('manual exchange policy', () => {
     ).toThrow(ConflictException);
     expect(() =>
       nextManualExchangeStatus('PAYOUT_PENDING', 'BANK', 'REJECT'),
+    ).toThrow(ConflictException);
+  });
+  it('records a claimed manual cedi payout as complete, without completing an unclaimed order', () => {
+    expect(
+      nextManualExchangeStatus(
+        'PAYOUT_PROCESSING',
+        'MOMO',
+        'RECORD_CEDIS_SENT',
+      ),
+    ).toBe('COMPLETED');
+    expect(() =>
+      nextManualExchangeStatus('PAYOUT_PENDING', 'MOMO', 'RECORD_CEDIS_SENT'),
+    ).toThrow(ConflictException);
+    expect(() =>
+      nextManualExchangeStatus(
+        'AWAITING_CONFIRMATION',
+        'MOMO',
+        'RECORD_CEDIS_SENT',
+      ),
+    ).toThrow(ConflictException);
+    expect(() =>
+      nextManualExchangeStatus('CREDITED', 'WALLET', 'RECORD_CEDIS_SENT'),
     ).toThrow(ConflictException);
   });
   it('freezes exact amounts with existing rate markup and zero extra receipt fee', () => {

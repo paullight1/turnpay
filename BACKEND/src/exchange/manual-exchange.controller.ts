@@ -19,6 +19,7 @@ import {
   AttachManualProofDto,
   CreateManualExchangeDto,
   ManualExchangeQueryDto,
+  ManualQueueQueryDto,
   ManualProofReadDto,
   ManualProofUploadDto,
   ReviewManualExchangeDto,
@@ -100,6 +101,9 @@ export class AdminManualExchangeController {
   ) {}
   @Get('reconciliation') reconciliationRuns() {
     return this.reconciliation.latest();
+  }
+  @Get('queue') queue(@Query() query: ManualQueueQueryDto) {
+    return this.service.queue(query);
   }
   @Get() list(@Query() query: ManualExchangeQueryDto) {
     return this.service.list(undefined, query.status);

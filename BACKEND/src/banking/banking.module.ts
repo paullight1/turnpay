@@ -1,3 +1,6 @@
+import { KoraModule } from '../kora/kora.module';
+import { PaystackModule } from '../paystack/paystack.module';
+import { PaystackVirtualAccountProvider } from './providers/paystack-virtual-account.provider';
 import { Module } from '@nestjs/common';
 import { MonnifyKycSyncService } from './monnify-kyc-sync.service';
 import { HttpModule } from '@nestjs/axios';
@@ -14,6 +17,8 @@ import { WalletsModule } from '../wallets/wallets.module';
       maxRedirects: 5,
     }),
     WalletsModule,
+    KoraModule,
+    PaystackModule,
   ],
   controllers: [BankingController],
   providers: [
@@ -21,11 +26,13 @@ import { WalletsModule } from '../wallets/wallets.module';
     BankingService,
     BeneficiariesService,
     MonnifyVirtualAccountProvider,
+    PaystackVirtualAccountProvider,
   ],
   exports: [
     BankingService,
     BeneficiariesService,
     MonnifyVirtualAccountProvider,
+    PaystackVirtualAccountProvider,
   ],
 })
 export class BankingModule {}

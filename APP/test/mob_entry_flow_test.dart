@@ -16,6 +16,28 @@ void main() {
     setMockSecureStorage(refreshToken: 'refresh-token');
   });
 
+  testWidgets('default splash leaves as soon as session restoration completes',
+      (tester) async {
+    setMockSecureStorage();
+    final bundle = buildTrustPayTestBundle();
+    await tester.pumpWidget(MaterialApp.router(
+      routerConfig: GoRouter(initialLocation: AppRoutes.splash, routes: [
+        GoRoute(
+          path: AppRoutes.splash,
+          builder: (_, __) => SplashScreen(authService: bundle.authService),
+        ),
+        GoRoute(
+          path: AppRoutes.onboarding,
+          builder: (_, __) => const Scaffold(body: Text('Ready to sign in')),
+        ),
+      ]),
+    ));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 500));
+    await tester.pump();
+    expect(find.text('Ready to sign in'), findsOneWidget);
+  });
+
   testWidgets('splash routes to home when a session is restored',
       (tester) async {
     final bundle = buildTrustPayTestBundle(refreshSucceeds: true);

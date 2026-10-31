@@ -76,14 +76,14 @@ async function installKycMocks(page: Page, overview: KycOverviewFixture) {
 }
 
 const emptyOverview: KycOverviewFixture = {
-  provider: "NINJA",
+  provider: "MONNIFY",
   kycStatus: "PENDING",
   kycTier: "TIER_0",
   latestVerification: null,
   documents: [],
 };
 
-test.describe("Ninja KYC", () => {
+test.describe("Monnify KYC", () => {
   test("shows a Nigeria-only form, useful empty state, and submits exact DOB", async ({
     page,
   }) => {
@@ -101,7 +101,7 @@ test.describe("Ninja KYC", () => {
           idNumber: "*******7777",
           status: "VERIFIED",
           verificationStatus: "VERIFIED",
-          provider: "NINJA",
+          provider: "MONNIFY",
           reference: "document-1",
         },
       });
@@ -121,7 +121,9 @@ test.describe("Ninja KYC", () => {
       page.getByRole("button", { name: "NIN", exact: true }),
     ).toBeVisible();
     await expect(page.getByLabel("Date of birth")).toBeVisible();
-    await expect(page.getByText(/shared securely with Ninja/i)).toBeVisible();
+    await expect(
+      page.getByText(/prepare my NGN account automatically/i),
+    ).toBeVisible();
     await expect(page.getByText("No identity checks yet.")).toBeVisible();
     await expect(
       page.getByText(/Choose BVN or NIN above to begin/i),
@@ -131,7 +133,7 @@ test.describe("Ninja KYC", () => {
     await page.getByLabel("Identity number").fill("77777777777");
     await page.getByLabel("Date of birth").fill("1975-01-01");
     await page.getByRole("checkbox").check();
-    await page.getByRole("button", { name: "Verify NIN" }).click();
+    await page.getByRole("button", { name: "Submit and prepare account" }).click();
 
     await expect
       .poll(() => submittedBody)
@@ -152,11 +154,11 @@ test.describe("Ninja KYC", () => {
   ] as const) {
     test(`renders the ${status} recovery state`, async ({ page }) => {
       await installKycMocks(page, {
-        provider: "NINJA",
+        provider: "MONNIFY",
         kycStatus: status === "REVIEW_REQUIRED" ? "SUBMITTED" : "REJECTED",
         kycTier: "TIER_0",
         latestVerification: {
-          provider: "NINJA",
+          provider: "MONNIFY",
           status,
           reference: "document-state",
           errorMessage:
@@ -183,11 +185,11 @@ test.describe("Ninja KYC", () => {
 
   test("renders a quiet completion state at Tier 2", async ({ page }) => {
     await installKycMocks(page, {
-      provider: "NINJA",
+      provider: "MONNIFY",
       kycStatus: "VERIFIED",
       kycTier: "TIER_2",
       latestVerification: {
-        provider: "NINJA",
+        provider: "MONNIFY",
         status: "VERIFIED",
         reference: "document-nin",
       },

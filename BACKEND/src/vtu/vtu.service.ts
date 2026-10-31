@@ -16,6 +16,10 @@ import { WalletsService } from '../wallets/wallets.service';
 import { VtuApiProvider } from './providers/vtu-api.provider';
 import {
   PurchaseVtuDto,
+  VtuQuoteDto,
+  EXTENDED_VTU_PROVIDERS,
+  isSmile,
+  needsPackage,
   ValidateMeterDto,
   ValidateSmartCardDto,
 } from './dto/vtu.dto';
@@ -37,7 +41,7 @@ type VtuPricingContext = {
   countryCode: string;
   serviceType: TransactionType;
   provider: string;
-  scope: 'LOCAL';
+  scope: 'LOCAL' | 'INTERNATIONAL';
 };
 
 @Injectable()
@@ -54,14 +58,98 @@ export class VtuService {
     private readonly settlementHold: SettlementHoldService,
   ) {}
 
-  async getProviders(type?: string) {
+  async getProviders(type?: string, extended = false) {
     this.assertVtuEnabled();
-    return this.vtuApi.getProviders(type);
+    const providers = await this.vtuApi.getProviders(type);
+    return extended
+      ? providers
+      : providers.filter(
+          (provider) => !EXTENDED_VTU_PROVIDERS.has(provider.id),
+        );
   }
 
-  async getPackages(provider: string) {
+  async getPackages(
+    provider: string,
+    options: { countryCode?: string; operatorId?: string } = {},
+  ) {
     this.assertVtuEnabled();
-    return this.vtuApi.getPackages(provider);
+    return this.vtuApi.getPackages(provider, options);
+  }
+
+  async getInternationalCountries() {
+    this.assertVtuEnabled();
+    return this.vtuApi.getInternationalCountries();
+  }
+  async getInternationalOperators(countryCode: string) {
+    this.assertVtuEnabled();
+    return this.vtuApi.getInternationalOperators(countryCode);
+  }
+  async validateSmile(email: string) {
+    this.assertVtuEnabled();
+    return this.vtuApi.validateSmile(email);
+  }
+
+  async quote(dto: VtuQuoteDto) {
+    this.assertVtuEnabled();
+    await this.assertProviderSupportsType(dto);
+    const amount = await this.resolvePackageAmount(dto);
+    this.assertAmountLimits(amount);
+    const pricing = await this.calculatePricingForPurchase(dto, amount);
+    return {
+      amount: amount.toFixed(2),
+      fee: pricing.fee.toFixed(2),
+      totalDebit: amount.plus(pricing.fee).toFixed(2),
+      currency: 'NGN',
+    };
+  }
+
+  private assertAmountLimits(amount: Decimal) {
+    if (
+      !amount.isFinite() ||
+      amount.lt(50) ||
+      amount.gt(1000000) ||
+      amount.decimalPlaces() > 2
+    )
+      throw new BadRequestException(
+        'Amount must be between 50 and 1000000 with at most 2 decimal places',
+      );
+  }
+
+  private async resolvePackageAmount(dto: {
+    provider: string;
+    type: string;
+    countryCode?: string;
+    operatorId?: string;
+    packageId?: string;
+    faceValue?: string;
+  }) {
+    const packages = await this.vtuApi.getPackages(dto.provider, {
+      countryCode: dto.countryCode,
+      operatorId: dto.operatorId,
+    });
+    const plan = packages.find(
+      (item) => item.id === dto.packageId && item.serviceType === dto.type,
+    );
+    if (!plan) throw new BadRequestException('Invalid VTU package');
+    if (dto.provider === 'foreign-airtime' && plan.fixedPrice === false) {
+      if (!dto.faceValue || !plan.rate)
+        throw new BadRequestException('Destination airtime amount is required');
+      const face = new Decimal(dto.faceValue);
+      if (
+        !face.isFinite() ||
+        face.lte(0) ||
+        face.decimalPlaces() > 2 ||
+        (plan.minFaceValue && face.lt(plan.minFaceValue)) ||
+        (plan.maxFaceValue && face.gt(plan.maxFaceValue))
+      )
+        throw new BadRequestException(
+          'Destination amount is outside provider limits',
+        );
+      const charge = face.mul(plan.rate);
+      this.assertAmountLimits(charge);
+      return charge;
+    }
+    return new Decimal(plan.price);
   }
 
   async getProviderHealth(): Promise<VtuProviderHealthResponse> {
@@ -204,6 +292,30 @@ export class VtuService {
 
     const verification = await this.verifyCustomerForPurchase(dto);
     const amount = await this.resolveServerAmount(dto, verification);
+    this.assertAmountLimits(amount);
+    let buyerEmail: string | undefined;
+    if (dto.provider === 'foreign-airtime') {
+      const countries = await this.vtuApi.getInternationalCountries();
+      const destination = countries.find(
+        (country) => country.code === dto.countryCode,
+      );
+      if (
+        !destination ||
+        !dto.recipientNumber?.startsWith(`+${destination.prefix}`)
+      )
+        throw new BadRequestException(
+          'Recipient does not match destination country',
+        );
+      const buyer = await this.prisma.user.findUnique({
+        where: { id: userId },
+        select: { email: true },
+      });
+      if (!buyer?.email)
+        throw new BadRequestException(
+          'An account email is required for international airtime',
+        );
+      buyerEmail = buyer.email;
+    }
     const wallet = await this.walletsService.getWallet(userId, 'NGN');
     if (!wallet) {
       throw new NotFoundException('NGN wallet not found');
@@ -219,6 +331,10 @@ export class VtuService {
 
     const pricing = await this.calculatePricingForPurchase(dto, amount);
     const debitAmount = amount.plus(pricing.fee);
+    if (dto.expectedTotal && !debitAmount.equals(dto.expectedTotal))
+      throw new BadRequestException(
+        'Total price changed. Review a fresh quote before paying.',
+      );
     const reference = `VTU-${Date.now()}-${uuidv4().slice(0, 8)}`;
     const metadata = {
       ...this.buildSafeMetadata(dto),
@@ -264,9 +380,12 @@ export class VtuService {
         data: {
           transactionId: transaction.id,
           provider,
-          scope: 'LOCAL',
+          scope: dto.provider === 'foreign-airtime' ? 'INTERNATIONAL' : 'LOCAL',
           serviceType: this.mapVtuType(dto.type),
-          countryCode: 'NG',
+          countryCode:
+            dto.provider === 'foreign-airtime' ? dto.countryCode : 'NG',
+          operatorId:
+            dto.provider === 'foreign-airtime' ? dto.operatorId : undefined,
           localProvider: this.getLocalProvider(dto),
           providerRequestId,
           status: 'PENDING',
@@ -327,6 +446,12 @@ export class VtuService {
         meterNumber: dto.meterNumber,
         meterType: dto.meterType,
         providerRequestId,
+        smileAccountId: dto.smileAccountId,
+        countryCode: dto.countryCode,
+        operatorId: dto.operatorId,
+        faceValue:
+          dto.provider === 'foreign-airtime' ? dto.faceValue : undefined,
+        email: buyerEmail,
       });
     } catch (error) {
       await this.markProviderResultUnknown(transactionRecord, {
@@ -467,13 +592,17 @@ export class VtuService {
     };
   }
 
-  async calculatePricingForPurchase(dto: PurchaseVtuDto, amount: Decimal) {
+  async calculatePricingForPurchase(
+    dto: { type: string; provider: string; countryCode?: string },
+    amount: Decimal,
+  ) {
     return this.calculateVtuPricing({
       amount,
-      countryCode: 'NG',
+      countryCode:
+        dto.provider === 'foreign-airtime' ? dto.countryCode || 'NG' : 'NG',
       serviceType: this.mapVtuType(dto.type),
       provider: this.getPricingProvider(dto),
-      scope: 'LOCAL',
+      scope: dto.provider === 'foreign-airtime' ? 'INTERNATIONAL' : 'LOCAL',
     });
   }
 
@@ -760,21 +889,32 @@ export class VtuService {
 
   private assertRequiredTarget(dto: PurchaseVtuDto) {
     if (
-      (dto.type === 'airtime' || dto.type === 'data') &&
+      !isSmile(dto.provider) &&
+      (dto.type === 'airtime' ||
+        dto.type === 'data' ||
+        dto.provider === 'showmax') &&
       !dto.recipientNumber
     ) {
       throw new BadRequestException('Recipient phone number is required');
     }
 
-    if (dto.type === 'data' && !dto.packageId) {
+    if (needsPackage(dto) && !dto.packageId) {
       throw new BadRequestException('Data package is required');
     }
 
-    if (dto.type === 'cable' && !dto.smartCardNumber) {
+    if (
+      dto.type === 'cable' &&
+      dto.provider !== 'showmax' &&
+      !dto.smartCardNumber
+    ) {
       throw new BadRequestException('Smart card number is required');
     }
 
-    if (dto.type === 'cable' && !dto.subscriptionType) {
+    if (
+      dto.type === 'cable' &&
+      dto.provider !== 'showmax' &&
+      !dto.subscriptionType
+    ) {
       throw new BadRequestException('Cable subscription type is required');
     }
 
@@ -801,6 +941,19 @@ export class VtuService {
    * and a mistyped meter/smartcard would burn real funds.
    */
   private async verifyCustomerForPurchase(dto: PurchaseVtuDto) {
+    if (isSmile(dto.provider)) {
+      if (!dto.smileEmail || !dto.smileAccountId)
+        throw new BadRequestException('Smile account and email are required');
+      const customer = await this.vtuApi.validateSmile(dto.smileEmail);
+      if (
+        !customer.accounts.some((account) => account.id === dto.smileAccountId)
+      )
+        throw new BadRequestException(
+          'Smile account does not belong to this email',
+        );
+      return { verifiedCustomerName: this.safeCustomerField(customer.name) };
+    }
+    if (dto.provider === 'showmax') return {};
     if (dto.type === 'cable') {
       const customer = await this.vtuApi.validateSmartCard(
         this.getLocalProvider(dto),
@@ -833,7 +986,10 @@ export class VtuService {
     return trimmed ? trimmed.slice(0, 120) : undefined;
   }
 
-  private async assertProviderSupportsType(dto: PurchaseVtuDto) {
+  private async assertProviderSupportsType(dto: {
+    provider: string;
+    type: string;
+  }) {
     const providers = await this.vtuApi.getProviders(dto.type);
     const provider = providers.find(
       (item) =>
@@ -856,7 +1012,11 @@ export class VtuService {
   ) {
     const amount = new Decimal(dto.amount);
 
-    if (dto.type === 'cable' && dto.subscriptionType === 'renew') {
+    if (
+      dto.type === 'cable' &&
+      dto.provider !== 'showmax' &&
+      dto.subscriptionType === 'renew'
+    ) {
       if (!verification.verifiedRenewalAmount) {
         throw new BadRequestException(
           'Provider did not return a valid cable renewal amount',
@@ -870,26 +1030,12 @@ export class VtuService {
       return renewalAmount;
     }
 
-    if (dto.type !== 'data' && dto.type !== 'cable') {
-      return amount;
-    }
-
-    const packages = await this.vtuApi.getPackages(this.getLocalProvider(dto));
-    const selectedPackage = packages.find((item) => item.id === dto.packageId);
-
-    if (!selectedPackage) {
-      throw new BadRequestException('Invalid VTU package');
-    }
-
-    if (selectedPackage.serviceType !== dto.type) {
-      throw new BadRequestException('Invalid VTU package');
-    }
-
-    const packagePrice = new Decimal(selectedPackage.price);
-    if (!amount.equals(packagePrice)) {
-      throw new BadRequestException('Package price mismatch');
-    }
-
+    if (!needsPackage(dto)) return amount;
+    const packagePrice = await this.resolvePackageAmount(dto);
+    if (!amount.equals(packagePrice))
+      throw new BadRequestException(
+        'Package price mismatch. Refresh your quote before paying.',
+      );
     return packagePrice;
   }
 
@@ -1400,9 +1546,16 @@ export class VtuService {
   private buildSafeMetadata(dto: PurchaseVtuDto) {
     return {
       vtuType: dto.type,
-      scope: 'local',
+      scope: dto.provider === 'foreign-airtime' ? 'international' : 'local',
       provider: this.getLocalProvider(dto),
-      countryCode: 'NG',
+      countryCode: dto.provider === 'foreign-airtime' ? dto.countryCode : 'NG',
+      operatorId:
+        dto.provider === 'foreign-airtime' ? dto.operatorId : undefined,
+      smileAccountMasked:
+        isSmile(dto.provider) && dto.smileAccountId
+          ? maskAccountNumber(dto.smileAccountId)
+          : undefined,
+      faceValue: dto.provider === 'foreign-airtime' ? dto.faceValue : undefined,
       recipientNumberMasked: dto.recipientNumber
         ? maskPhone(dto.recipientNumber)
         : undefined,
@@ -1427,7 +1580,7 @@ export class VtuService {
     return typeMap[type] || 'AIRTIME';
   }
 
-  private getLocalProvider(dto: PurchaseVtuDto) {
+  private getLocalProvider(dto: { provider: string }) {
     if (!dto.provider) {
       throw new BadRequestException('Provider is required');
     }
@@ -1439,7 +1592,7 @@ export class VtuService {
     return 'VTPASS' as const;
   }
 
-  private getPricingProvider(dto: PurchaseVtuDto) {
+  private getPricingProvider(dto: { provider: string }) {
     return this.getLocalProvider(dto);
   }
 
@@ -1448,6 +1601,8 @@ export class VtuService {
   }
 
   private getTargetMasked(dto: PurchaseVtuDto) {
+    if (isSmile(dto.provider) && dto.smileAccountId)
+      return maskAccountNumber(dto.smileAccountId);
     if (dto.recipientNumber) {
       return maskPhone(dto.recipientNumber);
     }

@@ -42,8 +42,8 @@ void main() {
     await tester.enterText(find.byType(TextFormField).first, '1000');
     await tester.tap(find.text('Continue'));
     await tester.pumpAndSettle();
-    expect(find.text('Choose where to receive GHS'), findsOneWidget);
-    expect(find.text('TrustPay wallet'), findsOneWidget);
+    expect(find.text('Receive cedis'), findsOneWidget);
+    expect(find.text('TrustPay wallet'), findsNothing);
     expect(find.text('Bank account'), findsOneWidget);
     expect(find.text('Mobile money'), findsOneWidget);
     expect(find.text('View transfer account'), findsOneWidget);
@@ -61,8 +61,39 @@ void main() {
     await tester.enterText(find.byType(TextFormField).first, '100');
     await tester.tap(find.text('Continue'));
     await tester.pumpAndSettle();
-    expect(find.text('Choose where to receive NGN'), findsOneWidget);
+    expect(find.text('Naira goes to your TrustPay wallet'), findsOneWidget);
+    expect(find.text('Bank account'), findsNothing);
+    expect(find.text('Mobile money'), findsNothing);
     expect(find.text('View transfer account'), findsOneWidget);
+  });
+
+  testWidgets('cedi-to-naira receiving step fits a phone with larger text',
+      (tester) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    await tester.pumpWidget(MaterialApp(
+        builder: (context, child) => MediaQuery(
+            data: MediaQuery.of(context)
+                .copyWith(textScaler: const TextScaler.linear(1.5)),
+            child: child!),
+        home: ManualExchangeScreen(
+            service: _FakeManualExchangeService(enabled: true))));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Cedis to naira'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextFormField).first, '100');
+    await tester.ensureVisible(find.text('Continue'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Continue'));
+    await tester.pumpAndSettle();
+    expect(find.text('Naira goes to your TrustPay wallet'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    await tester.ensureVisible(find.text('View transfer account'));
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
   });
 
   testWidgets('does not expose receiving instructions when the feature is off',

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -26,32 +26,12 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { bankingApi } from "@/services/api";
+import { bankingApi, paymentApi } from "@/services/api";
 import { getMoneyActionGate } from "@/lib/account-status";
 import { useAuth } from "@/lib/auth-provider";
 import { createMoneyAttemptIdempotencyKey } from "@/lib/idempotency";
 import { getErrorMessage } from "@/lib/errors";
 import { maskEmail, maskPhone } from "@/lib/privacy";
-import type { VirtualAccount } from "@/types";
-
-function splitNameFromEmail(email?: string | null) {
-  const local = email
-    ?.split("@")[0]
-    ?.replace(/[._-]+/g, " ")
-    .trim();
-  const [first = "", ...rest] = local ? local.split(/\s+/) : [];
-  return {
-    firstName: first ? first[0].toUpperCase() + first.slice(1) : "",
-    lastName: rest.length > 0 ? rest.join(" ") : "",
-  };
-}
-
-function splitName(value?: string | null) {
-  const normalized = value?.trim();
-  if (!normalized) return null;
-  const [firstName = "", ...rest] = normalized.split(/\s+/);
-  return { firstName, lastName: rest.join(" ") };
-}
 
 function accountStatusVariant(status?: string) {
   if (status === "ACTIVE") return "default";
@@ -115,17 +95,26 @@ export default function FundPage() {
   const moneyGate = getMoneyActionGate(profile);
   const email = profile?.email ?? user?.email ?? "";
   const phone = profile?.phone ?? user?.user_metadata?.phone ?? "";
-  const nameSeed = useMemo(
-    () => splitName(profile?.fullName) ?? splitNameFromEmail(email),
-    [email, profile?.fullName],
-  );
-  const [firstName, setFirstName] = useState(nameSeed.firstName);
-  const [lastName, setLastName] = useState(nameSeed.lastName);
-  const [middleName, setMiddleName] = useState("");
-  const [bvn, setBvn] = useState("");
-  const [nin, setNin] = useState("");
-  const resolvedFirstName = firstName.trim() || nameSeed.firstName;
-  const resolvedLastName = lastName.trim() || nameSeed.lastName;
+  const [fundingAmount, setFundingAmount] = useState("");
+  const [accountConsent, setAccountConsent] = useState(false);
+  const [checkoutReference, setCheckoutReference] = useState<string | null>(null);
+  const [isVerifyingCheckout, setIsVerifyingCheckout] = useState(false);
+  const checkoutKeyRef = useRef<string | null>(null);
+  const accountProvisionKeyRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      try {
+        const storedReference = window.sessionStorage.getItem(
+          "trustpay.paystack.checkout.reference",
+        );
+        if (storedReference) setCheckoutReference(storedReference);
+      } catch {
+        // Session storage can be unavailable in private browsing.
+      }
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, []);
 
   const accountsQuery = useQuery({
     queryKey: ["virtual-accounts"],
@@ -135,13 +124,48 @@ export default function FundPage() {
     },
   });
 
+  const provisioningQuery = useQuery({
+    queryKey: ["virtual-account-provisioning"],
+    queryFn: async () => (await bankingApi.getProvisioningStatus()).data,
+    staleTime: 15_000,
+  });
+
+  const capabilitiesQuery = useQuery({
+    queryKey: ["payment-capabilities"],
+    queryFn: async () => (await paymentApi.getCapabilities()).data,
+    staleTime: 60_000,
+  });
+
   const ngnAccount = useMemo(
     () =>
       accountsQuery.data?.find(
         (account) =>
           account.currency === "NGN" &&
-          account.provider?.toLowerCase() === "monnify",
+          account.provider?.toUpperCase() === "PAYSTACK" &&
+          account.status?.toUpperCase() === "ACTIVE" &&
+          Boolean(account.accountNumber || account.accountNumberMasked),
       ) ?? null,
+    [accountsQuery.data],
+  );
+  const pendingNgnAccount = useMemo(
+    () =>
+      accountsQuery.data?.find(
+        (account) =>
+          account.currency === "NGN" &&
+          account.provider?.toUpperCase() === "PAYSTACK" &&
+          !account.accountNumber &&
+          !account.accountNumberMasked &&
+          account.status?.toUpperCase() === "PENDING",
+      ) ?? null,
+    [accountsQuery.data],
+  );
+  const legacyNgnAccounts = useMemo(
+    () =>
+      accountsQuery.data?.filter(
+        (account) =>
+          account.currency === "NGN" &&
+          account.provider?.toUpperCase() !== "PAYSTACK",
+      ) ?? [],
     [accountsQuery.data],
   );
 
@@ -150,45 +174,171 @@ export default function FundPage() {
       const response = await bankingApi.provisionVirtualAccount(
         {
           currency: "NGN",
-          provider: "monnify",
-          firstName: resolvedFirstName,
-          lastName: resolvedLastName,
-          middleName: middleName.trim() || undefined,
           country: "NG",
-          bvn: bvn.trim() || undefined,
-          nin: nin.trim() || undefined,
+          consentAccepted: true,
         },
-        createMoneyAttemptIdempotencyKey("fund"),
+        (accountProvisionKeyRef.current ??=
+          createMoneyAttemptIdempotencyKey("fund")),
       );
       return response.data;
     },
     onSuccess: (account) => {
-      queryClient.setQueryData<VirtualAccount[]>(
-        ["virtual-accounts"],
-        (current) => {
-          const rest =
-            current?.filter(
-              (item) =>
-                !(
-                  item.provider === account.provider &&
-                  item.currency === account.currency
-                ),
-            ) ?? [];
-          return [account, ...rest];
-        },
-      );
-      toast.success("Monnify account is ready for wallet funding.");
+      accountProvisionKeyRef.current = null;
+      void queryClient.invalidateQueries({ queryKey: ["virtual-accounts"] });
+      void queryClient.invalidateQueries({
+        queryKey: ["virtual-account-provisioning"],
+      });
+      const status = account.status?.toUpperCase();
+      if (status === "PENDING") {
+        toast.success("Paystack is preparing your receiving account. Refresh shortly.");
+      } else if (status === "ACTION_REQUIRED") {
+        toast.error(
+          account.message ??
+            "Paystack needs more information before this receiving account can be created.",
+        );
+      } else {
+        toast.success("Paystack account is ready for wallet funding.");
+      }
     },
     onError: (error) => {
+      const status = (error as { response?: { status?: number } }).response
+        ?.status;
+      // A provider/eligibility rejection is terminal for this attempt. Clear
+      // its key so the next user-confirmed retry is a new idempotent attempt;
+      // transport failures deliberately keep the key for safe replay.
+      if (status !== undefined && status >= 400 && status < 500) {
+        accountProvisionKeyRef.current = null;
+      }
       toast.error(getErrorMessage(error, "Could not request account"));
     },
   });
 
+  const isProvisioningPending =
+    pendingNgnAccount !== null ||
+    provisioningQuery.data?.status?.toUpperCase() === "PENDING";
+  const isProvisioningActionRequired =
+    provisioningQuery.data?.status?.toUpperCase() === "ACTION_REQUIRED";
+  const checkoutMinimumAmount = useMemo(() => {
+    const configured = Number(capabilitiesQuery.data?.checkoutMinimumAmount);
+    return Number.isFinite(configured) && configured > 0 ? configured : 50;
+  }, [capabilitiesQuery.data?.checkoutMinimumAmount]);
+  const refreshFundingState = () => {
+    void accountsQuery.refetch();
+    void provisioningQuery.refetch();
+  };
   const canRequestAccount =
-    resolvedFirstName.length >= 2 &&
-    resolvedLastName.length >= 2 &&
     !moneyGate &&
+    capabilitiesQuery.data?.virtualAccounts === true &&
+    accountConsent &&
+    !isProvisioningPending &&
     !provisionMutation.isPending;
+
+  const initializeCheckout = async () => {
+    const amount = Number(fundingAmount);
+    if (
+      !/^\d+(?:\.\d{1,2})?$/.test(fundingAmount) ||
+      !Number.isFinite(amount) ||
+      amount < checkoutMinimumAmount
+    ) {
+      toast.error(`Enter at least NGN ${checkoutMinimumAmount.toFixed(2)}`);
+      return;
+    }
+    if (checkoutReference) {
+      toast.info("Check the saved payment status before starting another attempt.");
+      return;
+    }
+    try {
+      checkoutKeyRef.current ??= createMoneyAttemptIdempotencyKey("fund");
+      const result = (await paymentApi.initialize(
+        { amount: fundingAmount, currency: "NGN" },
+        checkoutKeyRef.current,
+      )).data;
+      const status = result.status.toUpperCase();
+      if (result.reference) {
+        setCheckoutReference(result.reference);
+        try {
+          window.sessionStorage.setItem(
+            "trustpay.paystack.checkout.reference",
+            result.reference,
+          );
+        } catch {
+          // Keep the reference in memory when session storage is unavailable.
+        }
+      }
+      if (status === "SUCCESS") {
+        toast.success("Your wallet funding was already confirmed.");
+        checkoutKeyRef.current = null;
+        setCheckoutReference(null);
+        try {
+          window.sessionStorage.removeItem("trustpay.paystack.checkout.reference");
+        } catch {
+          // Ignore storage cleanup failures.
+        }
+        return;
+      }
+      if (status === "FAILED") {
+        checkoutKeyRef.current = null;
+        setCheckoutReference(null);
+        try {
+          window.sessionStorage.removeItem("trustpay.paystack.checkout.reference");
+        } catch {
+          // Ignore storage cleanup failures.
+        }
+        toast.error(result.message ?? "Paystack could not start this payment.");
+        return;
+      }
+      if (!result.authorizationUrl) {
+        toast.info(result.message ?? "Your Paystack payment is pending. We’ll update your wallet after confirmation.");
+        return;
+      }
+      const url = new URL(result.authorizationUrl);
+      if (url.protocol !== "https:" || !url.host) {
+        throw new Error("Unsafe payment URL");
+      }
+      window.location.assign(url.toString());
+    } catch (error: unknown) {
+      const status = (error as { response?: { status?: number } }).response
+        ?.status;
+      if (status !== undefined && status >= 400 && status < 500) {
+        checkoutKeyRef.current = null;
+      }
+      toast.error(getErrorMessage(error, "Could not open Paystack checkout"));
+    }
+  };
+
+  const verifyCheckout = async () => {
+    if (!checkoutReference || isVerifyingCheckout) return;
+    setIsVerifyingCheckout(true);
+    try {
+      const result = (await paymentApi.verify(checkoutReference)).data;
+      if (result.status.toUpperCase() === "SUCCESS") {
+        checkoutKeyRef.current = null;
+        setCheckoutReference(null);
+        try {
+          window.sessionStorage.removeItem("trustpay.paystack.checkout.reference");
+        } catch {
+          // Ignore storage cleanup failures.
+        }
+        await queryClient.invalidateQueries({ queryKey: ["wallets"] });
+        toast.success("Payment confirmed. Your wallet balance will refresh shortly.");
+      } else if (result.status.toUpperCase() === "FAILED") {
+        checkoutKeyRef.current = null;
+        setCheckoutReference(null);
+        try {
+          window.sessionStorage.removeItem("trustpay.paystack.checkout.reference");
+        } catch {
+          // Ignore storage cleanup failures.
+        }
+        toast.error("Paystack marked this payment as failed. Start a new attempt when ready.");
+      } else {
+        toast.info("Payment is still pending. Complete checkout or check again shortly.");
+      }
+    } catch (error: unknown) {
+      toast.error(getErrorMessage(error, "Could not verify Paystack payment status"));
+    } finally {
+      setIsVerifyingCheckout(false);
+    }
+  };
 
   const copyAccountNumber = async () => {
     const accountNumber = ngnAccount?.accountNumber;
@@ -214,11 +364,17 @@ export default function FundPage() {
           <div>
             <h1 className="text-3xl font-bold">Fund wallet</h1>
             <p className="mt-1 text-muted-foreground">
-              Request your Monnify account, then transfer from your bank app.
+              Fund your wallet through a Paystack receiving account or secure checkout.
             </p>
           </div>
           <Badge variant={ngnAccount ? "default" : "secondary"}>
-            {ngnAccount ? "Account ready" : "Request required"}
+            {ngnAccount
+              ? "Account ready"
+              : isProvisioningPending
+                ? "Paystack setup pending"
+                : isProvisioningActionRequired
+                  ? "Action required"
+                  : "Request required"}
           </Badge>
         </div>
 
@@ -269,11 +425,11 @@ export default function FundPage() {
             <CardHeader>
               <div className="flex items-center gap-2">
                 <Landmark className="size-5 text-primary" />
-                <CardTitle>Monnify funding account</CardTitle>
+                <CardTitle>Paystack funding account</CardTitle>
               </div>
               <CardDescription>
-                Use this account for NGN wallet funding. Transfers are confirmed
-                by Monnify webhook.
+                Use this account for NGN wallet funding. Paystack confirms transfers
+                on the server before your wallet is credited.
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -349,70 +505,75 @@ export default function FundPage() {
                   </div>
                   <div className="rounded-md border bg-muted/30 p-3 text-sm text-muted-foreground">
                     Transfer only NGN to this account. Your wallet is credited
-                    after Monnify sends the transaction completion webhook.
+                    after Paystack sends a verified completion event.
                   </div>
+                </div>
+              ) : isProvisioningActionRequired ? (
+                <div className="flex min-h-52 flex-col items-center justify-center gap-3 rounded-md border border-amber-300 bg-amber-50 p-6 text-center text-amber-950">
+                  <ShieldCheck className="size-10 text-amber-700" />
+                  <p className="font-medium">Paystack account setup needs attention</p>
+                  <p className="max-w-md text-sm text-amber-800">
+                    {provisioningQuery.data?.message ??
+                      "Paystack could not complete the request. Review your verification details and retry, or contact support."}
+                  </p>
+                  <label className="flex max-w-md cursor-pointer items-start gap-3 text-left text-sm leading-5">
+                    <input
+                      className="mt-0.5 size-4 shrink-0 accent-primary"
+                      type="checkbox"
+                      checked={accountConsent}
+                      onChange={(event) => setAccountConsent(event.target.checked)}
+                    />
+                    <span>
+                      I authorize TRUSTPAY to retry creating a Paystack dedicated
+                      NGN receiving account for me.
+                    </span>
+                  </label>
+                  <Button
+                    disabled={!canRequestAccount}
+                    onClick={() => provisionMutation.mutate()}
+                  >
+                    {provisionMutation.isPending ? (
+                      <Loader2 className="mr-2 size-4 animate-spin" />
+                    ) : null}
+                    Retry Paystack account setup
+                  </Button>
+                </div>
+              ) : isProvisioningPending ? (
+                <div className="flex min-h-52 flex-col items-center justify-center gap-3 rounded-md border border-dashed p-6 text-center">
+                  <TrustPayAnimation
+                    variant="loading"
+                    className="size-16"
+                    label="Paystack account pending"
+                  />
+                  <p className="font-medium">Paystack is preparing your NGN account</p>
+                  <p className="max-w-md text-sm text-muted-foreground">
+                    Your request was accepted. Refresh this page shortly; the
+                    account number will appear only after the server confirms it.
+                  </p>
+                  <Button
+                    variant="outline"
+                    onClick={refreshFundingState}
+                    disabled={accountsQuery.isFetching || provisioningQuery.isFetching}
+                  >
+                    {accountsQuery.isFetching || provisioningQuery.isFetching
+                      ? "Refreshing…"
+                      : "Refresh status"}
+                  </Button>
                 </div>
               ) : (
                 <div className="grid gap-4">
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <div className="grid gap-2">
-                      <Label htmlFor="firstName">First name</Label>
-                      <Input
-                        id="firstName"
-                        value={firstName}
-                        onChange={(event) => setFirstName(event.target.value)}
-                        placeholder="First name"
-                      />
-                    </div>
-                    <div className="grid gap-2">
-                      <Label htmlFor="lastName">Last name</Label>
-                      <Input
-                        id="lastName"
-                        value={lastName}
-                        onChange={(event) => setLastName(event.target.value)}
-                        placeholder="Last name"
-                      />
-                    </div>
-                  </div>
-                  <div className="grid gap-2">
-                    <Label htmlFor="middleName">Middle name optional</Label>
-                    <Input
-                      id="middleName"
-                      value={middleName}
-                      onChange={(event) => setMiddleName(event.target.value)}
-                      placeholder="Middle name"
+                  <label className="flex cursor-pointer items-start gap-3 rounded-md border bg-muted/30 p-3 text-sm leading-5">
+                    <input
+                      className="mt-0.5 size-4 shrink-0 accent-primary"
+                      type="checkbox"
+                      checked={accountConsent}
+                      onChange={(event) => setAccountConsent(event.target.checked)}
                     />
-                  </div>
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <div className="grid gap-2">
-                      <Label htmlFor="bvn">BVN optional</Label>
-                      <Input
-                        id="bvn"
-                        value={bvn}
-                        onChange={(event) =>
-                          setBvn(
-                            event.target.value.replace(/\D/g, "").slice(0, 11),
-                          )
-                        }
-                        inputMode="numeric"
-                        placeholder="11 digits"
-                      />
-                    </div>
-                    <div className="grid gap-2">
-                      <Label htmlFor="nin">NIN optional</Label>
-                      <Input
-                        id="nin"
-                        value={nin}
-                        onChange={(event) =>
-                          setNin(
-                            event.target.value.replace(/\D/g, "").slice(0, 11),
-                          )
-                        }
-                        inputMode="numeric"
-                        placeholder="11 digits"
-                      />
-                    </div>
-                  </div>
+                    <span>
+                      I authorize TRUSTPAY to create a Paystack dedicated NGN
+                      receiving account for me after identity verification.
+                    </span>
+                  </label>
                   <Button
                     size="lg"
                     disabled={!canRequestAccount}
@@ -423,17 +584,97 @@ export default function FundPage() {
                     ) : (
                       <ShieldCheck className="mr-2 size-4" />
                     )}
-                    Request Monnify account
+                    Request Paystack account
                   </Button>
                   <p className="text-xs text-muted-foreground">
-                    You only need to request this once. After it is created, the
-                    account remains attached to your TRUSTPAY profile.
+                    Your verified Paystack identity is used. We never ask for
+                    your BVN or NIN again on this funding page.
                   </p>
                 </div>
               )}
             </CardContent>
           </Card>
         </div>
+
+        {legacyNgnAccounts.length > 0 ? (
+          <Card className="border-dashed">
+            <CardHeader>
+              <CardTitle className="text-base">Previous receiving account</CardTitle>
+              <CardDescription>
+                This legacy account record is kept for reconciliation and history.
+                Use your Paystack account above for new NGN wallet funding; we do
+                not relabel or close the previous provider record here.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="grid gap-3">
+              {legacyNgnAccounts.map((account) => (
+                <div
+                  key={account.id}
+                  className="grid gap-3 rounded-md border bg-muted/20 p-3 sm:grid-cols-4"
+                >
+                  <DetailRow
+                    label="Previous provider"
+                    value={account.provider || "Legacy provider"}
+                  />
+                  <DetailRow
+                    label="Account number"
+                    value={account.accountNumberMasked || account.accountNumber}
+                  />
+                  <DetailRow label="Bank" value={account.bankName} />
+                  <DetailRow label="Status" value={account.status} />
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+        ) : null}
+
+        {capabilitiesQuery.data?.checkout ? (
+          <Card>
+            <CardHeader>
+              <CardTitle>Pay with card or bank transfer</CardTitle>
+              <CardDescription>
+                Paystack will open a secure hosted checkout. TRUSTPAY verifies
+                the reference on the server before crediting your wallet.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="flex flex-col gap-3 sm:flex-row sm:items-end">
+              <div className="grid flex-1 gap-2">
+                <Label htmlFor="funding-amount">Amount (NGN)</Label>
+                <Input
+                  id="funding-amount"
+                  value={fundingAmount}
+                  onChange={(event) =>
+                    setFundingAmount(event.target.value.replace(/[^0-9.]/g, ""))
+                  }
+                  inputMode="decimal"
+                  min={checkoutMinimumAmount}
+                  placeholder="e.g. 5000"
+                />
+              </div>
+              <Button
+                onClick={initializeCheckout}
+                disabled={!fundingAmount || Boolean(checkoutReference)}
+              >
+                {checkoutReference ? "Payment pending" : "Open Paystack checkout"}
+              </Button>
+              {checkoutReference ? (
+                <div className="flex flex-col gap-2 rounded-md border bg-muted/30 p-3 text-sm sm:col-span-2 sm:flex-row sm:items-center sm:justify-between">
+                  <span className="text-muted-foreground">
+                    Checkout reference saved. Return here after payment to verify it securely.
+                  </span>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => void verifyCheckout()}
+                    disabled={isVerifyingCheckout}
+                  >
+                    {isVerifyingCheckout ? "Checking…" : "Check payment status"}
+                  </Button>
+                </div>
+              ) : null}
+            </CardContent>
+          </Card>
+        ) : null}
       </div>
     </DashboardLayout>
   );

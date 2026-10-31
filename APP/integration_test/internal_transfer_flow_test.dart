@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
+import 'package:trustpay_app/core/theme/app_theme.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:trustpay_app/features/home/screens/money_action_screen.dart';
@@ -14,6 +16,11 @@ void registerInternalTransferFlowTests({bool useIntegrationBinding = true}) {
   } else {
     TestWidgetsFlutterBinding.ensureInitialized();
   }
+
+  setUpAll(() async {
+    GoogleFonts.config.allowRuntimeFetching = false;
+    await GoogleFonts.pendingFonts([AppTextStyles.bodyM]);
+  });
 
   Future<void> useProductionPhoneViewport(WidgetTester tester) async {
     tester.view.physicalSize = const Size(390, 844);
@@ -57,12 +64,10 @@ void registerInternalTransferFlowTests({bool useIntegrationBinding = true}) {
   }
 
   Future<void> openReview(WidgetTester tester) async {
-    final submit = find.widgetWithText(FilledButton, 'Send transfer');
+    final submit = find.widgetWithText(FilledButton, 'Review transfer');
     await tester.ensureVisible(submit);
     await tester.tap(submit);
-    // The action screen contains an intentionally repeating loading animation
-    // while recipient/KYC checks complete, so settling the whole tree can
-    // wait forever. Wait only for the review action to mount.
+    // Wait for the review after recipient and KYC checks finish.
     await waitForText(tester, 'Continue', settle: false);
   }
 
@@ -95,7 +100,8 @@ void registerInternalTransferFlowTests({bool useIntegrationBinding = true}) {
     await openReview(tester);
 
     expect(find.text('Review send money'), findsOneWidget);
-    expect(find.text('25.50 NGN'), findsNWidgets(2));
+    expect(find.text('₦25.50'), findsOneWidget);
+    expect(find.text('25.50 NGN'), findsOneWidget);
     expect(find.text('0.00 NGN'), findsOneWidget);
     expect(find.text('Total debit'), findsOneWidget);
     await tester.tap(find.text('Continue'));
@@ -131,9 +137,9 @@ void registerInternalTransferFlowTests({bool useIntegrationBinding = true}) {
     await enterTransfer(tester, amount: '25.50');
     await openReview(tester);
     await tester.tap(find.text('Continue'));
-    await waitForText(tester, 'Approve send money');
+    await waitForText(tester, 'Confirm transfer');
 
-    expect(find.text('Approve send money'), findsOneWidget);
+    expect(find.text('Confirm transfer'), findsOneWidget);
     await enterExistingPin(tester);
     await waitForText(tester, 'Payment recovery');
     expect(bundle.adapter.internalTransferIdempotencyKeys, hasLength(1));

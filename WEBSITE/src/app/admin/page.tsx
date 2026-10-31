@@ -581,7 +581,7 @@ const ADMIN_VTU_RECONCILIATION_LIMIT = 50;
 const ADMIN_VTU_RECONCILIATION_OLDER_THAN_MINUTES = 10;
 
 const currencyRoadmap = [
-  { code: "NGN", label: "Nigerian naira", rail: "Monnify", status: "LIVE" },
+  { code: "NGN", label: "Nigerian naira", rail: "Paystack", status: "LIVE" },
   {
     code: "GHS",
     label: "Ghanaian cedi",
@@ -2427,7 +2427,7 @@ function AdminPageContent() {
           <TabsContent value="ops" className="flex flex-col gap-4">
             <nav aria-label="Quick access" className="divide-y divide-border border-y border-border">
               {[
-                { href: "/admin/exchange/manual-orders", title: "Exchange requests", detail: "Review deposits and payouts" },
+                { href: "/admin/exchange/manual-orders", title: "Exchange requests", detail: "Review confirmed payments and send payouts" },
                 { href: "/admin/support", title: "Customer support", detail: "Open customer cases" },
                 { href: "/admin?tab=reports", title: "Reports & system health", detail: "Treasury, service activity and detailed reports" },
               ].map((item) => (
@@ -3280,7 +3280,7 @@ function AdminPageContent() {
 
               <Card>
                 <CardHeader>
-                  <CardTitle>Monnify funding health</CardTitle>
+                  <CardTitle>Paystack funding health</CardTitle>
                 </CardHeader>
                 <CardContent className="flex flex-col gap-4">
                   <div className="grid grid-cols-2 gap-3">

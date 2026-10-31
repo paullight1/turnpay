@@ -1,5 +1,9 @@
 import 'dart:async';
+import 'dart:convert';
 
+import 'package:crypto/crypto.dart';
+import 'package:dio/dio.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -9,10 +13,11 @@ import 'package:intl/intl.dart';
 import '../../../core/router/app_router.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/haptics.dart';
-import '../../../core/widgets/tp_page_header.dart';
 import '../../../services/api_client.dart';
 import '../../../services/auth_service.dart';
 import '../../../services/kyc_service.dart';
+import '../widgets/kyc_status_presenter.dart';
+import '../widgets/kyc_status_widgets.dart';
 
 class KycVerificationScreen extends StatefulWidget {
   final KycOverview? initialOverview;
@@ -30,39 +35,97 @@ class KycVerificationScreen extends StatefulWidget {
 
 class _KycVerificationScreenState extends State<KycVerificationScreen> {
   late final KycService _service;
+  late final ManualNinSubmission _manualNinSubmission;
   final _attemptIdempotency = MoneyAttemptIdempotency();
+  final _profileIdempotency = MoneyAttemptIdempotency();
   final _idNumberController = TextEditingController();
   final _dateOfBirthController = TextEditingController();
   final _firstNameController = TextEditingController();
   final _lastNameController = TextEditingController();
+  final _phoneController = TextEditingController();
+  String? _detailsError;
+  bool _detailsRequireSupport = false;
+  bool _profileDetailsConfirmed = false;
+  final _bankCodeController = TextEditingController();
+  final _accountNumberController = TextEditingController();
   late Future<KycOverview> _future;
   bool _isSubmitting = false;
+  bool _isManualNinSubmitting = false;
   bool _consentAccepted = false;
+  bool _accountSetupConsent = false;
   int _stepIndex = 0;
-  bool _showHistory = false;
+  String _bankName = '';
   bool _namePrefilled = false;
   Timer? _statusTimer;
   int _statusGeneration = 0;
+  KycOverview? _lastOverview;
+  final _locallyAccepted = <String>{};
 
   Future<KycOverview> _loadStatus([KycOverview? initial]) async {
     final generation = ++_statusGeneration;
     _statusTimer?.cancel();
-    final overview = initial ?? await _service.fetchOverview();
-    if (mounted && generation == _statusGeneration && overview.isSubmitted) {
+    final raw =
+        initial ?? await _service.fetchOverview(includeIdentityProfile: true);
+    final overview = generation == _statusGeneration
+        ? _rememberOverview(raw, acknowledge: initial == null)
+        : raw;
+    if (mounted &&
+        generation == _statusGeneration &&
+        _needsStatusPolling(overview)) {
       _scheduleStatusCheck(generation);
     }
     return overview;
   }
 
+  KycOverview _rememberOverview(KycOverview incoming,
+      {bool acknowledge = true}) {
+    if (acknowledge) {
+      _locallyAccepted.removeWhere((type) {
+        final state = kycCheckStatus(incoming, type);
+        final legacy =
+            type == 'BVN' && state == 'VERIFIED' && !kycPaystackReady(incoming);
+        return state != 'INCOMPLETE' && !legacy;
+      });
+    }
+    final previous = _lastOverview;
+    final updated = previous == null
+        ? incoming
+        : kycReconcileOverview(previous, incoming,
+            locallyAccepted: _locallyAccepted);
+    _lastOverview = updated;
+    return updated;
+  }
+
+  KycOverview _submissionOverview(KycOverview previous, KycOverview? fresh,
+      KycVerificationResult result, String type) {
+    final state = fresh == null ? 'INCOMPLETE' : kycCheckStatus(fresh, type);
+    final legacy = fresh != null &&
+        type == 'BVN' &&
+        state == 'VERIFIED' &&
+        !kycPaystackReady(fresh);
+    if (fresh != null && state != 'INCOMPLETE' && !legacy) {
+      return _rememberOverview(fresh);
+    }
+    if (result.status == 'VERIFIED' || kycCheckPending(result.status)) {
+      _locallyAccepted.add(type);
+    }
+    return _rememberOverview(
+        kycOverviewAfterSubmission(fresh ?? previous, result, type),
+        acknowledge: false);
+  }
+
   void _scheduleStatusCheck(int generation) {
     _statusTimer = Timer(const Duration(seconds: 15), () async {
       try {
-        final overview = await _service.fetchOverview();
+        final raw = await _service.fetchOverview(includeIdentityProfile: true);
         if (!mounted || generation != _statusGeneration) return;
+        final overview = _rememberOverview(raw);
         setState(() {
           _future = Future.value(overview);
         });
-        if (overview.isSubmitted) _scheduleStatusCheck(generation);
+        if (_needsStatusPolling(overview)) {
+          _scheduleStatusCheck(generation);
+        }
       } catch (_) {
         // Preserve the pending result if a status refresh loses connectivity.
         if (mounted && generation == _statusGeneration) {
@@ -76,6 +139,7 @@ class _KycVerificationScreenState extends State<KycVerificationScreen> {
   void initState() {
     super.initState();
     _service = widget.service ?? KycService();
+    _manualNinSubmission = ManualNinSubmission(service: _service);
     _future = _loadStatus(widget.initialOverview);
   }
 
@@ -86,6 +150,9 @@ class _KycVerificationScreenState extends State<KycVerificationScreen> {
     _dateOfBirthController.dispose();
     _firstNameController.dispose();
     _lastNameController.dispose();
+    _phoneController.dispose();
+    _bankCodeController.dispose();
+    _accountNumberController.dispose();
     super.dispose();
   }
 
@@ -95,48 +162,643 @@ class _KycVerificationScreenState extends State<KycVerificationScreen> {
     });
   }
 
-  String _effectiveType(KycOverview overview) {
-    final verified = overview.documents
-        .where((document) => document.status == 'VERIFIED')
-        .map((document) => document.type)
-        .toSet();
-    if (verified.contains('NIN')) return 'BVN';
-    return 'NIN';
+  String? _manualDocumentContentType(PlatformFile file) {
+    switch (file.extension?.toLowerCase()) {
+      case 'jpg':
+      case 'jpeg':
+        return 'image/jpeg';
+      case 'png':
+        return 'image/png';
+      case 'webp':
+        return 'image/webp';
+      case 'pdf':
+        return 'application/pdf';
+      default:
+        return null;
+    }
   }
 
-  Future<void> _verify(KycOverview overview) async {
+  Future<void> _openManualNinDialog(KycOverview overview) async {
     if (_isSubmitting ||
-        overview.isSubmitted ||
-        _tierRank(overview.tier) >= 2) {
+        _isManualNinSubmitting ||
+        !kycCanStartNin(overview) ||
+        _isDocumentPending(_documentStatus(overview, 'NIN')) ||
+        _documentStatus(overview, 'NIN') == 'VERIFIED') {
       return;
     }
-    final documentType = _effectiveType(overview);
+
+    _idNumberController.clear();
+    PlatformFile? selectedFile;
+    var consentAccepted = false;
+    final submit = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => Dialog.fullscreen(
+        child: StatefulBuilder(
+          builder: (pageContext, setDialogState) => Scaffold(
+            backgroundColor: AppColors.background,
+            resizeToAvoidBottomInset: true,
+            appBar: _pageHeader(
+              title: 'Submit NIN for review',
+              onBack: () => Navigator.of(dialogContext).pop(false),
+            ),
+            body: SafeArea(
+              top: false,
+              child: ListView(
+                keyboardDismissBehavior:
+                    ScrollViewKeyboardDismissBehavior.onDrag,
+                padding: const EdgeInsets.fromLTRB(
+                  AppSpacing.lg,
+                  AppSpacing.lg,
+                  AppSpacing.lg,
+                  AppSpacing.xl,
+                ),
+                children: [
+                  const _KycPageIntro(
+                    eyebrow: 'MANUAL REVIEW',
+                    title: 'Submit your NIN evidence',
+                    description:
+                        'Upload your NIN slip or card. Our team will review your evidence and update your verification status.',
+                    icon: Icons.upload_file_rounded,
+                  ),
+                  const SizedBox(height: AppSpacing.lg),
+                  _Panel(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('NIN details', style: AppTextStyles.headingM),
+                        const SizedBox(height: AppSpacing.sm),
+                        TextField(
+                          key: const ValueKey('kyc-nin-number'),
+                          controller: _idNumberController,
+                          obscureText: true,
+                          enableSuggestions: false,
+                          autocorrect: false,
+                          keyboardType: TextInputType.number,
+                          inputFormatters: [
+                            FilteringTextInputFormatter.digitsOnly,
+                            LengthLimitingTextInputFormatter(11),
+                          ],
+                          decoration: const InputDecoration(
+                            labelText: 'NIN number',
+                            hintText: '11 digits',
+                          ),
+                          onChanged: (_) => setDialogState(() {}),
+                        ),
+                        const SizedBox(height: AppSpacing.md),
+                        Text('Identity evidence', style: AppTextStyles.labelM),
+                        const SizedBox(height: AppSpacing.xs),
+                        Text(
+                          'Upload a clear JPG, PNG, WEBP, or PDF file. Maximum size: 8 MiB.',
+                          style: AppTextStyles.bodyS,
+                        ),
+                        const SizedBox(height: AppSpacing.sm),
+                        OutlinedButton.icon(
+                          onPressed: () async {
+                            final result = await FilePicker.pickFiles(
+                              type: FileType.custom,
+                              allowedExtensions: const [
+                                'jpg',
+                                'jpeg',
+                                'png',
+                                'webp',
+                                'pdf',
+                              ],
+                              allowMultiple: false,
+                              withData: true,
+                            );
+                            if (!pageContext.mounted ||
+                                result == null ||
+                                result.files.isEmpty) {
+                              return;
+                            }
+                            setDialogState(
+                                () => selectedFile = result.files.single);
+                          },
+                          icon: const Icon(Icons.upload_file_rounded),
+                          label: Text(selectedFile == null
+                              ? 'Choose NIN evidence'
+                              : 'Replace NIN evidence'),
+                        ),
+                        if (selectedFile != null) ...[
+                          const SizedBox(height: AppSpacing.xs),
+                          Semantics(
+                            liveRegion: true,
+                            label: 'Selected file ${selectedFile!.name}',
+                            child: Text(
+                              selectedFile!.name,
+                              style: AppTextStyles.caption,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: AppSpacing.md),
+                  _Panel(
+                    child: CheckboxListTile(
+                      key: const ValueKey('kyc-nin-consent'),
+                      contentPadding: EdgeInsets.zero,
+                      value: consentAccepted,
+                      controlAffinity: ListTileControlAffinity.leading,
+                      title: const Text(
+                        'I consent to secure storage and manual review of this NIN evidence.',
+                      ),
+                      onChanged: (value) => setDialogState(
+                          () => consentAccepted = value ?? false),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            bottomNavigationBar: SafeArea(
+              top: false,
+              child: Padding(
+                padding: EdgeInsets.only(
+                  bottom: MediaQuery.viewInsetsOf(pageContext).bottom,
+                ),
+                child: Container(
+                  padding: const EdgeInsets.fromLTRB(
+                    AppSpacing.lg,
+                    AppSpacing.sm,
+                    AppSpacing.lg,
+                    AppSpacing.md,
+                  ),
+                  decoration: BoxDecoration(
+                    color: AppColors.surface,
+                    border: Border(top: BorderSide(color: AppColors.border)),
+                  ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton(
+                          onPressed: () =>
+                              Navigator.of(dialogContext).pop(false),
+                          child: const Text('Cancel'),
+                        ),
+                      ),
+                      const SizedBox(width: AppSpacing.sm),
+                      Expanded(
+                        flex: 2,
+                        child: FilledButton(
+                          onPressed: selectedFile != null &&
+                                  consentAccepted &&
+                                  RegExp(r'^\d{11}$')
+                                      .hasMatch(_idNumberController.text.trim())
+                              ? () => Navigator.of(dialogContext).pop(true)
+                              : null,
+                          child: const Text('Submit for review'),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    if (submit == true && selectedFile != null) {
+      await _submitManualNin(selectedFile!, overview);
+    }
+    if (mounted) _idNumberController.clear();
+  }
+
+  Future<void> _submitManualNin(PlatformFile file, KycOverview overview) async {
+    final idNumber = _idNumberController.text.trim();
+    final bytes = file.bytes;
+    final contentType = _manualDocumentContentType(file);
+    if (!RegExp(r'^\d{11}$').hasMatch(idNumber)) {
+      _showMessage('Enter the 11-digit NIN before submitting.');
+      return;
+    }
+    if (contentType == null || bytes == null || bytes.isEmpty) {
+      _showMessage('Choose a readable JPG, PNG, WEBP, or PDF document.');
+      return;
+    }
+    if (bytes.length > 8 * 1024 * 1024) {
+      _showMessage('NIN evidence must be 8 MiB or smaller.');
+      return;
+    }
+
+    setState(() => _isManualNinSubmitting = true);
+    try {
+      final result = await _manualNinSubmission.submit(
+        idNumber: idNumber,
+        fileName: file.name,
+        contentType: contentType,
+        bytes: bytes,
+      );
+      if (!mounted) return;
+      KycOverview? refreshed;
+      try {
+        refreshed = await _service.fetchOverview(includeIdentityProfile: true);
+      } catch (_) {
+        // The accepted submission remains visible while the status endpoint recovers.
+      }
+      if (!mounted) return;
+      final updated = _submissionOverview(overview, refreshed, result, 'NIN');
+      setState(() {
+        _future = _loadStatus(updated);
+      });
+      await _showSubmissionConfirmation(updated, 'NIN', result);
+    } catch (error) {
+      if (mounted) {
+        _showMessage(
+            authErrorMessage(error, 'Could not submit NIN for review'));
+      }
+    } finally {
+      if (mounted) setState(() => _isManualNinSubmitting = false);
+    }
+  }
+
+  String _effectiveType(KycOverview overview) {
+    return 'BVN';
+  }
+
+  String? _paystackValidationStatus(KycOverview overview) {
+    final explicit = overview.providerValidationStatus?.trim().toUpperCase();
+    if (explicit != null && explicit.isNotEmpty) return explicit;
+    final hasPaystackBvn = overview.provider.toUpperCase() == 'PAYSTACK' &&
+        overview.documents.any(
+          (document) =>
+              document.type.toUpperCase() == 'BVN' &&
+              document.status == 'VERIFIED',
+        );
+    return hasPaystackBvn ? 'VERIFIED' : null;
+  }
+
+  bool _isPaystackValidated(KycOverview overview) {
+    return _paystackValidationStatus(overview) == 'VERIFIED';
+  }
+
+  bool _isPaystackValidationPending(KycOverview overview) {
+    return _paystackValidationStatus(overview) == 'PENDING';
+  }
+
+  bool _needsStatusPolling(KycOverview overview) =>
+      _isDocumentPending(_documentStatus(overview, 'BVN')) ||
+      _isDocumentPending(_documentStatus(overview, 'NIN'));
+
+  String _documentStatus(KycOverview overview, String type) =>
+      kycCheckStatus(overview, type);
+
+  Future<KycOverview> _checkStatus(KycOverview previous) async {
+    final generation = ++_statusGeneration;
+    _statusTimer?.cancel();
+    try {
+      final raw = await _service.fetchOverview(includeIdentityProfile: true);
+      final updated =
+          generation == _statusGeneration ? _rememberOverview(raw) : raw;
+      if (mounted && generation == _statusGeneration) {
+        setState(() {
+          _future = Future.value(updated);
+        });
+        if (_needsStatusPolling(updated)) _scheduleStatusCheck(generation);
+      }
+      return updated;
+    } catch (_) {
+      if (mounted &&
+          generation == _statusGeneration &&
+          _needsStatusPolling(previous)) {
+        _scheduleStatusCheck(generation);
+      }
+      rethrow;
+    }
+  }
+
+  Future<void> _openCheckDetails(KycOverview overview, String type) async {
+    await showModalBottomSheet<void>(
+        context: context,
+        isScrollControlled: true,
+        useSafeArea: true,
+        backgroundColor: AppColors.surface,
+        shape: const RoundedRectangleBorder(
+            borderRadius: BorderRadius.vertical(top: Radius.circular(28))),
+        builder: (sheetContext) => KycCheckDetailsSheet(
+            overview: overview,
+            type: type,
+            onCheckStatus: () => _checkStatus(overview),
+            onContinue: (latest) {
+              Navigator.of(sheetContext).pop();
+              if (type == 'NIN') {
+                _openManualNinDialog(latest);
+              } else {
+                _openVerificationDialog(latest);
+              }
+            }));
+  }
+
+  void _openHistory(KycOverview overview) {
+    showModalBottomSheet<void>(
+        context: context,
+        isScrollControlled: true,
+        useSafeArea: true,
+        backgroundColor: AppColors.surface,
+        shape: const RoundedRectangleBorder(
+            borderRadius: BorderRadius.vertical(top: Radius.circular(28))),
+        builder: (_) => KycHistorySheet(documents: overview.documents));
+  }
+
+  Future<void> _showSubmissionConfirmation(
+      KycOverview overview, String type, KycVerificationResult result) async {
+    final status = _documentStatus(overview, type);
+    if (status != 'VERIFIED' && !_isDocumentPending(status)) {
+      _showMessage(
+          'Your $type check needs attention. Open its status to review the next steps.');
+      return;
+    }
+    final verified = status == 'VERIFIED';
+    final continueNin = type == 'BVN' && kycCanStartNin(overview);
+    final next = await Navigator.of(context).push<bool>(MaterialPageRoute(
+      fullscreenDialog: true,
+      builder: (dialogContext) => KycSubmissionConfirmation(
+        type: type,
+        verified: verified,
+        message: verified &&
+                type == 'BVN' &&
+                result.accountProvisioningStatus == 'READY'
+            ? 'Identity confirmed. Your NGN account is ready.'
+            : verified
+                ? 'Your $type check is complete.'
+                : type == 'BVN'
+                    ? 'We’ve received your BVN and linked bank details.'
+                    : 'Your NIN document is with our review team.',
+        onStatus: () => Navigator.of(dialogContext).pop(false),
+        onContinueNin:
+            continueNin ? () => Navigator.of(dialogContext).pop(true) : null,
+      ),
+    ));
+    if (next == true && mounted) await _openManualNinDialog(overview);
+  }
+
+  Future<void> _openVerificationDialog(
+    KycOverview overview, {
+    String? documentTypeOverride,
+  }) async {
+    if (_isSubmitting ||
+        _isPaystackValidated(overview) ||
+        _isPaystackValidationPending(overview)) {
+      return;
+    }
+    setState(() {
+      _stepIndex = 0;
+      _idNumberController.clear();
+      _dateOfBirthController.clear();
+      _consentAccepted = false;
+      _accountSetupConsent = false;
+      _bankCodeController.clear();
+      _accountNumberController.clear();
+    });
+    final documentType = documentTypeOverride ?? _effectiveType(overview);
+    final dialogMessengerKey = GlobalKey<ScaffoldMessengerState>();
+
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => Dialog.fullscreen(
+        child: ScaffoldMessenger(
+          key: dialogMessengerKey,
+          child: StatefulBuilder(
+            builder: (pageContext, setDialogState) => PopScope(
+              canPop: _stepIndex == 0 && !_isSubmitting,
+              onPopInvokedWithResult: (didPop, result) {
+                if (_isSubmitting) return;
+                if (didPop) {
+                  _resetVerificationForm();
+                  return;
+                }
+                _handleVerificationBack(
+                  pageContext: pageContext,
+                  dialogContext: dialogContext,
+                  setDialogState: setDialogState,
+                );
+              },
+              child: Scaffold(
+                backgroundColor: AppColors.background,
+                resizeToAvoidBottomInset: true,
+                appBar: _pageHeader(
+                  title: 'Verify $documentType',
+                  enabled: !_isSubmitting,
+                  onBack: () => _handleVerificationBack(
+                    pageContext: pageContext,
+                    dialogContext: dialogContext,
+                    setDialogState: setDialogState,
+                  ),
+                ),
+                body: SafeArea(
+                  top: false,
+                  child: _VerificationForm(
+                    stepIndex: _stepIndex,
+                    firstNameController: _firstNameController,
+                    lastNameController: _lastNameController,
+                    phoneController: _phoneController,
+                    detailsError: _detailsError,
+                    profileIdentityLocked: overview.profileIdentityLocked ||
+                        _profileDetailsConfirmed,
+                    onDetailsChanged: () {
+                      _detailsError = null;
+                      _consentAccepted = false;
+                      _accountSetupConsent = false;
+                      setDialogState(() {});
+                    },
+                    onEditDetails: () => setDialogState(() => _stepIndex = 0),
+                    onSupport: overview.profileIdentityLocked ||
+                            _profileDetailsConfirmed ||
+                            _detailsRequireSupport
+                        ? () {
+                            Navigator.of(dialogContext).pop();
+                            context.push(AppRoutes.profileSupport);
+                          }
+                        : null,
+                    bankName: _bankName,
+                    bankCodeController: _bankCodeController,
+                    accountNumberController: _accountNumberController,
+                    documentType: documentType,
+                    service: _service,
+                    idNumberController: _idNumberController,
+                    dateOfBirthController: _dateOfBirthController,
+                    consentAccepted: _consentAccepted,
+                    accountSetupConsent: _accountSetupConsent,
+                    onAccountSetupConsentChanged: (accepted) {
+                      setState(() => _accountSetupConsent = accepted);
+                      setDialogState(() {});
+                    },
+                    isSubmitting: _isSubmitting,
+                    onConsentChanged: (accepted) {
+                      setState(() => _consentAccepted = accepted);
+                      setDialogState(() {});
+                    },
+                    onDateSelected: (date) {
+                      setState(() {
+                        _dateOfBirthController.text =
+                            DateFormat('yyyy-MM-dd').format(date);
+                      });
+                      setDialogState(() {});
+                    },
+                    onBankSelected: (bank) {
+                      setState(() {
+                        _bankCodeController.text = bank.code;
+                        _bankName = bank.name;
+                      });
+                      setDialogState(() {});
+                    },
+                  ),
+                ),
+                bottomNavigationBar: Padding(
+                  padding: EdgeInsets.only(
+                    bottom: MediaQuery.viewInsetsOf(pageContext).bottom,
+                  ),
+                  child: _VerificationNavigation(
+                    stepIndex: _stepIndex,
+                    isSubmitting: _isSubmitting,
+                    onBack: () => _handleVerificationBack(
+                      pageContext: pageContext,
+                      dialogContext: dialogContext,
+                      setDialogState: setDialogState,
+                    ),
+                    onNext: () {
+                      FocusScope.of(pageContext).unfocus();
+                      _continueToNextStep(
+                        overview,
+                        documentType,
+                        setDialogState,
+                        dialogContext,
+                        dialogMessengerKey.currentState,
+                      );
+                    },
+                    onSubmit: () {
+                      FocusScope.of(pageContext).unfocus();
+                      Haptics.medium();
+                      _continueToNextStep(
+                        overview,
+                        documentType,
+                        setDialogState,
+                        dialogContext,
+                        dialogMessengerKey.currentState,
+                      );
+                    },
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _resetVerificationForm() {
+    _idNumberController.clear();
+    _dateOfBirthController.clear();
+    _consentAccepted = false;
+    _accountSetupConsent = false;
+    _bankCodeController.clear();
+    _accountNumberController.clear();
+    _stepIndex = 0;
+  }
+
+  void _handleVerificationBack({
+    required BuildContext pageContext,
+    required BuildContext dialogContext,
+    required StateSetter setDialogState,
+  }) {
+    if (_isSubmitting) return;
+    FocusScope.of(pageContext).unfocus();
+    if (_stepIndex > 0) {
+      setDialogState(() => _stepIndex -= 1);
+      return;
+    }
+    _resetVerificationForm();
+    if (dialogContext.mounted) Navigator.of(dialogContext).pop();
+  }
+
+  Future<void> _verify(
+    KycOverview overview,
+    String documentType,
+    StateSetter setDialogState,
+    BuildContext dialogContext,
+    ScaffoldMessengerState? messenger,
+  ) async {
+    if (_isSubmitting ||
+        _isPaystackValidated(overview) ||
+        _isPaystackValidationPending(overview)) {
+      return;
+    }
     final idNumber = _idNumberController.text.trim();
     final dateOfBirth = _dateOfBirthController.text.trim();
     final firstName = _firstNameController.text.trim();
     final lastName = _lastNameController.text.trim();
-    if (firstName.isEmpty || lastName.isEmpty) {
-      _showMessage('Enter your legal first and last name.');
+    final bankCode = _bankCodeController.text.trim();
+    final accountNumber = _accountNumberController.text.trim();
+    final personalError = _personalDetailsError(overview);
+    if (personalError != null) {
+      setDialogState(() {
+        _stepIndex = 0;
+        _detailsError = personalError;
+      });
       return;
     }
     if (!RegExp(r'^\d{11}$').hasMatch(idNumber)) {
-      _showMessage('Enter the 11-digit $documentType number.');
+      _showMessage('Enter the 11-digit $documentType number.',
+          messenger: messenger);
+      return;
+    }
+    if (!RegExp(r'^\d{3,6}$').hasMatch(bankCode) ||
+        !RegExp(r'^\d{10}$').hasMatch(accountNumber)) {
+      _showMessage(
+        'Choose your bank and enter the 10-digit account linked to your BVN.',
+        messenger: messenger,
+      );
       return;
     }
     final parsedDateOfBirth = DateTime.tryParse(dateOfBirth);
     if (!RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(dateOfBirth) ||
         parsedDateOfBirth == null ||
         parsedDateOfBirth.isAfter(DateTime.now())) {
-      _showMessage('Enter a valid date of birth in YYYY-MM-DD format.');
+      _showMessage(
+        'Enter a valid date of birth in YYYY-MM-DD format.',
+        messenger: messenger,
+      );
       return;
     }
     if (!_consentAccepted) {
-      _showMessage('Confirm consent before verification.');
+      _showMessage('Confirm consent before verification.',
+          messenger: messenger);
       return;
     }
 
     setState(() => _isSubmitting = true);
+    setDialogState(() {});
+    var dialogClosed = false;
+    var profileReady = false;
     try {
+      final phone = normalizeNigerianKycPhone(_phoneController.text)!;
+      final profileLocked = await _service.ensureIdentityProfile(
+        firstName: firstName,
+        lastName: lastName,
+        phone: phone,
+        yearOfBirth: parsedDateOfBirth.year,
+        idempotencyKey: _profileIdempotency.keyFor(sha256
+            .convert(utf8.encode(
+              jsonEncode([
+                'kyc-profile',
+                firstName,
+                lastName,
+                phone,
+                parsedDateOfBirth.year
+              ]),
+            ))
+            .toString()),
+      );
+      _profileIdempotency.markFinalOutcome();
+      profileReady = true;
+      _profileDetailsConfirmed = profileLocked;
+      if (!mounted || !dialogContext.mounted) return;
       final result = await _service.verifyIdentity(
         country: 'NG',
         type: documentType,
@@ -145,53 +807,152 @@ class _KycVerificationScreenState extends State<KycVerificationScreen> {
         consentAccepted: _consentAccepted,
         firstName: firstName,
         lastName: lastName,
+        bankCode: bankCode,
+        accountNumber: accountNumber,
+        accountSetupConsent: _accountSetupConsent,
         idempotencyKey: _attemptIdempotency.keyFor(
-          'kyc-ninja|NG|$documentType',
+          sha256
+              .convert(utf8.encode(jsonEncode([
+                'kyc-paystack',
+                'NG',
+                documentType,
+                idNumber,
+                dateOfBirth,
+                firstName,
+                lastName,
+                phone,
+                bankCode,
+                accountNumber,
+                _accountSetupConsent,
+              ])))
+              .toString(),
         ),
       );
       _attemptIdempotency.markFinalOutcome();
       if (!mounted) return;
-      _showMessage(
-        result.status == 'VERIFIED'
-            ? 'Identity verified successfully.'
-            : result.status == 'REJECTED'
-                ? 'Identity check not approved. Please review your details.'
-                : result.status == 'FAILED'
-                    ? 'The check could not be completed. Please try again.'
-                    : 'Identity check submitted. Waiting for a decision.',
-      );
+      KycOverview? refreshed;
+      try {
+        refreshed = await _service.fetchOverview(includeIdentityProfile: true);
+      } catch (_) {
+        // The verification response remains authoritative if status refresh
+        // is temporarily unavailable.
+      }
+      if (!mounted) return;
+      final updated =
+          _submissionOverview(overview, refreshed, result, documentType);
       setState(() {
         _idNumberController.clear();
         _dateOfBirthController.clear();
         _consentAccepted = false;
+        _accountSetupConsent = false;
+        _bankCodeController.clear();
+        _accountNumberController.clear();
         _stepIndex = 0;
-        _future = _loadStatus();
+        _future = _loadStatus(updated);
       });
+      if (dialogContext.mounted) Navigator.of(dialogContext).pop();
+      dialogClosed = true;
+      setState(() => _isSubmitting = false);
+      await _showSubmissionConfirmation(updated, documentType, result);
     } catch (error) {
       if (!mounted) return;
-      _showMessage(authErrorMessage(error, 'Unable to verify identity'));
+      if (profileReady && error is DioException) {
+        final status = error.response?.statusCode ?? 0;
+        if (status >= 400 && status < 500) {
+          _attemptIdempotency.markFinalOutcome();
+        }
+      }
+      if (!profileReady) {
+        setDialogState(() {
+          _stepIndex = 0;
+          _detailsError = error is KycProfileException
+              ? error.message
+              : authErrorMessage(error,
+                  'Could not save your legal name and phone number. Check your connection and try again.');
+          _detailsRequireSupport =
+              error is KycProfileException && error.requiresSupport ||
+                  error is DioException && error.response?.statusCode == 409;
+          if (_detailsRequireSupport) {
+            _profileDetailsConfirmed = true;
+          }
+        });
+      } else {
+        _showMessage(
+          authErrorMessage(error, 'Unable to verify identity'),
+          messenger: messenger,
+        );
+      }
     } finally {
-      if (mounted) setState(() => _isSubmitting = false);
+      if (mounted) {
+        setState(() => _isSubmitting = false);
+        if (!dialogClosed) setDialogState(() {});
+      }
     }
   }
 
-  void _showMessage(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message)),
-    );
+  void _showMessage(String message, {ScaffoldMessengerState? messenger}) {
+    final target = messenger ?? ScaffoldMessenger.maybeOf(context);
+    target
+      ?..removeCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(message)));
   }
 
-  void _continueToNextStep(KycOverview overview) {
-    final documentType = _effectiveType(overview);
-    if (_stepIndex == 0 &&
-        (_firstNameController.text.trim().isEmpty ||
-            _lastNameController.text.trim().isEmpty)) {
-      _showMessage('Enter your legal first and last name.');
+  String? _personalDetailsError(KycOverview overview) {
+    final nameError = validateKycLegalName(
+        _firstNameController.text, _lastNameController.text);
+    final phone = normalizeNigerianKycPhone(_phoneController.text);
+    if (_profileDetailsConfirmed && (nameError != null || phone == null)) {
+      return kycLockedProfileMessage;
+    }
+    if (overview.profileIdentityLocked) {
+      final savedName = '${overview.firstName ?? ''} ${overview.lastName ?? ''}'
+          .trim()
+          .toLowerCase();
+      final enteredName =
+          '${_firstNameController.text.trim()} ${_lastNameController.text.trim()}'
+              .trim()
+              .toLowerCase();
+      if (nameError != null ||
+          phone == null ||
+          savedName != enteredName ||
+          phone != normalizeNigerianKycPhone(overview.phone ?? '')) {
+        return kycLockedProfileMessage;
+      }
+    }
+    return nameError ?? (phone == null ? kycPhoneValidationMessage : null);
+  }
+
+  void _continueToNextStep(
+    KycOverview overview,
+    String documentType,
+    StateSetter setDialogState,
+    BuildContext dialogContext,
+    ScaffoldMessengerState? messenger,
+  ) {
+    if (_stepIndex == 0) {
+      final error = _personalDetailsError(overview);
+      if (error != null) {
+        setDialogState(() => _detailsError = error);
+        return;
+      }
+      _detailsError = null;
+    }
+    if (_stepIndex == 1 &&
+        (!RegExp(r'^\d{3,6}$').hasMatch(_bankCodeController.text.trim()) ||
+            !RegExp(r'^\d{10}$')
+                .hasMatch(_accountNumberController.text.trim()))) {
+      _showMessage(
+        'Choose your bank and enter the 10-digit account linked to your BVN.',
+        messenger: messenger,
+      );
       return;
     }
     if (_stepIndex == 2 &&
         !RegExp(r'^\d{11}$').hasMatch(_idNumberController.text.trim())) {
-      _showMessage('Enter the 11-digit $documentType number.');
+      _showMessage(
+        'Enter the 11-digit $documentType number.',
+        messenger: messenger,
+      );
       return;
     }
     if (_stepIndex == 3) {
@@ -199,43 +960,79 @@ class _KycVerificationScreenState extends State<KycVerificationScreen> {
       final parsed = DateTime.tryParse(value);
       if (!RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(value) ||
           parsed == null ||
-          parsed.isAfter(DateTime.now())) {
-        _showMessage('Enter a valid date of birth in YYYY-MM-DD format.');
+          parsed.isAfter(DateTime.now()) ||
+          parsed.year < 1900 ||
+          parsed.year > DateTime.now().year - 13) {
+        _showMessage(
+          'Choose your correct date of birth (1900–${DateTime.now().year - 13}).',
+          messenger: messenger,
+        );
         return;
       }
     }
     if (_stepIndex < 4) {
-      setState(() => _stepIndex += 1);
+      setDialogState(() => _stepIndex += 1);
     } else {
-      _verify(overview);
+      _verify(
+        overview,
+        documentType,
+        setDialogState,
+        dialogContext,
+        messenger,
+      );
     }
   }
+
+  PreferredSizeWidget _pageHeader({
+    required String title,
+    required VoidCallback onBack,
+    bool enabled = true,
+    List<Widget> actions = const [],
+  }) =>
+      AppBar(
+        backgroundColor: AppColors.background,
+        foregroundColor: AppColors.textPrimary,
+        surfaceTintColor: Colors.transparent,
+        elevation: 0,
+        centerTitle: false,
+        leading: IconButton(
+            tooltip: 'Back',
+            onPressed: enabled ? onBack : null,
+            icon: const Icon(Icons.arrow_back_rounded)),
+        title: Text(title, style: AppTextStyles.headingM),
+        actions: actions,
+      );
 
   @override
   Widget build(BuildContext context) {
     AppColors.watch(context);
     return Scaffold(
       backgroundColor: AppColors.background,
-      appBar: TpAppHeader(
-        label: 'KYC verification',
-        menuActions: [
-          TpPageMenuAction(
-            label: 'Refresh',
-            icon: Icons.refresh_rounded,
-            onTap: _reload,
-          ),
-          TpPageMenuAction(
-            label: 'Home',
-            icon: Icons.home_rounded,
-            onTap: () => context.go(AppRoutes.home),
-          ),
+      appBar: _pageHeader(
+        title: 'KYC verification',
+        onBack: () {
+          if (context.canPop()) {
+            context.pop();
+          } else {
+            context.go(AppRoutes.home);
+          }
+        },
+        actions: [
+          IconButton(
+              tooltip: 'Refresh verification status',
+              onPressed: _reload,
+              icon: const Icon(Icons.refresh_rounded))
         ],
       ),
       body: RefreshIndicator(
         color: AppColors.primary,
         onRefresh: () async {
           _reload();
-          await _future;
+          try {
+            await _future;
+          } catch (_) {
+            // The FutureBuilder owns the visible error and retry action.
+          }
         },
         child: FutureBuilder<KycOverview>(
           future: _future,
@@ -264,81 +1061,21 @@ class _KycVerificationScreenState extends State<KycVerificationScreen> {
                   overview.lastName != null) {
                 _lastNameController.text = overview.lastName!;
               }
+              if (_phoneController.text.isEmpty && overview.phone != null) {
+                _phoneController.text = overview.phone!;
+              }
             }
-            final documentType = _effectiveType(overview);
-            final tierTwo = _tierRank(overview.tier) >= 2;
-            return ListView(
-              physics: const AlwaysScrollableScrollPhysics(
-                parent: BouncingScrollPhysics(),
-              ),
-              padding: const EdgeInsets.all(AppSpacing.lg),
-              children: [
-                Text(
-                  'Two quick checks: NIN first, then BVN. No document upload is required.',
-                  style: AppTextStyles.bodyM,
-                ),
-                const SizedBox(height: AppSpacing.md),
-                _KycTierProgress(currentTier: overview.tier),
-                if (_showVerificationState(overview)) ...[
-                  const SizedBox(height: AppSpacing.md),
-                  _VerificationState(overview: overview),
-                ],
-                if (overview.isSubmitted) ...[
-                  const SizedBox(height: AppSpacing.md),
-                  OutlinedButton.icon(
-                    onPressed: _reload,
-                    icon: const Icon(Icons.refresh_rounded),
-                    label: const Text('Check status'),
-                  ),
-                ],
-                if (!tierTwo && !overview.isSubmitted) ...[
-                  const SizedBox(height: AppSpacing.md),
-                  _KycProgressIndicator(currentStep: _stepIndex),
-                  const SizedBox(height: AppSpacing.sm),
-                  _VerificationForm(
-                    stepIndex: _stepIndex,
-                    firstNameController: _firstNameController,
-                    lastNameController: _lastNameController,
-                    documentType: documentType,
-                    idNumberController: _idNumberController,
-                    dateOfBirthController: _dateOfBirthController,
-                    consentAccepted: _consentAccepted,
-                    isSubmitting: _isSubmitting,
-                    onConsentChanged: (accepted) {
-                      setState(() => _consentAccepted = accepted);
-                    },
-                    onDateSelected: (date) {
-                      setState(() {
-                        _dateOfBirthController.text =
-                            DateFormat('yyyy-MM-dd').format(date);
-                      });
-                    },
-                    onBack: () => setState(() => _stepIndex -= 1),
-                    onNext: () => _continueToNextStep(overview),
-                    onSubmit: () {
-                      Haptics.medium();
-                      _continueToNextStep(overview);
-                    },
-                  ),
-                ],
-                if (overview.isSubmitted || overview.documents.isNotEmpty) ...[
-                  const SizedBox(height: AppSpacing.md),
-                  OutlinedButton.icon(
-                    onPressed: () =>
-                        setState(() => _showHistory = !_showHistory),
-                    icon: Icon(_showHistory
-                        ? Icons.keyboard_arrow_up_rounded
-                        : Icons.history_rounded),
-                    label: Text(_showHistory
-                        ? 'Hide verification history'
-                        : 'View verification history'),
-                  ),
-                  if (_showHistory) ...[
-                    const SizedBox(height: AppSpacing.sm),
-                    _HistoryPanel(documents: overview.documents),
-                  ],
-                ],
-              ],
+            return KycStatusOverview(
+              overview: overview,
+              busy: _isSubmitting || _isManualNinSubmitting,
+              onDetails: (type) => _openCheckDetails(overview, type),
+              onStartBvn: () => _openVerificationDialog(overview),
+              onStartNin: () => _openManualNinDialog(overview),
+              onHistory: () => _openHistory(overview),
+              onAccount: () async {
+                await context.push(AppRoutes.virtualAccount);
+                if (mounted) _reload();
+              },
             );
           },
         ),
@@ -347,147 +1084,201 @@ class _KycVerificationScreenState extends State<KycVerificationScreen> {
   }
 }
 
-class _KycTierProgress extends StatelessWidget {
-  final String currentTier;
+class _KycPageIntro extends StatelessWidget {
+  final String eyebrow;
+  final String title;
+  final String description;
+  final IconData icon;
 
-  const _KycTierProgress({required this.currentTier});
-
-  @override
-  Widget build(BuildContext context) {
-    final rank = _tierRank(currentTier);
-    return _Panel(
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Row(children: [
-          Expanded(
-              child:
-                  Text('Identity verification', style: AppTextStyles.labelM)),
-          Text(rank >= 2 ? 'Complete' : 'Step ${rank == 0 ? 1 : 2} of 2',
-              style: AppTextStyles.caption),
-        ]),
-        const SizedBox(height: AppSpacing.sm),
-        Row(children: [
-          Expanded(
-              child: _TierItem(
-                  label: '1  NIN', detail: 'First check', complete: rank >= 1)),
-          const SizedBox(width: AppSpacing.sm),
-          Expanded(
-              child: _TierItem(
-                  label: '2  BVN', detail: 'Final check', complete: rank >= 2)),
-        ]),
-        if (rank == 0 || rank == 1) ...[
-          const SizedBox(height: AppSpacing.sm),
-          Text(
-            rank == 0
-                ? 'Start with your NIN. We will request your BVN next.'
-                : 'NIN verified. Verify your BVN to finish.',
-            style: AppTextStyles.caption,
-          ),
-        ],
-      ]),
-    );
-  }
-}
-
-class _TierItem extends StatelessWidget {
-  final String label;
-  final String detail;
-  final bool complete;
-  const _TierItem(
-      {required this.label, required this.detail, required this.complete});
-  @override
-  Widget build(BuildContext context) => Container(
-        padding: const EdgeInsets.all(AppSpacing.sm),
-        decoration: BoxDecoration(
-          color: complete
-              ? AppColors.primary.withValues(alpha: .12)
-              : AppColors.surface,
-          borderRadius: BorderRadius.circular(AppRadius.sm),
-          border: Border.all(
-              color: complete ? AppColors.primary : AppColors.border),
-        ),
-        child: Row(children: [
-          Icon(
-              complete
-                  ? Icons.check_circle_rounded
-                  : Icons.lock_outline_rounded,
-              size: 18,
-              color: complete ? AppColors.primary : AppColors.textSecondary),
-          const SizedBox(width: AppSpacing.xs),
-          Expanded(
-              child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                Text(label, style: AppTextStyles.labelS),
-                Text(detail, style: AppTextStyles.caption)
-              ])),
-        ]),
-      );
-}
-
-class _VerificationState extends StatelessWidget {
-  final KycOverview overview;
-
-  const _VerificationState({required this.overview});
+  const _KycPageIntro({
+    required this.eyebrow,
+    required this.title,
+    required this.description,
+    required this.icon,
+  });
 
   @override
   Widget build(BuildContext context) {
     AppColors.watch(context);
-    if (_tierRank(overview.tier) >= 2) {
-      return _StatePanel(
-        icon: Icons.verified_outlined,
-        color: AppColors.success,
-        title: 'Identity verification complete',
-        message:
-            'Your BVN and NIN checks are complete. You do not need to submit anything else here.',
-      );
-    }
-    if (overview.status == 'REVIEW_REQUIRED' || overview.isSubmitted) {
-      return _StatePanel(
-        icon: Icons.schedule_rounded,
-        color: AppColors.warning,
-        title: 'Waiting for approval',
-        message:
-            'Your details are being reviewed. This page checks for updates automatically. You can leave and return later.',
-      );
-    }
-    if (overview.isVerified) {
-      return _StatePanel(
-        icon: Icons.verified_outlined,
-        color: AppColors.success,
-        title: 'Identity check approved',
-        message:
-            'Complete your remaining identity check to finish verification.',
-      );
-    }
-    if (overview.status == 'REJECTED') {
-      return _StatePanel(
-        icon: Icons.error_outline_rounded,
-        color: AppColors.error,
-        title: 'Identity check not approved',
-        message:
-            'Check the number, your TRUSTPAY profile name, and date of birth, then try again.',
-      );
-    }
-    return _StatePanel(
-      icon: Icons.sync_problem_rounded,
-      color: AppColors.error,
-      title: 'The identity service could not complete your check.',
-      message: 'No verification was completed. Wait a moment and try again.',
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          width: 46,
+          height: 46,
+          decoration: BoxDecoration(
+            color: AppColors.primary.withValues(alpha: 0.1),
+            borderRadius: BorderRadius.circular(AppRadius.md),
+          ),
+          child: Icon(icon, color: AppColors.primary),
+        ),
+        const SizedBox(width: AppSpacing.md),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                eyebrow,
+                style: AppTextStyles.caption.copyWith(
+                  color: AppColors.primary,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 0.7,
+                ),
+              ),
+              const SizedBox(height: AppSpacing.xs),
+              Text(title, style: AppTextStyles.headingL),
+              const SizedBox(height: AppSpacing.xs),
+              Text(description, style: AppTextStyles.bodyS),
+            ],
+          ),
+        ),
+      ],
     );
   }
 }
 
-class _StatePanel extends StatelessWidget {
-  final IconData icon;
-  final Color color;
-  final String title;
-  final String message;
+class _KycBankPicker extends StatefulWidget {
+  final KycService service;
+  final String selectedCode;
+  final bool enabled;
+  final ValueChanged<KycBankOption> onSelected;
 
-  const _StatePanel({
+  const _KycBankPicker({
+    required this.service,
+    required this.selectedCode,
+    required this.enabled,
+    required this.onSelected,
+  });
+
+  @override
+  State<_KycBankPicker> createState() => _KycBankPickerState();
+}
+
+class _KycBankPickerState extends State<_KycBankPicker> {
+  List<KycBankOption> _banks = const [];
+  bool _isLoading = true;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadBanks();
+  }
+
+  Future<void> _loadBanks() async {
+    if (mounted) {
+      setState(() {
+        _isLoading = true;
+        _error = null;
+      });
+    }
+    try {
+      final banks = await widget.service.fetchBanks();
+      if (!mounted) return;
+      setState(() {
+        _banks = banks;
+        _isLoading = false;
+        _error = banks.isEmpty ? 'No banks are available right now.' : null;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _banks = const [];
+        _isLoading = false;
+        _error = authErrorMessage(
+          error,
+          'Could not load the bank list. Check your connection and retry.',
+        );
+      });
+    }
+  }
+
+  Future<void> _openPicker() async {
+    if (!widget.enabled || _isLoading || _banks.isEmpty) return;
+    FocusScope.of(context).unfocus();
+    final selected = await showModalBottomSheet<KycBankOption>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      backgroundColor: AppColors.surface,
+      builder: (_) => _KycBankSheet(
+        banks: _banks,
+        selectedCode: widget.selectedCode,
+      ),
+    );
+    if (selected != null && mounted) widget.onSelected(selected);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    AppColors.watch(context);
+    final selected = _banks.where((bank) => bank.code == widget.selectedCode);
+    final selectedName = selected.isEmpty ? null : selected.first.name;
+
+    if (_isLoading) {
+      return const _KycBankStatePanel(
+        icon: Icons.account_balance_outlined,
+        message: 'Loading the secure bank list…',
+        action: null,
+      );
+    }
+
+    if (_banks.isEmpty) {
+      return _KycBankStatePanel(
+        icon: Icons.cloud_off_rounded,
+        message: _error ?? 'The secure bank list is unavailable.',
+        action: TextButton.icon(
+          onPressed: widget.enabled ? _loadBanks : null,
+          icon: const Icon(Icons.refresh_rounded),
+          label: const Text('Retry'),
+        ),
+      );
+    }
+
+    return OutlinedButton(
+      key: const ValueKey('kyc-bank-picker'),
+      onPressed: widget.enabled ? _openPicker : null,
+      style: OutlinedButton.styleFrom(
+        padding: const EdgeInsets.all(AppSpacing.md),
+        alignment: Alignment.centerLeft,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(AppRadius.md),
+        ),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.account_balance_outlined, color: AppColors.primary),
+          const SizedBox(width: AppSpacing.sm),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Bank', style: AppTextStyles.caption),
+                const SizedBox(height: AppSpacing.xs),
+                Text(
+                  selectedName ?? 'Choose your bank',
+                  style: AppTextStyles.labelM,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ),
+          ),
+          const Icon(Icons.keyboard_arrow_down_rounded),
+        ],
+      ),
+    );
+  }
+}
+
+class _KycBankStatePanel extends StatelessWidget {
+  final IconData icon;
+  final String message;
+  final Widget? action;
+
+  const _KycBankStatePanel({
     required this.icon,
-    required this.color,
-    required this.title,
     required this.message,
+    required this.action,
   });
 
   @override
@@ -497,26 +1288,166 @@ class _StatePanel extends StatelessWidget {
       width: double.infinity,
       padding: const EdgeInsets.all(AppSpacing.md),
       decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.07),
+        color: AppColors.surfaceVariant,
         borderRadius: BorderRadius.circular(AppRadius.md),
-        border: Border.all(color: color.withValues(alpha: 0.28)),
+        border: Border.all(color: AppColors.border),
       ),
       child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(icon, size: 22, color: color),
+          Icon(icon, color: AppColors.textSecondary),
           const SizedBox(width: AppSpacing.sm),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(title, style: AppTextStyles.labelM),
-                const SizedBox(height: AppSpacing.xs),
-                Text(message, style: AppTextStyles.bodyS),
-              ],
-            ),
-          ),
+          Expanded(child: Text(message, style: AppTextStyles.bodyS)),
+          if (action != null) ...[
+            const SizedBox(width: AppSpacing.xs),
+            action!,
+          ],
         ],
+      ),
+    );
+  }
+}
+
+class _KycBankSheet extends StatefulWidget {
+  final List<KycBankOption> banks;
+  final String selectedCode;
+
+  const _KycBankSheet({
+    required this.banks,
+    required this.selectedCode,
+  });
+
+  @override
+  State<_KycBankSheet> createState() => _KycBankSheetState();
+}
+
+class _KycBankSheetState extends State<_KycBankSheet> {
+  String _query = '';
+
+  @override
+  Widget build(BuildContext context) {
+    AppColors.watch(context);
+    final rows = widget.banks
+        .where((bank) =>
+            '${bank.name} ${bank.slug} ${bank.code}'.toLowerCase().contains(
+                  _query,
+                ))
+        .toList(growable: false);
+    final media = MediaQuery.of(context);
+    final available =
+        (media.size.height - media.viewInsets.bottom - media.padding.top - 64)
+            .clamp(220.0, media.size.height * 0.72)
+            .toDouble();
+
+    return Padding(
+      padding: EdgeInsets.only(bottom: media.viewInsets.bottom),
+      child: SafeArea(
+        top: false,
+        child: SizedBox(
+          height: available,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(
+                  AppSpacing.lg,
+                  AppSpacing.sm,
+                  AppSpacing.lg,
+                  AppSpacing.md,
+                ),
+                child: Text('Choose your bank', style: AppTextStyles.headingL),
+              ),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
+                child: TextField(
+                  autofocus: false,
+                  decoration: const InputDecoration(
+                    labelText: 'Search banks',
+                    hintText: 'Bank name or code',
+                    prefixIcon: Icon(Icons.search_rounded),
+                  ),
+                  onChanged: (value) => setState(
+                    () => _query = value.trim().toLowerCase(),
+                  ),
+                ),
+              ),
+              const SizedBox(height: AppSpacing.sm),
+              if (rows.isEmpty)
+                Padding(
+                  padding: const EdgeInsets.all(AppSpacing.lg),
+                  child: Text(
+                    'No banks match. Try another name or code.',
+                    style: AppTextStyles.bodyM,
+                  ),
+                ),
+              Expanded(
+                child: ListView.separated(
+                  keyboardDismissBehavior:
+                      ScrollViewKeyboardDismissBehavior.onDrag,
+                  itemCount: rows.length,
+                  separatorBuilder: (_, __) =>
+                      Divider(height: 1, color: AppColors.divider),
+                  itemBuilder: (context, index) {
+                    final bank = rows[index];
+                    return ListTile(
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: AppSpacing.lg,
+                        vertical: AppSpacing.xs,
+                      ),
+                      leading: CircleAvatar(
+                        backgroundColor: AppColors.surfaceVariant,
+                        child: Icon(
+                          Icons.account_balance_outlined,
+                          color: AppColors.textSecondary,
+                        ),
+                      ),
+                      title: Text(bank.name, style: AppTextStyles.labelM),
+                      subtitle: Text(bank.code, style: AppTextStyles.caption),
+                      trailing: bank.code == widget.selectedCode
+                          ? Icon(Icons.check_circle_rounded,
+                              color: AppColors.primary)
+                          : null,
+                      onTap: () => Navigator.of(context).pop(bank),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _KycConsentTile extends StatelessWidget {
+  final Key? tileKey;
+  final bool value;
+  final bool enabled;
+  final String title;
+  final ValueChanged<bool> onChanged;
+
+  const _KycConsentTile({
+    this.tileKey,
+    required this.value,
+    required this.enabled,
+    required this.title,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    AppColors.watch(context);
+    return Material(
+      color: Colors.transparent,
+      child: CheckboxListTile(
+        key: tileKey,
+        value: value,
+        onChanged: enabled ? (next) => onChanged(next ?? false) : null,
+        controlAffinity: ListTileControlAffinity.leading,
+        contentPadding: EdgeInsets.zero,
+        dense: true,
+        visualDensity: VisualDensity.compact,
+        title: Text(title, style: AppTextStyles.bodyS),
       ),
     );
   }
@@ -524,30 +1455,339 @@ class _StatePanel extends StatelessWidget {
 
 class _VerificationForm extends StatelessWidget {
   final int stepIndex;
+  final String bankName;
   final String documentType;
+  final KycService service;
   final TextEditingController idNumberController;
   final TextEditingController dateOfBirthController;
   final TextEditingController firstNameController;
   final TextEditingController lastNameController;
+  final TextEditingController phoneController;
+  final String? detailsError;
+  final bool profileIdentityLocked;
+  final VoidCallback onDetailsChanged, onEditDetails;
+  final VoidCallback? onSupport;
+  final TextEditingController bankCodeController;
+  final TextEditingController accountNumberController;
   final bool consentAccepted;
+  final bool accountSetupConsent;
   final bool isSubmitting;
   final ValueChanged<bool> onConsentChanged;
+  final ValueChanged<bool> onAccountSetupConsentChanged;
   final ValueChanged<DateTime> onDateSelected;
-  final VoidCallback onBack;
-  final VoidCallback onNext;
-  final VoidCallback onSubmit;
+  final ValueChanged<KycBankOption> onBankSelected;
 
   const _VerificationForm({
     required this.stepIndex,
+    required this.bankName,
     required this.documentType,
+    required this.service,
     required this.idNumberController,
     required this.dateOfBirthController,
     required this.firstNameController,
     required this.lastNameController,
+    required this.phoneController,
+    required this.detailsError,
+    required this.profileIdentityLocked,
+    required this.onDetailsChanged,
+    required this.onEditDetails,
+    required this.onSupport,
+    required this.bankCodeController,
+    required this.accountNumberController,
     required this.consentAccepted,
+    required this.accountSetupConsent,
+    required this.onAccountSetupConsentChanged,
     required this.isSubmitting,
     required this.onConsentChanged,
     required this.onDateSelected,
+    required this.onBankSelected,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    AppColors.watch(context);
+    final reviewedPhone = normalizeNigerianKycPhone(phoneController.text);
+    final titles = [
+      'Confirm your legal name',
+      'Your linked bank account',
+      'Enter your $documentType number',
+      'Confirm your date of birth',
+      'Review and consent',
+    ];
+    final descriptions = [
+      'Use your BVN name and Nigerian phone number.',
+      'Paystack checks the bank account connected to your BVN.',
+      'Use the 11-digit number linked to your profile.',
+      'This must match the identity record exactly.',
+      'Your details are shared securely with Paystack for verification.',
+    ];
+
+    return AnimatedSwitcher(
+      duration: const Duration(milliseconds: 220),
+      child: SingleChildScrollView(
+        key: ValueKey(stepIndex),
+        keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+        padding: const EdgeInsets.fromLTRB(
+          AppSpacing.lg,
+          AppSpacing.lg,
+          AppSpacing.lg,
+          AppSpacing.xl,
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _KycPageIntro(
+              eyebrow:
+                  '$documentType VERIFICATION · STEP ${stepIndex + 1} OF 5',
+              title: titles[stepIndex],
+              description: descriptions[stepIndex],
+              icon: stepIndex == 4
+                  ? Icons.fact_check_outlined
+                  : Icons.verified_user_outlined,
+            ),
+            const SizedBox(height: AppSpacing.lg),
+            _KycProgressIndicator(currentStep: stepIndex),
+            const SizedBox(height: AppSpacing.lg),
+            _Panel(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (stepIndex == 0) ...[
+                    Text('Legal name and phone', style: AppTextStyles.labelM),
+                    const SizedBox(height: AppSpacing.sm),
+                    LayoutBuilder(
+                      builder: (context, constraints) {
+                        final fields = [
+                          TextField(
+                            key: const ValueKey('kyc-first-name'),
+                            controller: firstNameController,
+                            readOnly: profileIdentityLocked,
+                            onChanged: (_) => onDetailsChanged(),
+                            autofillHints: const [AutofillHints.givenName],
+                            enabled: !isSubmitting,
+                            textInputAction: TextInputAction.next,
+                            textCapitalization: TextCapitalization.words,
+                            decoration: const InputDecoration(
+                              labelText: 'First name',
+                              hintText: 'e.g. Ada',
+                            ),
+                          ),
+                          TextField(
+                            key: const ValueKey('kyc-last-name'),
+                            controller: lastNameController,
+                            readOnly: profileIdentityLocked,
+                            onChanged: (_) => onDetailsChanged(),
+                            autofillHints: const [AutofillHints.familyName],
+                            enabled: !isSubmitting,
+                            textInputAction: TextInputAction.done,
+                            textCapitalization: TextCapitalization.words,
+                            decoration: const InputDecoration(
+                              labelText: 'Last name',
+                              hintText: 'e.g. Lovelace',
+                            ),
+                          ),
+                        ];
+                        if (constraints.maxWidth < 420) {
+                          return Column(
+                            children: [
+                              fields[0],
+                              const SizedBox(height: AppSpacing.sm),
+                              fields[1],
+                            ],
+                          );
+                        }
+                        return Row(
+                          children: [
+                            Expanded(child: fields[0]),
+                            const SizedBox(width: AppSpacing.sm),
+                            Expanded(child: fields[1]),
+                          ],
+                        );
+                      },
+                    ),
+                    const SizedBox(height: AppSpacing.lg),
+                    TextField(
+                      key: const ValueKey('kyc-phone'),
+                      controller: phoneController,
+                      enabled: !isSubmitting,
+                      readOnly: profileIdentityLocked,
+                      onChanged: (_) => onDetailsChanged(),
+                      keyboardType: TextInputType.phone,
+                      textInputAction: TextInputAction.done,
+                      autofillHints: const [AutofillHints.telephoneNumber],
+                      decoration: const InputDecoration(
+                        labelText: 'Phone number',
+                        hintText: '0801 234 5678',
+                        helperText: 'Nigerian number, starting with 0 or +234',
+                        helperMaxLines: 2,
+                      ),
+                    ),
+                    const SizedBox(height: AppSpacing.sm),
+                    Text(
+                        'Submitting saves your reviewed name, phone and birth year to your profile. Later corrections require support.',
+                        style: AppTextStyles.caption),
+                    if (detailsError != null) ...[
+                      const SizedBox(height: AppSpacing.md),
+                      Semantics(
+                          liveRegion: true,
+                          child: Text(detailsError!,
+                              style: AppTextStyles.bodyS
+                                  .copyWith(color: AppColors.error))),
+                    ],
+                    if (onSupport != null) ...[
+                      const SizedBox(height: AppSpacing.md),
+                      Text(kycLockedProfileMessage, style: AppTextStyles.bodyS),
+                      TextButton.icon(
+                          onPressed: isSubmitting ? null : onSupport,
+                          icon: const Icon(Icons.support_agent_rounded),
+                          label: const Text('Contact support')),
+                    ],
+                  ] else if (stepIndex == 1) ...[
+                    _KycBankPicker(
+                      service: service,
+                      selectedCode: bankCodeController.text,
+                      enabled: !isSubmitting,
+                      onSelected: onBankSelected,
+                    ),
+                    const SizedBox(height: AppSpacing.sm),
+                    TextField(
+                      key: const ValueKey('kyc-account-number'),
+                      controller: accountNumberController,
+                      enabled: !isSubmitting,
+                      keyboardType: TextInputType.number,
+                      textInputAction: TextInputAction.done,
+                      inputFormatters: [
+                        FilteringTextInputFormatter.digitsOnly,
+                        LengthLimitingTextInputFormatter(10),
+                      ],
+                      decoration: const InputDecoration(
+                        labelText: 'Account number',
+                        hintText: '10 digits',
+                      ),
+                    ),
+                    const SizedBox(height: AppSpacing.sm),
+                    Text(
+                      'Your account number is sent over the encrypted TRUSTPAY connection and is not shown in history.',
+                      style: AppTextStyles.caption,
+                    ),
+                  ] else if (stepIndex == 2) ...[
+                    Text('$documentType number', style: AppTextStyles.labelM),
+                    const SizedBox(height: AppSpacing.sm),
+                    TextField(
+                      key: const ValueKey('kyc-identity-number'),
+                      controller: idNumberController,
+                      enabled: !isSubmitting,
+                      obscureText: true,
+                      enableSuggestions: false,
+                      autocorrect: false,
+                      keyboardType: TextInputType.number,
+                      textInputAction: TextInputAction.done,
+                      inputFormatters: [
+                        FilteringTextInputFormatter.digitsOnly,
+                        LengthLimitingTextInputFormatter(11),
+                      ],
+                      decoration: InputDecoration(
+                        labelText: '$documentType number',
+                        hintText: '11 digits',
+                      ),
+                    ),
+                    const SizedBox(height: AppSpacing.sm),
+                    Text(
+                      'Your full identity number is never shown in history.',
+                      style: AppTextStyles.caption,
+                    ),
+                  ] else if (stepIndex == 3) ...[
+                    Text('Date of birth', style: AppTextStyles.labelM),
+                    const SizedBox(height: AppSpacing.sm),
+                    _DateOfBirthPickerField(
+                      controller: dateOfBirthController,
+                      enabled: !isSubmitting,
+                      onDateSelected: onDateSelected,
+                    ),
+                    const SizedBox(height: AppSpacing.sm),
+                    Text(
+                      'Choose the date linked to your identity record. Future dates are not accepted.',
+                      style: AppTextStyles.caption,
+                    ),
+                  ] else ...[
+                    Text('Check your details', style: AppTextStyles.labelM),
+                    const SizedBox(height: AppSpacing.sm),
+                    _ReviewRow(
+                      label: 'Legal name',
+                      value:
+                          '${firstNameController.text.trim()} ${lastNameController.text.trim()}'
+                              .trim(),
+                    ),
+                    const SizedBox(height: AppSpacing.sm),
+                    _ReviewRow(
+                        label: 'Phone number',
+                        value: reviewedPhone == null
+                            ? 'Not provided'
+                            : '+234 ••• ••• ${reviewedPhone.substring(reviewedPhone.length - 4)}'),
+                    Align(
+                        alignment: Alignment.centerRight,
+                        child: TextButton.icon(
+                            onPressed: isSubmitting ? null : onEditDetails,
+                            icon: const Icon(Icons.edit_outlined, size: 18),
+                            label: const Text('Edit personal details'))),
+                    const SizedBox(height: AppSpacing.sm),
+                    _ReviewRow(label: 'Bank', value: bankName),
+                    const SizedBox(height: AppSpacing.sm),
+                    _ReviewRow(
+                        label: 'Linked account',
+                        value:
+                            '••••••${accountNumberController.text.length >= 4 ? accountNumberController.text.substring(accountNumberController.text.length - 4) : ''}'),
+                    const SizedBox(height: AppSpacing.sm),
+                    _ReviewRow(label: 'Identity type', value: documentType),
+                    const SizedBox(height: AppSpacing.sm),
+                    _ReviewRow(
+                      label: 'Identity number',
+                      value: '11-digit $documentType securely entered',
+                    ),
+                    const SizedBox(height: AppSpacing.sm),
+                    _ReviewRow(
+                      label: 'Date of birth',
+                      value: dateOfBirthController.text,
+                    ),
+                    const SizedBox(height: AppSpacing.lg),
+                    _KycConsentTile(
+                      tileKey: const ValueKey('kyc-consent'),
+                      value: consentAccepted,
+                      enabled: !isSubmitting,
+                      title:
+                          'I agree to share my identity and bank details securely with Paystack for verification.',
+                      onChanged: onConsentChanged,
+                    ),
+                    const SizedBox(height: AppSpacing.xs),
+                    _KycConsentTile(
+                      tileKey: const ValueKey('kyc-account-setup-consent'),
+                      value: accountSetupConsent,
+                      enabled: !isSubmitting,
+                      title:
+                          'I authorize TRUSTPAY to create a dedicated NGN receiving account after verification.',
+                      onChanged: onAccountSetupConsentChanged,
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _VerificationNavigation extends StatelessWidget {
+  final int stepIndex;
+  final bool isSubmitting;
+  final VoidCallback onBack;
+  final VoidCallback onNext;
+  final VoidCallback onSubmit;
+
+  const _VerificationNavigation({
+    required this.stepIndex,
+    required this.isSubmitting,
     required this.onBack,
     required this.onNext,
     required this.onSubmit,
@@ -556,179 +1796,45 @@ class _VerificationForm extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     AppColors.watch(context);
-    final titles = [
-      'Confirm your legal name',
-      'Your first identity check',
-      'Enter your $documentType number',
-      'Confirm your date of birth',
-      'Review and consent',
-    ];
-    final descriptions = [
-      'Use the name shown on your identity record.',
-      documentType == 'NIN'
-          ? 'Step 1 of 2. We start with your NIN.'
-          : 'Step 2 of 2. Your NIN is verified; now verify your BVN.',
-      'Use the 11-digit number linked to your profile.',
-      'This must match the identity record exactly.',
-      'Your details are shared securely with Ninja for this check.',
-    ];
-
-    return AnimatedSwitcher(
-      duration: const Duration(milliseconds: 220),
-      child: _Panel(
-        key: ValueKey(stepIndex),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+    return Container(
+      padding: const EdgeInsets.fromLTRB(
+        AppSpacing.lg,
+        AppSpacing.sm,
+        AppSpacing.lg,
+        AppSpacing.md,
+      ),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        border: Border(top: BorderSide(color: AppColors.border)),
+      ),
+      child: SafeArea(
+        top: false,
+        child: Row(
           children: [
-            Text(titles[stepIndex], style: AppTextStyles.headingM),
-            const SizedBox(height: AppSpacing.xs),
-            Text(descriptions[stepIndex], style: AppTextStyles.bodyS),
-            const SizedBox(height: AppSpacing.lg),
-            if (stepIndex == 0) ...[
-              Text('Legal name', style: AppTextStyles.labelM),
-              const SizedBox(height: AppSpacing.sm),
-              Row(children: [
-                Expanded(
-                    child: TextField(
-                        controller: firstNameController,
-                        enabled: !isSubmitting,
-                        textInputAction: TextInputAction.next,
-                        decoration:
-                            const InputDecoration(hintText: 'First name'))),
-                const SizedBox(width: AppSpacing.sm),
-                Expanded(
-                    child: TextField(
-                        controller: lastNameController,
-                        enabled: !isSubmitting,
-                        textInputAction: TextInputAction.next,
-                        decoration:
-                            const InputDecoration(hintText: 'Last name'))),
-              ]),
-            ] else if (stepIndex == 1) ...[
-              _Panel(
-                child: Row(
-                  children: [
-                    Icon(Icons.verified_user_outlined,
-                        color: AppColors.primary),
-                    const SizedBox(width: AppSpacing.sm),
-                    Expanded(
-                      child: Text(
-                        documentType == 'NIN'
-                            ? 'Step 1 of 2  ·  Verify NIN'
-                            : 'Step 2 of 2  ·  Verify BVN',
-                        style: AppTextStyles.labelM,
-                      ),
-                    ),
-                  ],
+            if (stepIndex > 0)
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: isSubmitting ? null : onBack,
+                  child: const Text('Back'),
                 ),
               ),
-              const SizedBox(height: AppSpacing.sm),
-              Text(
-                documentType == 'NIN'
-                    ? 'After this check, we will ask for your BVN.'
-                    : 'This is the final identity check for your account.',
-                style: AppTextStyles.bodyS,
+            if (stepIndex > 0) const SizedBox(width: AppSpacing.sm),
+            Expanded(
+              flex: stepIndex > 0 ? 2 : 1,
+              child: ElevatedButton(
+                onPressed: isSubmitting
+                    ? null
+                    : stepIndex == 4
+                        ? onSubmit
+                        : onNext,
+                child: isSubmitting
+                    ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : Text(stepIndex == 4 ? 'Submit verification' : 'Continue'),
               ),
-            ] else if (stepIndex == 2) ...[
-              Text('$documentType number', style: AppTextStyles.labelM),
-              const SizedBox(height: AppSpacing.sm),
-              TextField(
-                key: const ValueKey('kyc-identity-number'),
-                controller: idNumberController,
-                enabled: !isSubmitting,
-                obscureText: documentType != 'NIN',
-                enableSuggestions: false,
-                autocorrect: false,
-                keyboardType: TextInputType.number,
-                textInputAction: TextInputAction.next,
-                inputFormatters: [
-                  FilteringTextInputFormatter.digitsOnly,
-                  LengthLimitingTextInputFormatter(11),
-                ],
-                decoration: const InputDecoration(hintText: '11 digits'),
-              ),
-              const SizedBox(height: AppSpacing.sm),
-              Text(
-                'Your full identity number is never shown in history.',
-                style: AppTextStyles.caption,
-              ),
-            ] else if (stepIndex == 3) ...[
-              Text('Date of birth', style: AppTextStyles.labelM),
-              const SizedBox(height: AppSpacing.sm),
-              _DateOfBirthPickerField(
-                controller: dateOfBirthController,
-                enabled: !isSubmitting,
-                onDateSelected: onDateSelected,
-              ),
-            ] else ...[
-              _ReviewRow(
-                  label: 'Legal name',
-                  value:
-                      '${firstNameController.text.trim()} ${lastNameController.text.trim()}'
-                          .trim()),
-              const SizedBox(height: AppSpacing.sm),
-              _ReviewRow(label: 'Identity type', value: documentType),
-              const SizedBox(height: AppSpacing.sm),
-              _ReviewRow(
-                label: 'Identity number',
-                value: '11-digit $documentType securely entered',
-              ),
-              const SizedBox(height: AppSpacing.sm),
-              _ReviewRow(
-                label: 'Date of birth',
-                value: dateOfBirthController.text,
-              ),
-              const SizedBox(height: AppSpacing.md),
-              Material(
-                color: Colors.transparent,
-                child: CheckboxListTile(
-                  key: const ValueKey('kyc-consent'),
-                  value: consentAccepted,
-                  onChanged: isSubmitting
-                      ? null
-                      : (value) => onConsentChanged(value ?? false),
-                  controlAffinity: ListTileControlAffinity.leading,
-                  contentPadding: EdgeInsets.zero,
-                  dense: true,
-                  visualDensity: VisualDensity.compact,
-                  title: Text(
-                    'I agree to share my identity details securely with Ninja.',
-                    style: AppTextStyles.bodyS,
-                  ),
-                ),
-              ),
-            ],
-            const SizedBox(height: AppSpacing.lg),
-            Row(
-              children: [
-                if (stepIndex > 0)
-                  Expanded(
-                    child: OutlinedButton(
-                      onPressed: isSubmitting ? null : onBack,
-                      child: const Text('Back'),
-                    ),
-                  ),
-                if (stepIndex > 0) const SizedBox(width: AppSpacing.sm),
-                Expanded(
-                  flex: stepIndex > 0 ? 2 : 1,
-                  child: ElevatedButton(
-                    onPressed: isSubmitting
-                        ? null
-                        : stepIndex == 4
-                            ? onSubmit
-                            : onNext,
-                    child: isSubmitting
-                        ? const SizedBox(
-                            width: 20,
-                            height: 20,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : Text(stepIndex == 4
-                            ? 'Verify $documentType'
-                            : 'Continue'),
-                  ),
-                ),
-              ],
             ),
           ],
         ),
@@ -780,9 +1886,12 @@ class _DateOfBirthPickerField extends StatelessWidget {
                         onPressed: () => Navigator.of(context).pop(),
                         child: const Text('Cancel'),
                       ),
-                      const Spacer(),
-                      Text('Date of birth', style: AppTextStyles.labelM),
-                      const Spacer(),
+                      const SizedBox(width: AppSpacing.sm),
+                      Expanded(
+                          child: Text('Date of birth',
+                              style: AppTextStyles.labelM,
+                              textAlign: TextAlign.center)),
+                      const SizedBox(width: AppSpacing.sm),
                       CupertinoButton(
                         key: const ValueKey('kyc-date-picker-done'),
                         padding: EdgeInsets.zero,
@@ -879,12 +1988,12 @@ class _KycProgressIndicator extends StatelessWidget {
   Widget build(BuildContext context) {
     AppColors.watch(context);
     return Row(
-      children: List.generate(4, (index) {
+      children: List.generate(5, (index) {
         final active = index <= currentStep;
         return Expanded(
           child: Container(
             height: 4,
-            margin: EdgeInsets.only(right: index == 3 ? 0 : AppSpacing.xs),
+            margin: EdgeInsets.only(right: index == 4 ? 0 : AppSpacing.xs),
             decoration: BoxDecoration(
               color: active ? AppColors.primary : AppColors.border,
               borderRadius: BorderRadius.circular(AppRadius.full),
@@ -896,93 +2005,25 @@ class _KycProgressIndicator extends StatelessWidget {
   }
 }
 
-class _HistoryPanel extends StatelessWidget {
-  final List<KycDocumentSummary> documents;
-
-  const _HistoryPanel({required this.documents});
-
-  @override
-  Widget build(BuildContext context) {
-    AppColors.watch(context);
-    return _Panel(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text('Verification history', style: AppTextStyles.headingM),
-          const SizedBox(height: AppSpacing.sm),
-          if (documents.isEmpty)
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: AppSpacing.md),
-              child: Center(
-                child: Column(
-                  children: [
-                    Icon(
-                      Icons.verified_user_outlined,
-                      size: 24,
-                      color: AppColors.textHint,
-                    ),
-                    const SizedBox(height: AppSpacing.sm),
-                    Text('No verification submissions yet.',
-                        style: AppTextStyles.labelM),
-                    const SizedBox(height: AppSpacing.xs),
-                    Text(
-                      'Your verification history will appear after you submit a check.',
-                      style: AppTextStyles.bodyS,
-                      textAlign: TextAlign.center,
-                    ),
-                  ],
-                ),
-              ),
-            )
-          else
-            ...documents.map(
-              (document) => Padding(
-                padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(document.type, style: AppTextStyles.labelM),
-                          if (document.updatedAt != null)
-                            Text(
-                              DateFormat.yMMMd().format(document.updatedAt!),
-                              style: AppTextStyles.caption,
-                            ),
-                        ],
-                      ),
-                    ),
-                    Text(_displayStatus(document.status),
-                        style: AppTextStyles.labelS),
-                  ],
-                ),
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-}
-
 class _Panel extends StatelessWidget {
   final Widget child;
 
-  const _Panel({super.key, required this.child});
+  const _Panel({required this.child});
 
   @override
   Widget build(BuildContext context) {
     AppColors.watch(context);
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(AppSpacing.lg),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(AppRadius.lg),
-        border: Border.all(color: AppColors.border),
-      ),
-      child: child,
-    );
+    return SizedBox(
+        width: double.infinity,
+        child: Material(
+          color: AppColors.surface,
+          clipBehavior: Clip.antiAlias,
+          shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(AppRadius.lg),
+              side: BorderSide(color: AppColors.border)),
+          child: Padding(
+              padding: const EdgeInsets.all(AppSpacing.lg), child: child),
+        ));
   }
 }
 
@@ -1032,33 +2073,9 @@ class _ErrorView extends StatelessWidget {
   }
 }
 
-int _tierRank(String tier) {
-  final match = RegExp(r'(\d+)').firstMatch(tier);
-  return int.tryParse(match?.group(1) ?? '0') ?? 0;
-}
-
-bool _showVerificationState(KycOverview overview) {
-  return overview.isVerified ||
-      _tierRank(overview.tier) >= 2 ||
-      overview.status == 'REVIEW_REQUIRED' ||
-      overview.status == 'SUBMITTED' ||
-      overview.status == 'PENDING_REVIEW' ||
-      overview.status == 'REJECTED' ||
-      overview.status == 'FAILED';
-}
-
-String _displayStatus(String status) {
-  switch (status) {
-    case 'VERIFIED':
-      return 'Verified';
-    case 'REJECTED':
-    case 'FAILED':
-      return 'Needs attention';
-    case 'SUBMITTED':
-    case 'PENDING_REVIEW':
-    case 'REVIEW_REQUIRED':
-      return 'Under review';
-    default:
-      return 'Pending';
-  }
+bool _isDocumentPending(String status) {
+  return status == 'SUBMITTED' ||
+      status == 'PENDING' ||
+      status == 'PENDING_REVIEW' ||
+      status == 'REVIEW_REQUIRED';
 }

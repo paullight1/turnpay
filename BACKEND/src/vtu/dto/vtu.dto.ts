@@ -1,4 +1,9 @@
 import {
+  IsEmail,
+  Validate,
+  ValidatorConstraint,
+  ValidatorConstraintInterface,
+  ValidationArguments,
   IsString,
   IsIn,
   IsOptional,
@@ -19,6 +24,14 @@ export const VTU_SUBSCRIPTION_TYPES = ['change', 'renew'] as const;
 export type VtuType = (typeof VTU_TYPES)[number];
 export type VtuMeterType = (typeof VTU_METER_TYPES)[number];
 export type VtuSubscriptionType = (typeof VTU_SUBSCRIPTION_TYPES)[number];
+export const EXTENDED_VTU_PROVIDERS: ReadonlySet<string> = new Set([
+  'smile-airtime',
+  'smile',
+  'glo-sme',
+  '9mobile-sme',
+  'showmax',
+  'foreign-airtime',
+]);
 const VTU_PROVIDERS = [
   'mtn',
   'airtel',
@@ -39,6 +52,12 @@ const VTU_PROVIDERS = [
   'bedc',
   'aba',
   'yedc',
+  'smile-airtime',
+  'smile',
+  'glo-sme',
+  '9mobile-sme',
+  'showmax',
+  'foreign-airtime',
 ] as const;
 const NIGERIA_PHONE_REGEX = /^\+234[789]\d{9}$/;
 const CUSTOMER_IDENTIFIER_REGEX = /^[A-Za-z0-9-]{5,32}$/;
@@ -56,7 +75,48 @@ function PhoneField() {
   return Transform(({ value }) => normalizeNigeriaPhone(value));
 }
 
+export function isSmile(provider: string) {
+  return provider === 'smile' || provider === 'smile-airtime';
+}
+export function needsPackage(dto: {
+  type: string;
+  provider: string;
+  subscriptionType?: string;
+}) {
+  return (
+    dto.type === 'data' ||
+    isSmile(dto.provider) ||
+    dto.provider === 'foreign-airtime' ||
+    dto.provider === 'showmax' ||
+    (dto.type === 'cable' && dto.subscriptionType === 'change')
+  );
+}
+@ValidatorConstraint({ name: 'vtuRecipient', async: false })
+class VtuRecipient implements ValidatorConstraintInterface {
+  validate(value: unknown, args: ValidationArguments) {
+    const dto = args.object as PurchaseVtuDto;
+    return (
+      typeof value === 'string' &&
+      (dto.provider === 'foreign-airtime'
+        ? /^\+[1-9]\d{6,14}$/
+        : NIGERIA_PHONE_REGEX
+      ).test(value)
+    );
+  }
+  defaultMessage() {
+    return 'Enter a valid recipient phone number with country code';
+  }
+}
+
+export class InternationalCountryDto {
+  @IsString() @Matches(/^[A-Z]{2}$/) countryCode: string;
+}
+export class ValidateSmileDto {
+  @IsEmail() @MaxLength(254) smileEmail: string;
+}
+
 export class GetVtuProvidersDto {
+  @IsOptional() @IsIn(['extended']) catalog?: string;
   @IsString()
   @IsOptional()
   @IsIn(VTU_TYPES)
@@ -68,6 +128,21 @@ export class GetVtuPackagesDto {
   @IsNotEmpty()
   @IsIn(VTU_PROVIDERS)
   provider: (typeof VTU_PROVIDERS)[number];
+
+  @ValidateIf(
+    (dto: GetVtuPackagesDto) =>
+      dto.provider === 'foreign-airtime' || dto.countryCode !== undefined,
+  )
+  @IsString()
+  @Matches(/^[A-Z]{2}$/)
+  countryCode?: string;
+  @ValidateIf(
+    (dto: GetVtuPackagesDto) =>
+      dto.provider === 'foreign-airtime' || dto.operatorId !== undefined,
+  )
+  @IsString()
+  @Matches(/^\d{1,12}$/)
+  operatorId?: string;
 }
 
 export class ValidateVtuCustomerDto {
@@ -172,12 +247,15 @@ export class PurchaseVtuDto {
 
   @PhoneField()
   @IsString()
-  @ValidateIf((dto: PurchaseVtuDto) => ['airtime', 'data'].includes(dto.type))
+  @ValidateIf(
+    (dto: PurchaseVtuDto) =>
+      dto.recipientNumber !== undefined ||
+      (!isSmile(dto.provider) &&
+        (['airtime', 'data'].includes(dto.type) || dto.provider === 'showmax')),
+  )
   @IsNotEmpty()
-  @MaxLength(15)
-  @Matches(NIGERIA_PHONE_REGEX, {
-    message: 'recipientNumber must be a valid Nigerian phone number',
-  })
+  @MaxLength(16)
+  @Validate(VtuRecipient)
   recipientNumber?: string;
 
   @PhoneField()
@@ -196,16 +274,18 @@ export class PurchaseVtuDto {
 
   @IsString()
   @ValidateIf(
-    (dto: PurchaseVtuDto) =>
-      dto.type === 'data' ||
-      (dto.type === 'cable' && dto.subscriptionType === 'change'),
+    (dto: PurchaseVtuDto) => needsPackage(dto) || dto.packageId !== undefined,
   )
   @IsNotEmpty()
   @MaxLength(100)
   packageId?: string;
 
   @IsString()
-  @ValidateIf((dto: PurchaseVtuDto) => dto.type === 'cable')
+  @ValidateIf(
+    (dto: PurchaseVtuDto) =>
+      (dto.type === 'cable' && dto.provider !== 'showmax') ||
+      dto.smartCardNumber !== undefined,
+  )
   @IsNotEmpty()
   @MaxLength(32)
   @Matches(CUSTOMER_IDENTIFIER_REGEX, {
@@ -214,12 +294,19 @@ export class PurchaseVtuDto {
   smartCardNumber?: string;
 
   @IsString()
-  @ValidateIf((dto: PurchaseVtuDto) => dto.type === 'cable')
+  @ValidateIf(
+    (dto: PurchaseVtuDto) =>
+      (dto.type === 'cable' && dto.provider !== 'showmax') ||
+      dto.subscriptionType !== undefined,
+  )
   @IsIn(VTU_SUBSCRIPTION_TYPES)
   subscriptionType?: VtuSubscriptionType;
 
   @IsString()
-  @ValidateIf((dto: PurchaseVtuDto) => dto.type === 'electricity')
+  @ValidateIf(
+    (dto: PurchaseVtuDto) =>
+      dto.type === 'electricity' || dto.meterNumber !== undefined,
+  )
   @IsNotEmpty()
   @MaxLength(32)
   @Matches(/^\d{5,32}$/, {
@@ -228,12 +315,55 @@ export class PurchaseVtuDto {
   meterNumber?: string;
 
   @IsString()
-  @ValidateIf((dto: PurchaseVtuDto) => dto.type === 'electricity')
+  @ValidateIf(
+    (dto: PurchaseVtuDto) =>
+      dto.type === 'electricity' || dto.meterType !== undefined,
+  )
   @IsIn(VTU_METER_TYPES)
   meterType?: VtuMeterType;
+
+  @ValidateIf(
+    (dto: PurchaseVtuDto) =>
+      isSmile(dto.provider) || dto.smileEmail !== undefined,
+  )
+  @IsEmail()
+  @MaxLength(254)
+  smileEmail?: string;
+  @ValidateIf(
+    (dto: PurchaseVtuDto) =>
+      isSmile(dto.provider) || dto.smileAccountId !== undefined,
+  )
+  @IsString()
+  @Matches(/^\d{5,32}$/)
+  smileAccountId?: string;
+  @ValidateIf(
+    (dto: PurchaseVtuDto) =>
+      dto.provider === 'foreign-airtime' || dto.countryCode !== undefined,
+  )
+  @IsString()
+  @Matches(/^[A-Z]{2}$/)
+  countryCode?: string;
+  @ValidateIf(
+    (dto: PurchaseVtuDto) =>
+      dto.provider === 'foreign-airtime' || dto.operatorId !== undefined,
+  )
+  @IsString()
+  @Matches(/^\d{1,12}$/)
+  operatorId?: string;
+  @IsOptional()
+  @IsString()
+  @Matches(MONEY_AMOUNT_PATTERN)
+  expectedTotal?: string;
+  @IsOptional() @IsString() @Matches(MONEY_AMOUNT_PATTERN) faceValue?: string;
 
   @IsString()
   @IsOptional()
   @Matches(/^\d{4,6}$/)
   transactionPin?: string;
+}
+
+export class VtuQuoteDto extends GetVtuPackagesDto {
+  @IsString() @IsNotEmpty() @MaxLength(100) packageId: string;
+  @IsOptional() @IsString() @Matches(MONEY_AMOUNT_PATTERN) faceValue?: string;
+  @IsString() @IsIn(VTU_TYPES) type: VtuType;
 }

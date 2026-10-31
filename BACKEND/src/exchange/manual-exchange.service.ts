@@ -28,6 +28,8 @@ import {
 } from './dto/manual-exchange.dto';
 import {
   ManualStatus,
+  manualDeliveryOptions,
+  assertManualDelivery,
   nextManualExchangeStatus,
   quoteManualExchange,
 } from './manual-exchange.policy';
@@ -70,9 +72,14 @@ export class ManualExchangeService {
   configuration() {
     return {
       enabled: this.enabled(),
-      sourceCurrency: 'NGN',
-      targetCurrency: 'GHS',
-      supportedSourceCurrencies: ['NGN', 'GHS'],
+      sourceCurrency: 'GHS',
+      targetCurrency: 'NGN',
+      supportedSourceCurrencies: ['GHS', 'NGN'],
+      deliveryPolicyVersion: 1,
+      settlementOptions: {
+        GHS: manualDeliveryOptions('GHS'),
+        NGN: manualDeliveryOptions('NGN'),
+      },
     };
   }
   private enabled() {
@@ -140,16 +147,6 @@ export class ManualExchangeService {
     const sourceCurrency = dto.sourceCurrency ?? 'NGN';
     const targetCurrency = sourceCurrency === 'NGN' ? 'GHS' : 'NGN';
     await this.eligible(userId);
-    if (
-      dto.settlementMode === 'WALLET' &&
-      !(await this.prisma.wallet.findUnique({
-        where: { userId_currency: { userId, currency: targetCurrency } },
-        select: { id: true },
-      }))
-    )
-      throw new ConflictException(
-        `Set up your ${targetCurrency} wallet before creating a wallet exchange`,
-      );
     await this.pin.verifyRequired(userId, dto.transactionPin);
     const keyHash = this.key(key);
     const business = {
@@ -172,6 +169,17 @@ export class ManualExchangeService {
         );
       return this.present(existing);
     }
+    assertManualDelivery(sourceCurrency, dto.settlementMode);
+    if (
+      dto.settlementMode === 'WALLET' &&
+      !(await this.prisma.wallet.findUnique({
+        where: { userId_currency: { userId, currency: targetCurrency } },
+        select: { id: true },
+      }))
+    )
+      throw new ConflictException(
+        `Set up your ${targetCurrency} wallet before creating a wallet exchange`,
+      );
     if (
       dto.settlementMode === 'WALLET' &&
       (dto.destinationAccount ||
@@ -231,6 +239,10 @@ export class ManualExchangeService {
               createKeyHash: keyHash,
               createRequestHash: fingerprint,
               settlementMode: dto.settlementMode,
+              payoutWorkflow:
+                sourceCurrency === 'NGN' && dto.settlementMode !== 'WALLET'
+                  ? 'ADMIN_CEDIS'
+                  : 'LEGACY',
               ...quote,
               sourceCurrency,
               targetCurrency,
@@ -274,6 +286,56 @@ export class ManualExchangeService {
       }
       throw error;
     }
+  }
+  async queue(input: { status?: ManualStatus; cursor?: string } = {}) {
+    const { rows, groups } = await this.prisma.$transaction(
+      async (tx) => {
+        // Resolve the immutable boundary independently of its mutable status.
+        const anchor = input.cursor
+          ? await tx.manualExchangeOrder.findUnique({
+              where: { id: input.cursor },
+              select: { createdAt: true, id: true },
+            })
+          : null;
+        if (input.cursor && !anchor)
+          throw new BadRequestException(
+            'Queue position no longer exists. Refresh the queue.',
+          );
+        const rows = await tx.manualExchangeOrder.findMany({
+          where: {
+            ...(input.status ? { status: input.status } : {}),
+            ...(anchor
+              ? {
+                  OR: [
+                    { createdAt: { lt: anchor.createdAt } },
+                    { createdAt: anchor.createdAt, id: { lt: anchor.id } },
+                  ],
+                }
+              : {}),
+          },
+          orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+          take: 51,
+          include,
+        });
+        const groups = await tx.manualExchangeOrder.groupBy({
+          by: ['status'],
+          _count: { _all: true },
+        });
+        return { rows, groups };
+      },
+      {
+        isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead,
+        timeout: 5000,
+      },
+    );
+    const page = rows.slice(0, 50);
+    return {
+      items: page.map((row) => this.present(row, true)),
+      nextCursor: rows.length > 50 ? page.at(-1)!.id : null,
+      counts: Object.fromEntries(
+        groups.map((group) => [group.status, group._count._all]),
+      ),
+    };
   }
   async list(userId?: string, status?: ManualStatus) {
     const rows = await this.prisma.manualExchangeOrder.findMany({
@@ -497,7 +559,19 @@ export class ManualExchangeService {
   ) {
     const keyHash = this.key(key),
       fingerprint = requestHash(dto);
-    if (dto.action === 'MARK_SENT') {
+    // A committed replay is a read of financial facts. It must survive storage outages.
+    if (
+      await this.replay(
+        this.prisma,
+        id,
+        adminId,
+        dto.action,
+        keyHash,
+        fingerprint,
+      )
+    )
+      return this.present(await this.find(id), true);
+    if (dto.action === 'MARK_SENT' || dto.action === 'RECORD_CEDIS_SENT') {
       if (!dto.payoutProofObjectKey)
         throw new BadRequestException('Payout evidence is required');
       await this.verifyProof(id, adminId, dto.payoutProofObjectKey, 'PAYOUT');
@@ -506,6 +580,30 @@ export class ManualExchangeService {
       const row = await this.find(id, undefined, tx);
       if (await this.replay(tx, id, adminId, dto.action, keyHash, fingerprint))
         return this.present(row, true);
+      if (
+        dto.action === 'RECORD_CEDIS_SENT' &&
+        (row.sourceCurrency !== 'NGN' ||
+          row.targetCurrency !== 'GHS' ||
+          row.settlementMode === 'WALLET')
+      )
+        throw new BadRequestException(
+          'This action records only a manual cedi transfer for a naira-to-cedi order',
+        );
+      if (
+        dto.action === 'RECORD_CEDIS_SENT' &&
+        (!dto.payoutAmount ||
+          !new Decimal(dto.payoutAmount).eq(row.targetAmount))
+      )
+        throw new BadRequestException(
+          'The cedis sent must match the frozen payout amount',
+        );
+      if (
+        row.payoutWorkflow === 'ADMIN_CEDIS' &&
+        ['MARK_SENT', 'COMPLETE'].includes(dto.action)
+      )
+        throw new ConflictException(
+          'Use Confirm cedis sent with the actual cedi amount for this order',
+        );
       const next = nextManualExchangeStatus(
         row.status,
         row.settlementMode,
@@ -540,8 +638,33 @@ export class ManualExchangeService {
         });
         update.depositReference = reference;
       }
-      if (dto.action === 'CLAIM_PAYOUT') update.payoutClaimedBy = adminId;
-      if (dto.action === 'MARK_SENT') {
+      if (dto.action === 'CLAIM_PAYOUT') {
+        await this.eligible(row.userId, tx);
+        const credential = await tx.transactionPinCredential.findUnique({
+          where: { userId: row.userId },
+          select: { resetHoldUntil: true },
+        });
+        if (
+          credential?.resetHoldUntil &&
+          credential.resetHoldUntil > new Date()
+        )
+          throw new ForbiddenException(
+            'Payout is paused while the customer transaction PIN reset hold is active',
+          );
+        for (const currency of [row.sourceCurrency, row.targetCurrency])
+          await this.settlementHold.assertSettlementAllowed(
+            {
+              operation: 'MANUAL_EXCHANGE',
+              scope: 'MANUAL_EXCHANGE',
+              currency,
+              provider: 'MANUAL_ADMIN',
+              reference: row.reference,
+            },
+            tx,
+          );
+        update.payoutClaimedBy = adminId;
+      }
+      if (dto.action === 'MARK_SENT' || dto.action === 'RECORD_CEDIS_SENT') {
         if (row.payoutClaimedBy !== adminId)
           throw new ForbiddenException(
             'Only the assigned payout operator can record this payment',
@@ -559,6 +682,17 @@ export class ManualExchangeService {
           },
           tx,
         );
+        if (dto.action === 'RECORD_CEDIS_SENT')
+          await this.settlementHold.assertSettlementAllowed(
+            {
+              operation: 'MANUAL_EXCHANGE',
+              scope: 'MANUAL_EXCHANGE',
+              currency: 'GHS',
+              provider: 'MANUAL_ADMIN',
+              reference: row.reference,
+            },
+            tx,
+          );
         update.payoutReference = dto.payoutReference.trim().toUpperCase();
         update.payoutProofKey = dto.payoutProofObjectKey;
       }
@@ -609,6 +743,9 @@ export class ManualExchangeService {
             ...auditContext,
             amount: row.amount.toFixed(2),
             targetAmount: row.targetAmount.toFixed(2),
+            ...(dto.payoutAmount
+              ? { recordedPayoutAmount: dto.payoutAmount }
+              : {}),
             ...(dto.acceptExpiredQuote === true
               ? {
                   acceptedExpiredQuote: true,
@@ -709,6 +846,7 @@ export class ManualExchangeService {
       reference: row.reference,
       status: row.status,
       settlementMode: row.settlementMode,
+      payoutWorkflow: row.payoutWorkflow,
       sourceCurrency: row.sourceCurrency,
       targetCurrency: row.targetCurrency,
       amount: row.amount.toFixed(2),

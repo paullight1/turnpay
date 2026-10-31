@@ -15,7 +15,7 @@ class SplashScreen extends StatefulWidget {
   SplashScreen({
     super.key,
     AuthService? authService,
-    this.minimumDelay = const Duration(milliseconds: 2800),
+    this.minimumDelay = Duration.zero,
   }) : authService = authService ?? AuthService();
 
   @override
@@ -65,7 +65,8 @@ class _SplashScreenState extends State<SplashScreen>
   }
 
   Future<void> _resolveInitialRoute() async {
-    // Wait for splash animation to play (min 2.8s) while checking session
+    // Restore the session immediately; optional branding delays must not hold
+    // up the default launch path after authentication is ready.
     final results = await Future.wait([
       Future.delayed(widget.minimumDelay),
       _tryRestoreSession(),

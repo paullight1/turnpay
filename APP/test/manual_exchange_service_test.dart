@@ -18,6 +18,41 @@ void main() {
     });
   });
 
+  test('uses published receiving options and rejects invalid capability data',
+      () {
+    final config = ManualExchangeConfig.fromJson({
+      'enabled': true,
+      'sourceCurrency': 'GHS',
+      'targetCurrency': 'NGN',
+      'supportedSourceCurrencies': ['GHS', 'NGN'],
+      'settlementOptions': {
+        'GHS': ['WALLET'],
+        'NGN': ['BANK']
+      }
+    });
+    expect(config.deliveryModesFor('GHS'), [ManualSettlementMode.wallet]);
+    expect(config.deliveryModesFor('NGN'), [ManualSettlementMode.bank]);
+    expect(
+        () => ManualExchangeConfig.fromJson({
+              'enabled': true,
+              'sourceCurrency': 'GHS',
+              'targetCurrency': 'NGN',
+              'supportedSourceCurrencies': ['GHS'],
+              'settlementOptions': {'GHS': []}
+            }),
+        throwsFormatException);
+    expect(
+        () => ManualExchangeConfig.fromJson({
+              'enabled': true,
+              'sourceCurrency': 'GHS',
+              'targetCurrency': 'NGN',
+              'supportedSourceCurrencies': ['GHS'],
+              'settlementOptions': {
+                'GHS': ['UNKNOWN']
+              }
+            }),
+        throwsFormatException);
+  });
   test('retries an unknown create outcome with the same account-scoped key',
       () async {
     final adapter = _ManualExchangeAdapter(failFirstCreate: true);

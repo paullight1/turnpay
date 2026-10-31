@@ -10,6 +10,7 @@ class TpButton extends StatelessWidget {
   final bool isLoading;
   final bool isDisabled;
   final bool isOutlined;
+  final String? loadingLabel;
 
   const TpButton({
     super.key,
@@ -18,6 +19,7 @@ class TpButton extends StatelessWidget {
     this.isLoading = false,
     this.isDisabled = false,
     this.isOutlined = false,
+    this.loadingLabel,
   });
 
   @override
@@ -30,16 +32,31 @@ class TpButton extends StatelessWidget {
             Haptics.medium();
             onTap();
           };
+    final loadingContent = loadingLabel == null
+        ? const TrustPayLottie(
+            variant: TrustPayAnimationVariant.loading,
+            size: 30,
+          )
+        : Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Text(loadingLabel!, textAlign: TextAlign.center),
+            ],
+          );
     final content = isLoading
         ? Semantics(
-            label: '$label, loading',
+            label: '${loadingLabel ?? label}, loading',
             liveRegion: true,
-            child: const ExcludeSemantics(
-              child: TrustPayLottie(
-                variant: TrustPayAnimationVariant.loading,
-                size: 30,
-              ),
-            ),
+            child: ExcludeSemantics(child: loadingContent),
           )
         : Text(label, textAlign: TextAlign.center);
     const padding = EdgeInsets.symmetric(horizontal: 24, vertical: 16);

@@ -53,7 +53,7 @@ class _ManualExchangeScreenState extends State<ManualExchangeScreen>
   final _nameController = TextEditingController();
 
   ManualSettlementMode _settlementMode = ManualSettlementMode.wallet;
-  String _sourceCurrency = 'NGN';
+  String _sourceCurrency = 'GHS';
   int _step = 0;
   bool _isCreating = false;
   bool _isRefreshing = false;
@@ -119,7 +119,20 @@ class _ManualExchangeScreenState extends State<ManualExchangeScreen>
       _loadPendingCreate(),
     ]);
     final pendingCreate = results[1] as ManualExchangeAttempt?;
-    if (pendingCreate != null) _restorePendingCreate(pendingCreate);
+    final config = results[0] as ManualExchangeConfig;
+    if (pendingCreate != null) {
+      _restorePendingCreate(pendingCreate);
+    } else {
+      if (!config.supportedSourceCurrencies.contains(_sourceCurrency)) {
+        _sourceCurrency = config.sourceCurrency;
+      }
+      final modes = config.deliveryModesFor(_sourceCurrency);
+      if (modes.isEmpty) {
+        throw const FormatException(
+            'No receiving method is available for this exchange.');
+      }
+      if (!modes.contains(_settlementMode)) _settlementMode = modes.first;
+    }
     return _ManualExchangePageData(
       config: results[0] as ManualExchangeConfig,
       orders: const [],
@@ -462,7 +475,7 @@ class _ManualExchangeScreenState extends State<ManualExchangeScreen>
                               onRetry: _isRefreshing ? null : _refresh)
                         else ...[
                           if (_step == 0) ...[
-                            for (final currency in const ['NGN', 'GHS'])
+                            for (final currency in const ['GHS', 'NGN'])
                               _DirectionChoice(
                                 currency: currency,
                                 enabled: page.config.supportedSourceCurrencies
@@ -475,8 +488,9 @@ class _ManualExchangeScreenState extends State<ManualExchangeScreen>
                                             _institutionController.clear();
                                             _accountController.clear();
                                             _nameController.clear();
-                                            _settlementMode =
-                                                ManualSettlementMode.wallet;
+                                            _settlementMode = page.config
+                                                .deliveryModesFor(currency)
+                                                .first;
                                           }
                                           _sourceCurrency = currency;
                                           _step = 1;
@@ -488,23 +502,26 @@ class _ManualExchangeScreenState extends State<ManualExchangeScreen>
                           ] else
                             _ExchangeForm(
                               service: _service,
-                              onSwap:
-                                  page.config.supportedSourceCurrencies.length <
-                                          2
-                                      ? null
-                                      : () {
-                                          setState(() {
-                                            _sourceCurrency =
-                                                _sourceCurrency == 'NGN'
-                                                    ? 'GHS'
-                                                    : 'NGN';
-                                            _amountController.clear();
-                                            _institutionController.clear();
-                                            _accountController.clear();
-                                            _nameController.clear();
-                                          });
-                                          _centerStep();
-                                        },
+                              onSwap: page.config.supportedSourceCurrencies
+                                          .length <
+                                      2
+                                  ? null
+                                  : () {
+                                      setState(() {
+                                        _sourceCurrency =
+                                            _sourceCurrency == 'NGN'
+                                                ? 'GHS'
+                                                : 'NGN';
+                                        _settlementMode = page.config
+                                            .deliveryModesFor(_sourceCurrency)
+                                            .first;
+                                        _amountController.clear();
+                                        _institutionController.clear();
+                                        _accountController.clear();
+                                        _nameController.clear();
+                                      });
+                                      _centerStep();
+                                    },
                               sourceCurrency: _sourceCurrency,
                               step: _step,
                               onBack: () {
@@ -517,6 +534,10 @@ class _ManualExchangeScreenState extends State<ManualExchangeScreen>
                               accountController: _accountController,
                               nameController: _nameController,
                               settlementMode: _settlementMode,
+                              receivingModes: page.pendingCreate != null
+                                  ? [_settlementMode]
+                                  : page.config
+                                      .deliveryModesFor(_sourceCurrency),
                               isSubmitting: _isCreating,
                               hasPendingCreate: page.pendingCreate != null,
                               message: _formMessage,
@@ -659,6 +680,7 @@ class _ExchangeForm extends StatelessWidget {
   final TextEditingController accountController;
   final TextEditingController nameController;
   final ManualSettlementMode settlementMode;
+  final List<ManualSettlementMode> receivingModes;
   final bool isSubmitting;
   final bool hasPendingCreate;
   final String? message;
@@ -677,6 +699,7 @@ class _ExchangeForm extends StatelessWidget {
     required this.accountController,
     required this.nameController,
     required this.settlementMode,
+    required this.receivingModes,
     required this.isSubmitting,
     required this.hasPendingCreate,
     required this.message,
@@ -706,10 +729,20 @@ class _ExchangeForm extends StatelessWidget {
             if (step == 2) ...[
               const SizedBox(height: AppSpacing.lg),
               Text(
-                  'Choose where to receive ${sourceCurrency == 'NGN' ? 'GHS' : 'NGN'}',
+                  hasPendingCreate &&
+                          ((sourceCurrency == 'GHS' &&
+                                  settlementMode !=
+                                      ManualSettlementMode.wallet) ||
+                              (sourceCurrency == 'NGN' &&
+                                  settlementMode ==
+                                      ManualSettlementMode.wallet))
+                      ? 'Recover your earlier request'
+                      : sourceCurrency == 'GHS'
+                          ? 'Naira goes to your TrustPay wallet'
+                          : 'Receive cedis',
                   style: AppTextStyles.headingM),
               const SizedBox(height: AppSpacing.sm),
-              ...ManualSettlementMode.values.map(
+              ...receivingModes.map(
                 (mode) => Padding(
                   padding: const EdgeInsets.only(bottom: AppSpacing.sm),
                   child: _SettlementChoice(
@@ -720,6 +753,18 @@ class _ExchangeForm extends StatelessWidget {
                   ),
                 ),
               ),
+              if (sourceCurrency == 'GHS' &&
+                  settlementMode == ManualSettlementMode.wallet) ...[
+                const SizedBox(height: AppSpacing.sm),
+                const Text(
+                    'After your cedi payment is confirmed, we add the quoted naira to your TrustPay wallet.')
+              ],
+              if (sourceCurrency == 'NGN' &&
+                  settlementMode != ManualSettlementMode.wallet) ...[
+                const SizedBox(height: AppSpacing.sm),
+                const Text(
+                    'After your naira payment is confirmed, our team sends the quoted cedis to these details.')
+              ],
               if (settlementMode != ManualSettlementMode.wallet) ...[
                 const SizedBox(height: AppSpacing.sm),
                 TextFormField(

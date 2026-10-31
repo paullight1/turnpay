@@ -26,6 +26,7 @@ class WithdrawalCompletionDetails {
   final String accountNumberMasked;
   final String providerStatus;
   final String providerReference;
+  final String provider;
   final DateTime? createdAt;
   final DateTime? updatedAt;
   final DateTime? providerCreatedAt;
@@ -41,6 +42,7 @@ class WithdrawalCompletionDetails {
     required this.accountNumberMasked,
     required this.providerStatus,
     required this.providerReference,
+    this.provider = 'PAYSTACK',
     required this.createdAt,
     required this.updatedAt,
     required this.providerCreatedAt,
@@ -81,6 +83,13 @@ WithdrawalCompletionDetails _completionDetailsFromWithdrawal(
     latestAttempt['providerStatus'],
     fallback: status,
   );
+  final provider = _asString(
+    latestAttempt['provider'],
+    fallback: _asString(
+      withdrawal['provider'],
+      fallback: _asString(metadata['provider'], fallback: 'PAYSTACK'),
+    ),
+  ).toUpperCase();
   final providerReference = _asString(
     latestAttempt['providerReference'],
     fallback: _asString(
@@ -100,6 +109,7 @@ WithdrawalCompletionDetails _completionDetailsFromWithdrawal(
     accountNumberMasked: accountNumberMasked,
     providerStatus: providerStatus,
     providerReference: providerReference,
+    provider: provider,
     createdAt: _asDateTime(withdrawal['createdAt']),
     updatedAt: _asDateTime(withdrawal['updatedAt']),
     providerCreatedAt: _asDateTime(latestAttempt['createdAt']),
@@ -206,6 +216,15 @@ class _WithdrawalAuthorizationScreenState
   Future<void> _authorizeWithdrawal(Map<String, dynamic> withdrawal) async {
     if (_isSubmitting) return;
 
+    if (!_isLegacyMonnifyWithdrawal(withdrawal)) {
+      showTpSnackbar(
+        context,
+        'This Paystack withdrawal is processed securely by TRUSTPAY. No merchant code is required.',
+        type: TpSnackbarType.info,
+      );
+      return;
+    }
+
     final code = _codeController.text.trim();
     if (code.length < 6) {
       showTpSnackbar(
@@ -261,6 +280,15 @@ class _WithdrawalAuthorizationScreenState
 
   Future<void> _resendCode(Map<String, dynamic> withdrawal) async {
     if (_isResending) return;
+
+    if (!_isLegacyMonnifyWithdrawal(withdrawal)) {
+      showTpSnackbar(
+        context,
+        'Paystack withdrawals do not require a merchant authorization code.',
+        type: TpSnackbarType.info,
+      );
+      return;
+    }
 
     setState(() => _isResending = true);
 
@@ -350,8 +378,11 @@ class _WithdrawalAuthorizationScreenState
           _latestProviderStatus(withdrawal),
           fallback: 'PENDING_AUTHORIZATION',
         );
+        final requiresUserAuthorization =
+            _isLegacyMonnifyWithdrawal(withdrawal);
 
-        if (providerStatus != 'PENDING_AUTHORIZATION') {
+        if (providerStatus != 'PENDING_AUTHORIZATION' ||
+            !requiresUserAuthorization) {
           return WithdrawalCompletionScreen(details: details);
         }
 
@@ -461,6 +492,20 @@ class _WithdrawalAuthorizationScreenState
     final latest = _asMap(attempts.first);
     return latest['providerStatus']?.toString();
   }
+
+  bool _isLegacyMonnifyWithdrawal(Map<String, dynamic> withdrawal) {
+    final metadata = _asMap(withdrawal['metadata']);
+    final attempts = _asList(withdrawal['transferAttempts']);
+    final latestAttempt = attempts.isNotEmpty ? _asMap(attempts.first) : {};
+    final provider = _asString(
+      latestAttempt['provider'],
+      fallback: _asString(
+        withdrawal['provider'],
+        fallback: _asString(metadata['provider'], fallback: 'PAYSTACK'),
+      ),
+    );
+    return provider.toUpperCase() == 'MONNIFY';
+  }
 }
 
 class WithdrawalCompletionScreen extends StatefulWidget {
@@ -566,7 +611,9 @@ class _WithdrawalCompletionScreenState
         ? 'Your withdrawal finished successfully.'
         : isFailed
             ? 'This withdrawal expired before authorization could be completed.'
-            : 'Your withdrawal is with Monnify for final confirmation.';
+            : details?.provider.toUpperCase() == 'MONNIFY'
+                ? 'Your withdrawal is with Monnify for final confirmation.'
+                : 'Your Paystack withdrawal is being processed securely. We will update this status after confirmation.';
 
     return Scaffold(
       backgroundColor: AppColors.background,

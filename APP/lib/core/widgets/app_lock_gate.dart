@@ -925,6 +925,14 @@ class _LockOverlay extends StatelessWidget {
                   height: 22,
                   child: CircularProgressIndicator(strokeWidth: 2.4),
                 ),
+                const SizedBox(height: AppSpacing.xs),
+                Text(
+                  usingAccountPassword
+                      ? 'Signing in securely…'
+                      : 'Checking your PIN securely…',
+                  style: AppTextStyles.caption,
+                  textAlign: TextAlign.center,
+                ),
               ],
               if (usingAccountPassword) ...[
                 const SizedBox(height: AppSpacing.lg),

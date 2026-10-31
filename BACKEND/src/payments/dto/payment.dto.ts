@@ -12,7 +12,7 @@ import {
 } from '../../common/dto/query.dto';
 
 const SUPPORTED_CURRENCIES = ['NGN', 'GHS'] as const;
-const WITHDRAWAL_PROVIDERS = ['monnify'] as const;
+const WITHDRAWAL_PROVIDERS = ['monnify', 'paystack'] as const;
 
 export class WithdrawDto {
   @Transform(({ value }) => normalizeDecimalInput(value))
@@ -70,4 +70,22 @@ export class AuthorizeWithdrawalDto {
   @IsString()
   @Matches(/^\d{6,8}$/)
   authorizationCode: string;
+}
+
+export class InitializePaymentDto {
+  @Transform(({ value }) => normalizeDecimalInput(value))
+  @IsString()
+  @Matches(MONEY_AMOUNT_PATTERN)
+  amount: string;
+
+  @IsString()
+  @IsIn(['NGN'])
+  currency: 'NGN';
+}
+
+export class PaymentReferenceDto {
+  @IsString()
+  @MaxLength(128)
+  @Matches(/^[A-Za-z0-9_.=-]+$/)
+  reference: string;
 }

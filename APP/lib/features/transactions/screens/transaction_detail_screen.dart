@@ -10,8 +10,10 @@ import '../../../services/wallet_service.dart';
 
 class TransactionDetailScreen extends StatefulWidget {
   final String reference;
+  final WalletService? walletService;
 
-  const TransactionDetailScreen({super.key, required this.reference});
+  const TransactionDetailScreen(
+      {super.key, required this.reference, this.walletService});
 
   @override
   State<TransactionDetailScreen> createState() =>
@@ -19,12 +21,13 @@ class TransactionDetailScreen extends StatefulWidget {
 }
 
 class _TransactionDetailScreenState extends State<TransactionDetailScreen> {
-  final _walletService = WalletService();
+  late final WalletService _walletService;
   late Future<TransactionDetail?> _detailFuture;
 
   @override
   void initState() {
     super.initState();
+    _walletService = widget.walletService ?? WalletService();
     _detailFuture = _walletService.fetchTransactionDetail(widget.reference);
   }
 
@@ -87,6 +90,32 @@ class _TransactionDetailScreenState extends State<TransactionDetailScreen> {
                       // Amount hero
                       _AmountHero(detail: detail),
                       const SizedBox(height: AppSpacing.lg),
+
+                      if (detail.type.toUpperCase() == 'INTERNAL_TRANSFER') ...[
+                        OutlinedButton.icon(
+                          onPressed: () {
+                            final storedReference =
+                                detail.metadata?['transferReference'];
+                            final reference = storedReference is String &&
+                                    storedReference.isNotEmpty
+                                ? storedReference
+                                : detail.reference;
+                            context.push(AppRoutes.sendReceiptFor(reference));
+                          },
+                          icon: const Icon(Icons.receipt_long_outlined),
+                          label: const Text('View transfer receipt'),
+                        ),
+                        const SizedBox(height: AppSpacing.md),
+                      ],
+                      if (detail.type.toUpperCase() == 'WITHDRAW') ...[
+                        OutlinedButton.icon(
+                          onPressed: () => context.push(
+                              AppRoutes.withdrawReceiptFor(detail.reference)),
+                          icon: const Icon(Icons.receipt_long_outlined),
+                          label: const Text('View bank transfer receipt'),
+                        ),
+                        const SizedBox(height: AppSpacing.md),
+                      ],
 
                       // Basic info card
                       _InfoCard(detail: detail),
@@ -154,7 +183,8 @@ class _TransactionDetailScreenState extends State<TransactionDetailScreen> {
   }
 
   bool _canRetry(TransactionDetail detail) {
-    return detail.status.toUpperCase() == 'FAILED';
+    return detail.status.toUpperCase() == 'FAILED' &&
+        !{'INTERNAL_TRANSFER', 'WITHDRAW'}.contains(detail.type.toUpperCase());
   }
 }
 

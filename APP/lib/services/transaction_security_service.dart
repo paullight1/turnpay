@@ -25,7 +25,6 @@ class TransactionSecurityConfig {
 
   bool get shouldOfferBiometrics =>
       canUseBiometrics && hasBiometric && biometricEnabled;
-
 }
 
 class TransactionSecurityService {
@@ -96,7 +95,7 @@ class TransactionSecurityService {
     await _purgeLegacyStoredPinValue();
     final salt = _generateSalt();
     final saltB64 = base64.encode(salt);
-    final digest = _derivePinHash(pin, salt);
+    final digest = await _derivePinHashAsync(pin, salt);
 
     await _storage.write(key: _pinSaltKey, value: saltB64);
     await _storage.write(key: _pinHashKey, value: digest);
@@ -255,7 +254,7 @@ class TransactionSecurityService {
     final saltB64 = await _storage.read(key: _pinSaltKey);
     if (saltB64 != null && saltB64.isNotEmpty) {
       final salt = base64.decode(saltB64);
-      final digest = _derivePinHash(pin, salt);
+      final digest = await _derivePinHashAsync(pin, salt);
       return _constantTimeEquals(digest, saved);
     }
 
@@ -269,7 +268,10 @@ class TransactionSecurityService {
 
     final salt = _generateSalt();
     await _storage.write(key: _pinSaltKey, value: base64.encode(salt));
-    await _storage.write(key: _pinHashKey, value: _derivePinHash(pin, salt));
+    await _storage.write(
+      key: _pinHashKey,
+      value: await _derivePinHashAsync(pin, salt),
+    );
     return true;
   }
 
@@ -298,6 +300,54 @@ class TransactionSecurityService {
       keyLength: _keyLength,
     );
     return base64.encode(bytes);
+  }
+
+  static Future<String> _derivePinHashAsync(String pin, List<int> salt) async {
+    if (!kIsWeb) return _derivePinHash(pin, salt);
+
+    final bytes = await _pbkdf2WithEventLoopYields(
+      password: utf8.encode(pin),
+      salt: salt,
+      iterations: _pbkdf2Iterations,
+      keyLength: _keyLength,
+    );
+    return base64.encode(bytes);
+  }
+
+  /// Flutter web's `compute` runs on the browser's current event loop. Yield
+  /// during PBKDF2 so the unlock UI can paint progress instead of freezing.
+  static Future<List<int>> _pbkdf2WithEventLoopYields({
+    required List<int> password,
+    required List<int> salt,
+    required int iterations,
+    required int keyLength,
+  }) async {
+    final hmac = Hmac(sha256, password);
+    final blockCount = (keyLength / 32).ceil();
+    final derived = <int>[];
+
+    for (var block = 1; block <= blockCount; block++) {
+      final blockIndex = [
+        (block >> 24) & 0xff,
+        (block >> 16) & 0xff,
+        (block >> 8) & 0xff,
+        block & 0xff,
+      ];
+      var u = hmac.convert([...salt, ...blockIndex]).bytes;
+      final t = List<int>.from(u);
+      for (var i = 1; i < iterations; i++) {
+        u = hmac.convert(u).bytes;
+        for (var j = 0; j < t.length; j++) {
+          t[j] ^= u[j];
+        }
+        if (i % 1000 == 0) {
+          await Future<void>.delayed(Duration.zero);
+        }
+      }
+      derived.addAll(t);
+    }
+
+    return derived.sublist(0, keyLength);
   }
 
   static List<int> _pbkdf2({

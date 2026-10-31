@@ -49,11 +49,13 @@ describe('PaymentService withdrawals', () => {
   };
   const config = {
     get: jest.fn((key: string) =>
-      key === 'BANK_ACCOUNT_ENCRYPTION_KEY'
-        ? 'test-bank-account-encryption-key'
-        : key === 'MONNIFY_EXCHANGE_COLLECTION_ACCOUNT_NUMBER'
-          ? '2432628862'
-          : undefined,
+      key === 'BANKING_PROVIDER_PRIMARY'
+        ? 'monnify'
+        : key === 'BANK_ACCOUNT_ENCRYPTION_KEY'
+          ? 'test-bank-account-encryption-key'
+          : key === 'MONNIFY_EXCHANGE_COLLECTION_ACCOUNT_NUMBER'
+            ? '2432628862'
+            : undefined,
     ),
     getOrThrow: jest.fn(() => 'secret'),
   };

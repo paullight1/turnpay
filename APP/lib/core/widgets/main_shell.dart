@@ -3,9 +3,10 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 
 import '../../core/theme/app_theme.dart';
+import '../state/exchange_visibility.dart';
 import '../../features/home/screens/dashboard_detail_screen.dart';
 import '../../features/home/screens/home_screen.dart';
-import '../../features/exchange/screens/manual_exchange_screen.dart';
+import '../../features/exchange/screens/kora_exchange_screen.dart';
 import '../../services/home_data_service.dart';
 import 'micro_interactions.dart';
 
@@ -61,26 +62,55 @@ class _MainShellState extends State<MainShell> {
   bool _exchangeVisited = false;
 
   @override
+  void initState() {
+    super.initState();
+    exchangeServicesEnabled.addListener(_onExchangePreferenceChanged);
+    loadExchangeServicesPreference();
+  }
+
+  @override
+  void dispose() {
+    exchangeServicesEnabled.removeListener(_onExchangePreferenceChanged);
+    super.dispose();
+  }
+
+  void _onExchangePreferenceChanged() {
+    if (!exchangeServicesEnabled.value && _selectedIndex == 1) {
+      setState(() => _selectedIndex = 0);
+    } else {
+      setState(() {});
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
     AppColors.watch(context);
     return Scaffold(
       extendBody: true,
       backgroundColor: AppColors.background,
       body: Stack(children: [
+        Offstage(
+          offstage: _selectedIndex != 0,
+          child: TickerMode(
+            enabled: _selectedIndex == 0,
+            child: HomeScreen(homeDataService: widget.homeDataService),
+          ),
+        ),
         if (_exchangeVisited)
           Offstage(
             offstage: _selectedIndex != 1,
             child: TickerMode(
                 enabled: _selectedIndex == 1,
-                child: ManualExchangeScreen(
+                child: ExchangeEntryScreen(
                     showBackButton: false, active: _selectedIndex == 1)),
           ),
-        if (_selectedIndex != 1) _screenFor(_selectedIndex),
+        if (_selectedIndex > 1) _screenFor(_selectedIndex),
       ]),
       bottomNavigationBar: MediaQuery.viewInsetsOf(context).bottom > 0
           ? null
           : _TrustPayBottomNav(
               selectedIndex: _selectedIndex,
+              exchangeEnabled: exchangeServicesEnabled.value,
               onTap: (i) {
                 if (i == _selectedIndex) return;
                 FocusManager.instance.primaryFocus?.unfocus();
@@ -96,10 +126,9 @@ class _MainShellState extends State<MainShell> {
   Widget _screenFor(int index) {
     switch (index) {
       case 1:
-        return const ManualExchangeScreen(showBackButton: false);
+        return const ExchangeEntryScreen(showBackButton: false);
       case 2:
-        return DashboardDetailScreen(
-          kind: DashboardDetailKind.activity,
+        return DashboardTransactionsScreen(
           homeDataService: widget.homeDataService,
         );
       case 3:
@@ -115,16 +144,22 @@ class _MainShellState extends State<MainShell> {
 
 class _TrustPayBottomNav extends StatelessWidget {
   final int selectedIndex;
+  final bool exchangeEnabled;
   final ValueChanged<int> onTap;
 
   const _TrustPayBottomNav({
     required this.selectedIndex,
+    required this.exchangeEnabled,
     required this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
     AppColors.watch(context);
+    final entries = [
+      for (var index = 0; index < _navItems.length; index++)
+        if (index != 1 || exchangeEnabled) (index, _navItems[index]),
+    ];
     return SafeArea(
       top: false,
       minimum: const EdgeInsets.fromLTRB(14, 0, 14, 10),
@@ -132,7 +167,7 @@ class _TrustPayBottomNav extends StatelessWidget {
         height: 76,
         child: LayoutBuilder(
           builder: (context, constraints) {
-            final itemWidth = constraints.maxWidth / _navItems.length;
+            final itemWidth = constraints.maxWidth / entries.length;
             final pillWidth = itemWidth - 10;
 
             return Stack(
@@ -140,15 +175,19 @@ class _TrustPayBottomNav extends StatelessWidget {
                 AnimatedPositioned(
                   duration: const Duration(milliseconds: 260),
                   curve: Curves.easeOutCubic,
-                  left: selectedIndex * itemWidth + 5,
+                  left:
+                      entries.indexWhere((entry) => entry.$1 == selectedIndex) *
+                              itemWidth +
+                          5,
                   top: 8,
                   width: pillWidth,
                   height: 60,
                   child: const _LiquidGlassPill(),
                 ),
                 Row(
-                  children: List.generate(_navItems.length, (index) {
-                    final item = _navItems[index];
+                  children: List.generate(entries.length, (position) {
+                    final index = entries[position].$1;
+                    final item = entries[position].$2;
                     final isActive = index == selectedIndex;
 
                     return Expanded(

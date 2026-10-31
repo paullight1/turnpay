@@ -14,12 +14,10 @@ describe('HealthController', () => {
     getClient: jest.fn(),
   };
   const kycConfig: Record<string, string> = {
-    KYC_PROVIDER: 'youverify',
-    YOUVERIFY_API_KEY: 'test-youverify-api-key',
-    YOUVERIFY_BASE_URL: 'https://api.youverify.co',
-    YOUVERIFY_WEBHOOK_URL:
-      'https://api.trustpay.example.com/api/webhooks/kyc/youverify',
-    YOUVERIFY_WEBHOOK_SECRET: 'test-youverify-webhook-secret',
+    KYC_PROVIDER: 'monnify',
+    MONNIFY_API_KEY: 'test-monnify-api-key',
+    MONNIFY_SECRET_KEY: 'test-monnify-secret-key',
+    MONNIFY_BASE_URL: 'https://api.monnify.com',
     PII_ENCRYPTION_KEY: 'test-pii-key-with-at-least-32-characters',
   };
   const config = {
@@ -67,20 +65,12 @@ describe('HealthController', () => {
     });
   });
 
-  it('reports Ninja ready without requiring a webhook configuration', async () => {
+  it('reports Monnify ready with valid server credentials and HTTPS URL', async () => {
     prisma.$queryRaw = jest.fn().mockResolvedValue([{ '1': 1 }]);
     redis.isAvailable = jest.fn().mockReturnValue(true);
     redis.getClient = jest.fn().mockReturnValue({
       ping: jest.fn().mockResolvedValue('PONG'),
     });
-    const ninjaConfig: Record<string, string> = {
-      KYC_PROVIDER: 'ninja',
-      NINJA_CLIENT_KEY: 'test-ninja-client-key',
-      NINJA_CLIENT_SECRET: 'test-ninja-client-secret',
-      NINJA_BASE_URL: 'https://api.ninja.boucloud.io',
-      PII_ENCRYPTION_KEY: 'test-pii-key-with-at-least-32-characters',
-    };
-    config.get = jest.fn((key: string) => ninjaConfig[key]);
 
     await expect(controller.ready()).resolves.toMatchObject({
       status: 'ready',
@@ -88,36 +78,14 @@ describe('HealthController', () => {
     });
   });
 
-  it('never reports Ninja ready for an arbitrary HTTPS host', async () => {
-    prisma.$queryRaw = jest.fn().mockResolvedValue([{ '1': 1 }]);
-    redis.isAvailable = jest.fn().mockReturnValue(true);
-    redis.getClient = jest.fn().mockReturnValue({
-      ping: jest.fn().mockResolvedValue('PONG'),
-    });
-    const ninjaConfig: Record<string, string> = {
-      KYC_PROVIDER: 'ninja',
-      NINJA_CLIENT_KEY: 'test-ninja-client-key',
-      NINJA_CLIENT_SECRET: 'test-ninja-client-secret',
-      NINJA_BASE_URL: 'https://identity-attacker.example.com',
-      PII_ENCRYPTION_KEY: 'test-pii-key-with-at-least-32-characters',
-    };
-    config.get = jest.fn((key: string) => ninjaConfig[key]);
-
-    await expect(controller.ready()).rejects.toMatchObject({
-      response: expect.objectContaining({
-        checks: expect.objectContaining({ kyc: 'misconfigured' }),
-      }),
-    });
-  });
-
-  it('never reports ready when the Youverify webhook URL is missing', async () => {
+  it('rejects retired KYC providers from readiness', async () => {
     prisma.$queryRaw = jest.fn().mockResolvedValue([{ '1': 1 }]);
     redis.isAvailable = jest.fn().mockReturnValue(true);
     redis.getClient = jest.fn().mockReturnValue({
       ping: jest.fn().mockResolvedValue('PONG'),
     });
     config.get = jest.fn((key: string) =>
-      key === 'YOUVERIFY_WEBHOOK_URL' ? undefined : kycConfig[key],
+      key === 'KYC_PROVIDER' ? 'ninja' : kycConfig[key],
     );
 
     await expect(controller.ready()).rejects.toMatchObject({
@@ -143,5 +111,54 @@ describe('HealthController', () => {
     await expect(controller.ready()).rejects.toBeInstanceOf(
       ServiceUnavailableException,
     );
+  });
+  it('returns not_ready within two seconds when dependency probes hang', async () => {
+    jest.useFakeTimers();
+    try {
+      prisma.$queryRaw = jest.fn(() => new Promise(() => {}));
+      redis.isAvailable = jest.fn().mockReturnValue(true);
+      redis.getClient = jest
+        .fn()
+        .mockReturnValue({ ping: () => new Promise(() => {}) });
+      const checked = expect(controller.ready()).rejects.toMatchObject({
+        response: {
+          status: 'not_ready',
+          checks: { database: 'disconnected', redis: 'disconnected' },
+        },
+      });
+      await jest.advanceTimersByTimeAsync(2000);
+      // A broken deadline must fail this test rather than leave it waiting forever.
+      let complete = false;
+      void checked.then(() => {
+        complete = true;
+      });
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(complete).toBe(true);
+      await checked;
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('shares a stalled database probe across concurrent health requests', async () => {
+    jest.useFakeTimers();
+    try {
+      const localController = new HealthController(
+        prisma as never,
+        redis as never,
+        config as never,
+      );
+      prisma.$queryRaw = jest.fn(() => new Promise(() => {}));
+      redis.isAvailable = jest.fn().mockReturnValue(false);
+      const first = localController.ready().catch(() => undefined);
+      const second = localController.ready().catch(() => undefined);
+      await Promise.resolve();
+      expect(prisma.$queryRaw).toHaveBeenCalledTimes(1);
+      await jest.advanceTimersByTimeAsync(2000);
+      await Promise.all([first, second]);
+    } finally {
+      jest.useRealTimers();
+    }
   });
 });

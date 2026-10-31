@@ -80,15 +80,9 @@ services:
       - key: BANKING_SANDBOX_MODE
         value: "true"
       - key: KYC_PROVIDER
-        value: "ninja"
+        value: "paystack"
       - key: KYC_DOCUMENT_BUCKET
         value: "kyc-documents"
-      - key: NINJA_CLIENT_KEY
-        sync: false
-      - key: NINJA_CLIENT_SECRET
-        sync: false
-      - key: NINJA_BASE_URL
-        value: "https://api.sandbox.ninja.boucloud.io"
       - key: EXCHANGE_RECEIPT_BUCKET
         value: "exchange-receipts"
       - key: VTU_PROVIDER
@@ -119,24 +113,12 @@ services:
         sync: false
       - key: SUPABASE_SERVICE_ROLE_KEY
         sync: false
-      - key: MONNIFY_API_KEY
+      - key: BANKING_PROVIDER_PRIMARY
+        value: "paystack"
+      - key: PAYSTACK_SECRET_KEY
         sync: false
-      - key: MONNIFY_SECRET_KEY
-        sync: false
-      - key: MONNIFY_CONTRACT_CODE
-        sync: false
-      - key: MONNIFY_BASE_URL
-        value: "https://sandbox.monnify.com"
-      - key: MONNIFY_WEBHOOK_URL
-        value: "https://api.trustpayhq.com/api/webhooks/monnify"
-      - key: MONNIFY_GET_ALL_AVAILABLE_BANKS
+      - key: PAYSTACK_CHECKOUT_ENABLED
         value: "true"
-      - key: MONNIFY_RESTRICT_PAYMENT_SOURCE
-        value: "false"
-      - key: MONNIFY_TEST_BVN
-        sync: false
-      - key: MONNIFY_TEST_NIN
-        sync: false
 
   - type: keyvalue
     name: trustpay-redis

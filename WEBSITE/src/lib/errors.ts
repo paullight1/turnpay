@@ -105,3 +105,8 @@ export function getErrorMessage(error: unknown, fallback: string) {
 
   return fallback;
 }
+
+export function getErrorStatus(error: unknown): number | undefined {
+  const status = extractErrorPayload(error).status;
+  return typeof status === "number" ? status : undefined;
+}

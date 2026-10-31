@@ -26,7 +26,7 @@ Do not treat sandbox success as launch approval. Every money movement path must 
 | `20-INTERNAL-TRANSFER-CERTIFICATION.md` | Internal-transfer staging evidence, external approvals, and canary certification register |
 | `21-SUPABASE-RENDER-VERCEL-LAUNCH.MD` | Authoritative V1 hosting topology, dashboard setup order, secrets, and verification gates |
 | `22-YOUVERIFY-PRODUCTION-READINESS.md` | Historical Youverify readiness record; superseded for the active path |
-| `23-NINJA-KYC-PRODUCTION-READINESS.md` | Active Ninja sandbox certification, privacy checks, evidence, and launch gates |
+| `23-NINJA-KYC-PRODUCTION-READINESS.md` | Historical Ninja record; superseded by Monnify-only KYC |
 
 For V1 infrastructure, guide 21 is authoritative if an older guide mentions
 DigitalOcean, Fly.io, Render Postgres, or a self-hosted production Postgres.
@@ -49,7 +49,7 @@ Keep live values in the deployment secret manager, not in committed files. Use d
 | Privacy | `PII_ENCRYPTION_KEY`, `PII_KEY_VERSION`, `BANK_ACCOUNT_ENCRYPTION_KEY`, `IDEMPOTENCY_RESPONSE_ENCRYPTION_KEY`, `IDEMPOTENCY_RESPONSE_ENCRYPTION_KEY_ID` |
 | Jobs | `RECONCILIATION_CRON`, `WEBHOOK_QUEUE_NAME`, `DLQ_NAME`, `ADMIN_REVIEW_WEBHOOK_ALERT_CHANNEL` |
 | VTpass | `VTU_PROVIDER`, `VTPASS_BASE_URL`, `VTPASS_API_KEY`, `VTPASS_PUBLIC_KEY`, `VTPASS_SECRET_KEY`, `VTPASS_WEBHOOK_SECRET` |
-| Ninja KYC | `KYC_PROVIDER`, `NINJA_BASE_URL`, `NINJA_CLIENT_KEY`, `NINJA_CLIENT_SECRET` |
+| Monnify KYC | `KYC_PROVIDER`, `MONNIFY_BASE_URL`, `MONNIFY_API_KEY`, `MONNIFY_SECRET_KEY`, `PII_ENCRYPTION_KEY` |
 | FX | `FX_RATE_API_URL`, `FX_RATE_API_KEY` |
 
 ## Sandbox To Live Pattern

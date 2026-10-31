@@ -561,6 +561,13 @@ export class ExchangeService {
     userId: string,
     dto: CreateMonnifyExchangeDepositDto,
   ) {
+    if (
+      this.configService.get<string>('BANKING_PROVIDER_PRIMARY', 'paystack') !==
+      'monnify'
+    )
+      throw new BadRequestException(
+        'Fund your NGN wallet with Paystack before exchanging. New Monnify deposit requests are unavailable.',
+      );
     const amount = new Decimal(dto.amount);
     this.assertPositiveMoney(amount);
 
@@ -1746,7 +1753,7 @@ export class ExchangeService {
           data: {
             status: 'SENT',
             adminPaymentReceipt: dto.paymentReceiptUrl,
-            notificationSent: true,
+            notificationSent: false,
             sentAt: now,
           },
         });
@@ -1773,7 +1780,7 @@ export class ExchangeService {
             before,
             after: {
               status: 'SENT',
-              notificationSent: true,
+              notificationSent: false,
               paymentReceiptUrl: dto.paymentReceiptUrl,
               sentAt: now,
             },
@@ -1867,7 +1874,7 @@ export class ExchangeService {
             status: 'APPROVED',
             adminId,
             adminNote: reason,
-            notificationSent: true,
+            notificationSent: false,
             reviewedAt,
           },
         });
@@ -1878,7 +1885,7 @@ export class ExchangeService {
 
         await tx.transaction.update({
           where: { id: payout.transactionId },
-          data: { status: 'SUCCESS' },
+          data: { status: 'PENDING' },
         });
 
         await tx.auditLog.create({
@@ -1892,8 +1899,8 @@ export class ExchangeService {
             before,
             after: {
               status: 'APPROVED',
-              transactionStatus: 'SUCCESS',
-              notificationSent: true,
+              transactionStatus: 'PENDING',
+              notificationSent: false,
             },
             metadata: {
               destinationBankName: payout.destinationBankName,

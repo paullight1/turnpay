@@ -315,7 +315,8 @@ void main() {
     expect(find.text('Complete KYC'), findsOneWidget);
   });
 
-  testWidgets('home screen opens the wallets overview from manage',
+  testWidgets(
+      'home screen manages wallet visibility and hides an empty section',
       (tester) async {
     final bundle = buildTrustPayTestBundle();
 
@@ -351,18 +352,21 @@ void main() {
     await tester.tap(find.text('Manage'));
     await tester.pumpAndSettle();
 
-    expect(find.text('Wallets'), findsOneWidget);
-    expect(find.text('Your money, all in one place.'), findsOneWidget);
-    expect(
-      find.text('Live balances from your TrustPay backend account.'),
-      findsNothing,
-    );
-    expect(find.text('Active wallets'), findsOneWidget);
-    expect(find.text('Add currency wallet'), findsOneWidget);
-    expect(find.text('NGN'), findsWidgets);
-    expect(find.text('GHS'), findsWidgets);
-    expect(find.text('Coming soon'), findsNWidgets(2));
-    expect(find.text('Provider setup required'), findsNothing);
+    expect(find.text('Manage wallets'), findsOneWidget);
+    expect(find.byType(SwitchListTile), findsNWidgets(4));
+    for (var index = 0; index < 4; index++) {
+      await tester.ensureVisible(find.byType(SwitchListTile).at(index));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byType(SwitchListTile).at(index));
+      await tester.pumpAndSettle();
+    }
+    await tester.ensureVisible(find.text('Save'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Save'));
+    await tester.pumpAndSettle();
+    expect(find.text('Other wallets'), findsNothing);
+    expect(find.text('Manage'), findsNothing);
+    expect(find.byKey(const ValueKey('wallet-summary-USD')), findsNothing);
   });
 
   testWidgets('home screen opens notifications and dismisses them',

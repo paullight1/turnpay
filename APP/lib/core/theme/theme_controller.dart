@@ -13,7 +13,7 @@ final themeModeProvider =
 ///  - [ThemeMode.system] (default): follow the device light/dark setting.
 ///  - [ThemeMode.light] / [ThemeMode.dark]: an explicit manual override.
 class ThemeModeController extends StateNotifier<ThemeMode> {
-  ThemeModeController() : super(ThemeMode.system);
+  ThemeModeController() : super(ThemeMode.light);
 
   static const _storage = FlutterSecureStorage();
   static const _storageKey = 'trustpay_theme_mode';
@@ -39,8 +39,9 @@ class ThemeModeController extends StateNotifier<ThemeMode> {
       case 'dark':
         return ThemeMode.dark;
       case 'system':
-      default:
         return ThemeMode.system;
+      default:
+        return ThemeMode.light;
     }
   }
 

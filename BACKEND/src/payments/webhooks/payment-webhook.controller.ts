@@ -1,14 +1,16 @@
+import { redactProviderPayload } from '../../common/utils/masking';
 import {
   BadRequestException,
   Controller,
   Body,
   Headers,
+  HttpCode,
   Post,
   Req,
 } from '@nestjs/common';
 import { plainToInstance } from 'class-transformer';
 import { validateSync, ValidationError } from 'class-validator';
-import { createHmac, timingSafeEqual } from 'crypto';
+import { createHash, createHmac, timingSafeEqual } from 'crypto';
 import { PaymentService } from '../payment.service';
 import { PinoLogger } from 'nestjs-pino';
 import { Throttle } from '@nestjs/throttler';
@@ -18,6 +20,7 @@ import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../prisma/prisma.service';
 import {
   MonnifyWebhookDto,
+  PaystackWebhookDto,
   PaymentWebhookInboxDto,
 } from './dto/payment-webhook.dto';
 import { WebhookInboxService } from './webhook-inbox.service';
@@ -32,7 +35,63 @@ export class WebhookController {
     private readonly prisma: PrismaService,
   ) {}
 
+  @Post('paystack')
+  @HttpCode(200)
+  @Throttle({ default: { limit: 100, ttl: 60000 } })
+  async handlePaystackWebhook(
+    @Headers('x-paystack-signature') signature: string,
+    @Req() req: RawBodyRequest,
+    @Body() body: unknown,
+  ) {
+    if (
+      !signature ||
+      !req.rawBody ||
+      !this.verifyHmacHex(
+        'sha512',
+        req.rawBody,
+        signature,
+        'PAYSTACK_SECRET_KEY',
+      )
+    )
+      throw new BadRequestException('Invalid signature');
+    const payload = this.validateProviderBody(PaystackWebhookDto, body);
+    const data = payload.data;
+    const customer =
+      data.customer && typeof data.customer === 'object'
+        ? (data.customer as Record<string, unknown>)
+        : {};
+    const reference =
+      data.reference ??
+      data.customer_code ??
+      customer.customer_code ??
+      data.id ??
+      createHash('sha256').update(req.rawBody).digest('hex');
+    if (typeof reference !== 'string' && typeof reference !== 'number')
+      throw new BadRequestException('Invalid provider reference');
+    if (
+      [
+        'charge.success',
+        'transfer.success',
+        'transfer.failed',
+        'transfer.reversed',
+      ].includes(payload.event) &&
+      (typeof data.reference !== 'string' || !data.reference)
+    )
+      throw new BadRequestException('Payment reference is required');
+    await this.acceptWebhookEvent({
+      provider: 'PAYSTACK',
+      eventType: payload.event,
+      providerReference: String(reference),
+      payload: redactProviderPayload({ event: payload.event, data }) as Record<
+        string,
+        unknown
+      >,
+    });
+    return { received: true };
+  }
+
   @Post('monnify')
+  @HttpCode(200)
   @Throttle({ default: { limit: 100, ttl: 60000 } })
   async handleMonnifyWebhook(
     @Headers('monnify-signature') signature: string,
@@ -84,7 +143,7 @@ export class WebhookController {
   }
 
   private async acceptWebhookEvent(body: {
-    provider: 'MONNIFY';
+    provider: 'MONNIFY' | 'PAYSTACK';
     eventType: string;
     providerReference: string;
     payload: Record<string, unknown>;
@@ -97,7 +156,9 @@ export class WebhookController {
           provider: event.provider,
           eventType: event.eventType,
           reference: event.providerReference,
-          payload: event.payload as Prisma.InputJsonValue,
+          payload: redactProviderPayload(
+            event.payload,
+          ) as Prisma.InputJsonValue,
           processed: false,
         },
       });

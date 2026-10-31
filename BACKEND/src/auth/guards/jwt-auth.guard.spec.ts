@@ -17,6 +17,7 @@ describe('admin authorization from verified identity', () => {
   async function authorize(
     overrides: Record<string, unknown> = {},
     accountOverrides: Record<string, unknown> = {},
+    missingLocalUser = false,
   ) {
     const current = { ...account, ...accountOverrides };
     const supabase = {
@@ -32,6 +33,7 @@ describe('admin authorization from verified identity', () => {
         findFirst: jest.fn().mockResolvedValue({ id: 'app-session-1' }),
       },
     };
+    if (missingLocalUser) prisma.user.findUnique.mockResolvedValueOnce(null);
     const request = {
       headers: { authorization: 'Bearer test-token' },
       user: undefined as unknown,
@@ -50,8 +52,52 @@ describe('admin authorization from verified identity', () => {
     const roles = new RolesGuard({
       getAllAndOverride: () => ['ADMIN'],
     } as never);
-    return { request, roles, context };
+    return { request, roles, context, supabase };
   }
+  it('does not rewrite an existing user and wallets on every authenticated read', async () => {
+    const { supabase } = await authorize();
+    expect(supabase.verifyToken).toHaveBeenCalledTimes(1);
+    expect(supabase.getVerifiedProviderSessionId).toHaveBeenCalledTimes(1);
+    expect(supabase.syncUser).not.toHaveBeenCalled();
+  });
+  it('still synchronizes a verified identity when the local user is missing', async () => {
+    const { supabase, request } = await authorize({}, {}, true);
+    expect(supabase.syncUser).toHaveBeenCalledWith(identity);
+    expect(request.user).toEqual(
+      expect.objectContaining({ userId: identity.id }),
+    );
+  });
+  it('starts independent provider identity and session verification together', async () => {
+    let release!: (value: typeof identity) => void;
+    const identityResult = new Promise<typeof identity>((resolve) => {
+      release = resolve;
+    });
+    const supabase = {
+      verifyToken: jest.fn().mockReturnValue(identityResult),
+      getVerifiedProviderSessionId: jest.fn().mockResolvedValue('session-1'),
+    };
+    const prisma = {
+      user: { findUnique: jest.fn().mockResolvedValue(account) },
+      refreshToken: {
+        findFirst: jest.fn().mockResolvedValue({ id: 'session-1' }),
+      },
+    };
+    const guard = new JwtAuthGuard(
+      supabase as never,
+      prisma as never,
+      {} as never,
+    );
+    const authorization = guard.canActivate({
+      switchToHttp: () => ({
+        getRequest: () => ({ headers: { authorization: 'Bearer token' } }),
+      }),
+    } as never);
+    const verificationStarted =
+      supabase.getVerifiedProviderSessionId.mock.calls.length;
+    release(identity);
+    await authorization;
+    expect(verificationStarted).toBe(1);
+  });
   it('does not grant admin access to a verified company email without the ADMIN role', async () => {
     const { request, roles, context } = await authorize();
     expect(request.user).toEqual(

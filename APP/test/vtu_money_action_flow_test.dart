@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:trustpay_app/features/home/screens/money_action_screen.dart';
 
@@ -58,7 +59,8 @@ void main() {
       (widget) =>
           widget is TextField && widget.decoration?.labelText == 'Phone number',
     );
-    await tester.enterText(phoneField, '08012345678');
+    await tester.enterText(phoneField, '08031234567');
+    await tester.pump();
     await tester.tap(find.text('Continue to amount'));
     await tester.pump();
 
@@ -71,6 +73,26 @@ void main() {
       ),
       findsOneWidget,
     );
+  });
+
+  testWidgets('airtime suggests a network and keeps a manual ported override',
+      (tester) async {
+    await render(tester, MoneyActionKind.airtime, includeVtuProviders: true);
+    final phone = find.byWidgetPredicate((widget) =>
+        widget is TextField && widget.decoration?.labelText == 'Phone number');
+    await tester.enterText(phone, '+234 802 123 4567');
+    await tester.pumpAndSettle();
+    expect(find.text('Airtel suggested from number'), findsOneWidget);
+    await tester.tap(find.bySemanticsLabel('MTN network'));
+    await tester.pumpAndSettle();
+    expect(find.text('MTN selected manually'), findsOneWidget);
+    await tester.enterText(phone, '+234 802 123 4568');
+    await tester.pumpAndSettle();
+    expect(find.text('Airtel suggested from number'), findsOneWidget);
+    await tester.tap(find.text('Continue to amount'));
+    await tester.pumpAndSettle();
+    expect(find.text('08021234568'), findsOneWidget);
+    expect(find.text('Airtel'), findsOneWidget);
   });
 
   testWidgets('bank transfer collects the amount before bank details', (
@@ -87,8 +109,8 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('Step 1 of 2 · Choose the payout currency and amount.'),
-        findsOneWidget);
+    expect(
+        find.text('Step 1 of 2 · Choose an amount to send.'), findsOneWidget);
     expect(find.text('Continue to bank details'), findsOneWidget);
     expect(find.text('Bank code'), findsNothing);
     expect(find.text('Account number'), findsNothing);
@@ -98,58 +120,57 @@ void main() {
           widget is TextField && widget.decoration?.labelText == 'Amount',
     );
     await tester.enterText(amountField, '1000');
+    await tester.pump();
     await tester.tap(find.text('Continue to bank details'));
     await tester.pumpAndSettle();
 
     expect(find.text('Step 2 of 2 · Enter the bank details.'), findsOneWidget);
-    expect(
-      find.byWidgetPredicate(
-        (widget) =>
-            widget is TextField &&
-            (widget.decoration?.labelText == 'Bank' ||
-                widget.decoration?.labelText == 'Bank code'),
-      ),
-      findsOneWidget,
-    );
+    expect(find.text('Choose bank'), findsOneWidget);
     expect(find.text('Account number'), findsOneWidget);
-    expect(find.text('Send transfer'), findsOneWidget);
+    expect(find.text('Review transfer'), findsOneWidget);
     expect(find.text('Continue to bank details'), findsNothing);
   });
 
-  testWidgets('non-NGN bank payouts route through exchange first',
+  testWidgets('country switching preserves a ported number network override',
+      (tester) async {
+    await render(tester, MoneyActionKind.airtime, includeVtuProviders: true);
+    final phone = find.byWidgetPredicate(
+        (w) => w is TextField && w.decoration?.labelText == 'Phone number');
+    await tester.enterText(phone, '08031234567');
+    await tester.pumpAndSettle();
+    await tester.tap(find.bySemanticsLabel('Airtel network'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Nigeria').first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('International').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('International').first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Nigeria').last);
+    await tester.pumpAndSettle();
+    expect(find.text('Airtel selected manually'), findsOneWidget);
+    await tester.tap(find.text('Continue to amount'));
+    await tester.pumpAndSettle();
+    expect(find.text('Airtel'), findsOneWidget);
+  });
+
+  testWidgets('bank payouts expose only the supported NGN wallet',
       (tester) async {
     final bundle = buildTrustPayTestBundle();
-    await tester.pumpWidget(
-      MaterialApp(
+    await tester.pumpWidget(MaterialApp(
         home: MoneyActionScreen(
-          kind: MoneyActionKind.withdraw,
-          apiClient: bundle.apiClient,
-        ),
-      ),
-    );
+            kind: MoneyActionKind.withdraw, apiClient: bundle.apiClient)));
     await tester.pumpAndSettle();
-
-    final currencyField = find.byType(DropdownButtonFormField<String>);
-    await tester.tap(currencyField);
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('GHS').last);
-    await tester.pumpAndSettle();
-
+    expect(find.text('NGN wallet'), findsOneWidget);
+    expect(find.text('GHS wallet'), findsNothing);
     await tester.enterText(
-      find.byWidgetPredicate(
-        (widget) =>
-            widget is TextField && widget.decoration?.labelText == 'Amount',
-      ),
-      '1000',
-    );
+        find.byWidgetPredicate(
+            (w) => w is TextField && w.decoration?.labelText == 'Amount'),
+        '1000');
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Continue to bank details'));
     await tester.pumpAndSettle();
-
-    expect(
-      find.text('Exchange GHS to NGN before sending to a bank account.'),
-      findsOneWidget,
-    );
-    expect(find.text('Step 2 of 2 · Enter the bank details.'), findsNothing);
+    expect(find.text('Step 2 of 2 · Enter the bank details.'), findsOneWidget);
   });
 
   testWidgets('cable TV stages provider selection before card details', (
@@ -163,12 +184,6 @@ void main() {
 
     expect(find.text('Continue to card details'), findsOneWidget);
     expect(find.text('Renew current package'), findsNothing);
-    expect(
-      find.text(
-          'Renew current package — Coming soon. You can still select and buy a package using Change package.'),
-      findsOneWidget,
-    );
-    expect(find.text('Change package'), findsOneWidget);
     expect(find.text('Smart card / IUC number'), findsNothing);
     await tester.tap(find.text('Continue to card details'));
     await tester.pump();
@@ -178,6 +193,52 @@ void main() {
     expect(find.text('Contact phone number'), findsOneWidget);
     expect(find.text('Verify card & continue'), findsOneWidget);
     expect(find.text('Continue to card details'), findsNothing);
+  });
+
+  testWidgets(
+      'international airtime opens the VTpass destination form when the expanded catalog supports it',
+      (tester) async {
+    setMockSecureStorage();
+    final bundle = buildTrustPayTestBundle();
+    bundle.apiClient.client.interceptors
+        .add(InterceptorsWrapper(onRequest: (options, handler) {
+      if (options.path == '/api/vtu/providers') {
+        handler.resolve(Response(
+            requestOptions: options,
+            data: options.queryParameters['type'] == 'airtime'
+                ? [
+                    {
+                      'id': 'mtn',
+                      'name': 'MTN',
+                      'type': 'airtime',
+                      'isActive': true
+                    },
+                    {
+                      'id': 'foreign-airtime',
+                      'name': 'International Airtime',
+                      'type': 'airtime',
+                      'isActive': true
+                    },
+                  ]
+                : []));
+      } else if (options.path == '/api/vtu/international/countries') {
+        handler.resolve(Response(requestOptions: options, data: [
+          {'code': 'GH', 'name': 'Ghana', 'prefix': '233'}
+        ]));
+      } else {
+        handler.next(options);
+      }
+    }));
+    await tester.pumpWidget(MaterialApp(
+        home: MoneyActionScreen(
+            kind: MoneyActionKind.airtime, apiClient: bundle.apiClient)));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Nigeria').first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('International').last);
+    await tester.pumpAndSettle();
+    expect(find.text('Destination country'), findsOneWidget);
+    expect(find.text('Ghana (coming soon)'), findsNothing);
   });
 
   testWidgets('international airtime is coming soon and makes no legacy call', (
@@ -196,7 +257,9 @@ void main() {
     );
     expect(providerRequests, isNotEmpty);
     for (final request in providerRequests) {
-      expect(request.queryParameters.keys, unorderedEquals(['type']));
+      expect(
+          request.queryParameters.keys, unorderedEquals(['type', 'catalog']));
+      expect(request.queryParameters['catalog'], 'extended');
     }
   });
 

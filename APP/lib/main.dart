@@ -74,8 +74,12 @@ void main() {
               final error = transport.releaseValidationError(
                   nativePinningSupported: !kIsWeb);
               if (error != null) throw StateError(error);
-              await _bootstrapCrashReporting();
-              await _bootstrapSupabase();
+              // These services initialize independently; waiting for them in
+              // sequence unnecessarily delays the first app frame.
+              await Future.wait([
+                _bootstrapCrashReporting(),
+                _bootstrapSupabase(),
+              ]);
             },
             onError: (error, stack) {
               if (_sentryDsn.isNotEmpty) {

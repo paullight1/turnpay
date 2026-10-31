@@ -1,6 +1,6 @@
-import { randomUUID } from 'crypto';
+import { randomUUID, createHash } from 'crypto';
 import { ConfigService } from '@nestjs/config';
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient, Prisma } from '@prisma/client';
 import { PinoLogger } from 'nestjs-pino';
 import { ManualExchangeService } from '../src/exchange/manual-exchange.service';
 import { allocateDepositReference } from '../src/common/services/deposit-allocation';
@@ -41,9 +41,11 @@ describe('manual exchange financial boundaries (real PostgreSQL)', () => {
       prisma as PrismaService,
       config,
       {
-        getRate: jest
-          .fn()
-          .mockResolvedValue({ rate: 0.02, markup: 0, isStale: false }),
+        getRate: jest.fn().mockImplementation(async (source: string) => ({
+          rate: source === 'GHS' ? 100 : 0.02,
+          markup: 0,
+          isStale: false,
+        })),
       } as unknown as RateService,
       ledger ?? new LedgerService(prisma as PrismaService),
       { verifyRequired: jest.fn() } as unknown as TransactionPinService,
@@ -114,7 +116,87 @@ describe('manual exchange financial boundaries (real PostgreSQL)', () => {
   const user = () => fixture.users.sender.id;
   const admin = () => fixture.users.approverAdminA.id;
   const otherAdmin = () => fixture.users.approverAdminB.id;
+  // Seed pre-policy rows explicitly: production never reclassifies historical customer choices.
+  async function seedLegacyWallet(key: string) {
+    const hash = (text: string) =>
+      createHash('sha256').update(text).digest('hex');
+    const keyHash = hash(key),
+      fingerprint = hash(
+        JSON.stringify({ amount: '100.00', settlementMode: 'WALLET' }),
+      );
+    try {
+      await prisma.$transaction(async (tx) => {
+        if (
+          await tx.manualExchangeOrder.findUnique({
+            where: {
+              userId_createKeyHash: { userId: user(), createKeyHash: keyHash },
+            },
+          })
+        )
+          return;
+        const reference = 'MEX-' + randomUUID().toUpperCase();
+        const transaction = await tx.transaction.create({
+          data: {
+            userId: user(),
+            type: 'EXCHANGE',
+            currency: 'NGN',
+            amount: '100.00',
+            fee: '0.00',
+            reference,
+            metadata: {
+              flow: 'MANUAL_EXCHANGE',
+              settlementMode: 'WALLET',
+              targetCurrency: 'GHS',
+              targetAmount: '2.00',
+            },
+          },
+        });
+        await tx.manualExchangeOrder.create({
+          data: {
+            userId: user(),
+            transactionId: transaction.id,
+            reference,
+            createKeyHash: keyHash,
+            createRequestHash: fingerprint,
+            settlementMode: 'WALLET',
+            payoutWorkflow: 'LEGACY',
+            sourceCurrency: 'NGN',
+            targetCurrency: 'GHS',
+            amount: '100.00',
+            targetAmount: '2.00',
+            rate: '0.020000',
+            fee: '0.00',
+            collectionAccount: {
+              bankName: 'Test Bank',
+              accountName: 'Test Collection',
+              accountNumber: '0001112223',
+              version: 'test-v1',
+              currency: 'NGN',
+            },
+            expiresAt: new Date(Date.now() + 1800000),
+            events: {
+              create: {
+                actorId: user(),
+                action: 'CREATE',
+                keyHash,
+                requestHash: fingerprint,
+                status: 'AWAITING_TRANSFER',
+                reason: 'Historical customer exchange request',
+              },
+            },
+          },
+        });
+      });
+    } catch (error) {
+      if (
+        !(error instanceof Prisma.PrismaClientKnownRequestError) ||
+        error.code !== 'P2002'
+      )
+        throw error;
+    }
+  }
   async function order(mode: SettlementMode = 'WALLET', key = randomUUID()) {
+    if (mode === 'WALLET') await seedLegacyWallet(key);
     return service.create(
       user(),
       {
@@ -165,6 +247,249 @@ describe('manual exchange financial boundaries (real PostgreSQL)', () => {
     ).balance;
   }
 
+  it.each([
+    ['NGN', 'WALLET'],
+    ['GHS', 'MOMO'],
+  ] as const)(
+    'rejects unsupported new %s/%s delivery without creating an obligation',
+    async (sourceCurrency, settlementMode) => {
+      await expect(
+        service.create(
+          user(),
+          {
+            sourceCurrency,
+            settlementMode,
+            amount: '100.00',
+            transactionPin: '2468',
+            ...(settlementMode === 'WALLET'
+              ? {}
+              : {
+                  destinationInstitution: 'Test MoMo',
+                  destinationAccount: '0240000000',
+                  destinationName: 'Test Recipient',
+                }),
+          },
+          randomUUID(),
+        ),
+      ).rejects.toThrow();
+      expect(
+        await prisma.manualExchangeOrder.count({ where: { userId: user() } }),
+      ).toBe(0);
+    },
+  );
+  it('blocks payout ownership before an operator pays while reconciliation is on hold', async () => {
+    const created = await order('MOMO');
+    await attach(created.id);
+    await service.review(
+      created.id,
+      admin(),
+      { ...confirm('DEP-' + randomUUID()), action: 'CONFIRM_DEPOSIT' },
+      randomUUID(),
+    );
+    const hold = await prisma.reconciliationRun.create({
+      data: { scope: 'MANUAL_EXCHANGE', status: 'BLOCKED', mismatchCount: 1 },
+    });
+    try {
+      await expect(
+        service.review(
+          created.id,
+          admin(),
+          {
+            action: 'CLAIM_PAYOUT',
+            reason: 'Trying to start the cedi payout during a hold',
+          },
+          randomUUID(),
+        ),
+      ).rejects.toThrow();
+      const current = await service.get(created.id, user());
+      expect(current.status).toBe('PAYOUT_PENDING');
+      expect(current.payoutClaimedBy).toBeNull();
+      expect(
+        await prisma.manualExchangeEvent.count({
+          where: { orderId: created.id, action: 'CLAIM_PAYOUT' },
+        }),
+      ).toBe(0);
+    } finally {
+      await prisma.reconciliationRun.delete({ where: { id: hold.id } });
+    }
+  });
+  it.each(['suspended', 'pin-reset'] as const)(
+    'rechecks %s eligibility before a payout is claimed',
+    async (reason) => {
+      const created = await order('MOMO');
+      await attach(created.id);
+      await service.review(
+        created.id,
+        admin(),
+        { ...confirm('DEP-' + randomUUID()), action: 'CONFIRM_DEPOSIT' },
+        randomUUID(),
+      );
+      if (reason === 'suspended')
+        await prisma.user.update({
+          where: { id: user() },
+          data: { isSuspended: true },
+        });
+      else
+        await prisma.transactionPinCredential.create({
+          data: {
+            userId: user(),
+            salt: 'synthetic-test-only',
+            hash: 'synthetic-test-only',
+            iterations: 1,
+            pinLength: 4,
+            resetHoldUntil: new Date(Date.now() + 60000),
+          },
+        });
+      await expect(
+        service.review(
+          created.id,
+          admin(),
+          {
+            action: 'CLAIM_PAYOUT',
+            reason: 'Checking current customer safety before paying',
+          },
+          randomUUID(),
+        ),
+      ).rejects.toThrow();
+      const current = await service.get(created.id, user());
+      expect(current.status).toBe('PAYOUT_PENDING');
+      expect(current.payoutClaimedBy).toBeNull();
+    },
+  );
+  it('keeps an older funded payout discoverable beyond one hundred newer closed requests', async () => {
+    const old = await order('MOMO');
+    await attach(old.id);
+    await service.review(
+      old.id,
+      admin(),
+      { ...confirm('DEP-' + randomUUID()), action: 'CONFIRM_DEPOSIT' },
+      randomUUID(),
+    );
+    await prisma.manualExchangeOrder.update({
+      where: { id: old.id },
+      data: { createdAt: new Date('2000-01-01') },
+    });
+    const rows = Array.from({ length: 101 }, (_, index) => ({
+      id: randomUUID(),
+      transactionId: randomUUID(),
+      reference: 'CLOSED-' + randomUUID(),
+      createdAt: new Date(Date.now() + index + 1000),
+    }));
+    await prisma.transaction.createMany({
+      data: rows.map((r) => ({
+        id: r.transactionId,
+        userId: user(),
+        type: 'EXCHANGE' as const,
+        status: 'FAILED' as const,
+        currency: 'GHS' as const,
+        amount: '100.00',
+        reference: r.reference,
+      })),
+    });
+    await prisma.manualExchangeOrder.createMany({
+      data: rows.map((r) => ({
+        id: r.id,
+        transactionId: r.transactionId,
+        userId: user(),
+        reference: r.reference,
+        createKeyHash: randomUUID(),
+        createRequestHash: 'synthetic-closed-history',
+        status: 'REJECTED' as const,
+        settlementMode: 'WALLET' as const,
+        sourceCurrency: 'GHS' as const,
+        targetCurrency: 'NGN' as const,
+        amount: '100.00',
+        targetAmount: '2.00',
+        rate: '0.020000',
+        fee: '0.00',
+        collectionAccount: {
+          bankName: 'Synthetic',
+          accountName: 'Synthetic',
+          accountNumber: '0240000000',
+          currency: 'GHS',
+          version: 'test',
+        },
+        createdAt: r.createdAt,
+        expiresAt: new Date(Date.now() + 1800000),
+      })),
+    });
+    const filteredFirst = await service.queue({ status: 'REJECTED' });
+    expect(filteredFirst.nextCursor).toBeTruthy();
+    const expectedRemaining = rows
+      .filter((row) => !filteredFirst.items.some((item) => item.id === row.id))
+      .map((row) => row.id);
+    // Another operator resolves the boundary row while this operator browses.
+    await prisma.manualExchangeOrder.update({
+      where: { id: filteredFirst.nextCursor! },
+      data: { status: 'NEEDS_MORE_INFO' },
+    });
+    const remaining = [] as string[];
+    let filteredCursor = filteredFirst.nextCursor;
+    while (filteredCursor) {
+      const next = await service.queue({
+        status: 'REJECTED',
+        cursor: filteredCursor,
+      });
+      remaining.push(...next.items.map((item) => item.id));
+      filteredCursor = next.nextCursor;
+    }
+    expect(remaining).toEqual(expect.arrayContaining(expectedRemaining));
+    expect(new Set(remaining).size).toBe(remaining.length);
+    const first = await service.queue({});
+    expect(first.items).toHaveLength(50);
+    expect(first.nextCursor).toBeTruthy();
+    expect(first.items.some((item) => item.id === old.id)).toBe(false);
+    const all = [...first.items];
+    let cursor = first.nextCursor;
+    for (let i = 0; cursor && i < 10; i++) {
+      const page = await service.queue({ cursor });
+      all.push(...page.items);
+      cursor = page.nextCursor;
+    }
+    expect(all.some((item) => item.id === old.id)).toBe(true);
+    expect(new Set(all.map((item) => item.id)).size).toBe(all.length);
+    const filtered = await service.queue({ status: 'PAYOUT_PENDING' });
+    expect(filtered.items.some((item) => item.id === old.id)).toBe(true);
+    expect(filtered.counts.REJECTED).toBe(
+      await prisma.manualExchangeOrder.count({ where: { status: 'REJECTED' } }),
+    );
+  });
+  it('creates a new cedi request once and credits naira once across concurrent admins', async () => {
+    const key = randomUUID(),
+      dto = {
+        sourceCurrency: 'GHS' as const,
+        amount: '100.00',
+        settlementMode: 'WALLET' as const,
+        transactionPin: '2468',
+      };
+    const created = await Promise.all([
+      service.create(user(), dto, key),
+      service.create(user(), dto, key),
+    ]);
+    expect(created[0].id).toBe(created[1].id);
+    expect(created[0].targetCurrency).toBe('NGN');
+    expect(created[0].targetAmount).toBe('10000.00');
+    expect(
+      await prisma.manualExchangeOrder.count({ where: { userId: user() } }),
+    ).toBe(1);
+    const before = await prisma.wallet.findUniqueOrThrow({
+      where: { userId_currency: { userId: user(), currency: 'NGN' } },
+    });
+    await attach(created[0].id);
+    const deposit = confirm('MOMO-' + randomUUID());
+    const results = await Promise.allSettled([
+      service.review(created[0].id, admin(), deposit, randomUUID()),
+      service.review(created[0].id, otherAdmin(), deposit, randomUUID()),
+    ]);
+    expect(results.filter((item) => item.status === 'fulfilled')).toHaveLength(
+      1,
+    );
+    const after = await prisma.wallet.findUniqueOrThrow({
+      where: { userId_currency: { userId: user(), currency: 'NGN' } },
+    });
+    expect(after.balance.minus(before.balance).toFixed(2)).toBe('10000.00');
+    expect((await balance()).toFixed(2)).toBe('1000.00');
+  });
   it('freezes GHS collection and credits NGN exactly once for reverse exchange', async () => {
     const before = await prisma.wallet.findUniqueOrThrow({
       where: { userId_currency: { userId: user(), currency: 'NGN' } },
@@ -289,9 +614,20 @@ describe('manual exchange financial boundaries (real PostgreSQL)', () => {
       await prisma.providerEvent.delete({ where: { id: event.id } });
     }
     await prisma.wallet.delete({
-      where: { userId_currency: { userId: user(), currency: 'GHS' } },
+      where: { userId_currency: { userId: user(), currency: 'NGN' } },
     });
-    await expect(order()).rejects.toThrow('Set up your GHS wallet');
+    await expect(
+      service.create(
+        user(),
+        {
+          sourceCurrency: 'GHS',
+          amount: '100.00',
+          settlementMode: 'WALLET',
+          transactionPin: '2468',
+        },
+        randomUUID(),
+      ),
+    ).rejects.toThrow('Set up your NGN wallet');
   });
   it('makes webhook funding and manual approval compete for one global deposit allocation', async () => {
     const created = await order();
@@ -367,7 +703,7 @@ describe('manual exchange financial boundaries (real PostgreSQL)', () => {
       service.uploadUrl(created.id, user(), { ...dto, fileSize: 12 }, key),
     ).rejects.toThrow('different file');
   });
-  it('creates once across concurrent retry; retains instructions, exact amounts and immutable mode', async () => {
+  it('replays a historical wallet request with stable instructions and immutable mode', async () => {
     const key = randomUUID();
     const results = await Promise.all([
       order('WALLET', key),
@@ -458,8 +794,166 @@ describe('manual exchange financial boundaries (real PostgreSQL)', () => {
     expect(result.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
     expect((await balance()).toFixed(2)).toBe('1002.00');
   });
+  it('completes an admin cedi transfer once with exact amount, owned claim and protected evidence', async () => {
+    const created = await order('MOMO');
+    await attach(created.id);
+    await service.review(
+      created.id,
+      admin(),
+      { ...confirm('DEP-' + randomUUID()), action: 'CONFIRM_DEPOSIT' },
+      randomUUID(),
+    );
+    await service.review(
+      created.id,
+      admin(),
+      {
+        action: 'CLAIM_PAYOUT',
+        reason: 'Assigned operator preparing cedi payment',
+      },
+      randomUUID(),
+    );
+    const upload = await service.uploadUrl(
+      created.id,
+      admin(),
+      {
+        fileName: 'paid.pdf',
+        contentType: 'application/pdf',
+        fileSize: pdf.length,
+      },
+      randomUUID(),
+      true,
+    );
+    objects.set(upload.objectKey, pdf);
+    const input = {
+      action: 'RECORD_CEDIS_SENT' as const,
+      reason: 'Verified actual cedi transfer after checking recipient',
+      payoutReference: 'GHS-OUT-' + randomUUID(),
+      payoutAmount: created.targetAmount,
+      payoutProofObjectKey: upload.objectKey,
+    };
+    await expect(
+      service.review(
+        created.id,
+        admin(),
+        { ...input, payoutAmount: '999.99' },
+        randomUUID(),
+      ),
+    ).rejects.toThrow();
+    expect((await service.get(created.id, user())).status).toBe(
+      'PAYOUT_PROCESSING',
+    );
+    await expect(
+      service.review(
+        created.id,
+        admin(),
+        { ...input, action: 'MARK_SENT' },
+        randomUUID(),
+      ),
+    ).rejects.toThrow('Confirm cedis sent');
+    const key = randomUUID();
+    const paid = await service.review(created.id, admin(), input, key);
+    expect(paid.status).toBe('COMPLETED');
+    expect((await service.review(created.id, admin(), input, key)).status).toBe(
+      'COMPLETED',
+    );
+    const row = await prisma.manualExchangeOrder.findUniqueOrThrow({
+      where: { id: created.id },
+    });
+    expect(
+      (
+        await prisma.transaction.findUniqueOrThrow({
+          where: { id: row.transactionId },
+        })
+      ).status,
+    ).toBe('SUCCESS');
+    expect(
+      await prisma.ledgerEntry.count({
+        where: { transactionId: row.transactionId },
+      }),
+    ).toBe(0);
+    expect((await balance()).toFixed(2)).toBe('1000.00');
+    expect(
+      await prisma.manualExchangeEvent.count({
+        where: { orderId: row.id, action: 'RECORD_CEDIS_SENT' },
+      }),
+    ).toBe(1);
+    await expect(
+      service.review(created.id, otherAdmin(), input, randomUUID()),
+    ).rejects.toThrow();
+    const reconciliation = new ManualExchangeReconciliationService(
+      prisma as PrismaService,
+      { error: jest.fn() } as unknown as PinoLogger,
+    );
+    expect(
+      (await reconciliation.check()).mismatches.filter(
+        (r) => r.reference === created.reference,
+      ),
+    ).toEqual([]);
+  });
+  it('replays committed cedi completion without downloading proof again after a lost response', async () => {
+    const created = await order('MOMO');
+    await attach(created.id);
+    await service.review(
+      created.id,
+      admin(),
+      { ...confirm('DEP-' + randomUUID()), action: 'CONFIRM_DEPOSIT' },
+      randomUUID(),
+    );
+    await service.review(
+      created.id,
+      admin(),
+      {
+        action: 'CLAIM_PAYOUT',
+        reason: 'Assigned operator preparing cedi transfer',
+      },
+      randomUUID(),
+    );
+    const upload = await service.uploadUrl(
+      created.id,
+      admin(),
+      {
+        fileName: 'paid.pdf',
+        contentType: 'application/pdf',
+        fileSize: pdf.length,
+      },
+      randomUUID(),
+      true,
+    );
+    objects.set(upload.objectKey, pdf);
+    const dto = {
+      action: 'RECORD_CEDIS_SENT' as const,
+      reason: 'Statement checked and cedis received by the destination',
+      payoutReference: 'OUT-' + randomUUID(),
+      payoutAmount: created.targetAmount,
+      payoutProofObjectKey: upload.objectKey,
+    };
+    const key = randomUUID();
+    await service.review(created.id, admin(), dto, key);
+    objects.delete(upload.objectKey);
+    expect((await service.review(created.id, admin(), dto, key)).status).toBe(
+      'COMPLETED',
+    );
+    expect(
+      await prisma.manualExchangeEvent.count({
+        where: { orderId: created.id, action: 'RECORD_CEDIS_SENT' },
+      }),
+    ).toBe(1);
+    await expect(
+      service.review(
+        created.id,
+        admin(),
+        { ...dto, payoutReference: 'CHANGED-OUT' },
+        key,
+      ),
+    ).rejects.toThrow('different details');
+  });
   it('keeps bank/MoMo pending until evidence; exclusive payout claim never credits a wallet', async () => {
     const created = await order('MOMO');
+    // This case represents an order created before the stricter admin cedi workflow.
+    await prisma.manualExchangeOrder.update({
+      where: { id: created.id },
+      data: { payoutWorkflow: 'LEGACY' },
+    });
     await attach(created.id);
     const deposit = await service.review(
       created.id,

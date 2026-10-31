@@ -55,8 +55,8 @@ class HomeTaskScreen extends StatelessWidget {
         route: AppRoutes.electricity,
       ),
       _FeatureItem(
-        title: 'Virtual account',
-        subtitle: 'Receive bank transfers',
+        title: 'Paystack NGN account',
+        subtitle: 'Receive NGN bank transfers',
         icon: Icons.account_balance_outlined,
         route: AppRoutes.virtualAccount,
       ),

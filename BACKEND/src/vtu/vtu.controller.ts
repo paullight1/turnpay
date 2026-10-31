@@ -12,6 +12,9 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import {
   GetVtuPackagesDto,
+  VtuQuoteDto,
+  ValidateSmileDto,
+  InternationalCountryDto,
   GetVtuProvidersDto,
   PurchaseVtuDto,
   ValidateMeterDto,
@@ -27,12 +30,36 @@ export class VtuController {
 
   @Get('providers')
   async getProviders(@Query() query: GetVtuProvidersDto) {
+    if (query.catalog === 'extended')
+      return this.vtuService.getProviders(query.type, true);
     return this.vtuService.getProviders(query.type);
   }
 
   @Get('packages')
   async getPackages(@Query() query: GetVtuPackagesDto) {
-    return this.vtuService.getPackages(query.provider);
+    return this.vtuService.getPackages(query.provider, query);
+  }
+
+  @Get('international/countries')
+  async getInternationalCountries() {
+    return this.vtuService.getInternationalCountries();
+  }
+
+  @Get('international/operators')
+  async getInternationalOperators(@Query() query: InternationalCountryDto) {
+    return this.vtuService.getInternationalOperators(query.countryCode);
+  }
+
+  @Get('quote')
+  @Throttle({ default: { limit: 30, ttl: 60000 } })
+  async quote(@Query() query: VtuQuoteDto) {
+    return this.vtuService.quote(query);
+  }
+
+  @Post('validate/smile')
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  async validateSmile(@Body() dto: ValidateSmileDto) {
+    return this.vtuService.validateSmile(dto.smileEmail);
   }
 
   @Post('validate/smartcard')

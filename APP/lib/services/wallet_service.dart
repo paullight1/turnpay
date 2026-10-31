@@ -154,28 +154,26 @@ class WalletService {
   /// Provisions a new virtual account.
   Future<VirtualAccountData?> provisionVirtualAccount({
     required String currency,
-    required String provider,
     required String country,
-    required String firstName,
-    required String lastName,
-    String? middleName,
+    bool consentAccepted = false,
     String? idempotencyKey,
   }) async {
+    if (!consentAccepted) {
+      throw ArgumentError.value(
+        consentAccepted,
+        'consentAccepted',
+        'Dedicated-account setup requires explicit user consent.',
+      );
+    }
     final options = idempotencyKey != null && idempotencyKey.isNotEmpty
         ? Options(headers: {'Idempotency-Key': idempotencyKey})
         : null;
 
     final requestData = <String, dynamic>{
       'currency': currency,
-      'provider': provider,
       'country': country,
-      'firstName': firstName,
-      'lastName': lastName,
+      'consentAccepted': true,
     };
-
-    if (middleName != null && middleName.trim().isNotEmpty) {
-      requestData['middleName'] = middleName.trim();
-    }
 
     final response = await _apiClient.client.post(
       '/api/banking/accounts/provision',
@@ -184,6 +182,36 @@ class WalletService {
     );
 
     return VirtualAccountData.fromJson(_asMap(response.data));
+  }
+
+  /// Initializes a server-owned Paystack checkout. The returned URL must be
+  /// opened in a secure browser surface; clients never receive the secret key
+  /// and never credit a wallet from a redirect alone.
+  Future<PaystackCheckout> initializePaystackCheckout({
+    required String amount,
+    String currency = 'NGN',
+    required String idempotencyKey,
+  }) async {
+    final response = await _apiClient.client.post(
+      '/api/payments/initialize',
+      data: {'amount': amount, 'currency': currency},
+      options: Options(headers: {'Idempotency-Key': idempotencyKey}),
+    );
+    return PaystackCheckout.fromJson(_asMap(response.data));
+  }
+
+  Future<PaystackPaymentStatus> verifyPaystackPayment(String reference) async {
+    final response = await _apiClient.client.get(
+      '/api/payments/verify/${Uri.encodeComponent(reference)}',
+    );
+    return PaystackPaymentStatus.fromJson(_asMap(response.data));
+  }
+
+  Future<PaystackCapabilities> fetchPaystackCapabilities() async {
+    final response = await _apiClient.client.get(
+      '/api/payments/capabilities',
+    );
+    return PaystackCapabilities.fromJson(_asMap(response.data));
   }
 
   /// Loads wallets into an explicit state for callers that need to retain a
@@ -975,6 +1003,108 @@ class VirtualAccountData {
       bankName: _asString(json['bankName']),
       currency: _asString(json['currency'], fallback: 'NGN'),
       status: _asString(json['status'], fallback: 'PENDING'),
+    );
+  }
+}
+
+class PaystackCheckout {
+  final String reference;
+  final Uri? authorizationUrl;
+  final String status;
+  final String message;
+
+  const PaystackCheckout({
+    required this.reference,
+    required this.authorizationUrl,
+    required this.status,
+    required this.message,
+  });
+
+  factory PaystackCheckout.fromJson(Map<String, dynamic> json) {
+    final urlText = _asString(json['authorizationUrl']);
+    final parsed = urlText.isEmpty ? null : Uri.tryParse(urlText);
+    if (urlText.isNotEmpty &&
+        (parsed == null ||
+            parsed.scheme != 'https' ||
+            parsed.host != 'checkout.paystack.com' ||
+            parsed.userInfo.isNotEmpty ||
+            parsed.port != 443)) {
+      throw const FormatException('Invalid Paystack checkout destination.');
+    }
+    return PaystackCheckout(
+      reference: _asString(json['reference']),
+      authorizationUrl: parsed,
+      status: _asString(json['status'], fallback: 'PENDING').toUpperCase(),
+      message: _asString(json['message']),
+    );
+  }
+}
+
+class PaystackPaymentStatus {
+  final String reference;
+  final String status;
+
+  const PaystackPaymentStatus({required this.reference, required this.status});
+
+  factory PaystackPaymentStatus.fromJson(Map<String, dynamic> json) {
+    return PaystackPaymentStatus(
+      reference: _asString(json['reference']),
+      status: _asString(json['status'], fallback: 'PENDING').toUpperCase(),
+    );
+  }
+}
+
+class PaystackCapabilities {
+  final String provider;
+  final String country;
+  final String currency;
+  final bool configured;
+  final bool checkout;
+  final bool virtualAccounts;
+  final bool withdrawals;
+  final bool internalTransfers;
+  final bool identityVerification;
+  final bool manualDocumentReview;
+  final List<String> automatedIdentityTypes;
+  final String withdrawalMinimumTier;
+  final String checkoutMinimumAmount;
+
+  const PaystackCapabilities({
+    required this.provider,
+    required this.country,
+    required this.currency,
+    required this.configured,
+    required this.checkout,
+    required this.virtualAccounts,
+    required this.withdrawals,
+    this.internalTransfers = false,
+    required this.identityVerification,
+    required this.manualDocumentReview,
+    required this.automatedIdentityTypes,
+    required this.withdrawalMinimumTier,
+    required this.checkoutMinimumAmount,
+  });
+
+  factory PaystackCapabilities.fromJson(Map<String, dynamic> json) {
+    final identityTypes = json['automatedIdentityTypes'];
+    return PaystackCapabilities(
+      provider: _asString(json['provider'], fallback: 'PAYSTACK'),
+      country: _asString(json['country'], fallback: 'NG'),
+      currency: _asString(json['currency'], fallback: 'NGN'),
+      configured: json['configured'] == true,
+      checkout: json['checkout'] == true,
+      virtualAccounts: json['virtualAccounts'] == true,
+      withdrawals: json['withdrawals'] == true,
+      internalTransfers: json['internalTransfers'] == true,
+      identityVerification: json['identityVerification'] == true,
+      manualDocumentReview: json['manualDocumentReview'] == true,
+      automatedIdentityTypes: identityTypes is List
+          ? identityTypes.map((item) => '$item').toList(growable: false)
+          : const [],
+      withdrawalMinimumTier:
+          _asString(json['withdrawalMinimumTier'], fallback: 'TIER_2'),
+      checkoutMinimumAmount:
+          _asString(json['checkoutMinimumAmount'], fallback: '50.00'),
     );
   }
 }

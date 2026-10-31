@@ -31,7 +31,7 @@
   - [ ] `BANK_ACCOUNT_ENCRYPTION_KEY` — 256-bit
   - [ ] `DATABASE_URL` — production managed PostgreSQL
   - [ ] `REDIS_URL` — production managed Redis (auth + TLS)
-  - [ ] All provider API keys (Monnify, VTpass, Ninja)
+  - [ ] All provider API keys (Monnify and VTpass)
   - [ ] Supabase production keys
   - [ ] Sentry DSN
 
@@ -130,41 +130,11 @@ fly secrets set VTPASS_SECRET_KEY="..."
 fly secrets set VTPASS_BASE_URL="https://vtpass.com/api"
 fly secrets set VTPASS_WEBHOOK_SECRET="..."
 
-# KYC Provider — Ninja is the active Nigerian provider and is a direct API;
-# there is no Ninja webhook URL or client-facing provider choice.
-fly secrets set KYC_PROVIDER="ninja"
-fly secrets set NINJA_CLIENT_KEY="..."
-fly secrets set NINJA_CLIENT_SECRET="..."
-fly secrets set NINJA_BASE_URL="https://api.ninja.boucloud.io"
-
-# OTP delivery — deployed environments use Twilio and never a development OTP.
-fly secrets set SMS_PROVIDER="twilio"
-fly secrets set TWILIO_ACCOUNT_SID="AC..."
-fly secrets set TWILIO_AUTH_TOKEN="..."
-fly secrets set TWILIO_PHONE_NUMBER="+234..."
-fly secrets set OTP_EXPIRES_IN="5m"
-fly secrets set OTP_LENGTH="6"
-fly secrets set OTP_DEV_CODE=""
-
-# Feature Flags
-fly secrets set BANKING_ENABLED="true"
-fly secrets set VIRTUAL_ACCOUNTS_ENABLED="true"
-fly secrets set BANKING_SANDBOX_MODE="false"
-fly secrets set BANKING_PROVIDER_PRIMARY="monnify"
-fly secrets set VTU_ENABLED="true"
-
-# Sentry
-fly secrets set SENTRY_DSN="https://...@sentry.io/..."
-
-# Transaction PIN
-fly secrets set TRANSACTION_PIN_REQUIRED="true"
-
-# KYC
-fly secrets set KYC_DOCUMENT_BUCKET="kyc-documents"
-fly secrets set PII_KEY_VERSION="1"
-
-# Verify all secrets are set
-fly secrets list
+# KYC Provider — Monnify direct identity verification
+fly secrets set KYC_PROVIDER="monnify"
+fly secrets set MONNIFY_API_KEY="..."
+fly secrets set MONNIFY_SECRET_KEY="..."
+fly secrets set MONNIFY_BASE_URL="https://api.monnify.com"
 ```
 
 ### 5. Deploy
@@ -299,8 +269,8 @@ All env vars required by the backend. See `DOCS/PRODUCTION-GUIDES/17-SECRET-INVE
 | `SUPABASE_JWT_SECRET` | No | `fly secrets` | Supabase JWT secret |
 | `MONNIFY_*` (6 vars) | ✅ Yes | `fly secrets` | Monnify production keys |
 | `VTPASS_*` (4 vars) | No | `fly secrets` | VTU provider keys |
-| `NINJA_CLIENT_KEY`, `NINJA_CLIENT_SECRET` | ✅ Yes | `fly secrets` | Ninja server credentials |
-| `NINJA_BASE_URL` | ✅ Yes | `fly.toml` / `fly secrets` | `https://api.ninja.boucloud.io` in production |
+| `MONNIFY_API_KEY`, `MONNIFY_SECRET_KEY` | ✅ Yes | `fly secrets` | Shared server-side Monnify credentials for banking and KYC |
+| `MONNIFY_BASE_URL` | ✅ Yes | `fly.toml` / `fly secrets` | `https://api.monnify.com` in production |
 | `SMS_PROVIDER`, `TWILIO_*` | ✅ Yes | `fly secrets` | Twilio OTP delivery; no development OTP override |
 | `OTP_EXPIRES_IN`, `OTP_LENGTH`, `OTP_DEV_CODE` | ✅ Yes | `fly.toml` / `fly secrets` | `5m`, `6`, and empty respectively |
 | `BANKING_ENABLED` | No | `fly secrets` | Feature flag |

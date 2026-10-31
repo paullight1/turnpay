@@ -1,3 +1,4 @@
+import '../../ghana/ghana_money_screen.dart';
 import 'dart:async';
 import 'dart:convert';
 
@@ -7,22 +8,32 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:dio/dio.dart';
 import 'package:crypto/crypto.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/router/app_router.dart';
+import '../../../core/money/money_value.dart';
+import '../../../core/money/amount_words.dart';
 import '../../../core/state/wallet_refresh_signal.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/widgets/micro_interactions.dart';
 import '../../../core/widgets/tp_page_header.dart';
-import '../../../core/widgets/tp_transaction_status.dart';
 import '../../../core/widgets/trustpay_lottie.dart';
 import '../../../services/auth_service.dart';
 import '../../../services/api_client.dart';
 import '../../../services/home_data_service.dart';
 import '../../../services/payment_attempt_store.dart';
 import '../../../services/payment_recovery_service.dart';
+import '../../../services/paystack_checkout_recovery.dart';
 import '../../../services/transaction_security_service.dart';
 import '../../../services/vtu_service.dart';
+import '../../../services/wallet_service.dart';
 import '../../security/screens/transaction_security_screen.dart';
+import '../widgets/vtu_phone.dart';
+import '../widgets/transfer_widgets.dart';
+import '../widgets/transfer_review_dialog.dart';
+import '../widgets/vtu_purchase_widgets.dart';
+import 'extended_vtu_form.dart';
+import 'transfer_receipt_screen.dart';
 
 enum MoneyActionKind {
   fund,
@@ -66,6 +77,7 @@ class MoneyActionScreen extends StatefulWidget {
   final PaymentAttemptStore? paymentAttemptStore;
   final PaymentRecoveryService? paymentRecoveryService;
   final String? paymentRecoveryUserId;
+  final PaystackCheckoutAttemptStore? paystackCheckoutAttemptStore;
 
   const MoneyActionScreen({
     super.key,
@@ -77,6 +89,7 @@ class MoneyActionScreen extends StatefulWidget {
     this.paymentAttemptStore,
     this.paymentRecoveryService,
     this.paymentRecoveryUserId,
+    this.paystackCheckoutAttemptStore,
   });
 
   @override
@@ -90,6 +103,8 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
   late final TransactionSecurityService _transactionSecurityService;
   late final PaymentAttemptStore _paymentAttemptStore;
   late final PaymentRecoveryService _paymentRecoveryService;
+  late final PaystackCheckoutAttemptStore _paystackCheckoutAttemptStore;
+  late final PaystackCheckoutRecoveryService _paystackCheckoutRecoveryService;
   final _amountController = TextEditingController();
   final _recipientController = TextEditingController();
   final _accountNumberController = TextEditingController();
@@ -106,6 +121,7 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
   final _attemptIdempotency = MoneyAttemptIdempotency();
   final _submissionGate = MoneySubmissionGate();
   late final VtuService _vtuService;
+  late final WalletService _walletService;
   String? _paymentRecoveryUser;
   List<PaymentAttempt> _unresolvedPaymentAttempts = const [];
   bool _isLoadingPaymentRecovery = false;
@@ -129,12 +145,23 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
   String _currency = 'NGN';
   String _exchangeFrom = 'GHS';
   String _exchangeTo = 'NGN';
-  final String _provider = 'monnify';
+  // New withdrawals are routed through the server-selected Paystack adapter.
+  // Historical Monnify transfers remain provider-tagged in the ledger and are
+  // never retried through this new flow.
+  final String _provider = 'paystack';
   String _vtuProvider = '';
+  String _lastMobileRecipient = '';
+  bool _networkSelectedManually = false;
+  String? _returnCoreProvider;
+  bool _returnCoreManual = false;
+  int _vtuCatalogRequestId = 0;
+  int _dataPackageRequestId = 0;
+  int _cablePackageRequestId = 0;
   String _airtimeScope = 'local';
   String _airtimeCountryCode = 'GH';
   String _airtimeOperatorId = '';
   bool _isAirtimeAmountStep = false;
+  bool _isDataPlanStep = false;
   bool _isDataPaymentStep = false;
   bool _isWithdrawalDetailsStep = false;
   String _dataCountryCode = 'NG';
@@ -142,7 +169,7 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
   String _electricityCountryCode = 'NG';
   String _electricityBillerId = '';
   String _meterType = 'prepaid';
-  String _cableSubscriptionType = 'change';
+  final String _cableSubscriptionType = 'change';
   String? _dataPackageId;
   bool _isElectricityPaymentStep = false;
   bool _isVerifyingMeter = false;
@@ -159,6 +186,8 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
   List<VtuProviderOption> _localCableProviders = const [];
   Timer? _orderPollTimer;
   int _orderPollAttempts = 0;
+  Map<String, dynamic>? _extendedVtuPayload;
+  Map<String, String> _extendedVtuReview = {};
   String? _message;
   MoneyActionFeedbackType _messageType = MoneyActionFeedbackType.info;
   bool _messageCanRetry = false;
@@ -170,6 +199,18 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
   bool _isLoadingWithdrawalBanks = false;
   bool _isResolvingWithdrawalAccount = false;
   bool _isRequestingFundingAccount = false;
+  bool _fundingAccountConsent = false;
+  bool _isLoadingPaymentCapabilities = false;
+  bool _isOpeningPaystackCheckout = false;
+  String? _checkoutMessage;
+  static const _missingCheckoutLinkMessage =
+      'This payment has no checkout link yet. Check its status; if it stays unresolved, contact support with the payment reference below before starting another payment.';
+  String? _checkoutReference;
+  String? _checkoutAmount;
+  Uri? _checkoutAuthorizationUrl;
+  String? _checkoutRecoveryUser;
+  PaystackCheckoutAttempt? _checkoutAttempt;
+  PaystackCapabilities? _paymentCapabilities;
   String? _vtuCatalogMessage;
   String? _fundingAccountMessage;
   String? _withdrawalBankMessage;
@@ -178,7 +219,12 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
   String? _pendingOrderReference;
   VtuOrderStatus? _trackedOrder;
   bool _isSubmitting = false;
-  bool _isLoadingVtuCatalog = false;
+  bool _isAwaitingTransferApproval = false;
+  String? _lastInternalTransferReference;
+  bool _isLoadingVtuPackages = false;
+  bool _isLoadingVtuProviders = false;
+  bool get _isLoadingVtuCatalog =>
+      _isLoadingVtuPackages || _isLoadingVtuProviders;
   bool _isCheckingOrder = false;
   List<VtuProviderOption> _localAirtimeProviders = const [];
   List<VtuProviderOption> _localDataProviders = const [];
@@ -192,16 +238,23 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
   List<_SettlementBankOption> _withdrawalBanks = const [];
   _SettlementBankOption? _selectedWithdrawalBank;
   HomeUser? _fundingUser;
+  HomeVirtualAccountProvisioning? _fundingProvisioning;
   Timer? _withdrawalResolveDebounce;
   int _withdrawalResolveRequestId = 0;
   Timer? _recipientResolveDebounce;
   int _recipientResolveRequestId = 0;
+  String? _verifiedBankInput;
+  String? _verifiedRecipientInput;
+  List<WalletData> _transferWallets = const [];
+  bool _isLoadingTransferWallets = false;
+  int _transferWalletRequestId = 0;
   bool _isResolvingRecipient = false;
   String? _recipientResolveError;
   String? _resolvedRecipientName;
   String? _resolvedRecipientMasked;
   WithdrawPrefill? _activeBeneficiary;
   bool _paymentRecoveryLoaded = false;
+  int _paymentRecoveryOutcomeVersion = 0;
   Future<void>? _paymentRecoveryLoadInFlight;
 
   @override
@@ -221,31 +274,49 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
     _authService = AuthService(apiClient: _apiClient);
     _homeDataService = HomeDataService(apiClient: _apiClient);
     _vtuService = VtuService(apiClient: _apiClient);
+    _walletService = WalletService(apiClient: _apiClient);
+    _paystackCheckoutAttemptStore =
+        widget.paystackCheckoutAttemptStore ?? PaystackCheckoutAttemptStore();
+    _paystackCheckoutRecoveryService = PaystackCheckoutRecoveryService(
+      store: _paystackCheckoutAttemptStore,
+      initialize: ({required amount, required idempotencyKey}) =>
+          _walletService.initializePaystackCheckout(
+        amount: amount,
+        idempotencyKey: idempotencyKey,
+      ),
+      verify: _walletService.verifyPaystackPayment,
+    );
     final prefill = widget.withdrawPrefill;
     if (widget.kind == MoneyActionKind.withdraw &&
         prefill != null &&
         prefill.beneficiaryId.isNotEmpty) {
       _activeBeneficiary = prefill;
-      _isWithdrawalDetailsStep = true;
-      if (prefill.currency.trim().isNotEmpty) {
-        _currency = prefill.currency.trim().toUpperCase();
-      }
+      _isWithdrawalDetailsStep = false;
+      // Paystack bank withdrawals are NGN-only. Keep legacy prefill records
+      // from selecting an unsupported GHS payout route.
+      _currency = 'NGN';
     }
     _amountController.addListener(_onAmountChanged);
     _recipientController.addListener(_onRecipientChanged);
     _accountNumberController.addListener(_scheduleWithdrawalAccountResolve);
     _withdrawBankController.addListener(_onWithdrawalBankTyped);
     _loadFundingAccounts();
+    _loadPaymentCapabilities();
     _loadExchangeRate();
     _loadVtuCatalogs();
     _loadWithdrawalBanks();
     _restorePaymentAttempts();
+    if (_isTransferAction) {
+      _loadTransferWallets();
+      walletRefreshSignal.addListener(_onTransferWalletRefresh);
+    }
   }
 
   List<HomeVirtualAccount> _fundingAccounts = const [];
 
   @override
   void dispose() {
+    walletRefreshSignal.removeListener(_onTransferWalletRefresh);
     _withdrawalResolveDebounce?.cancel();
     _recipientResolveDebounce?.cancel();
     _orderPollTimer?.cancel();
@@ -295,6 +366,10 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
   }
 
   Future<void> _restorePaymentAttempts() async {
+    if (widget.kind == MoneyActionKind.fund) {
+      await _restorePaystackCheckout();
+      return;
+    }
     if (_paymentOperation == null) return;
 
     final configuredUserId = widget.paymentRecoveryUserId?.trim();
@@ -303,6 +378,40 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
         : configuredUserId;
     if (userId == null || userId.isEmpty) return;
     await _restorePaymentAttemptsForUser(userId);
+  }
+
+  Future<void> _restorePaystackCheckout() async {
+    final configuredUserId = widget.paymentRecoveryUserId?.trim();
+    final userId = configuredUserId == null || configuredUserId.isEmpty
+        ? await _paymentRecoveryService.authenticatedUserId()
+        : configuredUserId;
+    if (userId == null || userId.isEmpty) return;
+
+    final normalizedUserId = userId.trim();
+    _checkoutRecoveryUser = normalizedUserId;
+    try {
+      final attempt =
+          await _paystackCheckoutAttemptStore.findUnresolved(normalizedUserId);
+      if (!mounted || attempt == null) return;
+      setState(() {
+        _checkoutAttempt = attempt;
+        _checkoutAmount = attempt.amount;
+        _checkoutReference = attempt.reference;
+        _checkoutAuthorizationUrl = attempt.authorizationUrl;
+        _checkoutMessage = attempt.reference == null
+            ? 'A previous checkout is ready to resume with the same payment key.'
+            : 'A previous checkout was restored. Checking its status securely.';
+      });
+      if (attempt.reference != null && attempt.reference!.isNotEmpty) {
+        await _verifyPaystackCheckout(restoredAttempt: attempt);
+      }
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _checkoutMessage =
+            'Saved Paystack checkout data could not be read safely. Sending is paused until it can be checked.';
+      });
+    }
   }
 
   Future<void> _restorePaymentAttemptsForUser(String userId) async {
@@ -341,12 +450,22 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
     }
 
     try {
-      final attempts = await _paymentRecoveryService.restoreAndResolve(userId);
+      final terminalOutcomes = <PaymentAttempt>[];
+      final attempts = await _paymentRecoveryService.restoreAndResolve(userId,
+          onResolved: (attempt) {
+        if (attempt.state.isTerminal &&
+            attempt.operation == _paymentOperation) {
+          terminalOutcomes.add(attempt);
+        }
+      });
       _paymentRecoveryLoaded = true;
       if (!mounted) return;
       setState(() {
         _unresolvedPaymentAttempts = attempts;
       });
+      if (terminalOutcomes.isNotEmpty) {
+        _showRecoveredPaymentOutcome(terminalOutcomes.last);
+      }
     } catch (error) {
       _paymentRecoveryLoaded = false;
       if (!mounted) return;
@@ -393,27 +512,7 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
         _unresolvedPaymentAttempts = remaining;
       });
       if (resolved.state.isTerminal) {
-        walletRefreshSignal.bump();
-        final reference = resolved.reference;
-        final message = switch (resolved.state) {
-          PaymentAttemptState.success =>
-            'Payment confirmed. ${reference == null ? '' : 'Reference: $reference. '}No second payment was sent.',
-          PaymentAttemptState.failed =>
-            'Payment failed. No second payment was sent.',
-          PaymentAttemptState.reversed =>
-            'Payment was reversed. No second payment was sent.',
-          _ => null,
-        };
-        if (message != null) {
-          setState(() {
-            _setMessageState(
-              message,
-              type: resolved.state == PaymentAttemptState.success
-                  ? MoneyActionFeedbackType.success
-                  : MoneyActionFeedbackType.error,
-            );
-          });
-        }
+        _showRecoveredPaymentOutcome(resolved);
       }
     } catch (_) {
       if (!mounted) return;
@@ -426,11 +525,39 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
     }
   }
 
+  void _showRecoveredPaymentOutcome(PaymentAttempt resolved) {
+    if (!mounted) return;
+    walletRefreshSignal.bump();
+    final reference = resolved.reference;
+    final message = switch (resolved.state) {
+      PaymentAttemptState.success =>
+        'Payment confirmed. ${reference == null ? '' : 'Reference: $reference. '}No second payment was sent.',
+      PaymentAttemptState.failed =>
+        'Payment failed. No second payment was sent.',
+      PaymentAttemptState.reversed =>
+        'Payment was reversed. No second payment was sent.',
+      _ => null,
+    };
+    if (message == null) return;
+    setState(() {
+      _paymentRecoveryOutcomeVersion++;
+      if (resolved.operation == PaymentAttemptOperation.internalTransfer &&
+          reference?.isNotEmpty == true) {
+        _lastInternalTransferReference = reference;
+      }
+      _setMessageState(message,
+          type: resolved.state == PaymentAttemptState.success
+              ? MoneyActionFeedbackType.success
+              : MoneyActionFeedbackType.error);
+    });
+  }
+
   void _onAmountChanged() {
     if (mounted &&
         (widget.kind == MoneyActionKind.exchange ||
             widget.kind == MoneyActionKind.airtime ||
-            widget.kind == MoneyActionKind.electricity)) {
+            widget.kind == MoneyActionKind.electricity ||
+            _isTransferAction)) {
       setState(() {});
     }
   }
@@ -439,6 +566,15 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
     if (!mounted) return;
     if (widget.kind == MoneyActionKind.send) {
       _scheduleRecipientPreview();
+    }
+    if (_isLocalMobileTopup && !_isSubmitting) {
+      final phone = VtuPhone.normalize(_recipientController.text);
+      if (phone != _lastMobileRecipient) {
+        _lastMobileRecipient = phone;
+        _networkSelectedManually = false;
+        _suggestMobileNetwork();
+      }
+      setState(() {});
     }
     if (widget.kind == MoneyActionKind.electricity &&
         (_meterCustomerName != null || _meterVerifySkippable)) {
@@ -454,6 +590,589 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
         _cableCustomerName = null;
         _cableVerifySkippable = false;
       });
+    }
+  }
+
+  bool get _isLocalMobileTopup =>
+      (widget.kind == MoneyActionKind.airtime && _airtimeScope == 'local') ||
+      (widget.kind == MoneyActionKind.data && _dataCountryCode == 'NG');
+
+  bool get _hasConfirmedMobileNetwork =>
+      _networkSelectedManually ||
+      (VtuPhone.suggest(_recipientController.text) != null &&
+          VtuPhone.suggest(_recipientController.text) == _vtuProvider);
+
+  void _suggestMobileNetwork() {
+    if (!_isLocalMobileTopup || _networkSelectedManually) return;
+    final suggested = VtuPhone.suggest(_recipientController.text);
+    if (suggested == null || suggested == _vtuProvider) return;
+    if (_providersForCurrentFlow().any((p) => p.id == suggested)) {
+      _setVtuProvider(suggested, manual: false);
+    }
+  }
+
+  Widget _mobileNetworkHint() {
+    final valid = VtuPhone.isValid(_recipientController.text);
+    final confirmed = valid && _hasConfirmedMobileNetwork;
+    final name = _providerName(_providersForCurrentFlow(), _vtuProvider);
+    return Padding(
+      padding: const EdgeInsets.only(top: 12),
+      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Icon(
+            confirmed
+                ? Icons.check_circle_outline_rounded
+                : Icons.info_outline_rounded,
+            size: 18,
+            color: confirmed ? AppColors.success : AppColors.textSecondary),
+        const SizedBox(width: 8),
+        Expanded(
+            child:
+                Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(
+              confirmed
+                  ? (_networkSelectedManually
+                      ? '$name selected manually'
+                      : '$name suggested from number')
+                  : valid
+                      ? 'Choose the network for this number'
+                      : 'Your network will be suggested automatically',
+              style: AppTextStyles.bodyS.copyWith(
+                  color: confirmed
+                      ? AppColors.textPrimary
+                      : AppColors.textSecondary)),
+          if (valid)
+            Text('Ported number? Select your current network below.',
+                style: AppTextStyles.bodyS),
+        ])),
+      ]),
+    );
+  }
+
+  Widget _mobilePurchaseFooter() {
+    final data = widget.kind == MoneyActionKind.data;
+    final finished = _trackedOrder != null &&
+        _terminalOrderStatuses.contains(_trackedOrder!.orderStatus);
+    final review = data ? _isDataPaymentStep : _isAirtimeAmountStep;
+    final recipientReady = VtuPhone.isValid(_recipientController.text) &&
+        _hasConfirmedMobileNetwork &&
+        _hasSelectedProvider(_providersForCurrentFlow(), _vtuProvider);
+    final planReady = !_isLoadingVtuCatalog &&
+        _dataPackages.any((plan) => plan.id == _dataPackageId);
+    final ready = !_isSubmitting &&
+        !_isLoadingPaymentRecovery &&
+        _paymentRecoveryError == null &&
+        !_submissionGate.isClaimed &&
+        !_isLoadingVtuProviders &&
+        !_isCheckingOrder &&
+        (_pendingOrderReference == null || finished) &&
+        (finished ||
+            (recipientReady &&
+                (data
+                    ? (!_isDataPlanStep || planReady)
+                    : (!review ||
+                        MoneyActionFormValidator.validateAmount(
+                                    _amountController.text)
+                                .error ==
+                            null))));
+    final label = finished
+        ? 'Start another top-up'
+        : review
+            ? (data ? 'Buy data' : 'Buy airtime')
+            : data
+                ? (_isDataPlanStep
+                    ? 'Continue to payment'
+                    : 'Continue to plans')
+                : 'Continue to amount';
+    return Container(
+      decoration: BoxDecoration(
+          color: AppColors.surface,
+          border: Border(top: BorderSide(color: AppColors.divider))),
+      padding: const EdgeInsets.fromLTRB(24, 12, 24, 12),
+      child: SafeArea(
+          top: false,
+          child: Align(
+              heightFactor: 1,
+              child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 560),
+                  child: FilledButton(
+                    onPressed: !ready
+                        ? null
+                        : finished
+                            ? _startAnotherMobileTopup
+                            : review
+                                ? _submit
+                                : data
+                                    ? (_isDataPlanStep
+                                        ? _continueToDataPayment
+                                        : _continueToDataPlans)
+                                    : _continueToAirtimeAmount,
+                    style: FilledButton.styleFrom(
+                        minimumSize: const Size.fromHeight(54),
+                        backgroundColor: AppColors.primaryDark,
+                        foregroundColor: Colors.white),
+                    child: _isSubmitting
+                        ? const SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(
+                                strokeWidth: 2, color: Colors.white))
+                        : Text(label),
+                  )))),
+    );
+  }
+
+  bool get _isTransferAction =>
+      widget.kind == MoneyActionKind.send ||
+      widget.kind == MoneyActionKind.withdraw;
+  bool get _transferLocked => _isSubmitting || _submissionGate.isClaimed;
+  String get _bankInput =>
+      '${_bankCodeController.text.trim()}|${_accountNumberController.text.trim()}';
+  bool get _bankRecipientVerified =>
+      _activeBeneficiary != null ||
+      (!_isResolvingWithdrawalAccount &&
+          !_isLoadingWithdrawalBanks &&
+          _selectedWithdrawalBank != null &&
+          _withdrawalBanks
+              .any((b) => b.code == _selectedWithdrawalBank!.code) &&
+          _verifiedBankInput == _bankInput &&
+          (_withdrawalAccountName?.isNotEmpty ?? false));
+  bool get _trustpayRecipientVerified =>
+      !_isResolvingRecipient &&
+      _verifiedRecipientInput ==
+          _recipientController.text.trim().toLowerCase() &&
+      (_resolvedRecipientName?.isNotEmpty ?? false);
+
+  WalletData? get _transferWallet {
+    for (final wallet in _transferWallets) {
+      if (wallet.currency == _currency) return wallet;
+    }
+    return null;
+  }
+
+  String? get _transferAmountError {
+    if (_amountController.text.trim().isEmpty) return null;
+    final result =
+        MoneyActionFormValidator.validateAmount(_amountController.text);
+    if (result.error != null) return result.error;
+    if (_isLoadingTransferWallets) return 'Loading your available balance…';
+    final balance = _transferWallet?.exactBalance;
+    if (balance == null) {
+      return 'Refresh your wallet balance before continuing.';
+    }
+    if (MoneyValue.parse(result.value!, currency: _currency)
+            .compareTo(balance) >
+        0) {
+      return 'Amount exceeds your available $_currency balance.';
+    }
+    return null;
+  }
+
+  void _onTransferWalletRefresh() {
+    if (mounted && _isTransferAction) _loadTransferWallets();
+  }
+
+  Future<void> _loadTransferWallets() async {
+    final requestId = ++_transferWalletRequestId;
+    setState(() => _isLoadingTransferWallets = true);
+    try {
+      final wallets = await Future.wait([
+        _walletService.fetchWallet('NGN').catchError((Object _) => null),
+        _walletService.fetchWallet('GHS').catchError((Object _) => null),
+      ]);
+      if (!mounted || requestId != _transferWalletRequestId) return;
+      setState(
+          () => _transferWallets = wallets.whereType<WalletData>().toList());
+    } catch (_) {
+      if (!mounted || requestId != _transferWalletRequestId) return;
+      setState(() => _transferWallets = const []);
+    } finally {
+      if (mounted && requestId == _transferWalletRequestId) {
+        setState(() => _isLoadingTransferWallets = false);
+      }
+    }
+  }
+
+  Widget _transferAmountSection() => TransferSection(
+        title: 'How much are you sending?',
+        children: [
+          Row(children: [
+            Icon(Icons.account_balance_wallet_outlined,
+                size: 20, color: AppColors.textSecondary),
+            const SizedBox(width: 8),
+            Expanded(child: Text('Pay from', style: AppTextStyles.bodyS)),
+            if (widget.kind == MoneyActionKind.send)
+              DropdownButtonHideUnderline(
+                  child: DropdownButton<String>(
+                value: _currency,
+                items: const [
+                  DropdownMenuItem(value: 'NGN', child: Text('NGN wallet')),
+                  DropdownMenuItem(value: 'GHS', child: Text('GHS wallet'))
+                ],
+                onChanged: _transferLocked
+                    ? null
+                    : (value) => setState(() {
+                          _currency = value!;
+                          _setMessageState(null);
+                        }),
+              ))
+            else
+              Text('NGN wallet', style: AppTextStyles.labelM),
+          ]),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _amountController,
+            enabled: !_transferLocked,
+            focusNode: widget.kind == MoneyActionKind.send
+                ? _sendAmountFocusNode
+                : null,
+            textInputAction: widget.kind == MoneyActionKind.send
+                ? TextInputAction.next
+                : TextInputAction.done,
+            onSubmitted: (_) {
+              if (widget.kind == MoneyActionKind.send) {
+                _sendRecipientFocusNode.requestFocus();
+              } else if (_transferAmountError == null) {
+                _continueToWithdrawalDetails();
+              }
+            },
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            inputFormatters: const [MoneyAmountInputFormatter()],
+            style: AppTextStyles.displayMedium,
+            decoration: InputDecoration(
+                labelText: 'Amount',
+                floatingLabelBehavior: FloatingLabelBehavior.always,
+                prefixText: _currency == 'NGN' ? '₦ ' : 'GH₵ ',
+                hintText: '0.00',
+                errorText: _amountController.text.endsWith('.')
+                    ? null
+                    : _transferAmountError,
+                errorMaxLines: 3),
+          ),
+          if (moneyAmountInWords(_amountController.text, _currency)
+              case final words?) ...[
+            const SizedBox(height: 12),
+            Semantics(
+                liveRegion: true,
+                child: Text(words,
+                    key: const ValueKey('transfer-amount-words'),
+                    style: AppTextStyles.bodyS
+                        .copyWith(color: AppColors.primary))),
+          ],
+          const SizedBox(height: 10),
+          Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Expanded(
+                child: Text(
+                    _isLoadingTransferWallets
+                        ? 'Loading available balance…'
+                        : _transferWallet == null
+                            ? 'Balance unavailable'
+                            : 'Available ${transferMoneyLabel(_transferWallet!.balanceDecimalString, _currency)}',
+                    style: AppTextStyles.bodyS)),
+            SizedBox(
+                width: 48,
+                height: 48,
+                child: IconButton(
+                    tooltip: 'Refresh balance',
+                    icon: const Icon(Icons.refresh_rounded, size: 18),
+                    onPressed: _transferLocked || _isLoadingTransferWallets
+                        ? null
+                        : _loadTransferWallets)),
+          ]),
+          Wrap(spacing: 8, runSpacing: 8, children: [
+            for (final amount in (_currency == 'NGN'
+                ? ['1000', '5000', '10000']
+                : ['50', '100', '500']))
+              ActionChip(
+                  label: Text(transferMoneyLabel(amount, _currency)
+                      .replaceFirst('.00', '')),
+                  materialTapTargetSize: MaterialTapTargetSize.padded,
+                  onPressed: _transferLocked
+                      ? null
+                      : () => _amountController.text = amount),
+          ]),
+        ],
+      );
+
+  Widget _buildTransferScaffold(BuildContext context) {
+    final bank = widget.kind == MoneyActionKind.withdraw;
+    final details = bank && _isWithdrawalDetailsStep;
+    final validAmount = _amountController.text.trim().isNotEmpty &&
+        _transferAmountError == null;
+    final ready = !_transferLocked &&
+        !_isLoadingPaymentRecovery &&
+        _paymentRecoveryError == null &&
+        validAmount &&
+        (bank
+            ? _paymentCapabilities?.withdrawals == true
+            : _paymentCapabilities?.internalTransfers == true) &&
+        (!bank
+            ? _trustpayRecipientVerified
+            : !details || _bankRecipientVerified);
+    final beneficiary = _activeBeneficiary;
+    final horizontal = MediaQuery.sizeOf(context).width > 600
+        ? (MediaQuery.sizeOf(context).width - 552) / 2
+        : 24.0;
+    return Scaffold(
+      backgroundColor: AppColors.background,
+      bottomNavigationBar: Padding(
+        padding:
+            EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(context).bottom),
+        child: Container(
+          decoration: BoxDecoration(
+              color: AppColors.surface,
+              border: Border(top: BorderSide(color: AppColors.divider))),
+          padding: EdgeInsets.fromLTRB(horizontal, 12, horizontal, 12),
+          child: SafeArea(
+              top: false,
+              child: FilledButton(
+                onPressed: !ready
+                    ? null
+                    : bank && !details
+                        ? _continueToWithdrawalDetails
+                        : _submit,
+                style: FilledButton.styleFrom(
+                    backgroundColor: AppColors.primaryDark,
+                    foregroundColor: Colors.white,
+                    minimumSize: const Size.fromHeight(54)),
+                child: _isSubmitting && !_isAwaitingTransferApproval
+                    ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(
+                            strokeWidth: 2, color: Colors.white))
+                    : Text(_isLoadingPaymentRecovery
+                        ? 'Checking previous payments…'
+                        : _transferLocked
+                            ? 'Awaiting approval…'
+                            : bank && !details
+                                ? 'Continue to bank details'
+                                : 'Review transfer'),
+              )),
+        ),
+      ),
+      body: SafeArea(
+          child: SingleChildScrollView(
+        keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+        padding: EdgeInsets.fromLTRB(horizontal, 16, horizontal, 24),
+        child:
+            Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          TransferHeader(
+              bank: bank,
+              locked: _transferLocked,
+              showBack: widget.showBackButton,
+              onBack: _handlePageBack,
+              onSwitch: () => context
+                  .pushReplacement(bank ? AppRoutes.send : AppRoutes.withdraw)),
+          const SizedBox(height: 20),
+          Text(
+              bank
+                  ? (details
+                      ? 'Step 2 of 2 · Enter the bank details.'
+                      : 'Step 1 of 2 · Choose an amount to send.')
+                  : 'Send to another TrustPay user by email.',
+              style: AppTextStyles.bodyS),
+          const SizedBox(height: 16),
+          if (_relevantUnresolvedPaymentAttempts.isNotEmpty) ...[
+            _PaymentRecoveryPanel(
+                attempts: _relevantUnresolvedPaymentAttempts,
+                isChecking: _isLoadingPaymentRecovery,
+                onCheckStatus: _checkPaymentAttempt,
+                onSupport: () => context.push(AppRoutes.profileSupport)),
+            const SizedBox(height: 16),
+          ],
+          if (bank && !details && beneficiary != null) ...[
+            _BeneficiaryPrefillPanel(
+                beneficiary: beneficiary,
+                onUseAnother: () {
+                  if (!_transferLocked) {
+                    setState(() => _activeBeneficiary = null);
+                  }
+                }),
+            const SizedBox(height: 16),
+          ],
+          if (!details)
+            _transferAmountSection()
+          else ...[
+            _WithdrawalTransferSummary(
+                amount: _amountController.text,
+                currency: _currency,
+                onEdit: () {
+                  if (!_transferLocked) {
+                    setState(() => _isWithdrawalDetailsStep = false);
+                  }
+                }),
+            const SizedBox(height: 16),
+          ],
+          if (bank && details && beneficiary != null)
+            _BeneficiaryPrefillPanel(
+                beneficiary: beneficiary,
+                onUseAnother: () {
+                  if (!_transferLocked) {
+                    setState(() => _activeBeneficiary = null);
+                  }
+                })
+          else if (bank && details)
+            TransferSection(
+                title: 'Recipient details',
+                subtitle:
+                    'Choose a bank. We’ll confirm the name from the account number.',
+                children: [
+                  TransferBankPicker(
+                      banks: _withdrawalBanks
+                          .map((b) => TransferBankChoice(
+                              code: b.code, name: b.name, slug: b.slug))
+                          .toList(),
+                      selectedCode: _selectedWithdrawalBank?.code,
+                      loading: _isLoadingWithdrawalBanks,
+                      enabled: !_transferLocked,
+                      onSelect: (code) => _selectWithdrawalBank(
+                          _withdrawalBanks.firstWhere((b) => b.code == code)),
+                      onRetry: _loadWithdrawalBanks),
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: _accountNumberController,
+                    enabled: !_transferLocked,
+                    keyboardType: TextInputType.number,
+                    textInputAction: TextInputAction.done,
+                    inputFormatters: [
+                      FilteringTextInputFormatter.digitsOnly,
+                      LengthLimitingTextInputFormatter(10)
+                    ],
+                    decoration: InputDecoration(
+                        labelText: 'Account number',
+                        hintText: '10-digit account number',
+                        helperText:
+                            '${_accountNumberController.text.length}/10 digits'),
+                    style: AppTextStyles.headingM.copyWith(letterSpacing: 1),
+                  ),
+                  const SizedBox(height: 16),
+                  TransferRecipientCard(
+                      bank: true,
+                      name: _bankRecipientVerified
+                          ? _withdrawalAccountName
+                          : null,
+                      detail:
+                          '${_selectedWithdrawalBank?.name ?? ''} · ${_maskAccountNumber(_accountNumberController.text)}',
+                      loading: _isResolvingWithdrawalAccount,
+                      error: _withdrawalResolveError,
+                      idleText: _selectedWithdrawalBank == null
+                          ? 'Choose a bank to verify the recipient.'
+                          : 'Enter 10 digits to confirm the account name.',
+                      canRetry: !_transferLocked &&
+                          _accountNumberController.text.length == 10 &&
+                          _selectedWithdrawalBank != null,
+                      onRetry: _resolveWithdrawalAccount),
+                ])
+          else if (!bank) ...[
+            const SizedBox(height: 16),
+            TransferSection(title: 'Who are you sending to?', children: [
+              _InputField(
+                  controller: _recipientController,
+                  enabled: !_transferLocked,
+                  label: 'Recipient email',
+                  inputFormatters: [LengthLimitingTextInputFormatter(254)],
+                  keyboardType: TextInputType.emailAddress,
+                  focusNode: _sendRecipientFocusNode,
+                  textInputAction: TextInputAction.next,
+                  onSubmitted: (_) => _sendNoteFocusNode.requestFocus()),
+              const SizedBox(height: 16),
+              TransferRecipientCard(
+                  bank: false,
+                  name: _trustpayRecipientVerified
+                      ? _resolvedRecipientLabel
+                      : null,
+                  loading: _isResolvingRecipient,
+                  error: _recipientResolveError,
+                  idleText: 'Enter a TrustPay email to see the recipient.',
+                  canRetry: !_transferLocked &&
+                      MoneyActionFormValidator.isValidEmail(
+                          _recipientController.text),
+                  onRetry: _resolveRecipientPreview),
+              const SizedBox(height: 16),
+              _InputField(
+                  controller: _noteController,
+                  enabled: !_transferLocked,
+                  label: 'Note optional',
+                  maxCodePoints: 120,
+                  focusNode: _sendNoteFocusNode,
+                  textInputAction: TextInputAction.done,
+                  onSubmitted: (_) => FocusScope.of(context).unfocus(),
+                  onChanged: (_) => setState(() {})),
+            ]),
+          ],
+          if (!bank &&
+              !_isLoadingPaymentCapabilities &&
+              _paymentCapabilities?.internalTransfers != true) ...[
+            const SizedBox(height: 16),
+            _MessagePanel(
+                message:
+                    'TrustPay transfers are temporarily unavailable. Try again.',
+                type: MoneyActionFeedbackType.warning,
+                onRetry: _loadPaymentCapabilities),
+          ],
+          if (bank &&
+              !_isLoadingPaymentCapabilities &&
+              _paymentCapabilities?.withdrawals != true) ...[
+            const SizedBox(height: 16),
+            _MessagePanel(
+                message:
+                    'Bank transfers are temporarily unavailable. Try again.',
+                type: MoneyActionFeedbackType.warning,
+                onRetry: _loadPaymentCapabilities),
+          ],
+          if (bank &&
+              details &&
+              _withdrawalBanks.isEmpty &&
+              _withdrawalBankMessage != null) ...[
+            const SizedBox(height: 16),
+            _MessagePanel(
+                message: 'Could not load the bank list. Reload it to continue.',
+                type: MoneyActionFeedbackType.warning,
+                onRetry: _loadWithdrawalBanks),
+          ],
+          if (_paymentRecoveryError != null) ...[
+            const SizedBox(height: 16),
+            _MessagePanel(
+                message: _paymentRecoveryError!,
+                type: MoneyActionFeedbackType.warning,
+                onRetry: _refreshPaymentRecovery),
+          ],
+          if (!bank && _lastInternalTransferReference != null) ...[
+            const SizedBox(height: 16),
+            OutlinedButton.icon(
+              onPressed: () =>
+                  _showInternalTransferReceipt(_lastInternalTransferReference!),
+              icon: const Icon(Icons.receipt_long_outlined),
+              label: const Text('View transfer receipt'),
+            ),
+          ],
+          if (_message != null) ...[
+            const SizedBox(height: 16),
+            _MessagePanel(
+                message: _message!,
+                type: _messageType,
+                onRetry: _messageCanRetry ? _retryLastSubmission : null),
+          ],
+        ]),
+      )),
+    );
+  }
+
+  void _showInternalTransferReceipt(
+    String reference, {
+    Map<String, dynamic>? initialReceipt,
+    bool replace = false,
+  }) {
+    if (!mounted) return;
+    final route = MaterialPageRoute<void>(
+        builder: (_) => TransferReceiptScreen(
+            reference: reference,
+            initialReceipt: initialReceipt,
+            apiClient: _apiClient));
+    if (replace) {
+      unawaited(Navigator.of(context).pushReplacement<void, void>(route));
+    } else {
+      unawaited(Navigator.of(context).push<void>(route));
     }
   }
 
@@ -533,8 +1252,9 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
       return;
     }
 
+    final requestId = ++_vtuCatalogRequestId;
     setState(() {
-      _isLoadingVtuCatalog = true;
+      _isLoadingVtuProviders = true;
       _vtuCatalogMessage = null;
     });
 
@@ -546,26 +1266,27 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
         _vtuService.getProviders('cable'),
       ]);
 
-      if (!mounted) return;
+      if (!mounted || requestId != _vtuCatalogRequestId) return;
 
       setState(() {
         _localAirtimeProviders = results[0];
         _localDataProviders = results[1];
         _localElectricityProviders = results[2];
         _localCableProviders = results[3];
-        _vtuProvider = _firstProviderId(_providersForCurrentFlow());
+        final available = _providersForCurrentFlow();
+        if (!available.any((p) => p.id == _vtuProvider)) {
+          _vtuProvider = _firstProviderId(available);
+          _networkSelectedManually = false;
+        }
+        final suggested = VtuPhone.suggest(_recipientController.text);
+        if (!_networkSelectedManually &&
+            suggested != null &&
+            available.any((p) => p.id == suggested)) {
+          _vtuProvider = suggested;
+        }
       });
-
-      if (widget.kind == MoneyActionKind.data &&
-          _dataCountryCode == 'NG' &&
-          _vtuProvider.isNotEmpty) {
-        await _loadDataPackages(_vtuProvider);
-      } else if (widget.kind == MoneyActionKind.cable &&
-          _vtuProvider.isNotEmpty) {
-        await _loadCablePackages(_vtuProvider);
-      }
     } catch (error) {
-      if (!mounted) return;
+      if (!mounted || requestId != _vtuCatalogRequestId) return;
       setState(() {
         _localAirtimeProviders = const [];
         _localDataProviders = const [];
@@ -577,15 +1298,19 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
           'Could not load live VTU providers.',
         );
       });
-      if (widget.kind == MoneyActionKind.data &&
-          _dataCountryCode == 'NG' &&
-          _vtuProvider.isNotEmpty) {
-        await _loadDataPackages(_vtuProvider);
-      }
     } finally {
-      if (mounted) {
-        setState(() => _isLoadingVtuCatalog = false);
+      if (mounted && requestId == _vtuCatalogRequestId) {
+        setState(() => _isLoadingVtuProviders = false);
       }
+    }
+    if (!mounted || extendedVtuProviders.contains(_vtuProvider)) return;
+    if (widget.kind == MoneyActionKind.data &&
+        _dataCountryCode == 'NG' &&
+        _vtuProvider.isNotEmpty) {
+      await _loadDataPackages(_vtuProvider);
+    } else if (widget.kind == MoneyActionKind.cable &&
+        _vtuProvider.isNotEmpty) {
+      await _loadCablePackages(_vtuProvider);
     }
   }
 
@@ -601,14 +1326,31 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
 
     try {
       final dashboard = await _homeDataService.fetchDashboard();
+      HomeVirtualAccountProvisioning? provisioning;
+      try {
+        provisioning = await _homeDataService.fetchVirtualAccountProvisioning();
+      } on DioException {
+        // The account list remains useful if an older deployment does not
+        // expose the optional provisioning-status endpoint yet. Never infer
+        // a ready account from a missing status response.
+      }
       if (!mounted) return;
       setState(() {
         _fundingUser = dashboard.user;
         _fundingAccounts = dashboard.virtualAccounts;
+        _fundingProvisioning = provisioning;
         if (_preferredFundingAccount() == null) {
-          _fundingAccountMessage = _canRevealFundingAccount
-              ? 'Request your NGN funding account before making a bank transfer.'
-              : 'Complete full KYC before requesting a funding account.';
+          _fundingAccountMessage = provisioning?.isActionRequired == true
+              ? (provisioning?.message.isNotEmpty == true
+                  ? provisioning!.message
+                  : 'Paystack account setup needs attention. Review your details or contact support, then retry.')
+              : provisioning?.isPending == true
+                  ? (provisioning?.message.isNotEmpty == true
+                      ? provisioning!.message
+                      : 'Paystack is preparing your NGN receiving account. Refresh shortly.')
+                  : _canRevealFundingAccount
+                      ? 'Request your NGN funding account before making a bank transfer.'
+                      : 'Complete BVN and bank verification before requesting a funding account.';
         }
       });
     } catch (error) {
@@ -623,6 +1365,283 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
       if (mounted) {
         setState(() => _isLoadingFundingAccounts = false);
       }
+    }
+  }
+
+  Future<void> _loadPaymentCapabilities() async {
+    if (widget.kind != MoneyActionKind.fund &&
+        widget.kind != MoneyActionKind.withdraw &&
+        widget.kind != MoneyActionKind.send) {
+      return;
+    }
+    setState(() => _isLoadingPaymentCapabilities = true);
+    try {
+      final capabilities = await _walletService.fetchPaystackCapabilities();
+      if (!mounted) return;
+      setState(() => _paymentCapabilities = capabilities);
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _paymentCapabilities = null;
+        _checkoutMessage = authErrorMessage(
+          error,
+          'Paystack funding options are temporarily unavailable.',
+        );
+      });
+    } finally {
+      if (mounted) setState(() => _isLoadingPaymentCapabilities = false);
+    }
+  }
+
+  Future<void> _openPaystackCheckout(String rawAmount) async {
+    final amount = rawAmount.trim();
+    if (_isOpeningPaystackCheckout) return;
+    if (_checkoutReference != null && _checkoutReference!.isNotEmpty) {
+      _showMessage(
+        'Check the saved payment status before starting another attempt.',
+        type: MoneyActionFeedbackType.info,
+      );
+      return;
+    }
+    final minimumAmount =
+        double.tryParse(_paymentCapabilities?.checkoutMinimumAmount ?? '') ??
+            50;
+    if (!RegExp(r'^\d+(?:\.\d{1,2})?$').hasMatch(amount) ||
+        (double.tryParse(amount) ?? 0) < minimumAmount) {
+      _showMessage(
+        'Enter at least NGN ${minimumAmount.toStringAsFixed(2)} for checkout.',
+        type: MoneyActionFeedbackType.warning,
+      );
+      return;
+    }
+    if (_paymentCapabilities?.checkout != true) {
+      _showMessage(
+        'Paystack checkout is not available for this account yet.',
+        type: MoneyActionFeedbackType.warning,
+      );
+      return;
+    }
+
+    setState(() {
+      _isOpeningPaystackCheckout = true;
+      _checkoutMessage = null;
+    });
+    String? userId;
+    try {
+      userId = await _resolvePaystackCheckoutUser();
+      if (userId == null || userId.isEmpty) {
+        throw const PaystackCheckoutRecoveryException(
+          'Sign in again before starting Paystack checkout.',
+        );
+      }
+      final result = await _paystackCheckoutRecoveryService.initializeCheckout(
+        userId: userId,
+        amount: amount,
+        currency: 'NGN',
+      );
+      if (!mounted) return;
+      final attempt = result.attempt;
+      setState(() {
+        _checkoutAttempt = attempt;
+        _checkoutAmount = attempt.amount;
+        _checkoutReference = attempt.reference;
+        _checkoutAuthorizationUrl = attempt.authorizationUrl;
+      });
+      final checkout = result.checkout;
+      if (checkout == null) {
+        await _verifyPaystackCheckout(restoredAttempt: attempt);
+        return;
+      }
+      if (checkout.status == 'SUCCESS') {
+        walletRefreshSignal.bump();
+        setState(() {
+          _checkoutAttempt = null;
+          _checkoutAmount = null;
+          _checkoutReference = null;
+          _checkoutAuthorizationUrl = null;
+          _checkoutMessage =
+              'This payment is already confirmed. Your wallet will refresh shortly.';
+        });
+        return;
+      }
+      if (checkout.status == 'FAILED') {
+        setState(() {
+          _checkoutAttempt = null;
+          _checkoutAmount = null;
+          _checkoutReference = null;
+          _checkoutAuthorizationUrl = null;
+          _checkoutMessage = checkout.message.isNotEmpty
+              ? checkout.message
+              : 'Paystack marked this payment as failed. You can start a new attempt.';
+        });
+        return;
+      }
+      final authorizationUrl = checkout.authorizationUrl;
+      if (authorizationUrl == null) {
+        setState(() {
+          _checkoutMessage = checkout.message.isNotEmpty
+              ? checkout.message
+              : 'Payment is pending. We will credit your wallet after Paystack confirmation.';
+        });
+        return;
+      }
+      final opened = await launchUrl(
+        authorizationUrl,
+        mode: LaunchMode.externalApplication,
+      );
+      if (!opened) throw StateError('Could not open Paystack checkout.');
+      setState(() {
+        _checkoutMessage =
+            'Checkout opened securely. Return here and check status after payment.';
+      });
+    } catch (error) {
+      if (userId != null && userId.isNotEmpty) {
+        try {
+          await _syncPaystackCheckoutAttempt(userId);
+        } catch (_) {
+          // Keep the original checkout error visible. A failed journal read
+          // must remain fail-closed and cannot permit a replacement payment.
+        }
+      }
+      if (!mounted) return;
+      setState(() {
+        _checkoutMessage = authErrorMessage(
+          error,
+          'Could not open Paystack checkout. Retry the same amount to resume safely.',
+        );
+      });
+    } finally {
+      if (mounted) setState(() => _isOpeningPaystackCheckout = false);
+    }
+  }
+
+  Future<void> _verifyPaystackCheckout({
+    PaystackCheckoutAttempt? restoredAttempt,
+  }) async {
+    final attempt = restoredAttempt ?? _checkoutAttempt;
+    final reference = attempt?.reference ?? _checkoutReference;
+    if (reference == null ||
+        reference.isEmpty ||
+        (_isOpeningPaystackCheckout && restoredAttempt == null)) {
+      _showMessage(
+        'Start checkout first, then return here to check its status.',
+        type: MoneyActionFeedbackType.warning,
+      );
+      return;
+    }
+    setState(() => _isOpeningPaystackCheckout = true);
+    try {
+      final userId = await _resolvePaystackCheckoutUser();
+      if (userId == null || userId.isEmpty || attempt == null) {
+        throw const PaystackCheckoutRecoveryException(
+          'Sign in again before checking Paystack payment status.',
+        );
+      }
+      final resolved = await _paystackCheckoutRecoveryService.verifyCheckout(
+        userId: userId,
+        attempt: attempt,
+      );
+      if (!mounted) return;
+      final normalized = resolved.state.wireName;
+      setState(() {
+        _checkoutAttempt = resolved;
+        _checkoutAmount = resolved.amount;
+        _checkoutReference = resolved.reference;
+        _checkoutAuthorizationUrl = resolved.authorizationUrl;
+      });
+      if (normalized == 'SUCCESS') {
+        walletRefreshSignal.bump();
+        setState(() {
+          _checkoutAttempt = null;
+          _checkoutAmount = null;
+          _checkoutReference = null;
+          _checkoutAuthorizationUrl = null;
+          _checkoutMessage =
+              'Payment confirmed. Your wallet balance will refresh shortly.';
+        });
+      } else if (normalized == 'FAILED') {
+        setState(() {
+          _checkoutAttempt = null;
+          _checkoutAmount = null;
+          _checkoutReference = null;
+          _checkoutAuthorizationUrl = null;
+          _checkoutMessage =
+              'Paystack marked this payment as failed. You can start a new attempt.';
+        });
+      } else {
+        setState(() {
+          _checkoutMessage = resolved.authorizationUrl == null
+              ? _missingCheckoutLinkMessage
+              : 'Payment is still pending. Complete checkout or check again shortly.';
+        });
+      }
+    } catch (error) {
+      if (mounted) {
+        _showMessage(
+          authErrorMessage(error, 'Could not verify Paystack payment status.'),
+          type: MoneyActionFeedbackType.warning,
+        );
+        if (_checkoutAuthorizationUrl == null) {
+          setState(() => _checkoutMessage = _missingCheckoutLinkMessage);
+        }
+      }
+    } finally {
+      if (mounted) setState(() => _isOpeningPaystackCheckout = false);
+    }
+  }
+
+  Future<String?> _resolvePaystackCheckoutUser() async {
+    final current = _checkoutRecoveryUser?.trim();
+    if (current != null && current.isNotEmpty) return current;
+
+    final configured = widget.paymentRecoveryUserId?.trim();
+    final userId = configured == null || configured.isEmpty
+        ? await _paymentRecoveryService.authenticatedUserId()
+        : configured;
+    if (userId == null || userId.trim().isEmpty) return null;
+    _checkoutRecoveryUser = userId.trim();
+    return _checkoutRecoveryUser;
+  }
+
+  Future<void> _syncPaystackCheckoutAttempt(String userId) async {
+    final attempt = await _paystackCheckoutAttemptStore.findUnresolved(userId);
+    if (!mounted) return;
+    setState(() {
+      _checkoutAttempt = attempt;
+      _checkoutAmount = attempt?.amount;
+      _checkoutReference = attempt?.reference;
+      _checkoutAuthorizationUrl = attempt?.authorizationUrl;
+    });
+  }
+
+  Future<void> _reopenPaystackCheckout() async {
+    final authorizationUrl = _checkoutAuthorizationUrl;
+    if (authorizationUrl == null) {
+      _showMessage(
+        _missingCheckoutLinkMessage,
+        type: MoneyActionFeedbackType.warning,
+      );
+      return;
+    }
+    try {
+      final opened = await launchUrl(
+        authorizationUrl,
+        mode: LaunchMode.externalApplication,
+      );
+      if (!opened) throw StateError('Could not open Paystack checkout.');
+      if (!mounted) return;
+      setState(() {
+        _checkoutMessage =
+            'Checkout reopened securely. Return here and check status after payment.';
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _checkoutMessage = authErrorMessage(
+          error,
+          'Could not reopen Paystack checkout. Check your payment status before retrying.',
+        );
+      });
     }
   }
 
@@ -712,25 +1731,29 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
     required String accountNumber,
     required String bankCode,
   }) async {
+    dynamic body;
     try {
-      final response = await _apiClient.client.post(
-        '/api/payments/banks/resolve',
-        data: {'accountNumber': accountNumber, 'bankCode': bankCode},
-      );
-      final data = Map<String, dynamic>.from(response.data as Map);
-      return '${data['accountName'] ?? ''}'.trim();
-    } catch (_) {
-      final response = await _apiClient.client.post(
-        '/api/banking/banks/resolve',
-        data: {
-          'accountNumber': accountNumber,
-          'bankCode': bankCode,
-          'provider': 'monnify',
-        },
-      );
-      final data = Map<String, dynamic>.from(response.data as Map);
-      return '${data['accountName'] ?? ''}'.trim();
+      body = (await _apiClient.client.post('/api/payments/banks/resolve',
+              data: {'accountNumber': accountNumber, 'bankCode': bankCode}))
+          .data;
+    } on DioException catch (error) {
+      if (![404, 405, 501].contains(error.response?.statusCode)) rethrow;
+      body = (await _apiClient.client.post('/api/banking/banks/resolve', data: {
+        'accountNumber': accountNumber,
+        'bankCode': bankCode,
+        'provider': 'paystack',
+      }))
+          .data;
     }
+    final data = _asResponseMap(body);
+    final name = _responseString(data['accountName']);
+    if (name.isEmpty ||
+        (data['accountNumber'] != null &&
+            '${data['accountNumber']}' != accountNumber) ||
+        (data['bankCode'] != null && '${data['bankCode']}' != bankCode)) {
+      throw const FormatException('Account confirmation is incomplete.');
+    }
+    return name;
   }
 
   void _onWithdrawalBankTyped() {
@@ -779,14 +1802,15 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
     _withdrawalResolveDebounce?.cancel();
     if (widget.kind != MoneyActionKind.withdraw) return;
     if (_activeBeneficiary != null) return;
+    _withdrawalResolveRequestId++;
 
     if (mounted) {
       setState(() {
+        _verifiedBankInput = null;
+        _isResolvingWithdrawalAccount = false;
+        _accountNameController.clear();
         _withdrawalAccountName = null;
         _withdrawalResolveError = null;
-        if (!_isResolvingWithdrawalAccount) {
-          _accountNameController.clear();
-        }
       });
     }
 
@@ -796,8 +1820,9 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
       return;
     }
 
+    setState(() => _isResolvingWithdrawalAccount = true);
     _withdrawalResolveDebounce = Timer(
-      const Duration(milliseconds: 600),
+      const Duration(milliseconds: 450),
       _resolveWithdrawalAccount,
     );
   }
@@ -824,6 +1849,8 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
       );
       if (!mounted || requestId != _withdrawalResolveRequestId) return;
 
+      if (_bankInput != '$bankCode|$accountNumber') return;
+      _verifiedBankInput = _bankInput;
       _setWithdrawalAccountResolveSuccess(accountName);
     } catch (error) {
       if (!mounted || requestId != _withdrawalResolveRequestId) return;
@@ -838,9 +1865,12 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
   void _scheduleRecipientPreview() {
     _recipientResolveDebounce?.cancel();
     if (widget.kind != MoneyActionKind.send) return;
+    _recipientResolveRequestId++;
 
     if (mounted) {
       setState(() {
+        _verifiedRecipientInput = null;
+        _isResolvingRecipient = false;
         _resolvedRecipientName = null;
         _resolvedRecipientMasked = null;
         _recipientResolveError = null;
@@ -851,14 +1881,15 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
       return;
     }
 
+    setState(() => _isResolvingRecipient = true);
     _recipientResolveDebounce = Timer(
-      const Duration(milliseconds: 600),
+      const Duration(milliseconds: 450),
       _resolveRecipientPreview,
     );
   }
 
   Future<void> _resolveRecipientPreview() async {
-    final email = _recipientController.text.trim();
+    final email = _recipientController.text.trim().toLowerCase();
     if (widget.kind != MoneyActionKind.send ||
         !MoneyActionFormValidator.isValidEmail(email)) {
       return;
@@ -888,6 +1919,12 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
         return;
       }
       final masked = _responseString(data['maskedIdentifier']);
+      final displayName = _responseString(data['displayName']);
+      if (displayName.isEmpty && masked.isEmpty) {
+        throw const FormatException('Recipient confirmation is incomplete.');
+      }
+      if (_recipientController.text.trim().toLowerCase() != email) return;
+      _verifiedRecipientInput = email;
       setState(() {
         _resolvedRecipientName = _responseString(
           data['displayName'],
@@ -934,15 +1971,32 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
   Future<void> _requestFundingAccount() async {
     if (_isRequestingFundingAccount) return;
 
+    if (_fundingProvisioning?.isPending == true) {
+      _showMessage(
+        _fundingProvisioning?.message.isNotEmpty == true
+            ? _fundingProvisioning!.message
+            : 'Paystack is already preparing your NGN receiving account. Refresh shortly.',
+        type: MoneyActionFeedbackType.info,
+      );
+      await _loadFundingAccounts();
+      return;
+    }
+
     if (!_canRevealFundingAccount) {
       _showMessage(
-        'Complete full KYC before requesting a funding account.',
+        'Complete BVN and bank verification before requesting a funding account.',
+        type: MoneyActionFeedbackType.warning,
+      );
+      return;
+    }
+    if (!_fundingAccountConsent) {
+      _showMessage(
+        'Confirm that you authorize TRUSTPAY to create a dedicated Paystack NGN receiving account.',
         type: MoneyActionFeedbackType.warning,
       );
       return;
     }
 
-    final names = _fundingAccountNameParts();
     setState(() {
       _isRequestingFundingAccount = true;
       _fundingAccountMessage = null;
@@ -951,38 +2005,61 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
 
     try {
       final account = await _homeDataService.provisionVirtualAccount(
-        firstName: names.firstName,
-        lastName: names.lastName,
-        middleName: names.middleName,
+        consentAccepted: true,
         idempotencyKey: _attemptIdempotency.keyFor(
-          'funding-account|monnify|NGN',
+          'funding-account|paystack|NGN',
         ),
       );
       _attemptIdempotency.markFinalOutcome();
 
       if (!mounted) return;
       setState(() {
+        _fundingProvisioning = HomeVirtualAccountProvisioning(
+          provider: account.provider.isEmpty ? 'PAYSTACK' : account.provider,
+          status: account.status,
+        );
         _fundingAccounts = [
           account,
           ..._fundingAccounts.where(
             (item) =>
-                item.provider.toLowerCase() != 'monnify' ||
+                item.provider.toUpperCase() != 'PAYSTACK' ||
                 item.currency.toUpperCase() != 'NGN',
           ),
         ];
         _fundingAccountMessage = null;
+        final status = account.status.trim().toUpperCase();
+        final isPending =
+            {'PENDING', 'PROCESSING', 'PROVISIONING'}.contains(status);
+        final isActionRequired =
+            {'ACTION_REQUIRED', 'FAILED', 'REJECTED'}.contains(status);
         _setMessageState(
-          'Funding account created. Transfer NGN to this account and your wallet will update after payment confirmation.',
-          type: MoneyActionFeedbackType.success,
+          isPending
+              ? 'Paystack is preparing your NGN receiving account. Refresh shortly; the account number appears after server confirmation.'
+              : isActionRequired
+                  ? 'Paystack account setup needs attention. Review your details or contact support, then retry.'
+                  : 'Funding account is ready. Transfer NGN to this account and your wallet will update after payment confirmation.',
+          type: isPending
+              ? MoneyActionFeedbackType.info
+              : isActionRequired
+                  ? MoneyActionFeedbackType.warning
+                  : MoneyActionFeedbackType.success,
         );
       });
     } catch (error) {
+      if (error is DioException &&
+          (error.response?.statusCode ?? 0) >= 400 &&
+          (error.response?.statusCode ?? 0) < 500) {
+        // Provider/eligibility responses are known terminal outcomes for this
+        // attempt. A user-confirmed retry should receive a fresh key; network
+        // failures keep the key so the same request can be safely replayed.
+        _attemptIdempotency.markFinalOutcome();
+      }
       if (!mounted) return;
       setState(() {
         _setMessageState(
           authErrorMessage(
             error,
-            'Could not request your funding account. Complete KYC and try again.',
+            'Could not request your funding account. Complete BVN and bank verification, then try again.',
           ),
           type: MoneyActionFeedbackType.error,
           canRetry: true,
@@ -1005,6 +2082,7 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
   }
 
   Future<void> _loadDataPackages(String provider) async {
+    final requestId = ++_dataPackageRequestId;
     if (provider.isEmpty) {
       setState(() {
         _dataPackageId = null;
@@ -1015,7 +2093,7 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
     }
 
     setState(() {
-      _isLoadingVtuCatalog = true;
+      _isLoadingVtuPackages = true;
       _vtuCatalogMessage = null;
       _dataPackageId = null;
       _dataPackages = const [];
@@ -1023,15 +2101,20 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
 
     try {
       final packages = await _vtuService.getPackages(provider);
-      if (!mounted) return;
+      if (!mounted ||
+          requestId != _dataPackageRequestId ||
+          provider != _vtuProvider) {
+        return;
+      }
       setState(() {
         _dataPackages = packages;
-        if (packages.isNotEmpty) {
-          _selectDataPackage(packages.first.id);
-        }
       });
     } catch (error) {
-      if (!mounted) return;
+      if (!mounted ||
+          requestId != _dataPackageRequestId ||
+          provider != _vtuProvider) {
+        return;
+      }
       setState(() {
         _vtuCatalogMessage = authErrorMessage(
           error,
@@ -1039,8 +2122,8 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
         );
       });
     } finally {
-      if (mounted) {
-        setState(() => _isLoadingVtuCatalog = false);
+      if (mounted && requestId == _dataPackageRequestId) {
+        setState(() => _isLoadingVtuPackages = false);
       }
     }
   }
@@ -1054,6 +2137,7 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
   }
 
   Future<void> _loadCablePackages(String provider) async {
+    final requestId = ++_cablePackageRequestId;
     if (provider.isEmpty) {
       setState(() {
         _cablePackageId = null;
@@ -1064,7 +2148,7 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
     }
 
     setState(() {
-      _isLoadingVtuCatalog = true;
+      _isLoadingVtuPackages = true;
       _vtuCatalogMessage = null;
       _cablePackageId = null;
       _cablePackages = const [];
@@ -1072,7 +2156,11 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
 
     try {
       final packages = await _vtuService.getPackages(provider);
-      if (!mounted) return;
+      if (!mounted ||
+          requestId != _cablePackageRequestId ||
+          provider != _vtuProvider) {
+        return;
+      }
       setState(() {
         _cablePackages = packages;
         if (packages.isNotEmpty) {
@@ -1080,7 +2168,11 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
         }
       });
     } catch (error) {
-      if (!mounted) return;
+      if (!mounted ||
+          requestId != _cablePackageRequestId ||
+          provider != _vtuProvider) {
+        return;
+      }
       setState(() {
         _vtuCatalogMessage = authErrorMessage(
           error,
@@ -1088,8 +2180,8 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
         );
       });
     } finally {
-      if (mounted) {
-        setState(() => _isLoadingVtuCatalog = false);
+      if (mounted && requestId == _cablePackageRequestId) {
+        setState(() => _isLoadingVtuPackages = false);
       }
     }
   }
@@ -1102,11 +2194,44 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
     _amountController.text = package.price;
   }
 
-  void _setVtuProvider(String provider) {
+  void _leaveSpecialistVtu() {
+    final providers = _providersForCurrentFlow()
+        .where((p) => !extendedVtuProviders.contains(p.id))
+        .toList();
+    final restore = providers.any((p) => p.id == _returnCoreProvider);
+    final suggestion = VtuPhone.suggest(_recipientController.text);
+    final next = restore
+        ? _returnCoreProvider!
+        : providers.any((p) => p.id == suggestion)
+            ? suggestion!
+            : _firstProviderId(providers);
+    _setVtuProvider(next, manual: restore && _returnCoreManual);
+  }
+
+  void _setVtuProvider(String provider, {bool manual = true}) {
+    if (_isSubmitting) return;
+    if (provider == _vtuProvider) {
+      setState(() => _networkSelectedManually = manual);
+      return;
+    }
+    if (extendedVtuProviders.contains(provider) &&
+        !extendedVtuProviders.contains(_vtuProvider)) {
+      _returnCoreProvider = _vtuProvider;
+      _returnCoreManual = _networkSelectedManually;
+    }
+    _dataPackageRequestId++;
+    _cablePackageRequestId++;
     setState(() {
+      _networkSelectedManually = manual;
+      _isLoadingVtuPackages = false;
+      _extendedVtuPayload = null;
+      _extendedVtuReview = {};
+      if (provider == 'foreign-airtime') _airtimeScope = 'local';
       _vtuProvider = provider;
       _dataPackageId = null;
       _dataPackages = const [];
+      _isDataPlanStep = false;
+      _isDataPaymentStep = false;
       if (widget.kind == MoneyActionKind.electricity) {
         _isElectricityPaymentStep = false;
       }
@@ -1121,6 +2246,7 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
       _setMessageState(null);
     });
 
+    if (extendedVtuProviders.contains(provider)) return;
     if (widget.kind == MoneyActionKind.data && _dataCountryCode == 'NG') {
       _loadDataPackages(provider);
     } else if (widget.kind == MoneyActionKind.cable) {
@@ -1158,12 +2284,19 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
   }
 
   void _setAirtimeScope(String scope) {
+    if (scope == 'international' &&
+        _localAirtimeProviders.any((item) => item.id == 'foreign-airtime')) {
+      _setVtuProvider('foreign-airtime');
+      return;
+    }
     setState(() {
       _airtimeScope = scope;
       _isAirtimeAmountStep = false;
-      if (scope == 'local') {
+      if (scope == 'local' &&
+          !_hasSelectedProvider(_localAirtimeProviders, _vtuProvider)) {
         _vtuProvider = _firstProviderId(_localAirtimeProviders);
-      } else {
+        _networkSelectedManually = false;
+      } else if (scope != 'local') {
         _airtimeCountryCode = 'GH';
         _airtimeOperatorId = _firstProviderId(
           _airtimeOperatorsForCountry(_airtimeCountryCode),
@@ -1171,6 +2304,7 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
         );
       }
     });
+    if (scope == 'local') _suggestMobileNetwork();
   }
 
   void _setAirtimeCountryCode(String countryCode) {
@@ -1187,6 +2321,8 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
   void _setDataCountryCode(String countryCode) {
     setState(() {
       _dataCountryCode = countryCode;
+      _isDataPlanStep = false;
+      _isDataPaymentStep = false;
       _dataPackageId = null;
       _dataPackages = const [];
       if (countryCode == 'GH') {
@@ -1226,9 +2362,8 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
   }
 
   void _handlePageBack() {
-    if (widget.kind == MoneyActionKind.withdraw &&
-        _isWithdrawalDetailsStep &&
-        _activeBeneficiary == null) {
+    FocusScope.of(context).unfocus();
+    if (widget.kind == MoneyActionKind.withdraw && _isWithdrawalDetailsStep) {
       setState(() {
         _isWithdrawalDetailsStep = false;
         _setMessageState(null);
@@ -1243,9 +2378,15 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
       });
       return;
     }
-    if (widget.kind == MoneyActionKind.data && _isDataPaymentStep) {
+    if (widget.kind == MoneyActionKind.data &&
+        (_isDataPlanStep || _isDataPaymentStep)) {
+      FocusScope.of(context).unfocus();
       setState(() {
-        _isDataPaymentStep = false;
+        if (_isDataPaymentStep) {
+          _isDataPaymentStep = false;
+        } else {
+          _isDataPlanStep = false;
+        }
         _setMessageState(null);
       });
       return;
@@ -1323,6 +2464,7 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
       return;
     }
 
+    FocusScope.of(context).unfocus();
     setState(() {
       _isAirtimeAmountStep = true;
       _setMessageState(null);
@@ -1330,6 +2472,11 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
   }
 
   void _continueToWithdrawalDetails() {
+    if (_transferAmountError != null) {
+      _showMessage(_transferAmountError!,
+          type: MoneyActionFeedbackType.warning);
+      return;
+    }
     final amountResult = MoneyActionFormValidator.validateAmount(
       _amountController.text,
     );
@@ -1352,8 +2499,25 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
     });
   }
 
+  void _continueToDataPlans() {
+    if (_isSubmitting ||
+        _isLoadingVtuProviders ||
+        !VtuPhone.isValid(_recipientController.text) ||
+        !_hasConfirmedMobileNetwork ||
+        !_hasSelectedProvider(_localDataProviders, _vtuProvider)) {
+      return;
+    }
+    FocusScope.of(context).unfocus();
+    setState(() {
+      _isDataPlanStep = true;
+      _setMessageState(null);
+    });
+  }
+
   void _continueToDataPayment() {
-    if (_dataCountryCode != 'NG' || _dataPackageId == null) {
+    if (_dataCountryCode != 'NG' ||
+        _isLoadingVtuCatalog ||
+        !_dataPackages.any((plan) => plan.id == _dataPackageId)) {
       _showMessage('Choose an available data plan first.',
           type: MoneyActionFeedbackType.warning);
       return;
@@ -1366,6 +2530,7 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
       _showMessage(error, type: MoneyActionFeedbackType.warning);
       return;
     }
+    FocusScope.of(context).unfocus();
     setState(() {
       _isDataPaymentStep = true;
       _setMessageState(null);
@@ -1664,6 +2829,9 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
   }
 
   String? _resolvedAmountText() {
+    if (_extendedVtuPayload != null) {
+      return _extendedVtuPayload!['amount'] as String;
+    }
     if (widget.kind == MoneyActionKind.data && _dataCountryCode == 'NG') {
       final packageId = _dataPackageId;
       if (packageId == null) return null;
@@ -1689,7 +2857,27 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
   }
 
   Future<void> _submit({bool explicitRetry = false}) async {
-    if (_isSubmitting || _submissionGate.isClaimed) return;
+    if (_isSubmitting ||
+        _submissionGate.isClaimed ||
+        (_paymentOperation != null && _isLoadingPaymentRecovery)) {
+      return;
+    }
+
+    if (widget.kind == MoneyActionKind.send &&
+        _paymentCapabilities?.internalTransfers != true) {
+      _showMessage('TrustPay transfers are temporarily unavailable. Try again.',
+          type: MoneyActionFeedbackType.warning);
+      return;
+    }
+
+    if (widget.kind == MoneyActionKind.withdraw &&
+        _paymentCapabilities?.withdrawals != true) {
+      _showMessage(
+        'NGN withdrawals are temporarily unavailable for this account.',
+        type: MoneyActionFeedbackType.warning,
+      );
+      return;
+    }
 
     if (widget.kind == MoneyActionKind.exchange) {
       await _submitExchange();
@@ -1782,59 +2970,37 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
     }
     final amount = amountResult.value!;
 
-    if (widget.kind == MoneyActionKind.withdraw && _activeBeneficiary == null) {
-      if (_isResolvingWithdrawalAccount) {
-        _showMessage(
-          'Wait for the account name confirmation.',
-          type: MoneyActionFeedbackType.warning,
-        );
-        return;
-      }
-      if (_withdrawalBanks.isNotEmpty && _selectedWithdrawalBank == null) {
-        _showMessage(
-          'Choose a bank from the list.',
-          type: MoneyActionFeedbackType.warning,
-        );
-        return;
-      }
-      if (_withdrawalBanks.isNotEmpty &&
-          (_withdrawalAccountName == null || _withdrawalAccountName!.isEmpty)) {
-        _showMessage(
-          _withdrawalResolveError ?? 'Confirm the account name before sending.',
-          type: MoneyActionFeedbackType.warning,
-        );
-        return;
-      }
+    if (_isTransferAction && _transferAmountError != null) {
+      _showMessage(_transferAmountError!,
+          type: MoneyActionFeedbackType.warning);
+      return;
     }
-
-    if (widget.kind == MoneyActionKind.send) {
-      if (_isResolvingRecipient) {
-        _showMessage(
-          'Wait for the recipient confirmation.',
-          type: MoneyActionFeedbackType.warning,
-        );
-        return;
-      }
-      if (_resolvedRecipientName == null || _resolvedRecipientName!.isEmpty) {
-        _showMessage(
+    if (widget.kind == MoneyActionKind.withdraw && !_bankRecipientVerified) {
+      _showMessage(
+          _withdrawalResolveError ??
+              'Confirm the bank and recipient name before sending.',
+          type: MoneyActionFeedbackType.warning);
+      return;
+    }
+    if (widget.kind == MoneyActionKind.send && !_trustpayRecipientVerified) {
+      _showMessage(
           _recipientResolveError ?? 'Confirm the recipient before sending.',
-          type: MoneyActionFeedbackType.warning,
-        );
-        return;
-      }
+          type: MoneyActionFeedbackType.warning);
+      return;
     }
 
-    final fieldError =
-        (widget.kind == MoneyActionKind.withdraw && _activeBeneficiary != null)
-            ? null
-            : MoneyActionFormValidator.validateFields(
-                kind: widget.kind,
-                recipient: _recipientController.text,
-                accountNumber: _accountNumberController.text,
-                accountName: _accountNameController.text,
-                bankCode: _bankCodeController.text,
-                note: _noteController.text,
-              );
+    final fieldError = (_extendedVtuPayload != null ||
+            (widget.kind == MoneyActionKind.withdraw &&
+                _activeBeneficiary != null))
+        ? null
+        : MoneyActionFormValidator.validateFields(
+            kind: widget.kind,
+            recipient: _recipientController.text,
+            accountNumber: _accountNumberController.text,
+            accountName: _accountNameController.text,
+            bankCode: _bankCodeController.text,
+            note: _noteController.text,
+          );
     if (fieldError != null) {
       _showMessage(fieldError, type: MoneyActionFeedbackType.error);
       return;
@@ -1850,15 +3016,29 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
     }
 
     if (!_submissionGate.tryClaim()) return;
+    if (_isTransferAction) {
+      FocusScope.of(context).unfocus();
+      setState(() {});
+    }
     var confirmed = false;
     try {
+      final recoveryVersion = _paymentRecoveryOutcomeVersion;
       final kycCanConfirm = await _ensureKycCanConfirm();
-      if (!kycCanConfirm) return;
+      if (!kycCanConfirm || !mounted) return;
+      // A previous uncertain payment just reached a final state. Let the user
+      // inspect that result before intentionally starting a different payment.
+      if (_paymentOperation != null &&
+          (recoveryVersion != _paymentRecoveryOutcomeVersion ||
+              _paymentRecoveryError != null ||
+              !_paymentRecoveryLoaded)) {
+        return;
+      }
       confirmed = await _confirmSubmission(amount);
     } finally {
       _submissionGate.release();
+      if (_isTransferAction && mounted) setState(() {});
     }
-    if (!confirmed) return;
+    if (!confirmed || !mounted) return;
 
     setState(() {
       _isSubmitting = true;
@@ -1871,51 +3051,68 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
         paymentOperation == null ? null : _canonicalPaymentPayload(amount);
     PaymentAttempt? matchingPaymentAttempt;
 
-    if (paymentOperation != null) {
-      if (paymentUserId == null || paymentUserId.isEmpty) {
-        if (mounted) {
-          setState(() {
-            _isSubmitting = false;
-            _setMessageState(
-              'Your account could not be identified for payment protection. Sign in again before sending.',
-              type: MoneyActionFeedbackType.error,
-            );
-          });
+    try {
+      if (paymentOperation != null) {
+        if (paymentUserId == null || paymentUserId.isEmpty) {
+          if (mounted) {
+            setState(() {
+              _isSubmitting = false;
+              _setMessageState(
+                'Your account could not be identified for payment protection. Sign in again before sending.',
+                type: MoneyActionFeedbackType.error,
+              );
+            });
+          }
+          return;
         }
-        return;
-      }
 
-      matchingPaymentAttempt = await _paymentAttemptStore.findUnresolved(
-        paymentUserId,
-        paymentOperation,
-        canonicalPayload!,
-      );
-      if (!mounted) return;
-
-      if (matchingPaymentAttempt != null && !explicitRetry) {
-        final retry = await _confirmExistingPaymentRetry(
-          matchingPaymentAttempt,
+        matchingPaymentAttempt = await _paymentAttemptStore.findUnresolved(
+          paymentUserId,
+          paymentOperation,
+          canonicalPayload!,
         );
-        if (!retry) {
-          if (mounted) setState(() => _isSubmitting = false);
-          return;
-        }
-      } else if (matchingPaymentAttempt == null &&
-          _relevantUnresolvedPaymentAttempts.isNotEmpty &&
-          !explicitRetry) {
-        final separatePayment = await _confirmSeparatePayment();
-        if (!separatePayment) {
-          if (mounted) setState(() => _isSubmitting = false);
-          return;
+        if (!mounted) return;
+
+        if (matchingPaymentAttempt != null && !explicitRetry) {
+          final retry = await _confirmExistingPaymentRetry(
+            matchingPaymentAttempt,
+          );
+          if (!retry) {
+            if (mounted) setState(() => _isSubmitting = false);
+            return;
+          }
+        } else if (matchingPaymentAttempt == null &&
+            _relevantUnresolvedPaymentAttempts.isNotEmpty &&
+            !explicitRetry) {
+          final separatePayment = await _confirmSeparatePayment();
+          if (!separatePayment) {
+            if (mounted) setState(() => _isSubmitting = false);
+            return;
+          }
         }
       }
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _isSubmitting = false;
+          _setMessageState(
+              'Payment protection could not be checked. Try again before sending.',
+              type: MoneyActionFeedbackType.error,
+              canRetry: true);
+        });
+      }
+      return;
     }
 
     final transactionPin = await _requireTransactionApproval(
-      title: 'Approve ${_configFor(widget.kind).title.toLowerCase()}',
-      subtitle: 'Confirm this money action before it is submitted.',
+      title: _isTransferAction
+          ? 'Confirm transfer'
+          : 'Approve ${_configFor(widget.kind).title.toLowerCase()}',
+      subtitle: _isTransferAction
+          ? 'Enter your transaction PIN.'
+          : 'Confirm this money action before it is submitted.',
     );
-    if (transactionPin == null) {
+    if (transactionPin == null || !mounted) {
       if (mounted) {
         setState(() => _isSubmitting = false);
       }
@@ -1923,6 +3120,9 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
     }
 
     String? paymentAttemptKey;
+    var requestStarted = false;
+    PaymentAttemptState? receivedPaymentState;
+    Map<String, dynamic>? receivedPaymentData;
     try {
       final idempotencyKey = paymentOperation == null
           ? _attemptIdempotency.keyFor(_attemptFingerprint(amount))
@@ -1938,11 +3138,14 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
           paymentAttemptKey,
         );
       }
+      requestStarted = true;
       final response = await _request(amount, idempotencyKey, transactionPin);
       final responseData = _asResponseMap(response.data);
       final serverState = paymentOperation == null
           ? null
           : _paymentAttemptStateFromResponse(responseData);
+      receivedPaymentState = serverState;
+      receivedPaymentData = responseData;
       if (paymentOperation != null) {
         final updatedAttempt = await _paymentAttemptStore.recordServerState(
           userId: paymentUserId!,
@@ -2019,43 +3222,15 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
           });
           return;
         }
-        final recipient = _asResponseMap(responseData['recipient']);
-        final responseCurrency = _responseString(
-          responseData['currency'],
-          fallback: 'NGN',
-        );
-        final responseAmount = _responseString(responseData['amount']);
-        final financialRows = InternalTransferReviewContract.financialRows(
-          amount: responseAmount,
-          currency: responseCurrency,
-        );
-        await TpTransactionResultView.present(
-          context,
-          status: TpTxStatus.success,
-          title: 'Money sent',
-          message: 'Your transfer to '
-              '${_responseString(recipient['maskedIdentifier'], fallback: 'the recipient')} '
-              'is complete.',
-          amount: '$responseCurrency $responseAmount',
-          details: [
-            for (final row in financialRows.skip(1))
-              TpDetailRow(row.label, row.value),
-            TpDetailRow(
-              'Reference',
-              _responseString(responseData['reference']),
-            ),
-            TpDetailRow(
-              'New balance',
-              _responseString(responseData['senderBalanceAfter']),
-              emphasize: true,
-            ),
-          ],
-          secondaryLabel: 'View history',
-          onSecondary: () {
-            Navigator.of(context).pop();
-            context.go(AppRoutes.activity);
-          },
-        );
+        final reference = _responseString(responseData['reference']);
+        if (reference.isEmpty) {
+          _showMessage(
+              'Your transfer was confirmed, but its reference is unavailable. Check your history before sending again.',
+              type: MoneyActionFeedbackType.warning);
+          return;
+        }
+        _showInternalTransferReceipt(reference,
+            initialReceipt: responseData, replace: true);
         return;
       }
 
@@ -2069,7 +3244,10 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
       _orderPollAttempts = 0;
       _scheduleVtuOrderAutoCheck();
     } catch (error) {
-      if (paymentAttemptKey != null && paymentUserId != null) {
+      if (requestStarted &&
+          receivedPaymentState?.isTerminal != true &&
+          paymentAttemptKey != null &&
+          paymentUserId != null) {
         try {
           final unresolved = await _paymentAttemptStore.recordServerState(
             userId: paymentUserId,
@@ -2086,13 +3264,21 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
       if (mounted) {
         setState(() {
           _setMessageState(
-            paymentOperation == null
-                ? authErrorMessage(error, 'Request failed')
-                : 'We could not confirm this payment. It is still unresolved and will not be sent again automatically.',
-            type: paymentOperation == null
-                ? MoneyActionFeedbackType.error
-                : MoneyActionFeedbackType.warning,
-            canRetry: true,
+            receivedPaymentState == PaymentAttemptState.success
+                ? 'Payment confirmed. Reference: ${_responseString(receivedPaymentData?['reference'])}. Open your history for the receipt.'
+                : receivedPaymentState?.isTerminal == true
+                    ? 'This payment is ${receivedPaymentState!.wireName.toLowerCase()}. Check your history for the final details.'
+                    : !requestStarted
+                        ? 'Payment protection could not prepare the transfer. No transfer request was sent. Try again.'
+                        : paymentOperation == null
+                            ? authErrorMessage(error, 'Request failed')
+                            : 'We could not confirm this payment. It is still unresolved and will not be sent again automatically.',
+            type: receivedPaymentState == PaymentAttemptState.success
+                ? MoneyActionFeedbackType.success
+                : !requestStarted || paymentOperation == null
+                    ? MoneyActionFeedbackType.error
+                    : MoneyActionFeedbackType.warning,
+            canRetry: receivedPaymentState?.isTerminal != true,
           );
         });
       }
@@ -2174,7 +3360,7 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
       _orderPollAttempts++;
       try {
         final order = await _vtuService.getOrderStatus(reference);
-        if (!mounted) return;
+        if (!mounted || reference != _pendingOrderReference) return;
         setState(() {
           _trackedOrder = order;
           if (_terminalOrderStatuses.contains(order.orderStatus)) {
@@ -2192,6 +3378,7 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
   }
 
   Future<void> _checkVtuOrderStatus() async {
+    final pendingReference = _pendingOrderReference;
     final reference = _trackedOrder?.orderId ?? _pendingOrderReference;
     if (reference == null || _isCheckingOrder) return;
 
@@ -2207,7 +3394,7 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
       );
       _attemptIdempotency.markFinalOutcome();
 
-      if (!mounted) return;
+      if (!mounted || pendingReference != _pendingOrderReference) return;
       setState(() {
         _trackedOrder = order;
         _pendingOrderReference = order.orderId;
@@ -2374,6 +3561,9 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
   }
 
   Map<String, dynamic> _paymentRequestPayload(String amount) {
+    if (_extendedVtuPayload != null) {
+      return Map<String, dynamic>.from(_extendedVtuPayload!);
+    }
     switch (widget.kind) {
       case MoneyActionKind.fund:
         return <String, dynamic>{};
@@ -2486,6 +3676,8 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
         _hashPayloadIdentifier(payload, 'recipientNumber');
         _hashPayloadIdentifier(payload, 'smartCardNumber');
         _hashPayloadIdentifier(payload, 'meterNumber');
+        _hashPayloadIdentifier(payload, 'smileEmail');
+        _hashPayloadIdentifier(payload, 'smileAccountId');
         break;
       case MoneyActionKind.fund:
       case MoneyActionKind.exchange:
@@ -2622,7 +3814,7 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
   /// Convert a locally formatted number (e.g. 0803...) into the E.164 form
   /// the backend validates against, using the flow's country code.
   String _normalizedPhone(String raw, String countryCode) {
-    final trimmed = raw.trim();
+    final trimmed = countryCode == 'NG' ? VtuPhone.normalize(raw) : raw.trim();
     if (trimmed.startsWith('+')) return trimmed;
     const prefixes = {
       'NG': '+234',
@@ -2785,6 +3977,25 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
     final config = _configFor(widget.kind);
     final rows = _reviewRows(amount);
 
+    if (_isTransferAction) {
+      return await showDialog<bool>(
+            context: context,
+            builder: (dialogContext) => TransferReviewDialog(
+              title: 'Review ${config.title.toLowerCase()}',
+              amount: amount,
+              currency: _currency,
+              amountWords: moneyAmountInWords(amount, _currency),
+              entries: rows
+                  .skip(1)
+                  .map((row) => TransferReviewEntry(row.label, row.value))
+                  .toList(),
+              onEdit: () => Navigator.of(dialogContext).pop(false),
+              onContinue: () => Navigator.of(dialogContext).pop(true),
+            ),
+          ) ??
+          false;
+    }
+
     return await showDialog<bool>(
           context: context,
           builder: (dialogContext) {
@@ -2794,7 +4005,8 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
                 'Review ${config.title.toLowerCase()}',
                 style: AppTextStyles.headingM,
               ),
-              content: Column(
+              content: SingleChildScrollView(
+                  child: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
@@ -2820,7 +4032,7 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
                     style: AppTextStyles.bodyS,
                   ),
                 ],
-              ),
+              )),
               actions: [
                 TextButton(
                   onPressed: () => Navigator.of(dialogContext).pop(false),
@@ -2847,6 +4059,11 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
   }
 
   List<_ReviewRowData> _reviewRows(String amount) {
+    if (_extendedVtuPayload != null) {
+      return _extendedVtuReview.entries
+          .map((entry) => _ReviewRowData(entry.key, entry.value))
+          .toList();
+    }
     switch (widget.kind) {
       case MoneyActionKind.fund:
         final account = _preferredFundingAccount();
@@ -2987,9 +4204,53 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
   @override
   Widget build(BuildContext context) {
     AppColors.watch(context);
+    if (_isVtuAction && extendedVtuProviders.contains(_vtuProvider)) {
+      return Scaffold(
+        backgroundColor: AppColors.background,
+        appBar: AppBar(
+            title:
+                Text(_providerName(_providersForCurrentFlow(), _vtuProvider)),
+            leading: IconButton(
+                icon: const Icon(Icons.arrow_back),
+                onPressed: _isSubmitting ? null : _leaveSpecialistVtu)),
+        body: ListView(padding: const EdgeInsets.all(24), children: [
+          ExtendedVtuForm(
+              key: ValueKey(_vtuProvider),
+              client: _apiClient.client,
+              provider: _vtuProvider,
+              type: widget.kind == MoneyActionKind.airtime
+                  ? 'airtime'
+                  : widget.kind == MoneyActionKind.data
+                      ? 'data'
+                      : 'cable',
+              disabled: _isSubmitting || _pendingOrderReference != null,
+              onReady: (payload, review) async {
+                setState(() {
+                  _extendedVtuPayload = payload;
+                  _extendedVtuReview = review;
+                });
+                await _submit();
+              }),
+          if (_pendingOrderReference != null)
+            _VtuOrderStatusPanel(
+                reference: _pendingOrderReference!,
+                order: _trackedOrder,
+                isChecking: _isCheckingOrder,
+                onCheckStatus: _checkVtuOrderStatus),
+          if (_message != null)
+            _MessagePanel(
+                message: _message!,
+                type: _messageType,
+                onRetry: _messageCanRetry ? _retryLastSubmission : null),
+        ]),
+      );
+    }
+
     if (widget.kind == MoneyActionKind.exchange) {
       return _buildExchangeScaffold(context);
     }
+    if (_isTransferAction) return _buildTransferScaffold(context);
+    if (_isLocalMobileTopup) return _buildMobileTopupScaffold(context);
 
     final config = _configFor(widget.kind);
     final isAirtimeAmountPage =
@@ -3026,6 +4287,12 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
 
     return Scaffold(
       backgroundColor: AppColors.background,
+      bottomNavigationBar: _isLocalMobileTopup
+          ? Padding(
+              padding: EdgeInsets.only(
+                  bottom: MediaQuery.viewInsetsOf(context).bottom),
+              child: _mobilePurchaseFooter())
+          : null,
       body: SafeArea(
         child: CustomScrollView(
           physics: const BouncingScrollPhysics(),
@@ -3039,13 +4306,61 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
               ),
               sliver: SliverList.list(
                 children: [
-                  TpPageHeader(
-                    label: config.title,
-                    showBackButton: widget.showBackButton,
-                    onBack: _handlePageBack,
-                  ),
+                  if (_isVtuAction)
+                    VtuPageHeader(
+                        title: config.title,
+                        onBack: _handlePageBack,
+                        showBackButton: widget.showBackButton)
+                  else
+                    TpPageHeader(
+                      label: config.title,
+                      showBackButton: widget.showBackButton,
+                      onBack: _handlePageBack,
+                      menuActions: widget.kind == MoneyActionKind.withdraw
+                          ? [
+                              TpPageMenuAction(
+                                  label: 'Withdraw cedis',
+                                  icon: Icons.payments_outlined,
+                                  onTap: () => Navigator.of(context).push(
+                                      MaterialPageRoute(
+                                          builder: (_) =>
+                                              const GhanaMoneyScreen(
+                                                  withdraw: true))))
+                            ]
+                          : widget.kind == MoneyActionKind.fund
+                              ? [
+                                  TpPageMenuAction(
+                                      label: 'Add cedis',
+                                      icon: Icons.payments_outlined,
+                                      onTap: () => Navigator.of(context).push(
+                                          MaterialPageRoute(
+                                              builder: (_) =>
+                                                  const GhanaMoneyScreen())))
+                                ]
+                              : const [],
+                    ),
                   const SizedBox(height: AppSpacing.lg),
-                  Text(pageSubtitle, style: AppTextStyles.bodyL),
+                  if (_isVtuAction) ...[
+                    VtuProgress(
+                      step: widget.kind == MoneyActionKind.airtime
+                          ? (_isAirtimeAmountStep ? 1 : 0)
+                          : widget.kind == MoneyActionKind.data
+                              ? (_isDataPaymentStep ? 1 : 0)
+                              : widget.kind == MoneyActionKind.cable
+                                  ? (_isCablePaymentStep
+                                      ? 2
+                                      : _isCableRecipientStep
+                                          ? 1
+                                          : 0)
+                                  : (_isElectricityPaymentStep ? 1 : 0),
+                      labels: widget.kind == MoneyActionKind.cable
+                          ? const ['Provider', 'Account', 'Payment']
+                          : widget.kind == MoneyActionKind.data
+                              ? const ['Number & plan', 'Payment']
+                              : const ['Recipient', 'Amount'],
+                    ),
+                  ] else
+                    Text(pageSubtitle, style: AppTextStyles.bodyL),
                   const SizedBox(height: AppSpacing.lg),
                   if (_isLoadingPaymentRecovery &&
                       _paymentRecoveryUser != null) ...[
@@ -3077,6 +4392,9 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
                           !isWithdrawalDetailsPage)) ...[
                     _CurrencySelector(
                       value: _currency,
+                      values: widget.kind == MoneyActionKind.withdraw
+                          ? const ['NGN']
+                          : const ['NGN', 'GHS'],
                       onChanged: (value) => setState(() => _currency = value),
                     ),
                     const SizedBox(height: AppSpacing.md),
@@ -3113,7 +4431,7 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
                       widget.kind != MoneyActionKind.cable &&
                       (!isAirtimeRecipientPage || isAirtimeAmountPage))
                     ..._vtuAmountSection(),
-                  if (isAirtimeRecipientPage) ...[
+                  if (isAirtimeRecipientPage && !_isLocalMobileTopup) ...[
                     const SizedBox(height: AppSpacing.lg),
                     FilledButton(
                       onPressed:
@@ -3127,6 +4445,7 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
                     ),
                   ],
                   if (widget.kind == MoneyActionKind.data &&
+                      !_isLocalMobileTopup &&
                       !_isDataPaymentStep) ...[
                     const SizedBox(height: AppSpacing.lg),
                     FilledButton(
@@ -3139,6 +4458,7 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
                     ),
                   ],
                   if (widget.kind == MoneyActionKind.data &&
+                      !_isLocalMobileTopup &&
                       _isDataPaymentStep) ...[
                     const SizedBox(height: AppSpacing.lg),
                     _buildSubmitButton('Buy data', 'Data'),
@@ -3160,6 +4480,7 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
                       widget.kind != MoneyActionKind.data &&
                       widget.kind != MoneyActionKind.electricity &&
                       widget.kind != MoneyActionKind.cable &&
+                      !_isLocalMobileTopup &&
                       !isAirtimeRecipientPage) ...[
                     const SizedBox(height: AppSpacing.lg),
                     _buildSubmitButton(config.buttonLabel, config.title),
@@ -3193,6 +4514,168 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+
+  void _startAnotherMobileTopup() {
+    final order = _trackedOrder;
+    if (_isSubmitting ||
+        _isCheckingOrder ||
+        order == null ||
+        !_terminalOrderStatuses.contains(order.orderStatus)) {
+      return;
+    }
+    FocusScope.of(context).unfocus();
+    _orderPollTimer?.cancel();
+    _attemptIdempotency.markFinalOutcome();
+    setState(() {
+      _pendingOrderReference = null;
+      _trackedOrder = null;
+      _orderPollAttempts = 0;
+      _isAirtimeAmountStep = false;
+      _isDataPaymentStep = false;
+      _isDataPlanStep = false;
+      _dataPackageId = null;
+      _amountController.clear();
+      _setMessageState(null);
+    });
+    if (widget.kind == MoneyActionKind.data) {
+      _loadDataPackages(_vtuProvider);
+    }
+    _refreshPaymentRecovery();
+  }
+
+  void _editDataRecipient() {
+    if (_isSubmitting) return;
+    FocusScope.of(context).unfocus();
+    setState(() {
+      _isDataPaymentStep = false;
+      _isDataPlanStep = false;
+      _setMessageState(null);
+    });
+  }
+
+  Widget _buildMobileTopupScaffold(BuildContext context) {
+    final data = widget.kind == MoneyActionKind.data;
+    final step = data
+        ? (_isDataPaymentStep
+            ? 2
+            : _isDataPlanStep
+                ? 1
+                : 0)
+        : (_isAirtimeAmountStep ? 1 : 0);
+    final title = data ? 'Data' : 'Airtime';
+    final heading = step == 0
+        ? 'Who is it for?'
+        : data
+            ? (step == 1 ? 'Find your data plan' : 'Review your top-up')
+            : 'How much airtime?';
+    return PopScope(
+      canPop: step == 0 && !_isSubmitting,
+      onPopInvokedWithResult: (didPop, result) {
+        if (!didPop && !_isSubmitting && step > 0) _handlePageBack();
+      },
+      child: Scaffold(
+        backgroundColor: AppColors.background,
+        bottomNavigationBar: Padding(
+          padding:
+              EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(context).bottom),
+          child: _mobilePurchaseFooter(),
+        ),
+        body: SafeArea(
+          child: Column(children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(24, 12, 24, 16),
+              child: Align(
+                  alignment: Alignment.topCenter,
+                  child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 560),
+                      child: Column(children: [
+                        VtuPageHeader(
+                            title: title,
+                            onBack: () {
+                              if (!_isSubmitting) _handlePageBack();
+                            },
+                            showBackButton: widget.showBackButton || step > 0),
+                        const SizedBox(height: 20),
+                        VtuProgress(
+                            step: step,
+                            labels: data
+                                ? const ['Recipient', 'Plan', 'Payment']
+                                : const ['Recipient', 'Amount']),
+                      ]))),
+            ),
+            Expanded(
+                child: SingleChildScrollView(
+              key: ValueKey('mobile-topup-${widget.kind.name}-$step'),
+              padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
+              child: Align(
+                alignment: Alignment.topCenter,
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 560),
+                  child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(heading, style: AppTextStyles.headingM),
+                        const SizedBox(height: 8),
+                        Text(
+                            step == 0
+                                ? 'Enter a phone number, then confirm the network.'
+                                : data && step == 1
+                                    ? 'Choose a bundle that fits. Prices are loaded from your network.'
+                                    : 'Check the recipient and amount before continuing.',
+                            style: AppTextStyles.bodyM),
+                        const SizedBox(height: 16),
+                        if (_isLoadingPaymentRecovery &&
+                            _paymentRecoveryUser != null)
+                          const _InfoPanel(
+                              text: 'Checking unresolved payment status...',
+                              isLoading: true),
+                        if (_relevantUnresolvedPaymentAttempts.isNotEmpty)
+                          _PaymentRecoveryPanel(
+                              attempts: _relevantUnresolvedPaymentAttempts,
+                              isChecking: _isLoadingPaymentRecovery,
+                              onCheckStatus: _checkPaymentAttempt,
+                              onSupport: () =>
+                                  context.push(AppRoutes.profileSupport)),
+                        if (_paymentRecoveryError != null)
+                          _MessagePanel(
+                              message: _paymentRecoveryError!,
+                              type: MoneyActionFeedbackType.warning,
+                              onRetry: _refreshPaymentRecovery),
+                        ..._extraFields(),
+                        if (step > 0) ..._vtuAmountSection(),
+                        if (_vtuCatalogMessage != null) ...[
+                          const SizedBox(height: 16),
+                          _MessagePanel(
+                              message: _vtuCatalogMessage!,
+                              type: MoneyActionFeedbackType.warning,
+                              onRetry: _loadVtuCatalogs),
+                        ],
+                        if (_pendingOrderReference != null) ...[
+                          const SizedBox(height: 16),
+                          _VtuOrderStatusPanel(
+                              reference: _pendingOrderReference!,
+                              order: _trackedOrder,
+                              isChecking: _isCheckingOrder,
+                              onCheckStatus: _checkVtuOrderStatus),
+                        ],
+                        if (_message != null) ...[
+                          const SizedBox(height: 16),
+                          _MessagePanel(
+                              message: _message!,
+                              type: _messageType,
+                              onRetry: _messageCanRetry
+                                  ? _retryLastSubmission
+                                  : null),
+                        ],
+                      ]),
+                ),
+              ),
+            )),
+          ]),
         ),
       ),
     );
@@ -3311,92 +4794,123 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
     required String title,
     required String subtitle,
   }) async {
-    final results = await Future.wait<dynamic>([
-      _transactionSecurityService.getConfig(),
-      _authService.getTransactionPinStatus(),
-    ]);
-    final config = results[0] as TransactionSecurityConfig;
-    final serverStatus = results[1] as TransactionPinServerStatus;
-
-    if (!mounted) {
-      return null;
+    if (_isTransferAction && mounted) {
+      setState(() => _isAwaitingTransferApproval = true);
     }
+    try {
+      final results = await Future.wait<dynamic>([
+        _transactionSecurityService.getConfig(),
+        _authService.getTransactionPinStatus(),
+      ]);
+      final config = results[0] as TransactionSecurityConfig;
+      final serverStatus = results[1] as TransactionPinServerStatus;
 
-    if (!serverStatus.configured) {
-      final shouldSetup = await showDialog<bool>(
-            context: context,
-            builder: (dialogContext) {
-              return AlertDialog(
-                backgroundColor: AppColors.surface,
-                title: Text(
-                  'Set transaction PIN',
-                  style: AppTextStyles.headingM,
-                ),
-                content: Text(
-                  'Money actions require a transaction PIN. Set it up in Security & Limits first.',
-                  style: AppTextStyles.bodyM,
-                ),
-                actions: [
-                  TextButton(
-                    onPressed: () => Navigator.of(dialogContext).pop(false),
-                    child: Text(
-                      'Cancel',
-                      style: AppTextStyles.labelM.copyWith(
-                        color: AppColors.textSecondary,
+      if (!mounted) {
+        return null;
+      }
+
+      if (!serverStatus.configured) {
+        final shouldSetup = await showDialog<bool>(
+              context: context,
+              builder: (dialogContext) {
+                return AlertDialog(
+                  backgroundColor: AppColors.surface,
+                  title: Text(
+                    'Set transaction PIN',
+                    style: AppTextStyles.headingM,
+                  ),
+                  content: Text(
+                    'Money actions require a transaction PIN. Set it up in Security & Limits first.',
+                    style: AppTextStyles.bodyM,
+                  ),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.of(dialogContext).pop(false),
+                      child: Text(
+                        'Cancel',
+                        style: AppTextStyles.labelM.copyWith(
+                          color: AppColors.textSecondary,
+                        ),
                       ),
                     ),
-                  ),
-                  FilledButton(
-                    onPressed: () => Navigator.of(dialogContext).pop(true),
-                    style: FilledButton.styleFrom(
-                      backgroundColor: AppColors.primary,
-                      foregroundColor: Colors.white,
+                    FilledButton(
+                      onPressed: () => Navigator.of(dialogContext).pop(true),
+                      style: FilledButton.styleFrom(
+                        backgroundColor: AppColors.primary,
+                        foregroundColor: Colors.white,
+                      ),
+                      child: const Text('Set up'),
                     ),
-                    child: const Text('Set up'),
-                  ),
-                ],
-              );
-            },
-          ) ??
-          false;
+                  ],
+                );
+              },
+            ) ??
+            false;
 
-      if (shouldSetup && mounted) {
-        await context.push(AppRoutes.transactionSecurity);
+        if (shouldSetup && mounted) {
+          await context.push(AppRoutes.transactionSecurity);
+        }
+        return null;
+      }
+
+      if (serverStatus.locked) {
+        _showMessage(
+          'Transaction PIN is temporarily locked. Try again later.',
+          type: MoneyActionFeedbackType.warning,
+        );
+        return null;
+      }
+      final resetHoldUntil = serverStatus.resetHoldUntil;
+      if (resetHoldUntil != null &&
+          resetHoldUntil.isAfter(DateTime.now().toUtc())) {
+        _showMessage(
+          'Money actions are temporarily locked after a PIN reset.',
+          type: MoneyActionFeedbackType.warning,
+        );
+        return null;
+      }
+
+      final approvedPin = await Navigator.of(context).push<String>(
+        MaterialPageRoute(
+          builder: (_) => TransactionPinScreen.verify(
+            pinLength: serverStatus.pinLength ?? config.pinLength,
+            title: title,
+            subtitle: subtitle,
+            securityService: _transactionSecurityService,
+            authService: _authService,
+            confirmationSummary: !_isTransferAction
+                ? null
+                : TransferApprovalSummary(
+                    amount: MoneyActionFormValidator.validateAmount(
+                            _amountController.text)
+                        .value!,
+                    currency: _currency,
+                    recipient: widget.kind == MoneyActionKind.send
+                        ? (_resolvedRecipientName ?? 'TrustPay recipient')
+                        : (_activeBeneficiary?.accountName ??
+                            _withdrawalAccountName ??
+                            'Bank recipient'),
+                    destination: widget.kind == MoneyActionKind.send
+                        ? _resolvedRecipientMasked
+                        : '${_activeBeneficiary?.bankName ?? _selectedWithdrawalBank?.name ?? ''} · ${_activeBeneficiary?.accountNumberMasked ?? _maskAccountNumber(_accountNumberController.text)}',
+                  ),
+          ),
+          fullscreenDialog: true,
+        ),
+      );
+
+      return approvedPin;
+    } catch (_) {
+      if (mounted) {
+        _showMessage('Could not check your transaction security. Try again.',
+            type: MoneyActionFeedbackType.error);
       }
       return null;
+    } finally {
+      if (_isTransferAction && mounted) {
+        setState(() => _isAwaitingTransferApproval = false);
+      }
     }
-
-    if (serverStatus.locked) {
-      _showMessage(
-        'Transaction PIN is temporarily locked. Try again later.',
-        type: MoneyActionFeedbackType.warning,
-      );
-      return null;
-    }
-    final resetHoldUntil = serverStatus.resetHoldUntil;
-    if (resetHoldUntil != null &&
-        resetHoldUntil.isAfter(DateTime.now().toUtc())) {
-      _showMessage(
-        'Money actions are temporarily locked after a PIN reset.',
-        type: MoneyActionFeedbackType.warning,
-      );
-      return null;
-    }
-
-    final approvedPin = await Navigator.of(context).push<String>(
-      MaterialPageRoute(
-        builder: (_) => TransactionPinScreen.verify(
-          pinLength: serverStatus.pinLength ?? config.pinLength,
-          title: title,
-          subtitle: subtitle,
-          securityService: _transactionSecurityService,
-          authService: _authService,
-        ),
-        fullscreenDialog: true,
-      ),
-    );
-
-    return approvedPin;
   }
 
   List<Widget> _cableTotalSection() {
@@ -3411,6 +4925,7 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
 
   List<Widget> _vtuAmountSection() {
     if (widget.kind == MoneyActionKind.data && _dataCountryCode == 'NG') {
+      if (!_isDataPaymentStep) return const [];
       final amountText = _resolvedAmountText();
       final amount = double.tryParse(amountText ?? '');
       if (amount == null || amount <= 0) return const [];
@@ -3453,12 +4968,35 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
             isLoading: _isLoadingFundingAccounts,
             isRequesting: _isRequestingFundingAccount,
             message: _fundingAccountMessage,
+            provisioningPending: _fundingProvisioning?.isPending == true,
+            provisioningActionRequired:
+                _fundingProvisioning?.isActionRequired == true,
             canRevealAccountNumber: _canRevealFundingAccount,
+            accountConsentAccepted: _fundingAccountConsent,
+            onAccountConsentChanged: (accepted) =>
+                setState(() => _fundingAccountConsent = accepted),
             onRefresh: _loadFundingAccounts,
             onRequest: _requestFundingAccount,
             onCompleteKyc: () => context.push(AppRoutes.kyc),
             onCopy: _copyFundingValue,
           ),
+          if (_paymentCapabilities?.checkout == true) ...[
+            const SizedBox(height: AppSpacing.md),
+            _PaystackCheckoutPanel(
+              isLoadingCapabilities: _isLoadingPaymentCapabilities,
+              isOpening: _isOpeningPaystackCheckout,
+              minimumAmount:
+                  _paymentCapabilities?.checkoutMinimumAmount ?? '50.00',
+              amount: _checkoutAmount,
+              hasPendingAttempt: _checkoutAttempt?.isUnresolved == true,
+              reference: _checkoutReference,
+              authorizationUrl: _checkoutAuthorizationUrl,
+              message: _checkoutMessage,
+              onOpen: _openPaystackCheckout,
+              onReopen: _reopenPaystackCheckout,
+              onVerify: _verifyPaystackCheckout,
+            ),
+          ],
         ];
       case MoneyActionKind.send:
         return [
@@ -3584,6 +5122,7 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
           return [
             const SizedBox(height: AppSpacing.md),
             _AirtimeRecipientSummary(
+              providerId: _vtuProvider,
               network: selectedNetwork,
               phoneNumber: _recipientController.text.trim(),
               onEdit: () {
@@ -3613,6 +5152,16 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
             onChanged: _setAirtimeScope,
           ),
           const SizedBox(height: AppSpacing.md),
+          if (isLocalAirtime) ...[
+            VtuPhoneField(
+                controller: _recipientController, enabled: !_isSubmitting),
+            _mobileNetworkHint(),
+            const VtuSectionLabel('Choose network'),
+          ] else
+            _InputField(
+                controller: _recipientController,
+                label: 'Phone number',
+                keyboardType: TextInputType.phone),
           if (!isLocalAirtime) ...[
             _ChoiceRow(
               label: 'Service country',
@@ -3655,7 +5204,8 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
               const _InfoPanel(text: 'No airtime networks are available yet.'),
               const SizedBox(height: AppSpacing.md),
             ] else ...[
-              _VtuNetworkTiles(
+              VtuNetworkPicker(
+                enabled: !_isSubmitting,
                 value: _vtuProvider,
                 providers: _localAirtimeProviders,
                 onChanged: (value) => _setVtuProvider(value),
@@ -3663,17 +5213,6 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
               const SizedBox(height: AppSpacing.md),
             ],
           ],
-          _InputField(
-            controller: _recipientController,
-            label: 'Phone number',
-            keyboardType: TextInputType.phone,
-            inputFormatters: isLocalAirtime
-                ? [
-                    FilteringTextInputFormatter.digitsOnly,
-                    LengthLimitingTextInputFormatter(11),
-                  ]
-                : null,
-          ),
         ];
       case MoneyActionKind.data:
         if (_isDataPaymentStep) {
@@ -3698,15 +5237,40 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
               ),
             ),
             const SizedBox(height: AppSpacing.md),
-            _InputField(
-              controller: _recipientController,
-              label: 'Recipient phone number',
-              keyboardType: TextInputType.phone,
-              inputFormatters: [
-                FilteringTextInputFormatter.digitsOnly,
-                LengthLimitingTextInputFormatter(11),
-              ],
+            _AirtimeRecipientSummary(
+              providerId: _vtuProvider,
+              network: _providerName(_localDataProviders, _vtuProvider),
+              phoneNumber: VtuPhone.normalize(_recipientController.text),
+              onEdit: _editDataRecipient,
             ),
+          ];
+        }
+        if (_isDataPlanStep && _dataCountryCode == 'NG') {
+          return [
+            _AirtimeRecipientSummary(
+              providerId: _vtuProvider,
+              network: _providerName(_localDataProviders, _vtuProvider),
+              phoneNumber: VtuPhone.normalize(_recipientController.text),
+              onEdit: _editDataRecipient,
+            ),
+            const SizedBox(height: AppSpacing.lg),
+            if (_isLoadingVtuCatalog)
+              const _InfoPanel(
+                text: 'Loading live packages and prices...',
+                isLoading: true,
+              )
+            else if (_dataPackages.isEmpty)
+              const _InfoPanel(
+                text: 'No data packages are available for this network yet.',
+              )
+            else
+              VtuPlanPicker(
+                enabled: !_isSubmitting,
+                key: ValueKey(_vtuProvider),
+                value: _dataPackageId,
+                packages: _dataPackages,
+                onChanged: (value) => setState(() => _selectDataPackage(value)),
+              ),
           ];
         }
         final ghanaDataOperators = _dataOperatorsForCountry('GH');
@@ -3723,6 +5287,14 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
             onChanged: (value) => _setDataCountryCode(value),
           ),
           const SizedBox(height: AppSpacing.md),
+          if (_dataCountryCode == 'NG') ...[
+            VtuPhoneField(
+                controller: _recipientController,
+                label: 'Recipient phone number',
+                enabled: !_isSubmitting),
+            _mobileNetworkHint(),
+            const VtuSectionLabel('Choose network'),
+          ],
           if (_dataCountryCode == 'GH') ...[
             if (_isLoadingVtuCatalog && ghanaDataOperators.isEmpty) ...[
               const _InfoPanel(
@@ -3758,28 +5330,14 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
               const _InfoPanel(text: 'No data networks are available yet.'),
               const SizedBox(height: AppSpacing.md),
             ] else ...[
-              _VtuNetworkTiles(
+              VtuNetworkPicker(
+                enabled: !_isSubmitting,
                 value: _vtuProvider,
                 providers: _localDataProviders,
                 onChanged: (value) => _setVtuProvider(value),
               ),
               const SizedBox(height: AppSpacing.md),
             ],
-            if (_isLoadingVtuCatalog)
-              const _InfoPanel(
-                text: 'Loading live packages and prices...',
-                isLoading: true,
-              )
-            else if (_dataPackages.isEmpty)
-              const _InfoPanel(
-                text: 'No data packages are available for this network yet.',
-              )
-            else
-              _VtuPackageGrid(
-                value: _dataPackageId,
-                packages: _dataPackages,
-                onChanged: (value) => setState(() => _selectDataPackage(value)),
-              ),
             const SizedBox(height: AppSpacing.md),
           ],
         ];
@@ -3823,10 +5381,10 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
                     text: 'No bouquets are available for this provider yet.',
                   )
                 else
-                  _VtuPackageGrid(
+                  VtuPlanPicker(
+                    enabled: !_isSubmitting,
                     value: _cablePackageId,
                     packages: _cablePackages,
-                    crossAxisCount: 2,
                     onChanged: (value) =>
                         setState(() => _selectCablePackage(value)),
                   ),
@@ -3860,15 +5418,10 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
                   ],
                 ),
                 const SizedBox(height: AppSpacing.md),
-                _InputField(
-                  controller: _cablePhoneController,
-                  label: 'Contact phone number',
-                  keyboardType: TextInputType.phone,
-                  inputFormatters: [
-                    FilteringTextInputFormatter.digitsOnly,
-                    LengthLimitingTextInputFormatter(11),
-                  ],
-                ),
+                VtuPhoneField(
+                    controller: _cablePhoneController,
+                    label: 'Contact phone number',
+                    enabled: !_isSubmitting),
                 const SizedBox(height: AppSpacing.lg),
                 FilledButton(
                   onPressed: _isVerifyingCard ? null : _continueToCablePayment,
@@ -3895,35 +5448,8 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
           _FormStepSection(
             step: '1',
             title: 'Choose a provider',
-            subtitle: 'Select the subscription type and TV provider.',
+            subtitle: 'Choose your TV service to find available packages.',
             children: [
-              _ChoiceRow(
-                label: 'Subscription type',
-                value: _cableSubscriptionType,
-                values: const ['change'],
-                labels: const {
-                  'change': 'Change package',
-                  'renew': 'Renew current package',
-                },
-                onChanged: (value) {
-                  setState(() {
-                    _cableSubscriptionType = value;
-                    _isCablePaymentStep = false;
-                    _isCableRecipientStep = false;
-                    _cableCustomerName = null;
-                    _amountController.clear();
-                  });
-                  if (value == 'change' && _vtuProvider.isNotEmpty) {
-                    _loadCablePackages(_vtuProvider);
-                  }
-                },
-              ),
-              const SizedBox(height: AppSpacing.sm),
-              const _InfoPanel(
-                text:
-                    'Renew current package — Coming soon. You can still select and buy a package using Change package.',
-              ),
-              const SizedBox(height: AppSpacing.md),
               if (_isLoadingVtuCatalog && _localCableProviders.isEmpty) ...[
                 const _NetworkTilesSkeleton(),
                 const SizedBox(height: AppSpacing.md),
@@ -3933,7 +5459,8 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
                 ),
                 const SizedBox(height: AppSpacing.md),
               ] else ...[
-                _VtuNetworkTiles(
+                VtuNetworkPicker(
+                  enabled: !_isSubmitting,
                   value: _vtuProvider,
                   providers: _localCableProviders,
                   onChanged: (value) => _setVtuProvider(value),
@@ -4098,15 +5625,10 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
                 inputFormatters: [FilteringTextInputFormatter.digitsOnly],
               ),
               const SizedBox(height: AppSpacing.md),
-              _InputField(
-                controller: _electricityPhoneController,
-                label: 'Contact phone number',
-                keyboardType: TextInputType.phone,
-                inputFormatters: [
-                  FilteringTextInputFormatter.digitsOnly,
-                  LengthLimitingTextInputFormatter(11),
-                ],
-              ),
+              VtuPhoneField(
+                  controller: _electricityPhoneController,
+                  label: 'Contact phone number',
+                  enabled: !_isSubmitting),
               const SizedBox(height: AppSpacing.lg),
               FilledButton(
                 onPressed:
@@ -4154,38 +5676,21 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
 
   HomeVirtualAccount? _preferredFundingAccount() {
     for (final account in _fundingAccounts) {
-      if (account.provider.toLowerCase() == 'monnify' &&
+      if (account.provider.toUpperCase() == 'PAYSTACK' &&
           account.currency.toUpperCase() == 'NGN' &&
           account.status.toUpperCase() == 'ACTIVE') {
         return account;
       }
     }
     for (final account in _fundingAccounts) {
-      if (account.provider.toLowerCase() == 'monnify' &&
-          account.currency.toUpperCase() == 'NGN') {
+      if (account.provider.toUpperCase() == 'PAYSTACK' &&
+          account.currency.toUpperCase() == 'NGN' &&
+          (account.status.toUpperCase() == 'ACTIVE' ||
+              account.status.toUpperCase() == 'PENDING')) {
         return account;
       }
     }
     return null;
-  }
-
-  _FundingNameParts _fundingAccountNameParts() {
-    final user = _fundingUser;
-    final source = (user?.fullName.trim().isNotEmpty ?? false)
-        ? user!.fullName.trim()
-        : (user?.email.split('@').first.trim() ?? '');
-    final parts = source
-        .split(RegExp(r'\s+|[._-]+'))
-        .where((part) => part.trim().isNotEmpty)
-        .toList();
-
-    return _FundingNameParts(
-      firstName: parts.isNotEmpty ? parts.first : 'TrustPay',
-      lastName: parts.length > 1 ? parts.last : 'User',
-      middleName: parts.length > 2
-          ? parts.sublist(1, parts.length - 1).join(' ')
-          : null,
-    );
   }
 
   Future<void> _copyFundingValue(String value) async {
@@ -4358,23 +5863,16 @@ String _underThousandToWords(int value) {
   return '${ones[value ~/ 100]} hundred$suffix';
 }
 
-class _FundingNameParts {
-  final String firstName;
-  final String lastName;
-  final String? middleName;
-
-  const _FundingNameParts({
-    required this.firstName,
-    required this.lastName,
-    this.middleName,
-  });
-}
-
 class _CurrencySelector extends StatelessWidget {
   final String value;
+  final List<String> values;
   final ValueChanged<String> onChanged;
 
-  const _CurrencySelector({required this.value, required this.onChanged});
+  const _CurrencySelector({
+    required this.value,
+    required this.values,
+    required this.onChanged,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -4382,7 +5880,7 @@ class _CurrencySelector extends StatelessWidget {
     return _ChoiceRow(
       label: 'Currency',
       value: value,
-      values: const ['NGN', 'GHS'],
+      values: values,
       onChanged: onChanged,
     );
   }
@@ -4440,10 +5938,10 @@ class _WithdrawalTransferSummary extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     AppColors.watch(context);
-    final parsedAmount = double.tryParse(amount.replaceAll(',', '').trim());
-    final displayAmount = parsedAmount == null
-        ? amount
-        : NumberFormat('#,##0.##').format(parsedAmount);
+    final normalized = MoneyActionFormValidator.validateAmount(amount);
+    final displayAmount = normalized.value == null
+        ? '$amount $currency'
+        : transferMoneyLabel(normalized.value!, currency);
 
     return _Panel(
       child: Row(
@@ -4470,7 +5968,7 @@ class _WithdrawalTransferSummary extends StatelessWidget {
                 Text('Transfer amount', style: AppTextStyles.bodyS),
                 const SizedBox(height: 2),
                 Text(
-                  '$displayAmount $currency',
+                  displayAmount,
                   style: AppTextStyles.labelL.copyWith(
                     color: AppColors.textPrimary,
                   ),
@@ -4506,11 +6004,19 @@ class _VtuProviderSelector extends StatelessWidget {
         : providers;
 
     return DropdownButtonFormField<String>(
+      isExpanded: true,
       initialValue:
           items.any((item) => item.id == value) ? value : items.first.id,
       items: items
           .map(
-            (item) => DropdownMenuItem(value: item.id, child: Text(item.name)),
+            (item) => DropdownMenuItem(
+                value: item.id,
+                child: Row(children: [
+                  VtuProviderLogo(id: item.id, size: 28),
+                  const SizedBox(width: 10),
+                  Expanded(
+                      child: Text(item.name, overflow: TextOverflow.ellipsis)),
+                ])),
           )
           .toList(),
       onChanged: (next) {
@@ -4520,131 +6026,6 @@ class _VtuProviderSelector extends StatelessWidget {
       decoration: _inputDecoration(label),
       style: AppTextStyles.bodyM.copyWith(color: AppColors.textPrimary),
     );
-  }
-}
-
-class _VtuNetworkTiles extends StatelessWidget {
-  final String value;
-  final List<VtuProviderOption> providers;
-  final ValueChanged<String> onChanged;
-
-  const _VtuNetworkTiles({
-    required this.value,
-    required this.providers,
-    required this.onChanged,
-  });
-
-  static const _brandColors = <String, Color>{
-    'mtn': Color(0xFFFFC403),
-    'airtel': Color(0xFFE4002B),
-    'glo': Color(0xFF50B651),
-    '9mobile': Color(0xFF006B38),
-    'etisalat': Color(0xFF006B38),
-    'dstv': Color(0xFF0077C8),
-    'gotv': Color(0xFF00A551),
-    'startimes': Color(0xFFF7941E),
-  };
-
-  static const _shortNames = <String, String>{
-    'mtn': 'MTN',
-    'airtel': 'Airtel',
-    'glo': 'Glo',
-    '9mobile': '9mob',
-    'etisalat': '9mob',
-    'dstv': 'DStv',
-    'gotv': 'GOtv',
-    'startimes': 'StarTimes',
-  };
-
-  @override
-  Widget build(BuildContext context) {
-    AppColors.watch(context);
-    // Brand tiles only pay off for the compact network row; longer catalogs
-    // (electricity discos, international operators) stay in a dropdown.
-    if (providers.length > 6) {
-      return _VtuProviderSelector(
-        label: 'Network',
-        value: value,
-        providers: providers,
-        onChanged: onChanged,
-      );
-    }
-
-    return Row(
-      children: [
-        for (var i = 0; i < providers.length; i++) ...[
-          if (i > 0) const SizedBox(width: AppSpacing.sm),
-          Expanded(child: _tile(providers[i])),
-        ],
-      ],
-    );
-  }
-
-  Widget _tile(VtuProviderOption provider) {
-    final brand = _brandColors[provider.id.toLowerCase()] ?? AppColors.primary;
-    final selected = provider.id == value;
-
-    return TapScale(
-      onTap: () => onChanged(provider.id),
-      borderRadius: BorderRadius.circular(AppRadius.md),
-      semanticLabel: '${provider.name} network',
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 160),
-        curve: Curves.easeOutCubic,
-        padding: const EdgeInsets.symmetric(
-          vertical: AppSpacing.sm + 4,
-          horizontal: AppSpacing.xs,
-        ),
-        decoration: BoxDecoration(
-          color: selected
-              ? AppColors.primary.withValues(alpha: 0.08)
-              : AppColors.surfaceVariant,
-          borderRadius: BorderRadius.circular(AppRadius.md),
-          border: Border.all(
-            color: selected ? AppColors.primary : AppColors.border,
-            width: selected ? 1.6 : 1,
-          ),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 34,
-              height: 34,
-              alignment: Alignment.center,
-              decoration: BoxDecoration(color: brand, shape: BoxShape.circle),
-              child: Text(
-                (_shortNames[provider.id.toLowerCase()] ?? provider.name)
-                    .characters
-                    .first
-                    .toUpperCase(),
-                style: AppTextStyles.labelM.copyWith(
-                  color: _luminanceInk(brand),
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-            ),
-            const SizedBox(height: AppSpacing.xs),
-            Text(
-              _shortNames[provider.id.toLowerCase()] ?? provider.name,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: (selected ? AppTextStyles.labelM : AppTextStyles.labelS)
-                  .copyWith(
-                color:
-                    selected ? AppColors.textPrimary : AppColors.textSecondary,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Color _luminanceInk(Color background) {
-    return background.computeLuminance() > 0.5
-        ? const Color(0xFF12131A)
-        : Colors.white;
   }
 }
 
@@ -4660,135 +6041,6 @@ class _NetworkTilesSkeleton extends StatelessWidget {
           if (i > 0) const SizedBox(width: AppSpacing.sm),
           const Expanded(
             child: ShimmerBlock(width: double.infinity, height: 76),
-          ),
-        ],
-      ],
-    );
-  }
-}
-
-class _VtuPackageGrid extends StatefulWidget {
-  final String? value;
-  final List<VtuPackageOption> packages;
-  final ValueChanged<String> onChanged;
-  final int crossAxisCount;
-
-  const _VtuPackageGrid({
-    required this.value,
-    required this.packages,
-    required this.onChanged,
-    this.crossAxisCount = 3,
-  });
-
-  @override
-  State<_VtuPackageGrid> createState() => _VtuPackageGridState();
-}
-
-class _VtuPackageGridState extends State<_VtuPackageGrid> {
-  static const _collapsedCount = 9;
-  bool _showAll = false;
-
-  String _allowanceFor(VtuPackageOption package) {
-    final match =
-        RegExp(r'(\d+(?:\.\d+)?\s*(?:TB|GB|MB))', caseSensitive: false)
-            .firstMatch(package.name);
-    return match?.group(1)?.replaceAll(RegExp(r'\s+'), '').toUpperCase() ??
-        package.name;
-  }
-
-  String _priceFor(VtuPackageOption package) {
-    final price = double.tryParse(package.price) ?? 0;
-    final pattern =
-        price % 1 == 0 ? NumberFormat('#,##0') : NumberFormat('#,##0.00');
-    return '₦${pattern.format(price)}';
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    AppColors.watch(context);
-    final visible = _showAll
-        ? widget.packages
-        : widget.packages.take(_collapsedCount).toList();
-    final hiddenCount = widget.packages.length - visible.length;
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        GridView.builder(
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: widget.crossAxisCount,
-            mainAxisSpacing: AppSpacing.sm,
-            crossAxisSpacing: AppSpacing.sm,
-            childAspectRatio: widget.crossAxisCount == 3 ? 1.15 : 1.9,
-          ),
-          itemCount: visible.length,
-          itemBuilder: (context, index) {
-            final package = visible[index];
-            final selected = package.id == widget.value;
-
-            return TapScale(
-              onTap: () => widget.onChanged(package.id),
-              borderRadius: BorderRadius.circular(AppRadius.md),
-              semanticLabel:
-                  '${package.name} for ${_priceFor(package)}, ${package.validity}',
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 160),
-                curve: Curves.easeOutCubic,
-                padding: const EdgeInsets.all(AppSpacing.sm),
-                decoration: BoxDecoration(
-                  color: selected
-                      ? AppColors.primary.withValues(alpha: 0.08)
-                      : AppColors.surfaceVariant,
-                  borderRadius: BorderRadius.circular(AppRadius.md),
-                  border: Border.all(
-                    color: selected ? AppColors.primary : AppColors.border,
-                    width: selected ? 1.6 : 1,
-                  ),
-                ),
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Text(
-                      _allowanceFor(package),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: AppTextStyles.labelL.copyWith(
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      _priceFor(package),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: AppTextStyles.labelM.copyWith(
-                        color: AppColors.primary,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      package.validity,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: AppTextStyles.caption,
-                    ),
-                  ],
-                ),
-              ),
-            );
-          },
-        ),
-        if (hiddenCount > 0 || _showAll) ...[
-          const SizedBox(height: AppSpacing.xs),
-          TextButton(
-            onPressed: () => setState(() => _showAll = !_showAll),
-            child: Text(
-              _showAll ? 'Show fewer packages' : 'Show all packages',
-              style: AppTextStyles.labelM.copyWith(color: AppColors.primary),
-            ),
           ),
         ],
       ],
@@ -4826,6 +6078,8 @@ class _QuickAmountChips extends StatelessWidget {
                 borderRadius: BorderRadius.circular(AppRadius.full),
                 semanticLabel: 'Set amount to $amount naira',
                 child: AnimatedContainer(
+                  constraints:
+                      const BoxConstraints(minHeight: 48, minWidth: 76),
                   duration: const Duration(milliseconds: 160),
                   curve: Curves.easeOutCubic,
                   padding: const EdgeInsets.symmetric(
@@ -4991,7 +6245,18 @@ class _ChoiceRow extends StatelessWidget {
         if (next != null) onChanged(next);
       },
       dropdownColor: AppColors.surface,
-      decoration: _inputDecoration(label),
+      decoration: label == 'Service country' || label == 'Top-up destination'
+          ? InputDecoration(
+              prefixIcon: const Icon(Icons.public_rounded, size: 18),
+              labelText: label,
+              filled: false,
+              isDense: true,
+              contentPadding:
+                  const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+              border: InputBorder.none,
+              enabledBorder: InputBorder.none,
+              focusedBorder: InputBorder.none)
+          : _inputDecoration(label),
       style: AppTextStyles.bodyM.copyWith(color: AppColors.textPrimary),
     );
   }
@@ -5000,6 +6265,7 @@ class _ChoiceRow extends StatelessWidget {
 class _InputField extends StatelessWidget {
   final TextEditingController controller;
   final String label;
+  final bool enabled;
   final TextInputType? keyboardType;
   final List<TextInputFormatter>? inputFormatters;
   final ValueChanged<String>? onChanged;
@@ -5012,6 +6278,7 @@ class _InputField extends StatelessWidget {
   const _InputField({
     required this.controller,
     required this.label,
+    this.enabled = true,
     this.keyboardType,
     this.inputFormatters,
     this.onChanged,
@@ -5026,6 +6293,7 @@ class _InputField extends StatelessWidget {
   Widget build(BuildContext context) {
     AppColors.watch(context);
     return TextField(
+      enabled: enabled,
       controller: controller,
       focusNode: focusNode,
       keyboardType: keyboardType,
@@ -5103,15 +6371,186 @@ class _UnicodeCodePointLimitingFormatter extends TextInputFormatter {
   }
 }
 
+class _PaystackCheckoutPanel extends StatefulWidget {
+  final bool isLoadingCapabilities;
+  final bool isOpening;
+  final String minimumAmount;
+  final String? amount;
+  final bool hasPendingAttempt;
+  final String? reference;
+  final Uri? authorizationUrl;
+  final String? message;
+  final ValueChanged<String> onOpen;
+  final VoidCallback onReopen;
+  final VoidCallback onVerify;
+
+  const _PaystackCheckoutPanel({
+    required this.isLoadingCapabilities,
+    required this.isOpening,
+    required this.minimumAmount,
+    required this.amount,
+    required this.hasPendingAttempt,
+    required this.reference,
+    required this.authorizationUrl,
+    required this.message,
+    required this.onOpen,
+    required this.onReopen,
+    required this.onVerify,
+  });
+
+  @override
+  State<_PaystackCheckoutPanel> createState() => _PaystackCheckoutPanelState();
+}
+
+class _PaystackCheckoutPanelState extends State<_PaystackCheckoutPanel> {
+  final _amountController = TextEditingController();
+
+  @override
+  void didUpdateWidget(covariant _PaystackCheckoutPanel oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.amount == widget.amount) return;
+    final amount = widget.amount;
+    if (amount == null || amount.isEmpty) {
+      _amountController.clear();
+    } else {
+      _amountController.text = amount;
+      _amountController.selection = TextSelection.collapsed(
+        offset: _amountController.text.length,
+      );
+    }
+  }
+
+  @override
+  void dispose() {
+    _amountController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    AppColors.watch(context);
+    return _Panel(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Paystack checkout', style: AppTextStyles.headingM),
+          const SizedBox(height: AppSpacing.xs),
+          Text(
+            'Pay by card or bank transfer. TRUSTPAY verifies the reference on the server before crediting your NGN wallet.',
+            style: AppTextStyles.bodyS,
+          ),
+          const SizedBox(height: AppSpacing.xs),
+          Text(
+            'Minimum checkout amount: NGN ${widget.minimumAmount}',
+            style:
+                AppTextStyles.caption.copyWith(color: AppColors.textSecondary),
+          ),
+          const SizedBox(height: AppSpacing.md),
+          TextField(
+            controller: _amountController,
+            enabled: !widget.isOpening && !widget.hasPendingAttempt,
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            inputFormatters: [
+              FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
+            ],
+            decoration: const InputDecoration(
+              labelText: 'Amount (NGN)',
+              hintText: 'e.g. 5000',
+              prefixText: '₦ ',
+            ),
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton.icon(
+              onPressed: widget.isOpening ||
+                      (widget.reference != null && widget.reference!.isNotEmpty)
+                  ? null
+                  : () => widget.onOpen(_amountController.text),
+              icon: widget.isOpening
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.lock_outline_rounded),
+              label: Text(
+                widget.isOpening
+                    ? 'Checking Paystack...'
+                    : widget.reference != null && widget.reference!.isNotEmpty
+                        ? 'Payment pending'
+                        : widget.hasPendingAttempt
+                            ? 'Resume secure checkout'
+                            : 'Open secure checkout',
+              ),
+            ),
+          ),
+          if (widget.message != null && widget.message!.trim().isNotEmpty) ...[
+            const SizedBox(height: AppSpacing.sm),
+            Text(widget.message!, style: AppTextStyles.bodyS),
+          ],
+          if (widget.reference != null && widget.reference!.isNotEmpty) ...[
+            const SizedBox(height: AppSpacing.sm),
+            Text('Payment reference', style: AppTextStyles.caption),
+            Row(
+              children: [
+                Expanded(
+                  child: SelectableText(
+                    widget.reference!,
+                    key: const ValueKey('paystack-checkout-reference'),
+                    style: AppTextStyles.bodyS,
+                  ),
+                ),
+                IconButton(
+                  tooltip: 'Copy payment reference',
+                  icon: const Icon(Icons.copy_rounded, size: 18),
+                  onPressed: () async {
+                    await Clipboard.setData(
+                        ClipboardData(text: widget.reference!));
+                    if (!context.mounted) return;
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Payment reference copied')),
+                    );
+                  },
+                ),
+              ],
+            ),
+            if (widget.authorizationUrl != null)
+              OutlinedButton.icon(
+                onPressed: widget.isOpening ? null : widget.onReopen,
+                icon: const Icon(Icons.open_in_new_rounded),
+                label: const Text('Open checkout again'),
+              ),
+            OutlinedButton.icon(
+              onPressed: widget.isOpening ? null : widget.onVerify,
+              icon: const Icon(Icons.refresh_rounded),
+              label: const Text('Check payment status'),
+            ),
+          ],
+          if (widget.isLoadingCapabilities)
+            const Padding(
+              padding: EdgeInsets.only(top: AppSpacing.sm),
+              child: LinearProgressIndicator(),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
 class _FundingAccountPanel extends StatelessWidget {
   final HomeUser? user;
   final HomeVirtualAccount? account;
   final bool isLoading;
   final bool isRequesting;
   final String? message;
+  final bool provisioningPending;
+  final bool provisioningActionRequired;
   final bool canRevealAccountNumber;
+  final bool accountConsentAccepted;
   final VoidCallback onRefresh;
   final VoidCallback onRequest;
+  final ValueChanged<bool> onAccountConsentChanged;
   final VoidCallback onCompleteKyc;
   final ValueChanged<String> onCopy;
 
@@ -5121,9 +6560,13 @@ class _FundingAccountPanel extends StatelessWidget {
     required this.isLoading,
     required this.isRequesting,
     required this.message,
+    required this.provisioningPending,
+    required this.provisioningActionRequired,
     required this.canRevealAccountNumber,
+    required this.accountConsentAccepted,
     required this.onRefresh,
     required this.onRequest,
+    required this.onAccountConsentChanged,
     required this.onCompleteKyc,
     required this.onCopy,
   });
@@ -5155,6 +6598,10 @@ class _FundingAccountPanel extends StatelessWidget {
     final canCopy = canRevealAccountNumber &&
         displayNumber.isNotEmpty &&
         !displayNumber.contains('*');
+    final accountPending = provisioningPending ||
+        (fundingAccount != null &&
+            displayNumber.isEmpty &&
+            fundingAccount.status.toUpperCase() == 'PENDING');
 
     return StaggeredEntrance(
       child: _Panel(
@@ -5162,159 +6609,220 @@ class _FundingAccountPanel extends StatelessWidget {
           duration: const Duration(milliseconds: 240),
           switchInCurve: Curves.easeOutCubic,
           switchOutCurve: Curves.easeInCubic,
-          child: fundingAccount == null
+          child: accountPending
               ? Column(
-                  key: const ValueKey('funding-request'),
+                  key: const ValueKey('funding-pending'),
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    _FundingUserSummary(user: user),
-                    const SizedBox(height: AppSpacing.md),
+                    const Icon(Icons.schedule_rounded),
+                    const SizedBox(height: AppSpacing.sm),
                     Text(
-                      message ??
-                          'Request your NGN account to fund by transfer.',
-                      style: AppTextStyles.bodyS.copyWith(
-                        color: AppColors.textPrimary,
-                      ),
+                      'Paystack is preparing your NGN receiving account.',
+                      style: AppTextStyles.labelM,
+                    ),
+                    const SizedBox(height: AppSpacing.xs),
+                    Text(
+                      'Your request was accepted. Refresh shortly; the account number appears only after server confirmation.',
+                      style: AppTextStyles.bodyS,
                     ),
                     const SizedBox(height: AppSpacing.md),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: FilledButton.icon(
-                            onPressed: canRevealAccountNumber
-                                ? (isRequesting ? null : onRequest)
-                                : onCompleteKyc,
-                            icon: !canRevealAccountNumber
-                                ? const Icon(Icons.verified_user_rounded)
-                                : isRequesting
-                                    ? const TrustPayLottie(
-                                        variant:
-                                            TrustPayAnimationVariant.loading,
-                                        size: 24,
-                                        semanticsLabel:
-                                            'Requesting funding account',
-                                      )
-                                    : const Icon(Icons.account_balance_rounded),
-                            label: Text(
-                              !canRevealAccountNumber
-                                  ? 'Complete KYC'
-                                  : isRequesting
-                                      ? 'Requesting account...'
-                                      : 'Request account',
-                            ),
-                            style: FilledButton.styleFrom(
-                              backgroundColor: AppColors.primary,
-                              foregroundColor: Colors.white,
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: AppSpacing.sm),
-                        IconButton(
-                          onPressed: onRefresh,
-                          icon: const Icon(Icons.refresh_rounded),
-                          tooltip: 'Refresh',
-                        ),
-                      ],
+                    OutlinedButton.icon(
+                      onPressed: onRefresh,
+                      icon: const Icon(Icons.refresh_rounded),
+                      label: const Text('Refresh status'),
                     ),
                   ],
                 )
-              : Column(
-                  key: const ValueKey('funding-account'),
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
+              : fundingAccount == null
+                  ? Column(
+                      key: const ValueKey('funding-request'),
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Container(
-                          width: 42,
-                          height: 42,
-                          decoration: BoxDecoration(
-                            color: AppColors.inputFill,
-                            borderRadius: BorderRadius.circular(AppRadius.sm),
-                            border: Border.all(color: AppColors.border),
-                          ),
-                          child: Icon(
-                            Icons.account_balance_rounded,
-                            color: AppColors.primary,
-                            size: 22,
-                          ),
-                        ),
-                        const SizedBox(width: AppSpacing.md),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
+                        _FundingUserSummary(user: user),
+                        const SizedBox(height: AppSpacing.md),
+                        if (provisioningActionRequired) ...[
+                          Row(
                             children: [
-                              Text(
-                                fundingAccount.bankName,
-                                style: AppTextStyles.labelL,
-                              ),
-                              const SizedBox(height: AppSpacing.xs),
-                              Text(
-                                fundingAccount.accountName,
-                                style: AppTextStyles.bodyS,
+                              const Icon(Icons.warning_amber_rounded),
+                              const SizedBox(width: AppSpacing.sm),
+                              Expanded(
+                                child: Text(
+                                  'Paystack account setup needs attention',
+                                  style: AppTextStyles.labelM,
+                                ),
                               ),
                             ],
                           ),
+                          const SizedBox(height: AppSpacing.sm),
+                        ],
+                        Text(
+                          message ??
+                              'Request your NGN account to fund by transfer.',
+                          style: AppTextStyles.bodyS.copyWith(
+                            color: AppColors.textPrimary,
+                          ),
                         ),
-                        _StatusPill(label: fundingAccount.status),
+                        const SizedBox(height: AppSpacing.md),
+                        if (canRevealAccountNumber) ...[
+                          CheckboxListTile(
+                            contentPadding: EdgeInsets.zero,
+                            value: accountConsentAccepted,
+                            controlAffinity: ListTileControlAffinity.leading,
+                            title: const Text(
+                              'I authorize TRUSTPAY to create a dedicated Paystack NGN receiving account for me.',
+                            ),
+                            onChanged: isRequesting
+                                ? null
+                                : (value) =>
+                                    onAccountConsentChanged(value ?? false),
+                          ),
+                          const SizedBox(height: AppSpacing.sm),
+                        ],
+                        Row(
+                          children: [
+                            Expanded(
+                              child: FilledButton.icon(
+                                onPressed: canRevealAccountNumber
+                                    ? (isRequesting || !accountConsentAccepted
+                                        ? null
+                                        : onRequest)
+                                    : onCompleteKyc,
+                                icon: !canRevealAccountNumber
+                                    ? const Icon(Icons.verified_user_rounded)
+                                    : isRequesting
+                                        ? const TrustPayLottie(
+                                            variant: TrustPayAnimationVariant
+                                                .loading,
+                                            size: 24,
+                                            semanticsLabel:
+                                                'Requesting funding account',
+                                          )
+                                        : const Icon(
+                                            Icons.account_balance_rounded),
+                                label: Text(
+                                  !canRevealAccountNumber
+                                      ? 'Complete KYC'
+                                      : isRequesting
+                                          ? 'Requesting account...'
+                                          : 'Request account',
+                                ),
+                                style: FilledButton.styleFrom(
+                                  backgroundColor: AppColors.primary,
+                                  foregroundColor: Colors.white,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: AppSpacing.sm),
+                            IconButton(
+                              onPressed: onRefresh,
+                              icon: const Icon(Icons.refresh_rounded),
+                              tooltip: 'Refresh',
+                            ),
+                          ],
+                        ),
+                      ],
+                    )
+                  : Column(
+                      key: const ValueKey('funding-account'),
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Container(
+                              width: 42,
+                              height: 42,
+                              decoration: BoxDecoration(
+                                color: AppColors.inputFill,
+                                borderRadius:
+                                    BorderRadius.circular(AppRadius.sm),
+                                border: Border.all(color: AppColors.border),
+                              ),
+                              child: Icon(
+                                Icons.account_balance_rounded,
+                                color: AppColors.primary,
+                                size: 22,
+                              ),
+                            ),
+                            const SizedBox(width: AppSpacing.md),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    fundingAccount.bankName,
+                                    style: AppTextStyles.labelL,
+                                  ),
+                                  const SizedBox(height: AppSpacing.xs),
+                                  Text(
+                                    fundingAccount.accountName,
+                                    style: AppTextStyles.bodyS,
+                                  ),
+                                ],
+                              ),
+                            ),
+                            _StatusPill(label: fundingAccount.status),
+                          ],
+                        ),
+                        const SizedBox(height: AppSpacing.md),
+                        canRevealAccountNumber
+                            ? Container(
+                                width: double.infinity,
+                                padding: const EdgeInsets.all(AppSpacing.md),
+                                decoration: BoxDecoration(
+                                  color: AppColors.background,
+                                  borderRadius:
+                                      BorderRadius.circular(AppRadius.sm),
+                                  border: Border.all(color: AppColors.border),
+                                ),
+                                child: Row(
+                                  children: [
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            'Account number',
+                                            style: AppTextStyles.bodyS.copyWith(
+                                              color: AppColors.textSecondary,
+                                            ),
+                                          ),
+                                          const SizedBox(height: AppSpacing.xs),
+                                          AnimatedValueText(
+                                            value:
+                                                '${fundingAccount.currency} $displayNumber',
+                                            style:
+                                                AppTextStyles.headingM.copyWith(
+                                              letterSpacing: 0,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                    IconButton(
+                                      onPressed: canCopy
+                                          ? () => onCopy(displayNumber)
+                                          : null,
+                                      icon: const Icon(Icons.copy_rounded),
+                                      tooltip: 'Copy account number',
+                                    ),
+                                  ],
+                                ),
+                              )
+                            : _KycAccountNumberGate(
+                                onCompleteKyc: onCompleteKyc),
+                        const SizedBox(height: AppSpacing.md),
+                        _FundingUserSummary(user: user),
+                        const SizedBox(height: AppSpacing.md),
+                        Text(
+                          'Transfer NGN to this Paystack account. Your wallet is credited after TRUSTPAY verifies the transaction.',
+                          style: AppTextStyles.bodyS.copyWith(
+                            color: AppColors.textSecondary,
+                          ),
+                        ),
                       ],
                     ),
-                    const SizedBox(height: AppSpacing.md),
-                    canRevealAccountNumber
-                        ? Container(
-                            width: double.infinity,
-                            padding: const EdgeInsets.all(AppSpacing.md),
-                            decoration: BoxDecoration(
-                              color: AppColors.background,
-                              borderRadius: BorderRadius.circular(AppRadius.sm),
-                              border: Border.all(color: AppColors.border),
-                            ),
-                            child: Row(
-                              children: [
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        'Account number',
-                                        style: AppTextStyles.bodyS.copyWith(
-                                          color: AppColors.textSecondary,
-                                        ),
-                                      ),
-                                      const SizedBox(height: AppSpacing.xs),
-                                      AnimatedValueText(
-                                        value:
-                                            '${fundingAccount.currency} $displayNumber',
-                                        style: AppTextStyles.headingM.copyWith(
-                                          letterSpacing: 0,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                                IconButton(
-                                  onPressed: canCopy
-                                      ? () => onCopy(displayNumber)
-                                      : null,
-                                  icon: const Icon(Icons.copy_rounded),
-                                  tooltip: 'Copy account number',
-                                ),
-                              ],
-                            ),
-                          )
-                        : _KycAccountNumberGate(onCompleteKyc: onCompleteKyc),
-                    const SizedBox(height: AppSpacing.md),
-                    _FundingUserSummary(user: user),
-                    const SizedBox(height: AppSpacing.md),
-                    Text(
-                      'Transfer NGN to this account. Your wallet is credited after Monnify confirms the transaction.',
-                      style: AppTextStyles.bodyS.copyWith(
-                        color: AppColors.textSecondary,
-                      ),
-                    ),
-                  ],
-                ),
         ),
       ),
     );
@@ -5354,7 +6862,7 @@ class _KycAccountNumberGate extends StatelessWidget {
           ),
           const SizedBox(height: AppSpacing.xs),
           Text(
-            'Complete full KYC to reveal and share this account number.',
+            'Complete BVN and bank verification to reveal and share this account number.',
             style: AppTextStyles.bodyS.copyWith(
               color: AppColors.textSecondary,
             ),
@@ -5647,11 +7155,13 @@ class _InfoPanel extends StatelessWidget {
 }
 
 class _AirtimeRecipientSummary extends StatelessWidget {
+  final String providerId;
   final String network;
   final String phoneNumber;
   final VoidCallback onEdit;
 
   const _AirtimeRecipientSummary({
+    required this.providerId,
     required this.network,
     required this.phoneNumber,
     required this.onEdit,
@@ -5664,20 +7174,7 @@ class _AirtimeRecipientSummary extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Container(
-            width: 40,
-            height: 40,
-            alignment: Alignment.center,
-            decoration: BoxDecoration(
-              color: AppColors.primary.withValues(alpha: 0.12),
-              borderRadius: BorderRadius.circular(AppRadius.sm),
-            ),
-            child: Icon(
-              Icons.phone_android_rounded,
-              color: AppColors.primary,
-              size: 20,
-            ),
-          ),
+          VtuProviderLogo(id: providerId, size: 44),
           const SizedBox(width: AppSpacing.sm),
           Expanded(
             child: Column(
@@ -6745,7 +8242,7 @@ class _ExchangeSettlementScreenState extends State<ExchangeSettlementScreen> {
         data: {
           'accountNumber': accountNumber,
           'bankCode': bank.code,
-          'provider': 'monnify',
+          'provider': 'paystack',
         },
       );
       if (!mounted || requestId != _settlementResolveRequestId) return;
@@ -7308,7 +8805,7 @@ class _ExchangeReceiptCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     AppColors.watch(context);
-    final formatter = DateFormat('dd MMM yyyy â€¢ HH:mm');
+    final formatter = DateFormat('dd MMM yyyy • HH:mm');
     return Container(
       width: double.infinity,
       decoration: BoxDecoration(
@@ -7810,7 +9307,6 @@ class MoneyActionFormValidator {
   static final RegExp _amountPattern = RegExp(r'^\d+(\.\d{1,2})?$');
   static final RegExp _emailPattern = RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$');
   static final RegExp _digitsPattern = RegExp(r'^\d+$');
-  static final RegExp _phonePattern = RegExp(r'^\+?[0-9]{7,15}$');
 
   static bool isValidEmail(String value) {
     return _emailPattern.hasMatch(value.trim());
@@ -7871,7 +9367,7 @@ class MoneyActionFormValidator {
         return null;
       case MoneyActionKind.airtime:
       case MoneyActionKind.data:
-        if (!_phonePattern.hasMatch(recipient.trim())) {
+        if (!VtuPhone.isValid(recipient)) {
           return 'Enter a valid phone number.';
         }
         return null;

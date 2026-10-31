@@ -156,17 +156,52 @@ class ManualExchangeConfig {
   final String sourceCurrency;
   final String targetCurrency;
   final List<String> supportedSourceCurrencies;
+  final Map<String, List<ManualSettlementMode>> settlementOptions;
 
   const ManualExchangeConfig({
     required this.enabled,
     required this.sourceCurrency,
     required this.targetCurrency,
     this.supportedSourceCurrencies = const ['NGN'],
+    this.settlementOptions = const {
+      'GHS': [ManualSettlementMode.wallet],
+      'NGN': [ManualSettlementMode.momo, ManualSettlementMode.bank]
+    },
   });
 
+  List<ManualSettlementMode> deliveryModesFor(String currency) =>
+      List.unmodifiable(
+          settlementOptions[currency] ?? const <ManualSettlementMode>[]);
+
   factory ManualExchangeConfig.fromJson(Map<String, dynamic> json) {
+    Map<String, List<ManualSettlementMode>>? options;
+    final raw = json['settlementOptions'];
+    if (raw != null) {
+      if (raw is! Map) {
+        throw const FormatException(
+            'Exchange receiving options could not be read.');
+      }
+      options = {};
+      for (final currency
+          in (json['supportedSourceCurrencies'] as List? ?? const ['NGN'])) {
+        final value = raw[currency];
+        if (value is! List || value.isEmpty) {
+          throw const FormatException(
+              'Exchange receiving options are unavailable.');
+        }
+        options['$currency'] = List.unmodifiable(value.map((item) =>
+            manualSettlementModeFromValue(
+                _requiredString(item, 'receiving option'))));
+      }
+    }
     return ManualExchangeConfig(
       enabled: _requiredBool(json['enabled'], 'exchange availability'),
+      settlementOptions: options == null
+          ? const {
+              'GHS': [ManualSettlementMode.wallet],
+              'NGN': [ManualSettlementMode.momo, ManualSettlementMode.bank]
+            }
+          : Map.unmodifiable(options),
       supportedSourceCurrencies: (json['supportedSourceCurrencies'] as List?)
               ?.map((value) =>
                   _currencyValue(value, fieldName: 'supported source currency'))
@@ -525,8 +560,9 @@ class ManualExchangeAttemptStore {
       // A create request represents a user-confirmed financial intent. Until
       // its server outcome is known, a replacement amount or destination must
       // not create a second intent in the same account journal.
-      if (normalizedAction == 'create' &&
-          attempts.any((attempt) => attempt.action == 'create')) {
+      if ((normalizedAction == 'create' ||
+              normalizedAction.endsWith('-create')) &&
+          attempts.any((attempt) => attempt.action == normalizedAction)) {
         throw const FormatException(
           'A previous exchange attempt is still pending. Retry it before starting another exchange.',
         );
@@ -1210,7 +1246,15 @@ DateTime _requiredDate(dynamic value, String fieldName) {
 
 String _attemptAction(dynamic value) {
   final action = _requiredString(value, 'retry action');
-  const actions = {'create', 'upload-url', 'proof'};
+  const actions = {
+    'create',
+    'upload-url',
+    'proof',
+    'provider-create',
+    'kora-account-create',
+    'kora-momo-create',
+    'ghs-cashout-create'
+  };
   if (!actions.contains(action)) {
     throw const FormatException('Manual exchange retry data is corrupt.');
   }

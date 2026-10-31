@@ -1,5 +1,7 @@
+import '../../ghana/ghana_money_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import 'package:intl/intl.dart';
 import 'package:go_router/go_router.dart';
 
@@ -8,6 +10,7 @@ import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/haptics.dart';
 import '../../../core/widgets/micro_interactions.dart';
 import '../../../core/widgets/tp_illustration.dart';
+import '../../../core/widgets/tp_empty_state.dart';
 import '../../../core/widgets/tp_page_header.dart';
 import '../../../core/widgets/tp_snackbar.dart';
 import '../../../services/home_data_service.dart';
@@ -31,6 +34,7 @@ class ReceiveMoneyScreen extends StatefulWidget {
 
 class _ReceiveMoneyScreenState extends State<ReceiveMoneyScreen> {
   late Future<List<VirtualAccountData>> _accountsFuture;
+  late Future<HomeVirtualAccountProvisioning> _provisioningFuture;
   late Future<List<DepositRecord>> _depositsFuture;
 
   @override
@@ -41,13 +45,39 @@ class _ReceiveMoneyScreenState extends State<ReceiveMoneyScreen> {
 
   void _loadData() {
     _accountsFuture = widget.walletService.fetchVirtualAccounts();
+    _provisioningFuture =
+        widget.homeDataService.fetchVirtualAccountProvisioning();
     _depositsFuture = widget.walletService.fetchRecentDeposits(limit: 20);
+    // Provisioning status is supplementary when an active account is already
+    // available. Observe a fast failure so legacy/default test doubles and
+    // older deployments do not surface an unhandled Future error.
+    _provisioningFuture.catchError((Object _, StackTrace __) {
+      return const HomeVirtualAccountProvisioning(
+        provider: 'PAYSTACK',
+        status: 'NOT_REQUESTED',
+      );
+    });
     // The deposit FutureBuilder is mounted only after accounts load. Observe
     // failures immediately so a fast failed request is not unhandled before
     // that nested builder can render its unavailable state.
     _depositsFuture.catchError((Object _, StackTrace __) {
       return <DepositRecord>[];
     });
+  }
+
+  Future<void> _openAccountSetup() async {
+    await Navigator.of(context).push<void>(MaterialPageRoute(
+      builder: (_) => DashboardDetailScreen(
+        kind: DashboardDetailKind.virtualAccount,
+        homeDataService: widget.homeDataService,
+      ),
+    ));
+    if (mounted) _refresh();
+  }
+
+  Future<void> _openKyc() async {
+    await context.push(AppRoutes.kyc);
+    if (mounted) _refresh();
   }
 
   void _refresh() {
@@ -65,6 +95,11 @@ class _ReceiveMoneyScreenState extends State<ReceiveMoneyScreen> {
         label: 'Receive Money',
         menuActions: [
           TpPageMenuAction(
+              label: 'Receive cedis',
+              icon: Icons.payments_outlined,
+              onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const GhanaMoneyScreen()))),
+          TpPageMenuAction(
             label: 'Refresh',
             icon: Icons.refresh_rounded,
             onTap: _refresh,
@@ -74,12 +109,19 @@ class _ReceiveMoneyScreenState extends State<ReceiveMoneyScreen> {
       body: RefreshIndicator(
         color: AppColors.primary,
         backgroundColor: AppColors.surface,
-        onRefresh: () async => _refresh(),
+        onRefresh: () async {
+          _refresh();
+          try {
+            await Future.wait([_accountsFuture, _provisioningFuture]);
+          } catch (_) {
+            // Individual builders display retry states.
+          }
+        },
         child: FutureBuilder<List<VirtualAccountData>>(
           future: _accountsFuture,
           builder: (context, accountsSnapshot) {
             // Loading: no account data has arrived yet. Never fall through to
-            // the "No virtual account yet" empty state while a fetch is pending.
+            // the "No Paystack account yet" empty state while a fetch is pending.
             if (accountsSnapshot.connectionState == ConnectionState.waiting &&
                 !accountsSnapshot.hasData) {
               return const _ReceiveMoneyLoadingState();
@@ -94,53 +136,107 @@ class _ReceiveMoneyScreenState extends State<ReceiveMoneyScreen> {
               );
             }
 
-            final accounts = accountsSnapshot.data ?? [];
-            final hasAccount = accounts.isNotEmpty;
+            final accounts = (accountsSnapshot.data ?? [])
+                .where(
+                  (account) =>
+                      account.provider.toUpperCase() == 'PAYSTACK' &&
+                      account.currency.toUpperCase() == 'NGN',
+                )
+                .toList(growable: false);
+            final hasPendingAccount = accounts.any(
+              (account) =>
+                  account.status.toUpperCase() == 'PENDING' &&
+                  account.accountNumber.trim().isEmpty,
+            );
+            final hasAccount = accounts.any(
+              (account) => account.status.toUpperCase() == 'ACTIVE',
+            );
             final hasShareableAccount = accounts.any(
-              (account) => account.accountNumber.trim().isNotEmpty,
+              (account) =>
+                  account.status.toUpperCase() == 'ACTIVE' &&
+                  account.accountNumber.trim().isNotEmpty,
             );
 
             // Until a receiving account exists, keep this screen focused on
             // the one action available: requesting the account. Deposit
             // history is only meaningful after an account can receive funds.
             if (!hasAccount) {
+              return FutureBuilder<HomeVirtualAccountProvisioning>(
+                future: _provisioningFuture,
+                builder: (context, provisioningSnapshot) {
+                  if (provisioningSnapshot.connectionState ==
+                      ConnectionState.waiting) {
+                    return const _ReceiveMoneyLoadingState();
+                  }
+                  if (provisioningSnapshot.hasError) {
+                    return _ReceiveMoneyErrorState(
+                      message: 'Could not check account setup status',
+                      onRetry: _refresh,
+                    );
+                  }
+                  final provisioning = provisioningSnapshot.data;
+                  final actionRequired = provisioning?.isActionRequired == true;
+                  if (hasPendingAccount ||
+                      provisioning?.isPending == true ||
+                      actionRequired) {
+                    return CustomScrollView(
+                      physics: const AlwaysScrollableScrollPhysics(
+                        parent: BouncingScrollPhysics(),
+                      ),
+                      slivers: [
+                        SliverFillRemaining(
+                          hasScrollBody: false,
+                          child: Center(
+                            child: _PaystackProvisioningCard(
+                              message: provisioning?.message,
+                              actionRequired: actionRequired,
+                              onRefresh: _refresh,
+                              onRetry: _openAccountSetup,
+                            ),
+                          ),
+                        ),
+                      ],
+                    );
+                  }
+                  return CustomScrollView(
+                    physics: const AlwaysScrollableScrollPhysics(
+                      parent: BouncingScrollPhysics(),
+                    ),
+                    slivers: [
+                      SliverFillRemaining(
+                        hasScrollBody: false,
+                        child: Center(
+                          child: _NoVirtualAccountCard(
+                            isRequesting: false,
+                            onRequest: _openAccountSetup,
+                          ),
+                        ),
+                      ),
+                    ],
+                  );
+                },
+              );
+            }
+
+            if (!hasShareableAccount) {
               return CustomScrollView(
                 physics: const AlwaysScrollableScrollPhysics(
                   parent: BouncingScrollPhysics(),
                 ),
                 slivers: [
-                  SliverPadding(
-                    padding: const EdgeInsets.fromLTRB(
-                      AppSpacing.lg,
-                      AppSpacing.md,
-                      AppSpacing.lg,
-                      AppSpacing.xxl,
+                  SliverFillRemaining(
+                    hasScrollBody: false,
+                    child: TpEmptyState(
+                      variant: TpIllustrationVariant.kyc,
+                      illustrationAsset:
+                          'assets/images/empty_states/receive-account.svg',
+                      title: 'Verify your identity',
+                      message:
+                          'Complete KYC to get your receiving account details.',
+                      primaryActionLabel: 'Complete KYC',
+                      onPrimaryAction: _openKyc,
+                      illustrationSize: 236,
                     ),
-                    sliver: SliverToBoxAdapter(
-                      child: _NoVirtualAccountCard(
-                        isRequesting: false,
-                        onRequest: () => Navigator.of(context).push(
-                          MaterialPageRoute(
-                            builder: (_) => DashboardDetailScreen(
-                              kind: DashboardDetailKind.virtualAccount,
-                              homeDataService: widget.homeDataService,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
-              );
-            }
-
-            if (!hasShareableAccount) {
-              return ListView(
-                physics: const AlwaysScrollableScrollPhysics(),
-                padding: const EdgeInsets.all(AppSpacing.lg),
-                children: [
-                  _KycAccountNumberNotice(
-                    onCompleteKyc: () => context.push(AppRoutes.kyc),
                   ),
                 ],
               );
@@ -172,22 +268,14 @@ class _ReceiveMoneyScreenState extends State<ReceiveMoneyScreen> {
                                 ),
                                 child: _VirtualAccountCard(
                                   account: account,
-                                  onCompleteKyc: () =>
-                                      context.push(AppRoutes.kyc),
+                                  onCompleteKyc: _openKyc,
                                 ),
                               );
                             })
                           else
                             _NoVirtualAccountCard(
                               isRequesting: false,
-                              onRequest: () => Navigator.of(context).push(
-                                MaterialPageRoute(
-                                  builder: (_) => DashboardDetailScreen(
-                                    kind: DashboardDetailKind.virtualAccount,
-                                    homeDataService: widget.homeDataService,
-                                  ),
-                                ),
-                              ),
+                              onRequest: _openAccountSetup,
                             ),
 
                           // "How to receive money" refers to the account number
@@ -228,7 +316,7 @@ class _ReceiveMoneyScreenState extends State<ReceiveMoneyScreen> {
                                   const _InstructionStep(
                                     number: '1',
                                     text:
-                                        'Share your virtual account number above with the sender',
+                                        'Share your Paystack NGN account number above with the sender',
                                   ),
                                   const SizedBox(height: AppSpacing.sm),
                                   const _InstructionStep(
@@ -333,7 +421,7 @@ class _ReceiveMoneyScreenState extends State<ReceiveMoneyScreen> {
                 ),
                 const SizedBox(height: AppSpacing.xs),
                 Text(
-                  'Deposits will appear here once someone sends money to your virtual account',
+                  'Deposits will appear here once someone sends money to your Paystack account',
                   style: AppTextStyles.bodyS,
                   textAlign: TextAlign.center,
                 ),
@@ -430,7 +518,7 @@ class _VirtualAccountCard extends StatelessWidget {
                   children: [
                     Text(
                       account.bankName.isEmpty
-                          ? 'Bank account'
+                          ? 'Paystack NGN account'
                           : account.bankName,
                       style: AppTextStyles.labelM.copyWith(
                         color: AppColors.textPrimary,
@@ -662,49 +750,127 @@ class _NoVirtualAccountCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     AppColors.watch(context);
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(AppSpacing.xl),
-      decoration: BoxDecoration(
-        color: AppColors.surfaceVariant,
-        borderRadius: BorderRadius.circular(AppRadius.md),
-        border: Border.all(color: AppColors.border),
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 380),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Semantics(
+              image: true,
+              label: 'No Paystack account yet',
+              child: SizedBox(
+                width: 224,
+                height: 176,
+                child: SvgPicture.asset(
+                  'assets/images/empty_states/receive-account.svg',
+                  fit: BoxFit.contain,
+                ),
+              ),
+            ),
+            const SizedBox(height: AppSpacing.sm),
+            Text(
+              'No Paystack account yet',
+              style: AppTextStyles.labelM,
+            ),
+            const SizedBox(height: AppSpacing.xs),
+            Text(
+              'Request a dedicated Paystack NGN account to receive bank transfers directly into your TrustPay wallet.',
+              style: AppTextStyles.bodyS,
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: AppSpacing.lg),
+            FilledButton(
+              onPressed: isRequesting
+                  ? null
+                  : () {
+                      Haptics.medium();
+                      onRequest();
+                    },
+              child: isRequesting
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Text('Request Paystack account'),
+            ),
+          ],
+        ),
       ),
-      child: Column(
-        children: [
-          const TpIllustration(
-            variant: TpIllustrationVariant.emptyWallet,
-            size: 132,
-            semanticLabel: 'No virtual account yet',
-          ),
-          const SizedBox(height: AppSpacing.sm),
-          Text(
-            'No virtual account yet',
-            style: AppTextStyles.labelM,
-          ),
-          const SizedBox(height: AppSpacing.xs),
-          Text(
-            'Request a virtual account to receive bank transfers directly into your TrustPay wallet.',
-            style: AppTextStyles.bodyS,
-            textAlign: TextAlign.center,
-          ),
-          const SizedBox(height: AppSpacing.lg),
-          FilledButton(
-            onPressed: isRequesting
-                ? null
-                : () {
-                    Haptics.medium();
-                    onRequest();
-                  },
-            child: isRequesting
-                ? const SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Text('Request virtual account'),
-          ),
-        ],
+    );
+  }
+}
+
+class _PaystackProvisioningCard extends StatelessWidget {
+  final String? message;
+  final bool actionRequired;
+  final VoidCallback onRefresh;
+  final VoidCallback onRetry;
+
+  const _PaystackProvisioningCard({
+    required this.message,
+    required this.actionRequired,
+    required this.onRefresh,
+    required this.onRetry,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    AppColors.watch(context);
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 380),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              actionRequired
+                  ? Icons.warning_amber_rounded
+                  : Icons.schedule_rounded,
+              size: 52,
+            ),
+            const SizedBox(height: AppSpacing.md),
+            Text(
+              actionRequired
+                  ? 'Paystack account setup needs attention'
+                  : 'Paystack is preparing your NGN account',
+              style: AppTextStyles.labelM,
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: AppSpacing.xs),
+            Text(
+              message?.trim().isNotEmpty == true
+                  ? message!
+                  : actionRequired
+                      ? 'Review your verification details or contact support, then retry account setup.'
+                      : 'Your request was accepted. Refresh shortly; the account number will appear after server confirmation.',
+              style: AppTextStyles.bodyS,
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: AppSpacing.lg),
+            Wrap(
+              alignment: WrapAlignment.center,
+              spacing: AppSpacing.sm,
+              runSpacing: AppSpacing.sm,
+              children: [
+                OutlinedButton.icon(
+                  onPressed: onRefresh,
+                  icon: const Icon(Icons.refresh_rounded),
+                  label: const Text('Refresh status'),
+                ),
+                if (actionRequired)
+                  FilledButton.icon(
+                    onPressed: onRetry,
+                    icon: const Icon(Icons.refresh_rounded),
+                    label: const Text('Review and retry'),
+                  ),
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }

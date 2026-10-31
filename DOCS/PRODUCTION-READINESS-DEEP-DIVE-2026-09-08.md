@@ -105,7 +105,7 @@ The startup script defaults migrations off and the checked-in Fly configuration 
 Additional operational gaps to resolve or document:
 
 - The production Compose file publishes HTTP ports 3000/3001. A separately managed TLS proxy/firewall may exist, but the file alone does not establish that boundary; verify and restrict direct origin access before using it publicly.
-- Fly's deployment guide still selects Youverify, conflicting with the current Ninja-primary policy; the Monnify webhook guide includes obsolete domains. Correct the release runbooks against the chosen deployment path.
+- At review time, provider deployment guidance was inconsistent. As of 2026-09-27, active deployment manifests and runbooks select Monnify for KYC; see `DOCS/PROVIDER-SOURCE-OF-TRUTH.MD`.
 - The restore drill validates successful restoration and `SELECT 1`, but does not compare wallet/ledger/audit/provider evidence totals. Add representative financial-data assertions and measure recovery time.
 - The Render Blueprint is explicitly free staging. A private dashboard Sentry setting, production promotion process, WAF, backups, or alert routing may exist elsewhere; none was certified by this repository review.
 
@@ -164,7 +164,7 @@ Before approving a release, attach evidence for the exact candidate:
 
 1. A frozen commit and migration/dependency manifest, with all intended working-tree changes included.
 2. Staging migration application and drift checks; financial concurrency, retry, reversal, and reconciliation tests using a disposable database.
-3. Provider acceptance for the enabled Monnify, Ninja, and VTpass products; reachable verified webhooks; successful and failed settlement scenarios. Sandbox observations must remain labeled sandbox.
+3. Provider acceptance for the enabled Monnify (banking/payments/KYC) and VTpass products; reachable verified webhooks; successful and failed settlement scenarios. Sandbox observations must remain labeled sandbox.
 4. Backup and restore of representative data, measured RPO/RTO, provider/Redis/database outage drills, alert delivery, and staffed incident ownership.
 5. Signed Android/iOS artifacts and real-device checks for certificate pinning, integrity controls, upgrade/session behavior, offline retries, and critical money flows.
 6. Staging security and load results, financial-control review, approved customer disclosures and launch-scope sign-off from the responsible business/compliance owners.

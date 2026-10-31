@@ -7,6 +7,7 @@ import { WalletsModule } from '../wallets/wallets.module';
 import { OtpModule } from '../otp/otp.module';
 import { SupabaseModule } from '../supabase/supabase.module';
 import { ReferralsModule } from '../referrals/referrals.module';
+import { RegistrationThrottlerGuard } from '../common/guards/registration-throttler.guard';
 
 @Module({
   imports: [
@@ -18,7 +19,7 @@ import { ReferralsModule } from '../referrals/referrals.module';
     ReferralsModule,
   ],
   controllers: [AuthController],
-  providers: [AuthService],
+  providers: [AuthService, RegistrationThrottlerGuard],
   exports: [AuthService],
 })
 export class AuthModule {}

@@ -1,3 +1,4 @@
+import { BadRequestException } from '@nestjs/common';
 import {
   KYCType,
   KycVerificationProvider,
@@ -20,6 +21,9 @@ export type KycIdentityVerificationRequest = {
     lastName?: string;
     dateOfBirth?: string;
     phone?: string;
+    bankCode?: string;
+    accountNumber?: string;
+    accountSetupConsent?: boolean;
   };
 };
 
@@ -32,11 +36,23 @@ export type KycProviderResult = {
   errorMessage?: string;
 };
 
-export type KycProviderCallbackResult = KycProviderResult & {
-  userId?: string;
-  documentType?: KYCType;
-  country?: string;
-};
+/**
+ * A provider has definitively rejected the submitted identity details.
+ *
+ * The KYC service uses this marker to close the canonical pending attempt.
+ * Other provider errors (timeouts, authorization failures, rate limits, or
+ * unknown responses) intentionally remain pending because the provider may
+ * have accepted the request before the error reached us.
+ */
+export class KycProviderDefinitiveFailure extends BadRequestException {
+  constructor(
+    readonly provider: KycVerificationProvider,
+    message: string,
+    readonly validationFingerprint?: string,
+  ) {
+    super(message);
+  }
+}
 
 export interface KycProviderGateway {
   readonly provider: KycVerificationProvider;
@@ -44,13 +60,4 @@ export interface KycProviderGateway {
   verifyIdentity(
     request: KycIdentityVerificationRequest,
   ): Promise<KycProviderResult>;
-
-  verifyCallbackSignature(input: {
-    signature?: string;
-    rawBody?: Buffer | string;
-  }): boolean;
-
-  normalizeCallback(
-    payload: Record<string, unknown>,
-  ): KycProviderCallbackResult;
 }

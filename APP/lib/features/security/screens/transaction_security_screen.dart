@@ -290,7 +290,7 @@ class _TransactionSecurityScreenState extends State<TransactionSecurityScreen> {
                                 const _SecurityInfoPanel(
                                   title: 'Current behavior',
                                   detail:
-                                    'Money action routes always request a freshly entered transaction PIN before submission. Biometrics are limited to app unlock until a server challenge can bind approval to the device.',
+                                      'Money action routes always request a freshly entered transaction PIN before submission. Biometrics are limited to app unlock until a server challenge can bind approval to the device.',
                                   icon: Icons.verified_user_outlined,
                                 ),
                               ],
@@ -316,6 +316,7 @@ class TransactionPinScreen extends StatefulWidget {
   final String subtitle;
   final TransactionSecurityService? securityService;
   final AuthService? authService;
+  final Widget? confirmationSummary;
 
   const TransactionPinScreen._({
     required this.mode,
@@ -324,6 +325,7 @@ class TransactionPinScreen extends StatefulWidget {
     required this.subtitle,
     this.securityService,
     this.authService,
+    this.confirmationSummary,
   });
 
   factory TransactionPinScreen.create({
@@ -346,6 +348,7 @@ class TransactionPinScreen extends StatefulWidget {
     required String subtitle,
     TransactionSecurityService? securityService,
     AuthService? authService,
+    Widget? confirmationSummary,
   }) {
     return TransactionPinScreen._(
       mode: PinScreenMode.verify,
@@ -354,6 +357,7 @@ class TransactionPinScreen extends StatefulWidget {
       subtitle: subtitle,
       securityService: securityService,
       authService: authService,
+      confirmationSummary: confirmationSummary,
     );
   }
 
@@ -385,6 +389,7 @@ class _TransactionPinScreenState extends State<TransactionPinScreen> {
   String? _error;
   late int _pinLength;
   bool _verifyExistingServerPin = false;
+  bool _isWorking = false;
 
   @override
   void initState() {
@@ -395,7 +400,7 @@ class _TransactionPinScreenState extends State<TransactionPinScreen> {
   }
 
   Future<void> _handleDigit(String digit) async {
-    if (_buffer.length >= _pinLength) {
+    if (_isWorking || _buffer.length >= _pinLength) {
       return;
     }
 
@@ -406,12 +411,17 @@ class _TransactionPinScreenState extends State<TransactionPinScreen> {
     });
 
     if (_buffer.length == _pinLength) {
-      await _completeStep();
+      setState(() => _isWorking = true);
+      try {
+        await _completeStep();
+      } finally {
+        if (mounted) setState(() => _isWorking = false);
+      }
     }
   }
 
   void _handleDelete() {
-    if (_buffer.isEmpty) {
+    if (_isWorking || _buffer.isEmpty) {
       return;
     }
 
@@ -506,7 +516,7 @@ class _TransactionPinScreenState extends State<TransactionPinScreen> {
       if (!mounted) return;
       setState(() {
         _buffer.clear();
-        _error = authErrorMessage(error, 'Could not verify transaction PIN.');
+        _error = _transactionPinVerificationError(error);
       });
     }
   }
@@ -586,6 +596,7 @@ class _TransactionPinScreenState extends State<TransactionPinScreen> {
   @override
   Widget build(BuildContext context) {
     AppColors.watch(context);
+    final isTransferConfirmation = widget.confirmationSummary != null;
     final isCreateConfirm = widget.mode == PinScreenMode.create &&
         !_verifyExistingServerPin &&
         _firstPin != null;
@@ -624,104 +635,143 @@ class _TransactionPinScreenState extends State<TransactionPinScreen> {
     return Scaffold(
       backgroundColor: AppColors.background,
       body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(
-            AppSpacing.lg,
-            AppSpacing.md,
-            AppSpacing.lg,
-            AppSpacing.xxl,
-          ),
-          child: Column(
-            children: [
-              Row(
-                children: [
-                  const Spacer(),
-                  const SizedBox(width: AppSpacing.md),
-                  _TopIconButton(
-                    icon: Icons.close_rounded,
-                    onTap: () {
-                      if (context.canPop()) {
-                        context.pop();
-                      } else {
-                        context.go(AppRoutes.home);
-                      }
-                    },
-                  ),
-                ],
-              ),
-              const SizedBox(height: AppSpacing.xxl),
-              Text(
-                currentTitle,
-                style: AppTextStyles.headingXL,
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: AppSpacing.sm),
-              Text(
-                currentSubtitle,
-                style: AppTextStyles.bodyM,
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: AppSpacing.xxl),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: List.generate(
-                  _pinLength,
-                  (index) => _PinDot(
-                    filled: index < _buffer.length,
-                    value: index < _buffer.length ? '*' : null,
-                  ),
+        child: SingleChildScrollView(
+          keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(
+              AppSpacing.lg,
+              AppSpacing.md,
+              AppSpacing.lg,
+              AppSpacing.xxl,
+            ),
+            child: Column(
+              children: [
+                Row(
+                  children: [
+                    const Spacer(),
+                    const SizedBox(width: AppSpacing.md),
+                    _TopIconButton(
+                      icon: Icons.close_rounded,
+                      onTap: () {
+                        if (Navigator.of(context).canPop()) {
+                          Navigator.of(context).pop();
+                        } else {
+                          context.go(AppRoutes.home);
+                        }
+                      },
+                    ),
+                  ],
                 ),
-              ),
-              if (_error != null) ...[
-                const SizedBox(height: AppSpacing.md),
+                SizedBox(
+                    height: isTransferConfirmation
+                        ? AppSpacing.md
+                        : AppSpacing.xxl),
                 Text(
-                  _error!,
-                  style: AppTextStyles.bodyS.copyWith(color: AppColors.error),
+                  currentTitle,
+                  style: isTransferConfirmation
+                      ? AppTextStyles.headingM
+                      : AppTextStyles.headingXL,
                   textAlign: TextAlign.center,
                 ),
-              ],
-              const Spacer(),
-              GridView.count(
-                crossAxisCount: 3,
-                shrinkWrap: true,
-                childAspectRatio: 1.35,
-                physics: const NeverScrollableScrollPhysics(),
-                children: [
-                  for (final digit in [
-                    '1',
-                    '2',
-                    '3',
-                    '4',
-                    '5',
-                    '6',
-                    '7',
-                    '8',
-                    '9'
-                  ])
-                    _KeypadButton(
-                      label: digit,
-                      onTap: () => _handleDigit(digit),
+                const SizedBox(height: AppSpacing.sm),
+                Text(
+                  currentSubtitle,
+                  style: AppTextStyles.bodyM,
+                  textAlign: TextAlign.center,
+                ),
+                SizedBox(
+                    height:
+                        isTransferConfirmation ? AppSpacing.md : AppSpacing.lg),
+                if (widget.confirmationSummary != null) ...[
+                  widget.confirmationSummary!,
+                  const SizedBox(height: AppSpacing.md),
+                ],
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: List.generate(
+                    _pinLength,
+                    (index) => _PinDot(
+                      filled: index < _buffer.length,
+                      value: index < _buffer.length ? '*' : null,
                     ),
-                  // Keep the zero key centered in the three-column keypad.
-                  // Money actions require a freshly entered transaction PIN.
-                  const SizedBox.shrink(),
-                  _KeypadButton(
-                    label: '0',
-                    onTap: () => _handleDigit('0'),
                   ),
-                  _KeypadIconButton(
-                    icon: Icons.backspace_outlined,
-                    enabled: true,
-                    onTap: _handleDelete,
+                ),
+                if (_error != null) ...[
+                  const SizedBox(height: AppSpacing.md),
+                  Text(
+                    _error!,
+                    style: AppTextStyles.bodyS.copyWith(color: AppColors.error),
+                    textAlign: TextAlign.center,
                   ),
                 ],
-              ),
-            ],
+                const SizedBox(height: AppSpacing.md),
+                if (_isWorking) ...[
+                  Semantics(
+                      liveRegion: true,
+                      child: const Text('Checking your PIN…')),
+                  const SizedBox(height: AppSpacing.sm),
+                  const LinearProgressIndicator(minHeight: 3),
+                ],
+                const SizedBox(height: AppSpacing.md),
+                GridView.count(
+                  crossAxisCount: 3,
+                  shrinkWrap: true,
+                  childAspectRatio: isTransferConfirmation
+                      ? (MediaQuery.sizeOf(context).width - AppSpacing.lg * 2) /
+                          3 /
+                          56
+                      : 1.35,
+                  physics: const NeverScrollableScrollPhysics(),
+                  children: [
+                    for (final digit in [
+                      '1',
+                      '2',
+                      '3',
+                      '4',
+                      '5',
+                      '6',
+                      '7',
+                      '8',
+                      '9'
+                    ])
+                      _KeypadButton(
+                        label: digit,
+                        onTap: _isWorking ? null : () => _handleDigit(digit),
+                      ),
+                    // Keep the zero key centered in the three-column keypad.
+                    // Money actions require a freshly entered transaction PIN.
+                    const SizedBox.shrink(),
+                    _KeypadButton(
+                      label: '0',
+                      onTap: _isWorking ? null : () => _handleDigit('0'),
+                    ),
+                    _KeypadIconButton(
+                      icon: Icons.backspace_outlined,
+                      enabled: !_isWorking,
+                      onTap: _isWorking ? null : _handleDelete,
+                    ),
+                  ],
+                ),
+              ],
+            ),
           ),
         ),
       ),
     );
   }
+}
+
+String _transactionPinVerificationError(Object error) {
+  if (error is DioException && error.response?.statusCode == 403) {
+    final message = _extractDioMessage(error.response?.data);
+    if (message == 'Invalid transaction PIN') {
+      return 'Incorrect PIN. Try again.';
+    }
+    if (message == 'Transaction PIN is temporarily locked') {
+      return 'Your transaction PIN is temporarily locked. Try again later.';
+    }
+  }
+  return authErrorMessage(error, 'Could not verify transaction PIN.');
 }
 
 bool isTransactionPinAlreadySetError(Object error) {
@@ -983,7 +1033,7 @@ class _PinDot extends StatelessWidget {
 
 class _KeypadButton extends StatelessWidget {
   final String label;
-  final VoidCallback onTap;
+  final VoidCallback? onTap;
 
   const _KeypadButton({
     required this.label,

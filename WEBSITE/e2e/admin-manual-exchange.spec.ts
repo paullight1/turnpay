@@ -1,4 +1,5 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
+test.setTimeout(120000);
 
 type AdminSession = {
   access_token: string;
@@ -19,8 +20,8 @@ type AdminOrder = {
   reference: string;
   status: string;
   settlementMode: "WALLET" | "BANK" | "MOMO";
-  sourceCurrency: "NGN";
-  targetCurrency: "GHS";
+  sourceCurrency: "NGN" | "GHS";
+  targetCurrency: "GHS" | "NGN";
   amount: string;
   targetAmount: string;
   rate: string;
@@ -29,7 +30,7 @@ type AdminOrder = {
     bankName: string;
     accountName: string;
     accountNumber: string;
-    currency: "NGN";
+    currency: "NGN" | "GHS";
     version: string;
   };
   expiresAt: string;
@@ -89,7 +90,8 @@ function buildSession(email: string): AdminSession {
 }
 
 function buildOrder(
-  overrides: Partial<AdminOrder> & Pick<AdminOrder, "id" | "reference" | "status" | "settlementMode">,
+  overrides: Partial<AdminOrder> &
+    Pick<AdminOrder, "id" | "reference" | "status" | "settlementMode">,
 ): AdminOrder {
   const now = iso();
   const base: AdminOrder = {
@@ -177,7 +179,30 @@ async function installAdminManualExchangeMocks(page: Page) {
     settlementMode: "WALLET",
     expiresAt: iso(-60 * 1000),
   });
-  const orders = [walletOrder, payoutOrder, expiredWalletOrder];
+  const cediWalletOrder = buildOrder({
+    id: "manual-cedi-wallet-001",
+    reference: "MX-CEDI-WALLET-001",
+    status: "AWAITING_CONFIRMATION",
+    settlementMode: "WALLET",
+    sourceCurrency: "GHS",
+    targetCurrency: "NGN",
+    amount: "100.00",
+    targetAmount: "10000.00",
+    rate: "100.000000",
+    collectionAccount: {
+      bankName: "Merchant MoMo",
+      accountName: "TrustPay",
+      accountNumber: "0240000000",
+      currency: "GHS",
+      version: "ghs-v1",
+    },
+  });
+  const orders = [
+    walletOrder,
+    payoutOrder,
+    expiredWalletOrder,
+    cediWalletOrder,
+  ];
   const reviewRequests: ReviewRequest[] = [];
   let walletReviewFailures = 1;
   let proofRequestCount = 0;
@@ -204,7 +229,9 @@ async function installAdminManualExchangeMocks(page: Page) {
   await page.route("**/api/admin/exchange/manual-orders**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
-    expect(request.headers().authorization).toBe(`Bearer ${session.access_token}`);
+    expect(request.headers().authorization).toBe(
+      `Bearer ${session.access_token}`,
+    );
 
     if (request.method() === "GET") {
       if (url.pathname.endsWith("/reconciliation")) {
@@ -228,6 +255,17 @@ async function installAdminManualExchangeMocks(page: Page) {
       const responseOrders = status
         ? orders.filter((order) => order.status === status)
         : orders;
+      if (url.pathname.endsWith("/queue")) {
+        const counts = orders.reduce<Record<string, number>>((result, item) => {
+          result[item.status] = (result[item.status] ?? 0) + 1;
+          return result;
+        }, {});
+        await route.fulfill({
+          status: 200,
+          json: { items: responseOrders, nextCursor: null, counts },
+        });
+        return;
+      }
       await route.fulfill({ status: 200, json: responseOrders });
       return;
     }
@@ -251,7 +289,8 @@ async function installAdminManualExchangeMocks(page: Page) {
       await route.fulfill({
         status: 200,
         json: {
-          signedUrl: "https://storage-example.supabase.co/manual-proof/upload?signature=test",
+          signedUrl:
+            "https://storage-example.supabase.co/manual-proof/upload?signature=test",
           objectKey: "manual-exchange/payout-proof-001.pdf",
           token: "signed-upload-token",
         },
@@ -267,7 +306,10 @@ async function installAdminManualExchangeMocks(page: Page) {
     const orderId = url.pathname.split("/").at(-2);
     const order = orders.find((candidate) => candidate.id === orderId);
     if (!order) {
-      await route.fulfill({ status: 404, json: { message: "Order not found" } });
+      await route.fulfill({
+        status: 404,
+        json: { message: "Order not found" },
+      });
       return;
     }
 
@@ -282,7 +324,10 @@ async function installAdminManualExchangeMocks(page: Page) {
       walletReviewFailures > 0
     ) {
       walletReviewFailures -= 1;
-      await route.fulfill({ status: 503, json: { message: "Temporary queue outage" } });
+      await route.fulfill({
+        status: 503,
+        json: { message: "Temporary queue outage" },
+      });
       return;
     }
 
@@ -294,7 +339,7 @@ async function installAdminManualExchangeMocks(page: Page) {
           ? "PAYOUT_PROCESSING"
           : body.action === "MARK_SENT"
             ? "PAYOUT_SENT"
-            : body.action === "COMPLETE"
+            : body.action === "COMPLETE" || body.action === "RECORD_CEDIS_SENT"
               ? "COMPLETED"
               : body.action === "REQUEST_INFO"
                 ? "NEEDS_MORE_INFO"
@@ -310,7 +355,9 @@ async function installAdminManualExchangeMocks(page: Page) {
       payoutClaimedBy:
         body.action === "CLAIM_PAYOUT" ? "user-123" : order.payoutClaimedBy,
       hasPayoutProof:
-        body.action === "MARK_SENT" ? true : order.hasPayoutProof,
+        body.action === "MARK_SENT" || body.action === "RECORD_CEDIS_SENT"
+          ? true
+          : order.hasPayoutProof,
       events: [
         ...order.events,
         { status: nextStatus, reason: String(body.reason), createdAt: now },
@@ -320,21 +367,27 @@ async function installAdminManualExchangeMocks(page: Page) {
     await route.fulfill({ status: 200, json: order });
   });
 
-  await page.route(/^https:\/\/storage-example\.supabase\.co\/manual-proof\/upload/, async (route) => {
-    uploadHeaders = route.request().headers();
-    await route.fulfill({
-      status: 200,
-      headers: {
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Methods": "PUT, OPTIONS",
-        "Access-Control-Allow-Headers": "Content-Type",
-      },
-    });
-  });
+  await page.route(
+    /^https:\/\/storage-example\.supabase\.co\/manual-proof\/upload/,
+    async (route) => {
+      uploadHeaders = route.request().headers();
+      await route.fulfill({
+        status: 200,
+        headers: {
+          "Access-Control-Allow-Origin": "*",
+          "Access-Control-Allow-Methods": "PUT, OPTIONS",
+          "Access-Control-Allow-Headers": "Content-Type",
+        },
+      });
+    },
+  );
 
-  (page as Page & { manualExchangeTestState?: unknown }).manualExchangeTestState = {
+  (
+    page as Page & { manualExchangeTestState?: unknown }
+  ).manualExchangeTestState = {
     reviewRequests,
     getProofRequestCount: () => proofRequestCount,
+    getOrders: () => orders,
     getUploadHeaders: () => uploadHeaders,
   };
 
@@ -364,6 +417,7 @@ function getTestState(page: Page) {
     manualExchangeTestState: {
       reviewRequests: ReviewRequest[];
       getProofRequestCount: () => number;
+      getOrders: () => AdminOrder[];
       getUploadHeaders: () => Record<string, string> | null;
     };
   };
@@ -378,18 +432,200 @@ test.describe("Admin manual exchange queue", () => {
     ).toBeVisible({ timeout: 15000 });
   });
 
+  test("lets an admin correct a rejected receipt with a new attempt key", async ({
+    page,
+  }) => {
+    const keys: string[] = [];
+    let rejectedKey: string | undefined;
+    await page.route(
+      "**/api/admin/exchange/manual-orders/*/review",
+      (route) => {
+        const body = route.request().postDataJSON();
+        if (body.action !== "CREDIT_WALLET") return route.fallback();
+        const key = route.request().headers()["idempotency-key"];
+        keys.push(key);
+        if (body.actualAmount === "100.01") rejectedKey = key;
+        if (key === rejectedKey)
+          return route.fulfill({
+            status: 400,
+            json: { message: "The received amount does not match the order." },
+          });
+        return route.fallback();
+      },
+    );
+    await page
+      .getByRole("row")
+      .filter({ hasText: "MX-CEDI-WALLET-001" })
+      .getByRole("button", { name: /Review MX-CEDI-WALLET-001/ })
+      .click();
+    await page
+      .getByRole("button", {
+        name: "Confirm cedis & credit naira",
+        exact: true,
+      })
+      .click();
+    const form = page.locator("form");
+    await form.locator("#manual-deposit-reference").fill("MOMO-CORRECTED-001");
+    await form.locator("#manual-actual-amount").fill("100.01");
+    await form
+      .getByLabel("Reason")
+      .fill("Checked the cedi receipt in the merchant statement.");
+    await form
+      .getByRole("button", {
+        name: "Confirm cedis and credit naira",
+        exact: true,
+      })
+      .click();
+    await expect(form.getByRole("alert")).toContainText("does not match");
+    await form.locator("#manual-actual-amount").fill("100.00");
+    await form
+      .getByRole("button", {
+        name: "Confirm cedis and credit naira",
+        exact: true,
+      })
+      .click();
+    await expect.poll(() => keys.length).toBe(2);
+    expect(keys[1]).not.toBe(keys[0]);
+    await expect(
+      page.getByRole("button", {
+        name: "Confirm cedis & credit naira",
+        exact: true,
+      }),
+    ).toHaveCount(0);
+  });
+
+  test("loads older requests and shows totals for the whole queue", async ({
+    page,
+  }) => {
+    const items = getTestState(page).manualExchangeTestState.getOrders();
+    const older = {
+      ...items.find((item) => item.sourceCurrency === "GHS")!,
+      id: "older-request",
+      reference: "MX-OLDER-READY-001",
+    };
+    await page.route("**/api/admin/exchange/manual-orders/queue*", (route) => {
+      const next = new URL(route.request().url()).searchParams.get("cursor");
+      return route.fulfill({
+        json: {
+          items: next ? [older] : items,
+          nextCursor: next ? null : "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          counts: {
+            AWAITING_CONFIRMATION: 77,
+            PAYOUT_PENDING: 8,
+            COMPLETED: 12,
+          },
+        },
+      });
+    });
+    await page.reload();
+    await expect(
+      page.getByText("Needs review", { exact: true }).locator(".."),
+    ).toContainText("77");
+    await page
+      .getByRole("button", { name: "Load more requests", exact: true })
+      .click();
+    const row = page.getByRole("row").filter({ hasText: "MX-OLDER-READY-001" });
+    await expect(row).toBeVisible();
+    await row
+      .getByRole("button", { name: /Review MX-OLDER-READY-001/ })
+      .click();
+    await expect(
+      page.getByRole("button", {
+        name: "Confirm cedis & credit naira",
+        exact: true,
+      }),
+    ).toBeVisible();
+  });
+  test("budgets live refresh requests when browsing eight queue pages", async ({
+    page,
+  }) => {
+    const sample = getTestState(page).manualExchangeTestState.getOrders()[0];
+    let requests = 0;
+    await page.route("**/api/admin/exchange/manual-orders/queue*", (route) => {
+      requests++;
+      const index = Number(
+        new URL(route.request().url()).searchParams.get("cursor") ?? "0",
+      );
+      return route.fulfill({
+        json: {
+          items: [
+            { ...sample, id: `page-${index}`, reference: `MX-PAGE-${index}` },
+          ],
+          nextCursor: index < 7 ? String(index + 1) : null,
+          counts: { AWAITING_CONFIRMATION: 8 },
+        },
+      });
+    });
+    await page.reload();
+    await expect(page.getByText("MX-PAGE-0", { exact: true })).toBeVisible();
+    await page.clock.install();
+    for (let index = 1; index < 8; index++) {
+      await page
+        .getByRole("button", { name: "Load more requests", exact: true })
+        .click();
+      await expect(
+        page.getByText(`MX-PAGE-${index}`, { exact: true }),
+      ).toBeVisible();
+    }
+    const before = requests;
+    await page.clock.fastForward(15000);
+    await page.waitForTimeout(250);
+    expect(requests).toBe(before);
+    await page.clock.fastForward(80000);
+    await expect.poll(() => requests).toBe(before + 8);
+  });
+
+  test("keeps a held payout unclaimed and does not offer recording a transfer", async ({
+    page,
+  }) => {
+    await page.route(
+      "**/api/admin/exchange/manual-orders/*/review",
+      (route) => {
+        if (route.request().postDataJSON().action === "CLAIM_PAYOUT")
+          return route.fulfill({
+            status: 503,
+            json: {
+              message:
+                "Payouts are on hold. Resolve reconciliation before paying.",
+            },
+          });
+        return route.fallback();
+      },
+    );
+    const row = page.getByRole("row").filter({ hasText: "MX-PAYOUT-001" });
+    await row.getByRole("button", { name: /Review MX-PAYOUT-001/ }).click();
+    await page
+      .getByRole("button", { name: "Start cedi transfer", exact: true })
+      .click();
+    const form = page.locator("form");
+    await form.getByLabel("Reason").fill("Preparing to send the quoted cedis.");
+    await form
+      .getByRole("button", { name: "Start cedi transfer", exact: true })
+      .click();
+    await expect(form.getByRole("alert")).toContainText("on hold");
+    await expect(
+      page.getByRole("button", { name: "I sent the cedis", exact: true }),
+    ).toHaveCount(0);
+  });
+
   test("opens protected deposit evidence and keeps the destination protected in the queue", async ({
     page,
   }) => {
     await expect(
       page.locator('a[href="/admin/exchange/manual-orders"]').first(),
     ).toHaveAttribute("href", "/admin/exchange/manual-orders");
-    const payoutRow = page.getByRole("row").filter({ hasText: "MX-PAYOUT-001" });
+    const payoutRow = page
+      .getByRole("row")
+      .filter({ hasText: "MX-PAYOUT-001" });
     await expect(payoutRow.getByText("******6789")).toBeVisible();
     await expect(payoutRow).not.toContainText("0241234567");
 
-    const walletRow = page.getByRole("row").filter({ hasText: "MX-WALLET-001" });
-    await walletRow.getByRole("button", { name: /Review MX-WALLET-001/ }).click();
+    const walletRow = page
+      .getByRole("row")
+      .filter({ hasText: "MX-WALLET-001" });
+    await walletRow
+      .getByRole("button", { name: /Review MX-WALLET-001/ })
+      .click();
     await expect(page.getByText("Customer bank reference")).toBeVisible();
     await expect(
       page.getByRole("button", { name: "View deposit receipt" }),
@@ -397,61 +633,105 @@ test.describe("Admin manual exchange queue", () => {
 
     await page.getByRole("button", { name: "View deposit receipt" }).click();
     await expect
-      .poll(() => getTestState(page).manualExchangeTestState.getProofRequestCount())
+      .poll(() =>
+        getTestState(page).manualExchangeTestState.getProofRequestCount(),
+      )
       .toBe(1);
     await expect(page.locator("body")).not.toContainText(
       "https://proof.example.test/private/manual-proof.pdf",
     );
   });
 
-  test("admin queue fits desktop and mobile without document overflow", async ({ page }) => {
+  test("admin queue fits desktop and mobile without document overflow", async ({
+    page,
+  }) => {
     for (const width of [1087, 390]) {
       await page.setViewportSize({ width, height: 844 });
-      await expect(page.getByRole('heading', { name: 'Exchange requests' })).toBeVisible();
-      expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
-      await page.screenshot({ path: screenshotPath(`admin-exchange-${width}.png`), fullPage: true });
+      await expect(
+        page.getByRole("heading", { name: "Exchange requests" }),
+      ).toBeVisible();
+      expect(
+        await page.evaluate(
+          () => document.documentElement.scrollWidth <= window.innerWidth,
+        ),
+      ).toBe(true);
+      await page.screenshot({
+        path: screenshotPath(`admin-exchange-${width}.png`),
+        fullPage: true,
+      });
     }
   });
 
-  test("overview tabs remain above content and follow sidebar navigation", async ({ page }) => {
-    await page.goto('/admin');
-    await expect(page.getByRole('heading', { name: 'Admin overview' })).toBeVisible();
-    await expect(page.getByRole('region', { name: 'Business totals' })).toBeVisible();
-    expect(await page.locator('[data-slot="tabs"]').evaluate(el => getComputedStyle(el).flexDirection)).toBe('column');
+  test("overview tabs remain above content and follow sidebar navigation", async ({
+    page,
+  }) => {
+    await page.goto("/admin");
+    await expect(
+      page.getByRole("heading", { name: "Admin overview" }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("region", { name: "Business totals" }),
+    ).toBeVisible();
+    expect(
+      await page
+        .locator('[data-slot="tabs"]')
+        .evaluate((el) => getComputedStyle(el).flexDirection),
+    ).toBe("column");
     await page
-      .getByRole('navigation', { name: 'Admin navigation' })
-      .getByRole('link', { name: 'Transactions', exact: true })
+      .getByRole("navigation", { name: "Admin navigation" })
+      .getByRole("link", { name: "Transactions", exact: true })
       .click();
-    await expect(page.getByRole('heading', { name: 'Finance', exact: true })).toBeVisible();
-    await page.getByRole('link', { name: 'Overview', exact: true }).click();
-    await expect(page.getByRole('heading', { name: 'Admin overview' })).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "Finance", exact: true }),
+    ).toBeVisible();
+    await page.getByRole("link", { name: "Overview", exact: true }).click();
+    await expect(
+      page.getByRole("heading", { name: "Admin overview" }),
+    ).toBeVisible();
     for (const width of [1087, 390]) {
       await page.setViewportSize({ width, height: 844 });
-      expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
-      await page.screenshot({ path: screenshotPath(`admin-overview-${width}.png`), fullPage: true });
+      expect(
+        await page.evaluate(
+          () => document.documentElement.scrollWidth <= window.innerWidth,
+        ),
+      ).toBe(true);
+      await page.screenshot({
+        path: screenshotPath(`admin-overview-${width}.png`),
+        fullPage: true,
+      });
     }
   });
 
   test("retries wallet credit with the same idempotency key and exact deposit data", async ({
     page,
   }) => {
-    const walletRow = page.getByRole("row").filter({ hasText: "MX-WALLET-001" });
-    await walletRow.getByRole("button", { name: /Review MX-WALLET-001/ }).click();
+    const walletRow = page
+      .getByRole("row")
+      .filter({ hasText: "MX-WALLET-001" });
+    await walletRow
+      .getByRole("button", { name: /Review MX-WALLET-001/ })
+      .click();
     await page.getByRole("button", { name: "Approve & credit wallet" }).click();
 
     const form = page.locator("form");
     await form.locator("#manual-deposit-reference").fill("BANK-REAL-001");
     await form.locator("#manual-actual-amount").fill("50000.00");
-    await form.getByLabel("Reason").fill(
-      "Matched the bank inflow to the dedicated collection statement.",
+    await form
+      .getByLabel("Reason")
+      .fill("Matched the bank inflow to the dedicated collection statement.");
+
+    const submit = form.getByRole("button", {
+      name: "Approve and credit wallet",
+    });
+    await submit.click();
+    await expect(form.getByRole("alert")).toContainText(
+      "Temporary queue outage",
     );
-
-    const submit = form.getByRole("button", { name: "Approve and credit wallet" });
-    await submit.click();
-    await expect(form.getByRole("alert")).toContainText("Temporary queue outage");
     await submit.click();
 
-    await expect(page.getByText("Credited to Wallet").first()).toBeVisible({ timeout: 10000 });
+    await expect(page.getByText("Credited to Wallet").first()).toBeVisible({
+      timeout: 10000,
+    });
     const requests = getTestState(page).manualExchangeTestState.reviewRequests;
     expect(requests).toHaveLength(2);
     expect(requests[0]?.idempotencyKey).toBe(requests[1]?.idempotencyKey);
@@ -464,76 +744,158 @@ test.describe("Admin manual exchange queue", () => {
     });
   });
 
-  test("claims, uploads protected payout proof, marks sent, and completes", async ({
+  test("records the actual cedi transfer and completes once with proof and exact amount", async ({
     page,
   }) => {
-    const payoutRow = page.getByRole("row").filter({ hasText: "MX-PAYOUT-001" });
-    await payoutRow.getByRole("button", { name: /Review MX-PAYOUT-001/ }).click();
-    await page.getByRole("button", { name: "Claim payout" }).click();
+    const row = page.getByRole("row").filter({ hasText: "MX-PAYOUT-001" });
+    await row.getByRole("button", { name: /Review MX-PAYOUT-001/ }).click();
+    await page
+      .getByRole("button", { name: "Start cedi transfer", exact: true })
+      .click();
     let form = page.locator("form");
-    await form.getByLabel("Reason").fill("I am taking ownership of this payout review.");
-    await form.getByRole("button", { name: "Claim payout" }).click();
-
+    await form
+      .getByLabel("Reason")
+      .fill("I am taking ownership before sending the cedis.");
+    await form
+      .getByRole("button", { name: "Start cedi transfer", exact: true })
+      .click();
     await expect(
       page.getByRole("table").getByText("Payout Being Processed"),
-    ).toBeVisible({ timeout: 10000 });
-    await page.getByRole("button", { name: "Mark sent" }).click();
+    ).toBeVisible();
+    await page
+      .getByRole("button", { name: "I sent the cedis", exact: true })
+      .click();
     form = page.locator("form");
     await form.locator("#manual-payout-proof").setInputFiles({
       name: "payout-proof.pdf",
       mimeType: "application/pdf",
       buffer: Buffer.from("private payout evidence"),
     });
-    await form.getByRole("button", { name: "Upload proof" }).click();
-    await expect(form.getByText("Proof uploaded and ready to attach")).toBeVisible();
-    await form.locator("#manual-payout-reference").fill("GHS-TRANSFER-001");
-    await form.getByLabel("Reason").fill("Matched the completed GHS transfer to the payout statement.");
-    await form.getByRole("button", { name: "Mark payout as sent" }).click();
-
+    await form
+      .getByRole("button", { name: "Upload proof", exact: true })
+      .click();
     await expect(
-      page.getByRole("table").getByText("Payout Sent"),
-    ).toBeVisible({ timeout: 10000 });
+      form.getByText("Proof uploaded and ready to attach"),
+    ).toBeVisible();
+    await form.locator("#manual-payout-reference").fill("GHS-TRANSFER-001");
+    await form.getByLabel("Cedis actually sent").fill("2000.00");
+    await form
+      .getByLabel("Reason")
+      .fill(
+        "Matched the completed cedi transfer to the recipient and statement.",
+      );
+    await form
+      .getByRole("button", { name: "Confirm cedis sent", exact: true })
+      .click();
+    await expect(page.getByRole("table").getByText("Completed")).toBeVisible();
     const state = getTestState(page).manualExchangeTestState;
-    const uploadRequest = state.reviewRequests.find(
-      (request) => request.body.action === "MARK_SENT",
+    const requests = state.reviewRequests.filter(
+      (r) => r.body.action === "RECORD_CEDIS_SENT",
     );
-    expect(uploadRequest?.body).toMatchObject({
-      action: "MARK_SENT",
+    expect(requests).toHaveLength(1);
+    expect(requests[0].body).toMatchObject({
       payoutReference: "GHS-TRANSFER-001",
+      payoutAmount: "2000.00",
       payoutProofObjectKey: "manual-exchange/payout-proof-001.pdf",
     });
     expect(state.getUploadHeaders()?.authorization).toBeUndefined();
-
-    await page.getByRole("button", { name: "Complete" }).click();
-    form = page.locator("form");
-    await form.getByLabel("Reason").fill("Verified recipient settlement and payout evidence.");
-    await form.getByRole("button", { name: "Complete settlement" }).click();
     await expect(
-      page.getByRole("table").getByText("Completed"),
-    ).toBeVisible({ timeout: 10000 });
+      page.getByRole("button", { name: "I sent the cedis", exact: true }),
+    ).toHaveCount(0);
+  });
+  test("confirms received cedis and credits the frozen naira wallet amount", async ({
+    page,
+  }) => {
+    await page
+      .getByRole("row")
+      .filter({ hasText: "MX-CEDI-WALLET-001" })
+      .getByRole("button", { name: /Review MX-CEDI-WALLET-001/ })
+      .click();
+    await expect(
+      page.getByText("Rate (NGN per GHS)", { exact: true }),
+    ).toBeVisible();
+    await page
+      .getByRole("button", {
+        name: "Confirm cedis & credit naira",
+        exact: true,
+      })
+      .click();
+    const form = page.locator("form");
+    await form.locator("#manual-deposit-reference").fill("MOMO-RECEIVED-001");
+    await form.locator("#manual-actual-amount").fill("100.00");
+    await form
+      .getByLabel("Reason")
+      .fill("Verified the actual cedis received in the merchant MoMo account.");
+    await form
+      .getByRole("button", {
+        name: "Confirm cedis and credit naira",
+        exact: true,
+      })
+      .click();
+    await expect(
+      page.getByRole("button", {
+        name: "Confirm cedis & credit naira",
+        exact: true,
+      }),
+    ).toHaveCount(0);
+    const requests = getTestState(
+      page,
+    ).manualExchangeTestState.reviewRequests.filter(
+      (r) =>
+        r.body.action === "CREDIT_WALLET" && r.body.actualAmount === "100.00",
+    );
+    expect(requests).toHaveLength(1);
+    expect(requests[0].body).toMatchObject({
+      action: "CREDIT_WALLET",
+      actualAmount: "100.00",
+      depositReference: "MOMO-RECEIVED-001",
+    });
+    await expect(
+      page.getByRole("button", {
+        name: "Confirm cedis & credit naira",
+        exact: true,
+      }),
+    ).toHaveCount(0);
   });
 
   test("requires an explicit frozen-terms acknowledgement for expired deposits", async ({
     page,
   }) => {
-    const expiredRow = page.getByRole("row").filter({ hasText: "MX-WALLET-EXP-001" });
-    await expiredRow.getByRole("button", { name: /Review MX-WALLET-EXP-001/ }).click();
+    const expiredRow = page
+      .getByRole("row")
+      .filter({ hasText: "MX-WALLET-EXP-001" });
+    await expiredRow
+      .getByRole("button", { name: /Review MX-WALLET-EXP-001/ })
+      .click();
     await page.getByRole("button", { name: "Approve & credit wallet" }).click();
 
     const form = page.locator("form");
     await form.locator("#manual-deposit-reference").fill("BANK-EXPIRED-001");
     await form.locator("#manual-actual-amount").fill("50000.00");
-    await form.getByLabel("Reason").fill(
-      "Verified the inflow and will honor the original frozen quoted terms.",
+    await form
+      .getByLabel("Reason")
+      .fill(
+        "Verified the inflow and will honor the original frozen quoted terms.",
+      );
+    await form
+      .getByRole("button", { name: "Approve and credit wallet" })
+      .click();
+    await expect(form.getByRole("alert")).toContainText(
+      "original quoted terms",
     );
-    await form.getByRole("button", { name: "Approve and credit wallet" }).click();
-    await expect(form.getByRole("alert")).toContainText("original quoted terms");
 
-    await form.getByLabel("Honor the original quoted amount for this expired order").check();
-    await form.getByRole("button", { name: "Approve and credit wallet" }).click();
-    await expect(page.getByText("Credited to Wallet").first()).toBeVisible({ timeout: 10000 });
+    await form
+      .getByLabel("Honor the original quoted amount for this expired order")
+      .check();
+    await form
+      .getByRole("button", { name: "Approve and credit wallet" })
+      .click();
+    await expect(page.getByText("Credited to Wallet").first()).toBeVisible({
+      timeout: 10000,
+    });
 
-    const request = getTestState(page).manualExchangeTestState.reviewRequests.at(-1);
+    const request =
+      getTestState(page).manualExchangeTestState.reviewRequests.at(-1);
     expect(request?.body).toMatchObject({
       action: "CREDIT_WALLET",
       depositReference: "BANK-EXPIRED-001",

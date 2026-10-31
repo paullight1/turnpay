@@ -1,13 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import '../lib/core/widgets/tp_receipt.dart';
+import 'package:trustpay_app/core/widgets/tp_receipt.dart';
 
 void main() {
   testWidgets('long pending status fits a narrow receipt at large text size',
       (tester) async {
-    await tester.pumpWidget(MaterialApp(
+    await tester.pumpWidget(const MaterialApp(
       home: MediaQuery(
-        data: const MediaQueryData(textScaler: TextScaler.linear(1.5)),
+        data: MediaQueryData(textScaler: TextScaler.linear(1.5)),
         child: Scaffold(
           body: SingleChildScrollView(
             child: SizedBox(
@@ -17,7 +17,7 @@ void main() {
                 headerTitle: 'Electricity receipt',
                 headerSubtitle: 'TrustPay',
                 statusLabel: 'Awaiting confirmation',
-                entries: const [TpReceiptEntry('Reference', 'SANDBOX-TEST')],
+                entries: [TpReceiptEntry('Reference', 'SANDBOX-TEST')],
                 footerNote: 'Test receipt',
               ),
             ),

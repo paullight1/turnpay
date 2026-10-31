@@ -162,6 +162,13 @@ export default function WalletDetailPage() {
     staleTime: 30000,
   });
 
+  const provisioningQuery = useQuery({
+    queryKey: ["virtual-account-provisioning", user?.id],
+    queryFn: async () => (await bankingApi.getProvisioningStatus()).data,
+    enabled: !!user && currency === "NGN",
+    staleTime: 15_000,
+  });
+
   const transactionsQuery = useQuery({
     queryKey: ["transactions", user?.id, currency, "wallet-detail"],
     queryFn: async () => {
@@ -176,8 +183,24 @@ export default function WalletDetailPage() {
   const account = accountsQuery.data?.find(
     (item) =>
       item.currency === currency &&
-      (currency !== "NGN" || item.provider?.toLowerCase() === "monnify"),
+      (currency !== "NGN" || item.provider?.toUpperCase() === "PAYSTACK") &&
+      (currency !== "NGN" || item.status?.toUpperCase() === "ACTIVE") &&
+      Boolean(item.accountNumber || item.accountNumberMasked),
   );
+  const provisioningPending =
+    currency === "NGN" &&
+    (provisioningQuery.data?.status?.toUpperCase() === "PENDING" ||
+      accountsQuery.data?.some(
+        (item) =>
+          item.currency === "NGN" &&
+          item.provider?.toUpperCase() === "PAYSTACK" &&
+          item.status?.toUpperCase() === "PENDING" &&
+          !item.accountNumber &&
+          !item.accountNumberMasked,
+      ) === true);
+  const provisioningActionRequired =
+    currency === "NGN" &&
+    provisioningQuery.data?.status?.toUpperCase() === "ACTION_REQUIRED";
   const walletTransactions = useMemo(
     () =>
       transactionsQuery.data?.transactions?.filter(
@@ -215,8 +238,22 @@ export default function WalletDetailPage() {
               Account details first, then wallet history below.
             </p>
           </div>
-          <Badge variant={account ? accountStatusVariant(account.status) : "secondary"}>
-            {account ? account.status : "No account yet"}
+          <Badge
+            variant={
+              provisioningActionRequired || provisioningPending
+                ? "secondary"
+                : account
+                  ? accountStatusVariant(account.status)
+                  : "secondary"
+            }
+          >
+            {provisioningActionRequired
+              ? "ACTION REQUIRED"
+              : provisioningPending
+                ? "PENDING"
+                : account
+                  ? account.status
+                  : "No account yet"}
           </Badge>
         </div>
 
@@ -305,6 +342,31 @@ export default function WalletDetailPage() {
                 )}
                 onRetry={() => void accountsQuery.refetch()}
               />
+            ) : provisioningActionRequired ? (
+              <div className="rounded-lg border border-amber-200 bg-amber-50 p-5 text-center text-amber-950">
+                <AlertCircle className="mx-auto size-6 text-amber-700" />
+                <p className="mt-3 font-medium">Paystack account setup needs attention</p>
+                <p className="mx-auto mt-1 max-w-md text-sm text-amber-800">
+                  {provisioningQuery.data?.message ??
+                    "Review your verification details and retry account setup, or contact support."}
+                </p>
+                <Button asChild className="mt-4">
+                  <Link href="/dashboard/fund">Review and retry setup</Link>
+                </Button>
+              </div>
+            ) : provisioningPending ? (
+              <div className="rounded-lg border border-amber-200 bg-amber-50 p-5 text-center text-amber-950">
+                <Loader2 className="mx-auto size-6 animate-spin" />
+                <p className="mt-3 font-medium">Paystack is preparing your NGN account</p>
+                <p className="mx-auto mt-1 max-w-md text-sm text-amber-800">
+                  Your request was accepted. Refresh shortly; the account number
+                  appears only after server confirmation.
+                </p>
+                <Button variant="outline" className="mt-4" onClick={() => void provisioningQuery.refetch()}>
+                  <RefreshCw aria-hidden="true" className="size-4" />
+                  Refresh status
+                </Button>
+              </div>
             ) : account ? (
               <div className="grid gap-4">
                 <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
@@ -337,12 +399,12 @@ export default function WalletDetailPage() {
                 </div>
                 <p className="mt-3 font-medium text-slate-950">
                   {currency === "NGN"
-                    ? "No Monnify account yet"
+                    ? "No Paystack account yet"
                     : "Receiving account coming soon"}
                 </p>
                 <p className="mx-auto mt-1 max-w-md text-sm text-slate-500">
                   {currency === "NGN"
-                    ? "Request your Monnify account to receive wallet transfers."
+                    ? "Request your Paystack account to receive wallet transfers."
                     : "GHS receiving accounts are not available yet. You can still view your balance and history."}
                 </p>
                 {currency === "NGN" && (

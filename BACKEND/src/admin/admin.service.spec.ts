@@ -65,7 +65,7 @@ describe('AdminService banking operations', () => {
       updateMany: jest.fn(),
     },
     webhookLog: {
-      findUnique: jest.fn(),
+      findFirst: jest.fn(),
       update: jest.fn(),
     },
     providerEvent: {
@@ -87,6 +87,7 @@ describe('AdminService banking operations', () => {
 
   const configService = {
     get: jest.fn((key: string, defaultValue?: unknown) => {
+      if (key === 'BANKING_PROVIDER_PRIMARY') return 'monnify';
       if (key === 'MONNIFY_EXCHANGE_COLLECTION_ACCOUNT_NUMBER') {
         return '0123456789';
       }
@@ -2025,7 +2026,7 @@ describe('AdminService banking operations', () => {
   });
 
   it('replays a failed Monnify virtual-account deposit from its webhook log', async () => {
-    prisma.webhookLog.findUnique.mockResolvedValue({
+    prisma.webhookLog.findFirst.mockResolvedValue({
       id: 'log-1',
       provider: 'MONNIFY',
       reference: 'MNF-REF-1',
@@ -2066,7 +2067,7 @@ describe('AdminService banking operations', () => {
       }),
     );
     expect(prisma.webhookLog.update).toHaveBeenCalledWith({
-      where: { reference: 'MNF-REF-1' },
+      where: { id: 'log-1' },
       data: { processed: true, errorMessage: null },
     });
     expect(prisma.auditLog.create).toHaveBeenCalledWith({
@@ -2080,7 +2081,7 @@ describe('AdminService banking operations', () => {
   });
 
   it('rejects replaying a webhook log that is not a paid virtual-account deposit', async () => {
-    prisma.webhookLog.findUnique.mockResolvedValue({
+    prisma.webhookLog.findFirst.mockResolvedValue({
       id: 'log-2',
       provider: 'MONNIFY',
       reference: 'MNF-REF-2',
@@ -2099,7 +2100,7 @@ describe('AdminService banking operations', () => {
     ).rejects.toBeInstanceOf(BadRequestException);
     expect(bankingService.processVirtualAccountDeposit).not.toHaveBeenCalled();
 
-    prisma.webhookLog.findUnique.mockResolvedValue(null);
+    prisma.webhookLog.findFirst.mockResolvedValue(null);
 
     await expect(
       service.replayVirtualAccountDeposit(

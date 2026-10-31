@@ -156,7 +156,7 @@ class VtuService {
   Future<List<VtuProviderOption>> getProviders(String type) async {
     final response = await _apiClient.client.get<List<dynamic>>(
       '/api/vtu/providers',
-      queryParameters: {'type': type},
+      queryParameters: {'type': type, 'catalog': 'extended'},
     );
 
     return (response.data ?? [])

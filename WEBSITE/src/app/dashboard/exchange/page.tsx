@@ -267,12 +267,10 @@ export default function ExchangePage() {
   const [isQuoteExpired, setIsQuoteExpired] = useState(false);
   const [showSuccessAnimation, setShowSuccessAnimation] = useState(false);
   const [receiptAmount, setReceiptAmount] = useState("");
-  const [isSubmittingReceipt, setIsSubmittingReceipt] = useState(false);
+  const isSubmittingReceipt = false;
   const inFlightRef = useRef(false);
-  const receiptInFlightRef = useRef(false);
   const payoutInFlightRef = useRef(false);
   const attemptKeyRef = useRef<string | null>(null);
-  const receiptAttemptKeyRef = useRef<string | null>(null);
   const payoutAttemptKeyRef = useRef<string | null>(null);
   const moneyGate = getMoneyActionGate(profile);
 
@@ -342,9 +340,6 @@ export default function ExchangePage() {
     setIsQuoteExpired(remaining <= 0);
   };
 
-  const resetReceiptAttempt = () => {
-    receiptAttemptKeyRef.current = null;
-  };
 
   // ── Countdown timer for quote expiry ──────────────────────────
   useEffect(() => {
@@ -460,42 +455,7 @@ export default function ExchangePage() {
 
   const handleSubmitReceipt = async (event: React.FormEvent) => {
     event.preventDefault();
-
-    if (moneyGate) {
-      toast.error(moneyGate.title);
-      return;
-    }
-
-    if (receiptInFlightRef.current) return;
-
-    if (!amountPattern.test(receiptAmount) || Number(receiptAmount) <= 0) {
-      toast.error("Enter the NGN amount you paid");
-      return;
-    }
-
-    receiptInFlightRef.current = true;
-    setIsSubmittingReceipt(true);
-    try {
-      const idempotencyKey =
-        receiptAttemptKeyRef.current ??
-        createMoneyAttemptIdempotencyKey("exchange");
-      receiptAttemptKeyRef.current = idempotencyKey;
-
-      await exchangeApi.createMonnifyDepositIntent(
-        { amount: receiptAmount },
-        idempotencyKey,
-      );
-
-      toast.success("Monnify deposit instruction created");
-      setReceiptAmount("");
-      resetReceiptAttempt();
-      await refetchReceipts();
-    } catch (error: unknown) {
-      toast.error(getErrorMessage(error, "Could not submit receipt"));
-    } finally {
-      receiptInFlightRef.current = false;
-      setIsSubmittingReceipt(false);
-    }
+    toast.info("External exchange deposits are paused. Fund your NGN wallet through Paystack first.");
   };
 
   const handleGetPayoutQuote = async () => {
@@ -650,7 +610,7 @@ export default function ExchangePage() {
         <div>
           <h1 className="text-3xl font-bold">Currency Exchange</h1>
           <p className="mt-1 text-muted-foreground">
-            Convert between GHS and NGN, or submit an NGN transfer receipt for GHS credit.
+            Convert between wallets when funds are available. Fund your NGN wallet through Paystack first.
           </p>
         </div>
 
@@ -671,14 +631,14 @@ export default function ExchangePage() {
         )}
 
         <Tabs defaultValue="wallet" className="flex flex-col gap-4">
-          <TabsList className="grid w-full grid-cols-2 md:w-fit">
+          <TabsList className="grid w-full grid-cols-3 md:w-fit">
             <TabsTrigger value="wallet" className="gap-2">
               <ArrowLeftRight className="size-4" />
               Wallet exchange
             </TabsTrigger>
-            <TabsTrigger value="receipt" className="gap-2">
+            <TabsTrigger value="receipt" className="gap-2" disabled title="New external deposits are disabled while Paystack is primary">
               <ReceiptText className="size-4" />
-              Deposit receipt
+              External deposit
             </TabsTrigger>
             <TabsTrigger value="payout" className="gap-2">
               <Send className="size-4" />
@@ -862,9 +822,10 @@ export default function ExchangePage() {
             <div className="grid gap-4 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">
               <Card>
                 <CardHeader>
-                  <CardTitle>Monnify verified deposit</CardTitle>
+                  <CardTitle>Legacy exchange deposits</CardTitle>
                   <CardDescription>
-                    Create an exchange reference, then transfer NGN with that reference.
+                    New external deposits are paused. Fund your NGN wallet through
+                    Paystack first; this section preserves historical records.
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="flex flex-col gap-4">
@@ -896,15 +857,15 @@ export default function ExchangePage() {
                   <div className="grid gap-3 text-sm">
                     <div className="flex items-start gap-3">
                       <Badge variant="secondary">1</Badge>
-                      <p>Enter the NGN amount to create a unique exchange reference.</p>
+                      <p>New deposit instructions are disabled while Paystack is primary.</p>
                     </div>
                     <div className="flex items-start gap-3">
                       <Badge variant="secondary">2</Badge>
-                      <p>Send NGN to the Monnify account and include the reference in narration.</p>
+                      <p>Fund your NGN wallet through Paystack from the Fund wallet page.</p>
                     </div>
                     <div className="flex items-start gap-3">
                       <Badge variant="secondary">3</Badge>
-                      <p>Monnify verifies the inflow, then finance credits your GHS wallet.</p>
+                      <p>Existing records remain available below for reconciliation.</p>
                     </div>
                   </div>
                 </CardContent>
@@ -912,9 +873,10 @@ export default function ExchangePage() {
 
               <Card>
                 <CardHeader>
-                  <CardTitle>Create deposit instruction</CardTitle>
+                  <CardTitle>New instructions unavailable</CardTitle>
                   <CardDescription>
-                    The GHS credit amount is fixed when this instruction is created.
+                    New exchange deposit instructions are disabled while Paystack
+                    is the primary funding provider.
                   </CardDescription>
                 </CardHeader>
                 <CardContent>
@@ -927,7 +889,7 @@ export default function ExchangePage() {
                           inputMode="decimal"
                           placeholder="50000.00"
                           value={receiptAmount}
-                          onChange={(e) => { setReceiptAmount(e.target.value); resetReceiptAttempt(); }}
+                          onChange={(e) => setReceiptAmount(e.target.value)}
                           disabled={isSubmittingReceipt}
                         />
                       </div>
@@ -935,10 +897,10 @@ export default function ExchangePage() {
 
                     <Button
                       type="submit"
-                      disabled={isSubmittingReceipt || !!moneyGate}
+                      disabled
                       className="w-full"
                     >
-                      {isSubmittingReceipt ? "Creating..." : "Create Monnify reference"}
+                      Fund your NGN wallet through Paystack first
                     </Button>
                   </form>
                 </CardContent>
@@ -1013,7 +975,7 @@ export default function ExchangePage() {
                       </div>
                       {receipt.receiptUrl.startsWith("monnify://") ? (
                         <Badge variant="outline" className="w-fit">
-                          Monnify tracked
+                          Legacy provider tracked
                         </Badge>
                       ) : (
                         <Button

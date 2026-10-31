@@ -30,7 +30,7 @@ FX_RATE_API_KEY=
 
 ## Live Steps
 
-1. Obtain provider report access for Monnify, VTpass, Youverify, and the FX source where applicable.
+1. Obtain provider report access for Monnify, VTpass, and the FX source where applicable.
 2. Define daily cutoff time, timezone, owner, and sign-off process.
 3. Run reconciliation after the first live transaction before broader launch.
 4. Compare provider totals, wallet ledger totals, transaction statuses, fees, reversals, and settlements.

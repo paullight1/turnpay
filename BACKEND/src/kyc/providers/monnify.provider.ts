@@ -18,7 +18,6 @@ import { PinoLogger } from 'nestjs-pino';
 import { CircuitBreakerService } from '../../common/services/circuit-breaker.service';
 import {
   KycIdentityVerificationRequest,
-  KycProviderCallbackResult,
   KycProviderGateway,
   KycProviderResult,
 } from './kyc-provider.gateway';
@@ -86,16 +85,6 @@ export class MonnifyProvider implements KycProviderGateway {
         'Identity verification could not be completed',
       );
     }
-  }
-
-  verifyCallbackSignature(): boolean {
-    return false;
-  }
-
-  normalizeCallback(): KycProviderCallbackResult {
-    throw new BadRequestException(
-      'Monnify identity verification does not use callbacks',
-    );
   }
 
   private async verifyNin(
