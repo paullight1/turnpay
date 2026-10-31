@@ -49,7 +49,7 @@ run_backup 'postgresql://db-user:super-secret@db.example.com:5432/trustpay?sslmo
 
 backup_file=$(find "$backup_dir" -type f -name '*.sql.custom.gpg' -print)
 [ -f "$backup_file" ] || fail 'encrypted backup file was not created'
-[ "$(stat -f '%Lp' "$backup_file" 2>/dev/null || stat -c '%a' "$backup_file")" = 600 ] || fail 'backup file is not private'
+[ "$(stat -c '%a' "$backup_file" 2>/dev/null || stat -f '%Lp' "$backup_file")" = 600 ] || fail 'backup file is not private'
 [ ! -e "$backup_file.part" ] || fail 'partial backup file was left behind'
 
 grep -F -- '--dbname' "$capture_dir/pg_dump.args" >/dev/null 2>&1 && fail 'pg_dump received a database URL in argv'

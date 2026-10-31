@@ -87,14 +87,16 @@ INSERT INTO provider_events (
   provider,
   "eventType",
   "providerReference",
-  payload
+  payload,
+  "updatedAt"
 )
 VALUES (
   '00000000-0000-4000-8000-000000000906',
   'MONNIFY',
   'RESTORE_DRILL',
   'RESTORE-DRILL-PROVIDER-0906',
-  '{"synthetic":true}'::jsonb
+  '{"synthetic":true}'::jsonb,
+  CURRENT_TIMESTAMP
 )
 ON CONFLICT (id) DO NOTHING;
 
@@ -104,7 +106,8 @@ INSERT INTO payment_webhook_inbox (
   "eventType",
   "providerReference",
   payload,
-  "payloadHash"
+  "payloadHash",
+  "updatedAt"
 )
 VALUES (
   '00000000-0000-4000-8000-000000000907',
@@ -112,7 +115,8 @@ VALUES (
   'RESTORE_DRILL',
   'RESTORE-DRILL-WEBHOOK-0907',
   '{"synthetic":true}'::jsonb,
-  'restore-drill-payload-hash-0907'
+  'restore-drill-payload-hash-0907',
+  CURRENT_TIMESTAMP
 )
 ON CONFLICT (id) DO NOTHING;
 
@@ -125,7 +129,8 @@ INSERT INTO vtu_orders (
   "providerRequestId",
   status,
   amount,
-  currency
+  currency,
+  "updatedAt"
 )
 VALUES (
   '00000000-0000-4000-8000-000000000908',
@@ -136,7 +141,8 @@ VALUES (
   'RESTORE-DRILL-VTPASS-0908',
   'SUCCESS',
   1234.56,
-  'NGN'
+  'NGN',
+  CURRENT_TIMESTAMP
 )
 ON CONFLICT (id) DO NOTHING;
 
