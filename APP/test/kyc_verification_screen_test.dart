@@ -1130,6 +1130,10 @@ class _FakeKycService extends KycService {
   bool? submittedAccountSetupConsent;
 
   @override
+  Future<PaystackKycRecovery> reconcilePaystack() async =>
+      PaystackKycRecovery.fromJson(const {'state': 'AWAITING_PROVIDER'});
+
+  @override
   Future<KycOverview> fetchOverview(
       {bool includeIdentityProfile = false}) async {
     fetchCount++;

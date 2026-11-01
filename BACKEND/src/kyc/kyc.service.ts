@@ -33,6 +33,7 @@ import type {
 } from './providers/kyc-provider.gateway';
 import { KYCTier, KYCType, Prisma } from '@prisma/client';
 import { BankingService } from '../banking/banking.service';
+import { toPaystackRecoveryView } from './paystack-kyc-recovery.types';
 
 const DEFAULT_KYC_DOCUMENT_BUCKET = 'kyc-documents';
 const DEFAULT_ADMIN_DOCUMENT_URL_TTL_SECONDS = 300;
@@ -290,8 +291,12 @@ export class KycService {
           if (reusableAttempt?.document) {
             documentId = reusableAttempt.documentId;
             verificationId = reusableAttempt.id;
-            const retryChecks = {
+            const priorChecks = {
               ...this.asJsonRecord(reusableAttempt.checks),
+            };
+            delete priorChecks.paystackRecovery;
+            const retryChecks = {
+              ...priorChecks,
               customerCode: paystackBinding!.customerCode,
               validationFingerprint,
               accountSetupConsent: dto.accountSetupConsent === true,
@@ -494,11 +499,19 @@ export class KycService {
         select: { kycTier: true, kycStatus: true },
       });
       if (!currentUser) throw new NotFoundException('User not found');
+      let providerChecks = providerResult.checks;
       if (provider === 'PAYSTACK') {
         const current = await tx.kycVerification.findUnique({
           where: { id: verificationId },
           select: { status: true, reference: true, checks: true },
         });
+        const recovery = this.asJsonRecord(current?.checks).paystackRecovery;
+        if (recovery) {
+          providerChecks = {
+            ...providerResult.checks,
+            paystackRecovery: recovery,
+          };
+        }
         if (current && current.status !== 'PENDING') {
           const currentDocument = await tx.kycDocument.findUnique({
             where: { id: documentId },
@@ -531,7 +544,7 @@ export class KycService {
         data: {
           status: providerResult.status,
           reference: providerResult.reference,
-          checks: providerResult.checks,
+          checks: providerChecks,
           responseHash: providerResult.responseHash,
           errorMessage: providerResult.errorMessage,
         },
@@ -684,11 +697,26 @@ export class KycService {
       select: {
         userId: true,
         customerCode: true,
+        customerId: true,
         validationFingerprint: true,
         validationStatus: true,
       },
     });
-    if (!customer || !customer.validationFingerprint) {
+    const rawCustomerId = data.customer_id;
+    const providerCustomerId =
+      typeof rawCustomerId === 'string' && /^\d+$/.test(rawCustomerId)
+        ? rawCustomerId
+        : typeof rawCustomerId === 'number' &&
+            Number.isSafeInteger(rawCustomerId) &&
+            rawCustomerId > 0
+          ? String(rawCustomerId)
+          : undefined;
+    if (
+      !customer ||
+      !customer.validationFingerprint ||
+      !customer.customerId ||
+      providerCustomerId !== customer.customerId
+    ) {
       return { received: true, processed: false, ignored: true };
     }
 
@@ -1150,6 +1178,7 @@ export class KycService {
             provider: true,
             status: true,
             checks: true,
+            consentRecordedAt: true,
           },
         },
       },
@@ -1186,6 +1215,7 @@ export class KycService {
               status: true,
               reference: true,
               checks: true,
+              consentRecordedAt: true,
               errorMessage: true,
               updatedAt: true,
             },
@@ -1263,6 +1293,7 @@ export class KycService {
               provider: true,
               status: true,
               checks: true,
+              consentRecordedAt: true,
             },
           },
         },
@@ -1744,6 +1775,9 @@ export class KycService {
 
   private toSafeKycDocument<
     T extends {
+      id?: string;
+      type?: string;
+      createdAt?: Date;
       idNumber?: string | null;
       documentUrl?: string | null;
       kycTier?: KYCTier | null;
@@ -1752,6 +1786,7 @@ export class KycService {
         provider: string;
         status: string;
         checks?: Prisma.JsonValue | Prisma.InputJsonValue | null;
+        consentRecordedAt?: Date | null;
       }>;
     },
   >(document: T, options: { includeDocumentUrl?: boolean } = {}) {
@@ -1778,6 +1813,18 @@ export class KycService {
       provider: latestVerification?.provider,
       verificationStatus: latestVerification?.status,
       providerStatus: latestVerification?.status,
+      ...(document.type === 'BVN' &&
+      latestVerification?.provider === 'PAYSTACK' &&
+      latestVerification.status === 'PENDING' &&
+      document.id
+        ? {
+            recovery: toPaystackRecoveryView(
+              document.id,
+              latestVerification.consentRecordedAt ?? document.createdAt,
+              checks?.paystackRecovery,
+            ),
+          }
+        : {}),
       manualReviewRequired:
         latestVerification?.provider === 'MANUAL_REVIEW' ||
         checks?.manualReviewRequired === true ||

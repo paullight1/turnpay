@@ -5,6 +5,7 @@ import { ConfigService } from '@nestjs/config';
 import { PrismaClient } from '@prisma/client';
 import { PinoLogger } from 'nestjs-pino';
 import request from 'supertest';
+import { PaystackKycRecoveryService } from '../src/kyc/paystack-kyc-recovery.service';
 import { KycService } from '../src/kyc/kyc.service';
 import { AdminKycController, KycController } from '../src/kyc/kyc.controller';
 import { WebhookController } from '../src/payments/webhooks/payment-webhook.controller';
@@ -38,9 +39,14 @@ describe('KYC HTTP flow (isolated PostgreSQL)', () => {
     debug: jest.fn(),
     setContext: jest.fn(),
   };
+  const paystack = { request: jest.fn(), page: jest.fn() };
   const config = {
     get: (key: string, fallback?: unknown) =>
-      key === 'PII_ENCRYPTION_KEY' ? secret : fallback,
+      key === 'PII_ENCRYPTION_KEY'
+        ? secret
+        : key === 'PAYSTACK_DOMAIN'
+          ? 'test'
+          : fallback,
     getOrThrow: (key: string) => {
       if (key === 'PAYSTACK_SECRET_KEY') return secret;
       throw new Error('Unknown test configuration');
@@ -77,6 +83,7 @@ describe('KYC HTTP flow (isolated PostgreSQL)', () => {
     await prisma.$connect();
   });
   beforeEach(async () => {
+    jest.clearAllMocks();
     fixture = randomUUID();
     userId = randomUUID();
     adminId = randomUUID();
@@ -105,6 +112,7 @@ describe('KYC HTTP flow (isolated PostgreSQL)', () => {
       data: {
         userId,
         customerCode,
+        customerId: '1234',
         validationStatus: 'PENDING',
         validationFingerprint: fixture,
       },
@@ -148,6 +156,15 @@ describe('KYC HTTP flow (isolated PostgreSQL)', () => {
         JwtAuthGuard,
         RolesGuard,
         { provide: KycService, useValue: service },
+        {
+          provide: PaystackKycRecoveryService,
+          useValue: new PaystackKycRecoveryService(
+            prisma as never,
+            paystack as never,
+            config as never,
+            logger as never,
+          ),
+        },
         { provide: WebhookInboxService, useValue: inbox },
         { provide: PrismaService, useValue: prisma },
         { provide: SupabaseService, useValue: storage },
@@ -206,7 +223,7 @@ describe('KYC HTTP flow (isolated PostgreSQL)', () => {
   ) {
     const raw = JSON.stringify({
       event,
-      data: { customer_code: customerCode },
+      data: { customer_code: customerCode, customer_id: 1234 },
     });
     return request(app.getHttpServer())
       .post('/api/webhooks/paystack')
@@ -246,6 +263,130 @@ describe('KYC HTTP flow (isolated PostgreSQL)', () => {
         rejectionNote: 'Identity evidence checked against profile',
       });
   }
+
+  it('reconciles an accepted check without events and keeps BVN pending with a stable support reference', async () => {
+    paystack.request.mockResolvedValue({
+      id: 1234,
+      customer_code: customerCode,
+      domain: 'test',
+      identified: false,
+    });
+    paystack.page.mockResolvedValue({ data: [] });
+    const reconcile = (key = randomUUID()) =>
+      request(app.getHttpServer())
+        .post('/api/kyc/paystack/reconcile')
+        .set('Authorization', 'Bearer customer')
+        .set('Idempotency-Key', key)
+        .send({});
+    expect(
+      (
+        await request(app.getHttpServer())
+          .post('/api/kyc/paystack/reconcile')
+          .send({})
+      ).status,
+    ).toBe(401);
+    expect(
+      (
+        await request(app.getHttpServer())
+          .post('/api/kyc/paystack/reconcile')
+          .set('Authorization', 'Bearer customer')
+          .send({})
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await request(app.getHttpServer())
+          .post('/api/kyc/paystack/reconcile')
+          .set('Authorization', 'Bearer customer')
+          .set('Idempotency-Key', randomUUID())
+          .send({ customerCode: 'foreign' })
+      ).status,
+    ).toBe(400);
+    const key = randomUUID();
+    const first = await reconcile(key);
+    expect(first.status).toBe(201);
+    expect(first.body).toEqual(
+      expect.objectContaining({
+        state: 'AWAITING_PROVIDER',
+        supportReference: 'KYC-' + bvnId,
+        retryAllowed: false,
+      }),
+    );
+    expect((await reconcile(key)).body).toEqual(first.body);
+    await reconcile();
+    expect(paystack.page).toHaveBeenCalledTimes(1);
+    const overview = await request(app.getHttpServer())
+      .get('/api/kyc/status')
+      .set('Authorization', 'Bearer customer');
+    expect(overview.body.documents[0].recovery.supportReference).toBe(
+      first.body.supportReference,
+    );
+    expect(overview.body.documents[0].verificationStatus).toBe('PENDING');
+    expect(overview.body.kycTier).toBe('TIER_0');
+    expect(JSON.stringify(first.body)).not.toContain(customerCode);
+  });
+
+  it('reserves only one provider replay under concurrent HTTP requests and finalizes only through the signed inbox', async () => {
+    paystack.page.mockResolvedValue({
+      data: [
+        {
+          _id: 'event_123',
+          domain: 'test',
+          category: 'customers',
+          category_row_id: 1234,
+          event_name: 'customeridentification.success',
+        },
+      ],
+    });
+    paystack.request.mockImplementation(
+      async (method: string, path: string) => {
+        if (method === 'POST') return { count: 1, failed: 0, failed_ids: [] };
+        if (path.startsWith('/customer/'))
+          return {
+            id: 1234,
+            customer_code: customerCode,
+            domain: 'test',
+            identified: true,
+          };
+        return {
+          _id: 'event_123',
+          domain: 'test',
+          category: 'customers',
+          category_row_id: 1234,
+          event_name: 'customeridentification.success',
+          createdAt: new Date().toISOString(),
+          event_payload: {
+            event: 'customeridentification.success',
+            data: { customer_code: customerCode, customer_id: 1234 },
+          },
+        };
+      },
+    );
+    const results = await Promise.all(
+      Array.from({ length: 3 }, () =>
+        request(app.getHttpServer())
+          .post('/api/kyc/paystack/reconcile')
+          .set('Authorization', 'Bearer customer')
+          .set('Idempotency-Key', randomUUID())
+          .send({}),
+      ),
+    );
+    expect(results.every((result) => result.status === 201)).toBe(true);
+    expect(
+      paystack.request.mock.calls.filter(([method]) => method === 'POST'),
+    ).toHaveLength(1);
+    expect(
+      (await prisma.user.findUniqueOrThrow({ where: { id: userId } })).kycTier,
+    ).toBe('TIER_0');
+    expect((await deliver()).status).toBe(200);
+    await processor.processDueEvents();
+    const overview = await request(app.getHttpServer())
+      .get('/api/kyc/status')
+      .set('Authorization', 'Bearer customer');
+    expect(overview.body.documents[0].verificationStatus).toBe('VERIFIED');
+    expect(overview.body.documents[0]).not.toHaveProperty('recovery');
+    expect(overview.body.kycTier).toBe('TIER_1');
+  });
 
   it('rejects unsigned events, accepts a signed BVN result exactly once, and preserves terminal state', async () => {
     expect(
@@ -384,6 +525,46 @@ describe('KYC HTTP flow (isolated PostgreSQL)', () => {
     expect((await review(created.body.id, 'APPROVED')).status).toBe(400);
     expect(JSON.stringify(created.body)).not.toContain('11111111111');
     expect((await service.getUserKycStatus(userId)).kycTier).toBe('TIER_0');
+  });
+
+  it('lists NIN for staff review and preserves rejection history when corrected evidence is submitted', async () => {
+    const first = await submitNin();
+    expect(first.status).toBe(201);
+    const queue = await request(app.getHttpServer())
+      .get('/api/admin/kyc/pending')
+      .set('Authorization', 'Bearer reviewer');
+    expect(queue.status).toBe(200);
+    const item = queue.body.documents.find(
+      (document: { id: string }) => document.id === first.body.id,
+    );
+    expect(item).toEqual(
+      expect.objectContaining({
+        type: 'NIN',
+        manualReviewRequired: true,
+        reviewSource: 'DOCUMENT',
+        verificationStatus: 'REVIEW_REQUIRED',
+      }),
+    );
+    expect(item).not.toHaveProperty('documentUrl');
+    expect((await review(first.body.id, 'REJECTED')).status).toBe(200);
+    const corrected = await submitNin();
+    expect(corrected.status).toBe(201);
+    expect(corrected.body.id).not.toBe(first.body.id);
+    const overview = await request(app.getHttpServer())
+      .get('/api/kyc/status')
+      .set('Authorization', 'Bearer customer');
+    const nin = overview.body.documents.filter(
+      (document: { type: string }) => document.type === 'NIN',
+    );
+    expect(nin).toHaveLength(2);
+    expect(nin.map((document: { status: string }) => document.status)).toEqual([
+      'SUBMITTED',
+      'REJECTED',
+    ]);
+    expect(nin[1].rejectionNote).toBe(
+      'Identity evidence checked against profile',
+    );
+    expect(overview.body.kycTier).toBe('TIER_0');
   });
 
   it('serializes concurrent NIN submissions and keeps one pending review', async () => {

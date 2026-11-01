@@ -46,11 +46,25 @@ bool kycCanStartNin(KycOverview overview) {
       !kycCheckPending(nin);
 }
 
+PaystackKycRecovery? kycRecoveryFor(KycOverview overview, String type) {
+  final normalizedType = type.toUpperCase();
+  if (!kycCheckPending(kycCheckStatus(overview, normalizedType))) return null;
+  for (final document in overview.documents) {
+    if (document.type.toUpperCase() == normalizedType &&
+        document.recovery != null) {
+      return document.recovery;
+    }
+  }
+  return normalizedType == 'BVN' ? overview.recovery : null;
+}
+
 KycOverview _copy(KycOverview source,
         {required List<KycDocumentSummary> documents,
         String? providerStatus,
         String? provider,
-        String? reference}) =>
+        String? reference,
+        PaystackKycRecovery? recovery,
+        bool clearRecovery = false}) =>
     KycOverview(
       firstName: source.firstName,
       lastName: source.lastName,
@@ -66,6 +80,7 @@ KycOverview _copy(KycOverview source,
       verificationUri: source.verificationUri,
       updatedAt: source.updatedAt,
       documents: documents,
+      recovery: clearRecovery ? null : recovery ?? source.recovery,
     );
 
 /// An accepted retry may reuse the canonical reference of its failed attempt.
@@ -112,6 +127,9 @@ KycOverview kycOverviewAfterSubmission(
 KycOverview kycReconcileOverview(KycOverview previous, KycOverview incoming,
     {Set<String> locallyAccepted = const {}}) {
   final documents = [...incoming.documents];
+  final terminalBvn = {'VERIFIED', 'FAILED', 'REJECTED'}
+      .contains(kycCheckStatus(incoming, 'BVN'));
+  final recovery = terminalBvn ? null : incoming.recovery ?? previous.recovery;
   String? providerStatus, provider;
   for (final type in ['BVN', 'NIN']) {
     final next = kycCheckStatus(incoming, type),
@@ -140,5 +158,9 @@ KycOverview kycReconcileOverview(KycOverview previous, KycOverview incoming,
     }
   }
   return _copy(incoming,
-      documents: documents, providerStatus: providerStatus, provider: provider);
+      documents: documents,
+      providerStatus: providerStatus,
+      provider: provider,
+      recovery: recovery,
+      clearRecovery: terminalBvn);
 }

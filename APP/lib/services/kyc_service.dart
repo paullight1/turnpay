@@ -10,6 +10,7 @@ class KycService {
   KycService({ApiClient? apiClient}) : _apiClient = apiClient ?? ApiClient();
 
   final ApiClient _apiClient;
+  final _paystackReconcileAttempt = MoneyAttemptIdempotency();
 
   Future<List<KycBankOption>> fetchBanks() async {
     final response =
@@ -57,6 +58,35 @@ class KycService {
         'documents': documents.map((document) => document.toJson()).toList(),
       },
     );
+  }
+
+  /// Requests provider-side recovery for the existing Paystack BVN attempt.
+  ///
+  /// No identity fields are sent and this endpoint cannot submit a new check
+  /// or promote a tier. A new manual check gets a new idempotency key after a
+  /// response; a transport-uncertain request retains its key so a retry can
+  /// safely recover the same reconciliation operation.
+  Future<PaystackKycRecovery> reconcilePaystack() async {
+    final idempotencyKey =
+        _paystackReconcileAttempt.keyFor('paystack-bvn-reconcile');
+    try {
+      final response = await _apiClient.client.post<dynamic>(
+        '/api/kyc/paystack/reconcile',
+        data: const <String, dynamic>{},
+        options: Options(headers: {'Idempotency-Key': idempotencyKey}),
+      );
+      final recovery = PaystackKycRecovery.fromJson(_asMap(response.data));
+      // Every valid HTTP response is a completed reconciliation attempt. A
+      // new manual check must not replay a cached TEMPORARILY_UNAVAILABLE
+      // response; only transport uncertainty below retains the key.
+      _paystackReconcileAttempt.markFinalOutcome();
+      return recovery;
+    } on DioException catch (error) {
+      if (!_isUncertainReconciliationError(error)) {
+        _paystackReconcileAttempt.markFinalOutcome();
+      }
+      rethrow;
+    }
   }
 
   /// Customer setup reads the saved user profile, so commit reviewed details
@@ -239,6 +269,15 @@ class KycService {
     final statusCode = error.response?.statusCode;
     return statusCode == 404 || statusCode == 405 || statusCode == 501;
   }
+
+  bool _isUncertainReconciliationError(DioException error) {
+    final statusCode = error.response?.statusCode;
+    return statusCode == null ||
+        statusCode == 408 ||
+        statusCode == 425 ||
+        statusCode == 429 ||
+        statusCode >= 500;
+  }
 }
 
 class KycBankOption {
@@ -292,6 +331,7 @@ class KycOverview {
   final Uri? verificationUri;
   final DateTime? updatedAt;
   final List<KycDocumentSummary> documents;
+  final PaystackKycRecovery? recovery;
 
   const KycOverview({
     this.firstName,
@@ -307,6 +347,7 @@ class KycOverview {
     required this.verificationUri,
     required this.updatedAt,
     required this.documents,
+    this.recovery,
   });
 
   factory KycOverview.fromJson(Map<String, dynamic> json) {
@@ -325,6 +366,12 @@ class KycOverview {
     final documentsSource = json['documents'] is List
         ? _asList(json['documents'])
         : _asList(kyc['documents']);
+    final recovery = PaystackKycRecovery.fromNullable(
+      json['recovery'] ??
+          json['paystackRecovery'] ??
+          latest['recovery'] ??
+          kyc['recovery'],
+    );
 
     return KycOverview(
       firstName: nameParts.isNotEmpty ? nameParts.first : null,
@@ -384,6 +431,7 @@ class KycOverview {
       documents: documentsSource
           .map((item) => KycDocumentSummary.fromJson(_asMap(item)))
           .toList(growable: false),
+      recovery: recovery,
     );
   }
 
@@ -433,11 +481,13 @@ class KycDocumentSummary {
   final String type;
   final String status;
   final DateTime? updatedAt;
+  final PaystackKycRecovery? recovery;
 
   const KycDocumentSummary({
     required this.type,
     required this.status,
     required this.updatedAt,
+    this.recovery,
   });
 
   factory KycDocumentSummary.fromJson(Map<String, dynamic> json) {
@@ -449,6 +499,9 @@ class KycDocumentSummary {
             fallback: 'PENDING'),
       ),
       updatedAt: _asDate(json['updatedAt'] ?? json['createdAt']),
+      recovery: PaystackKycRecovery.fromNullable(
+        json['recovery'] ?? json['paystackRecovery'],
+      ),
     );
   }
 
@@ -457,7 +510,100 @@ class KycDocumentSummary {
       'type': type,
       'status': status,
       if (updatedAt != null) 'updatedAt': updatedAt!.toIso8601String(),
+      if (recovery != null) 'recovery': recovery!.toJson(),
     };
+  }
+}
+
+/// Safe provider-recovery metadata returned for an existing Paystack KYC
+/// attempt. It contains no identity, bank, customer, or provider-secret data.
+class PaystackKycRecovery {
+  static const checking = 'CHECKING';
+  static const awaitingProvider = 'AWAITING_PROVIDER';
+  static const actionRequired = 'ACTION_REQUIRED';
+  static const webhookRequested = 'WEBHOOK_REQUESTED';
+  static const temporarilyUnavailable = 'TEMPORARILY_UNAVAILABLE';
+  static const noPending = 'NO_PENDING';
+
+  const PaystackKycRecovery({
+    required this.state,
+    required this.message,
+    required this.supportReference,
+    required this.pendingSince,
+    required this.checkedAt,
+    required this.retryAllowed,
+  });
+
+  final String state;
+  final String message;
+  final String supportReference;
+  final DateTime? pendingSince;
+  final DateTime? checkedAt;
+  final bool retryAllowed;
+
+  factory PaystackKycRecovery.fromJson(Map<String, dynamic> json) {
+    final rawState = _asString(json['state']).toUpperCase();
+    final state =
+        _validStates.contains(rawState) ? rawState : temporarilyUnavailable;
+    return PaystackKycRecovery(
+      state: state,
+      message: _asString(json['message'], fallback: _defaultMessage(state)),
+      supportReference: _asString(json['supportReference']),
+      pendingSince: _asDate(json['pendingSince']),
+      checkedAt: _asDate(json['checkedAt']),
+      retryAllowed: json['retryAllowed'] == true,
+    );
+  }
+
+  static PaystackKycRecovery? fromNullable(dynamic value) {
+    final map = _asMap(value);
+    return map.isEmpty ? null : PaystackKycRecovery.fromJson(map);
+  }
+
+  /// The backend changes to ACTION_REQUIRED after the delayed-review SLA;
+  /// keeping the age check client-side also makes older cached reads useful.
+  bool get isDelayed {
+    if (state == actionRequired || state == webhookRequested) return true;
+    final started = pendingSince;
+    if (started == null) return false;
+    return DateTime.now().toUtc().difference(started.toUtc()) >=
+        const Duration(hours: 24);
+  }
+
+  Map<String, dynamic> toJson() => {
+        'state': state,
+        'message': message,
+        if (supportReference.isNotEmpty) 'supportReference': supportReference,
+        if (pendingSince != null)
+          'pendingSince': pendingSince!.toIso8601String(),
+        if (checkedAt != null) 'checkedAt': checkedAt!.toIso8601String(),
+        'retryAllowed': retryAllowed,
+      };
+
+  static const _validStates = {
+    checking,
+    awaitingProvider,
+    actionRequired,
+    webhookRequested,
+    temporarilyUnavailable,
+    noPending,
+  };
+
+  static String _defaultMessage(String state) {
+    switch (state) {
+      case checking:
+        return 'Checking the provider status of your existing BVN request.';
+      case awaitingProvider:
+        return 'Your BVN is still being processed by the provider.';
+      case actionRequired:
+        return 'Your BVN check needs attention from support.';
+      case webhookRequested:
+        return 'We requested the provider update. Check again shortly.';
+      case noPending:
+        return 'No pending provider check was found.';
+      default:
+        return 'The provider status could not be checked right now.';
+    }
   }
 }
 

@@ -21,6 +21,12 @@ const ALLOWED_KYC_CONTENT_TYPES = [
   'application/pdf',
 ] as const;
 
+export class ReconcilePaystackKycDto {
+  @IsOptional()
+  @IsIn(['status'])
+  action?: 'status';
+}
+
 export class CreateKycUploadDto {
   @IsString()
   @MinLength(1)
