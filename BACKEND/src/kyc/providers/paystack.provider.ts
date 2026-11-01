@@ -75,30 +75,52 @@ export class PaystackProvider implements KycProviderGateway {
     // Persist the correlation key and consent before the provider call. A
     // very fast webhook can arrive before Paystack returns its 202 response;
     // the worker must still be able to find this exact pending attempt.
-    const correlationUpdate = await this.prisma.kycVerification.updateMany({
-      where: { documentId: request.documentId, status: 'PENDING' },
-      data: {
-        checks: {
-          customerCode: customer.customerCode,
-          validationFingerprint,
-          accountSetupConsent,
-        },
-      },
-    });
-    if (correlationUpdate.count !== 1) {
-      throw new ConflictException(
-        'Paystack verification reservation is no longer pending',
+    await this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw(
+        Prisma.sql`SELECT "id" FROM "users" WHERE "id" = ${request.userId} FOR UPDATE`,
       );
-    }
-    await this.prisma.paystackCustomer.update({
-      where: { userId: request.userId },
-      data: {
-        validationFingerprint,
-        ...(existingCustomer?.validationStatus === 'VERIFIED'
-          ? {}
-          : { validationStatus: 'PENDING' }),
-        ...(accountSetupConsent ? { accountSetupConsentAt: new Date() } : {}),
-      },
+      const pending = await tx.kycVerification.findFirst({
+        where: {
+          userId: request.userId,
+          documentId: request.documentId,
+          status: 'PENDING',
+          provider: 'PAYSTACK',
+        },
+        select: { checks: true },
+      });
+      if (!pending)
+        throw new ConflictException(
+          'Paystack verification reservation is no longer pending',
+        );
+      const priorChecks =
+        pending.checks &&
+        typeof pending.checks === 'object' &&
+        !Array.isArray(pending.checks)
+          ? pending.checks
+          : {};
+      const correlationUpdate = await tx.kycVerification.updateMany({
+        where: { documentId: request.documentId, status: 'PENDING' },
+        data: {
+          checks: {
+            ...priorChecks,
+            customerCode: customer.customerCode,
+            validationFingerprint,
+            accountSetupConsent,
+          },
+        },
+      });
+      if (correlationUpdate.count !== 1)
+        throw new ConflictException(
+          'Paystack verification reservation is no longer pending',
+        );
+      await tx.paystackCustomer.update({
+        where: { userId: request.userId },
+        data: {
+          validationFingerprint,
+          validationStatus: 'PENDING',
+          ...(accountSetupConsent ? { accountSetupConsentAt: new Date() } : {}),
+        },
+      });
     });
 
     let providerStatus = 'accepted';

@@ -1,7 +1,10 @@
 import { validate } from 'class-validator';
 import { plainToInstance } from 'class-transformer';
 import { KycController } from './kyc.controller';
-import { CreateIdentityVerificationDto } from './dto/kyc.dto';
+import {
+  CreateIdentityVerificationDto,
+  ReconcilePaystackKycDto,
+} from './dto/kyc.dto';
 
 describe('KYC controllers', () => {
   const kycService = {
@@ -9,12 +12,14 @@ describe('KYC controllers', () => {
     createManualKycDocument: jest.fn(),
   };
 
+  const recovery = { reconcile: jest.fn() };
+
   beforeEach(() => {
     jest.clearAllMocks();
   });
 
   it('passes authenticated direct-verification requests to the KYC service', async () => {
-    const controller = new KycController(kycService as any);
+    const controller = new KycController(kycService as any, recovery as any);
     const dto: CreateIdentityVerificationDto = {
       country: 'NG',
       type: 'BVN',
@@ -33,7 +38,7 @@ describe('KYC controllers', () => {
   });
 
   it('passes owned manual NIN submissions to the KYC service', async () => {
-    const controller = new KycController(kycService as any);
+    const controller = new KycController(kycService as any, recovery as any);
     const dto = {
       type: 'NIN' as const,
       idNumber: '12345678901',
@@ -47,6 +52,28 @@ describe('KYC controllers', () => {
       'user-1',
       dto,
     );
+  });
+
+  it('reconciles only the authenticated customer and rejects caller-supplied identity fields', async () => {
+    const controller = new KycController(kycService as any, recovery as any);
+    recovery.reconcile.mockResolvedValue({ state: 'AWAITING_PROVIDER' });
+    await expect(
+      controller.reconcilePaystack({ userId: 'user-1' }, {}),
+    ).resolves.toEqual({ state: 'AWAITING_PROVIDER' });
+    expect(recovery.reconcile).toHaveBeenCalledWith('user-1');
+    const errors = await validate(
+      plainToInstance(ReconcilePaystackKycDto, {
+        customerCode: 'foreign-customer',
+        userId: 'other-user',
+        action: 'approve',
+      }),
+      { whitelist: true, forbidNonWhitelisted: true },
+    );
+    expect(errors.map((error) => error.property).sort()).toEqual([
+      'action',
+      'customerCode',
+      'userId',
+    ]);
   });
 
   it('rejects direct verification without explicit consent', async () => {

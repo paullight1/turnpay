@@ -10,6 +10,7 @@ import {
 } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { KycService } from './kyc.service';
+import { PaystackKycRecoveryService } from './paystack-kyc-recovery.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -21,12 +22,27 @@ import {
   ResolveDisputeDto,
   CreateIdentityVerificationDto,
   CreateManualKycDocumentDto,
+  ReconcilePaystackKycDto,
 } from './dto/kyc.dto';
 
 @Controller('kyc')
 @UseGuards(JwtAuthGuard)
 export class KycController {
-  constructor(private readonly kycService: KycService) {}
+  constructor(
+    private readonly kycService: KycService,
+    private readonly paystackRecovery: PaystackKycRecoveryService,
+  ) {}
+
+  @Post('paystack/reconcile')
+  @Throttle({ default: { limit: 5, ttl: 600000 } })
+  async reconcilePaystack(
+    @CurrentUser() user: { userId: string },
+    @Body() dto: ReconcilePaystackKycDto,
+  ) {
+    // The DTO intentionally accepts no identity or provider identifiers.
+    void dto;
+    return this.paystackRecovery.reconcile(user.userId);
+  }
 
   @Post('document-upload-url')
   @Throttle({ default: { limit: 5, ttl: 600000 } })

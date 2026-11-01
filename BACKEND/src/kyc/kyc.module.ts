@@ -5,6 +5,7 @@ import { BankingModule } from '../banking/banking.module';
 import { PaystackModule } from '../paystack/paystack.module';
 import { AdminKycController, KycController } from './kyc.controller';
 import { KycService } from './kyc.service';
+import { PaystackKycRecoveryService } from './paystack-kyc-recovery.service';
 import { KYC_PROVIDER_GATEWAY } from './providers/kyc-provider.gateway';
 import { MonnifyProvider } from './providers/monnify.provider';
 import { PaystackProvider } from './providers/paystack.provider';
@@ -22,6 +23,7 @@ import { selectKycProvider } from './providers/kyc-provider.selector';
   controllers: [KycController, AdminKycController],
   providers: [
     KycService,
+    PaystackKycRecoveryService,
     MonnifyProvider,
     PaystackProvider,
     {

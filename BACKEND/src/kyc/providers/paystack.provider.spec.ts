@@ -10,11 +10,19 @@ describe('PaystackProvider', () => {
   const client = { ensureCustomer: jest.fn(), request: jest.fn() };
   const prisma = {
     paystackCustomer: { findUnique: jest.fn(), update: jest.fn() },
-    kycVerification: { updateMany: jest.fn() },
+    kycVerification: { findFirst: jest.fn(), updateMany: jest.fn() },
+    $queryRaw: jest.fn(),
+    $transaction: jest.fn(),
   };
 
   beforeEach(() => {
     jest.clearAllMocks();
+    prisma.$transaction.mockImplementation(async (callback) =>
+      callback(prisma),
+    );
+    prisma.kycVerification.findFirst.mockResolvedValue({
+      checks: { paystackRecovery: { leaseId: 'early-recovery-lease' } },
+    });
     client.ensureCustomer.mockResolvedValue({
       customerCode: 'CUS_fixture123',
       customerId: '123',
@@ -72,6 +80,7 @@ describe('PaystackProvider', () => {
       data: {
         checks: expect.objectContaining({
           customerCode: 'CUS_fixture123',
+          paystackRecovery: { leaseId: 'early-recovery-lease' },
           validationFingerprint: expect.any(String),
           accountSetupConsent: true,
         }),

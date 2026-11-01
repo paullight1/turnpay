@@ -63,6 +63,7 @@ class KycStatusOverview extends StatelessWidget {
                           _CheckCard(
                               type: type,
                               status: type == 'BVN' ? bvn : nin,
+                              recovery: kycRecoveryFor(overview, type),
                               onTap: () => onDetails(type),
                               onStart: busy
                                   ? null
@@ -104,9 +105,11 @@ class _CheckCard extends StatelessWidget {
   const _CheckCard(
       {required this.type,
       required this.status,
+      this.recovery,
       required this.onTap,
       this.onStart});
   final String type, status;
+  final PaystackKycRecovery? recovery;
   final VoidCallback onTap;
   final VoidCallback? onStart;
   @override
@@ -158,6 +161,15 @@ class _CheckCard extends StatelessWidget {
                         ]),
                     const SizedBox(height: 20),
                     _StatusPill(status: status),
+                    if (recovery?.isDelayed == true) ...[
+                      const SizedBox(height: 12),
+                      Text(
+                        recovery!.message,
+                        style: AppTextStyles.bodyS,
+                        maxLines: 3,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
                     if (onStart != null) ...[
                       const SizedBox(height: 16),
                       SizedBox(
@@ -282,19 +294,29 @@ class KycCheckDetailsSheet extends StatefulWidget {
       required this.overview,
       required this.type,
       required this.onCheckStatus,
-      required this.onContinue});
+      required this.onContinue,
+      this.onReconcile});
   final KycOverview overview;
   final String type;
   final Future<KycOverview> Function() onCheckStatus;
   final void Function(KycOverview) onContinue;
+  final Future<PaystackKycRecovery> Function()? onReconcile;
   @override
   State<KycCheckDetailsSheet> createState() => _KycCheckDetailsSheetState();
 }
 
 class _KycCheckDetailsSheetState extends State<KycCheckDetailsSheet> {
   late KycOverview _overview = widget.overview;
+  PaystackKycRecovery? _recovery;
   bool _checking = false;
   String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _recovery = kycRecoveryFor(widget.overview, widget.type);
+  }
+
   Future<void> _check() async {
     if (_checking) return;
     setState(() {
@@ -302,8 +324,20 @@ class _KycCheckDetailsSheetState extends State<KycCheckDetailsSheet> {
       _error = null;
     });
     try {
+      final currentStatus = kycCheckStatus(_overview, widget.type);
+      if (widget.type.toUpperCase() == 'BVN' &&
+          kycCheckPending(currentStatus) &&
+          widget.onReconcile != null) {
+        final recovery = await widget.onReconcile!();
+        if (mounted) setState(() => _recovery = recovery);
+      }
       final updated = await widget.onCheckStatus();
-      if (mounted) setState(() => _overview = updated);
+      if (mounted) {
+        setState(() {
+          _overview = updated;
+          _recovery = kycRecoveryFor(updated, widget.type) ?? _recovery;
+        });
+      }
     } catch (_) {
       if (mounted) {
         setState(() => _error =
@@ -319,6 +353,7 @@ class _KycCheckDetailsSheetState extends State<KycCheckDetailsSheet> {
     AppColors.watch(context);
     final status = kycCheckStatus(_overview, widget.type);
     final pending = kycCheckPending(status), verified = status == 'VERIFIED';
+    final recovery = _recovery ?? kycRecoveryFor(_overview, widget.type);
     final canStart = widget.type == 'NIN'
         ? kycCanStartNin(_overview)
         : !kycPaystackReady(_overview) && !pending;
@@ -359,6 +394,10 @@ class _KycCheckDetailsSheetState extends State<KycCheckDetailsSheet> {
             Text(
                 'Last updated ${DateFormat('d MMM yyyy, HH:mm').format(dates.first.updatedAt!.toLocal())}',
                 style: AppTextStyles.bodyS)
+          ],
+          if (pending && recovery != null) ...[
+            const SizedBox(height: 16),
+            _RecoveryGuidance(recovery: recovery),
           ],
           if (_error != null) ...[
             const SizedBox(height: 20),
@@ -413,6 +452,19 @@ class KycHistorySheet extends StatelessWidget {
                             style: AppTextStyles.labelM),
                         const SizedBox(height: 8),
                         _StatusPill(status: document.status),
+                        if (document.recovery != null) ...[
+                          const SizedBox(height: 8),
+                          Text(document.recovery!.message,
+                              style: AppTextStyles.bodyS),
+                          if (document.recovery!.supportReference.isNotEmpty)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 4),
+                              child: Text(
+                                'Support reference: ${document.recovery!.supportReference}',
+                                style: AppTextStyles.caption,
+                              ),
+                            ),
+                        ],
                         if (document.updatedAt != null) ...[
                           const SizedBox(height: 8),
                           Text(
@@ -422,6 +474,44 @@ class KycHistorySheet extends StatelessWidget {
                         ],
                       ])),
           ]);
+}
+
+class _RecoveryGuidance extends StatelessWidget {
+  const _RecoveryGuidance({required this.recovery});
+  final PaystackKycRecovery recovery;
+
+  @override
+  Widget build(BuildContext context) {
+    final delayed = recovery.isDelayed;
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceVariant,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            delayed
+                ? 'This check is taking longer than expected'
+                : 'Recovery update',
+            style: AppTextStyles.labelM,
+          ),
+          const SizedBox(height: 6),
+          Text(recovery.message, style: AppTextStyles.bodyS),
+          if (recovery.supportReference.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            SelectableText(
+              'Support reference: ${recovery.supportReference}',
+              style: AppTextStyles.caption,
+            ),
+          ],
+        ],
+      ),
+    );
+  }
 }
 
 class _SheetFrame extends StatelessWidget {

@@ -483,6 +483,12 @@ class _KycVerificationScreenState extends State<KycVerificationScreen> {
             overview: overview,
             type: type,
             onCheckStatus: () => _checkStatus(overview),
+            onReconcile: type == 'BVN' &&
+                    (overview.providerValidationStatus != null ||
+                        overview.provider.toUpperCase() == 'PAYSTACK') &&
+                    kycCheckPending(kycCheckStatus(overview, type))
+                ? _service.reconcilePaystack
+                : null,
             onContinue: (latest) {
               Navigator.of(sheetContext).pop();
               if (type == 'NIN') {
