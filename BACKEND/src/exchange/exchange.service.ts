@@ -1,3 +1,4 @@
+import { TierOneLimitsService } from '../common/services/tier-one-limits.service';
 import { allocateDepositReference } from '../common/services/deposit-allocation';
 import {
   BadRequestException,
@@ -255,6 +256,7 @@ export class ExchangeService {
     }
 
     this.assertExchangeKycEligible(user, 'execute an exchange');
+    this.assertWalletExchangeCurrency(user, quote.to);
 
     const amount = new Decimal(quote.amount);
     const fee = new Decimal(quote.fee);
@@ -476,6 +478,7 @@ export class ExchangeService {
     }
 
     this.assertExchangeKycEligible(user, 'submit an exchange receipt');
+    this.assertWalletExchangeCurrency(user, 'GHS');
 
     if (user.wallets.length === 0) {
       throw new NotFoundException('GHS wallet not found');
@@ -493,6 +496,14 @@ export class ExchangeService {
     const result = await this.prisma
       .$transaction(
         async (tx) => {
+          await new TierOneLimitsService(
+            this.configService,
+          ).checkExternalExchange(tx, {
+            userId,
+            currency: 'NGN',
+            amount,
+            source: 'EXCHANGE_RECEIPT',
+          });
           const transaction = await tx.transaction.create({
             data: {
               userId,
@@ -1083,6 +1094,7 @@ export class ExchangeService {
     }
 
     this.assertExchangeKycEligible(receipt.user, 'review an exchange receipt');
+    this.assertWalletExchangeCurrency(receipt.user, 'GHS');
 
     if (dto.status === 'APPROVED') {
       return this.approveManualReceipt(receiptId, adminId, dto.reason, now);
@@ -1141,6 +1153,7 @@ export class ExchangeService {
         }
 
         this.assertExchangeKycEligible(receipt.user, 'credit an exchange');
+        this.assertWalletExchangeCurrency(receipt.user, 'GHS');
         this.assertProviderVerificationAllowsCredit(receipt);
 
         const verification = this.asRecord(receipt.metadata);
@@ -2324,6 +2337,19 @@ export class ExchangeService {
     }
   }
 
+  private assertWalletExchangeCurrency(
+    user: { kycTier?: KYCTier | null },
+    target: string,
+  ) {
+    if (user.kycTier === 'TIER_1' && target !== 'NGN') {
+      throw new ServiceUnavailableException({
+        code: 'TIER_ONE_CURRENCY_UNAVAILABLE',
+        message:
+          'Tier 1 wallet exchange is unavailable for this currency. Use a supported NGN bank or MoMo exchange order.',
+      });
+    }
+  }
+
   private assertExchangeKycEligible(
     user: { kycStatus: string; kycTier?: KYCTier | null },
     action: string,
@@ -2332,9 +2358,9 @@ export class ExchangeService {
       throw new BadRequestException(`Verified KYC is required to ${action}`);
     }
 
-    if (!isKycTierAtLeast(user.kycTier, 'TIER_2')) {
+    if (!isKycTierAtLeast(user.kycTier, 'TIER_1')) {
       throw new BadRequestException(
-        `KYC ${formatKycTier('TIER_2')} is required to ${action}`,
+        `KYC ${formatKycTier('TIER_1')} is required to ${action}`,
       );
     }
   }

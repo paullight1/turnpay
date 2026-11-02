@@ -1,12 +1,15 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   BadgeCheck,
   Clock3,
-  MapPin,
+  ArrowRight,
+  Landmark,
+  LockKeyhole,
+  RefreshCw,
   ShieldCheck,
   TriangleAlert,
 } from "lucide-react";
@@ -14,21 +17,16 @@ import { toast } from "sonner";
 import DashboardLayout from "@/components/layout/dashboard-layout";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { getErrorMessage } from "@/lib/errors";
 import { createMoneyAttemptIdempotencyKey } from "@/lib/idempotency";
 import { maskKycId } from "@/lib/privacy";
-import { kycApi } from "@/services/api";
-import type { KycDocument, KycStatusOverview } from "@/types";
+import { kycTierRank } from "@/lib/account-status";
+import { kycApi, paymentApi } from "@/services/api";
+import { useAuth } from "@/lib/auth-provider";
+import type { KycDocument } from "@/types";
 
 const statusVariants: Record<
   string,
@@ -50,13 +48,7 @@ function humanize(value?: string | number | null) {
 }
 
 function formatTier(value?: string | number | null) {
-  const tier = String(value ?? "0").replace(/^TIER[_\s-]?/i, "");
-  return `Tier ${tier}`;
-}
-
-function tierRank(value?: string | number | null) {
-  const parsed = Number(String(value ?? "0").replace(/\D/g, ""));
-  return Number.isFinite(parsed) ? parsed : 0;
+  return `Tier ${kycTierRank(value)}`;
 }
 
 function verifiedTypes(documents: KycDocument[]) {
@@ -67,156 +59,16 @@ function verifiedTypes(documents: KycDocument[]) {
   );
 }
 
-function nextStep(
-  documents: KycDocument[],
-  tier?: string | number,
-  providerValidationStatus?: string,
-) {
-  const paystackStatus = providerValidationStatus?.toUpperCase();
-  if (paystackStatus === "PENDING") {
-    return "Paystack is reviewing your BVN and linked bank account.";
-  }
-  if (paystackStatus !== "VERIFIED") {
-    return "Complete Paystack BVN and linked bank validation before using a new NGN account.";
-  }
-  if (tierRank(tier) >= 2) {
-    return "Your identity checks are complete for transfers and withdrawals.";
-  }
-  const verified = verifiedTypes(documents);
-  if (verified.has("BVN")) return "Submit your NIN evidence for manual review to reach Tier 2.";
-  if (verified.has("NIN")) return "Complete your Paystack BVN and linked bank check to reach Tier 2.";
-  return "Start with your BVN and the Nigerian bank account linked to it.";
-}
-
-function VerificationState({ overview }: { overview: KycStatusOverview }) {
-  const status = overview.latestVerification?.status;
-  const hasPaystackBvn = overview.documents.some(
-    (document) =>
-      document.type.toUpperCase() === "BVN" &&
-      document.status === "VERIFIED" &&
-      document.provider?.toUpperCase() === "PAYSTACK",
-  );
-  const paystackStatus =
-    overview.providerValidationStatus?.toUpperCase() ??
-    (hasPaystackBvn ? "VERIFIED" : undefined);
-
-  if (paystackStatus === "PENDING") {
-    return (
-      <div className="flex gap-3 rounded-xl border border-amber-500/30 bg-amber-500/8 p-4">
-        <Clock3
-          aria-hidden="true"
-          className="mt-0.5 size-5 shrink-0 text-amber-600 dark:text-amber-400"
-        />
-        <div>
-          <p className="font-medium">Paystack BVN validation is in progress.</p>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Your existing KYC tier remains unchanged. We will enable new NGN
-            funding features after Paystack confirms the linked bank account.
-          </p>
-        </div>
-      </div>
-    );
-  }
-
-  if (tierRank(overview.kycTier) >= 2 && paystackStatus === "VERIFIED") {
-    return (
-      <div className="flex gap-3 rounded-xl border border-emerald-500/25 bg-emerald-500/8 p-4">
-        <BadgeCheck
-          aria-hidden="true"
-          className="mt-0.5 size-5 shrink-0 text-emerald-600 dark:text-emerald-400"
-        />
-        <div>
-          <p className="font-medium">Identity verification complete</p>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Paystack identity validation is complete and your existing KYC
-            access is preserved. You do not need to submit anything else here.
-          </p>
-        </div>
-      </div>
-    );
-  }
-
-  if (tierRank(overview.kycTier) >= 2 && paystackStatus !== "VERIFIED") {
-    return (
-      <div className="flex gap-3 rounded-xl border border-sky-500/25 bg-sky-500/8 p-4">
-        <ShieldCheck
-          aria-hidden="true"
-          className="mt-0.5 size-5 shrink-0 text-sky-600 dark:text-sky-400"
-        />
-        <div>
-          <p className="font-medium">Existing KYC access is preserved.</p>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Complete the Paystack validation below before requesting a new NGN
-            receiving account. Your current tier is not being downgraded.
-          </p>
-        </div>
-      </div>
-    );
-  }
-
-  if (status === "REVIEW_REQUIRED") {
-    return (
-      <div className="flex gap-3 rounded-xl border border-amber-500/30 bg-amber-500/8 p-4">
-        <Clock3
-          aria-hidden="true"
-          className="mt-0.5 size-5 shrink-0 text-amber-600 dark:text-amber-400"
-        />
-        <div>
-          <p className="font-medium">
-            Your identity check needs a manual review.
-          </p>
-          <p className="mt-1 text-sm text-muted-foreground">
-            You can retry if any detail was entered incorrectly. Otherwise, we
-            will update this page after review.
-          </p>
-        </div>
-      </div>
-    );
-  }
-
-  if (status === "REJECTED") {
-    return (
-      <div className="flex gap-3 rounded-xl border border-destructive/30 bg-destructive/5 p-4">
-        <TriangleAlert
-          aria-hidden="true"
-          className="mt-0.5 size-5 shrink-0 text-destructive"
-        />
-        <div>
-          <p className="font-medium">
-            We could not match those identity details.
-          </p>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Check the number, name on your TRUSTPAY profile, and date of birth,
-            then try again.
-          </p>
-        </div>
-      </div>
-    );
-  }
-
-  if (status === "FAILED") {
-    return (
-      <div className="flex gap-3 rounded-xl border border-destructive/30 bg-destructive/5 p-4">
-        <TriangleAlert
-          aria-hidden="true"
-          className="mt-0.5 size-5 shrink-0 text-destructive"
-        />
-        <div>
-          <p className="font-medium">
-            The identity service could not complete your check.
-          </p>
-          <p className="mt-1 text-sm text-muted-foreground">
-            No verification was completed. Please wait a moment and try again.
-          </p>
-        </div>
-      </div>
-    );
-  }
-
-  return null;
-}
-
 export default function KycPage() {
+  const { refreshProfile, user, profile } = useAuth();
+  const queryClient = useQueryClient();
+  const [bvnOpen, setBvnOpen] = useState(false);
+  const [ninOpen, setNinOpen] = useState(false);
+  const [ninNumber, setNinNumber] = useState("");
+  const [ninDob, setNinDob] = useState("");
+  const [ninConsent, setNinConsent] = useState(false);
+  const ninAttempt = useRef<{ fingerprint: string; key: string } | null>(null);
+  const [isNinSubmitting, setIsNinSubmitting] = useState(false);
   const [idNumber, setIdNumber] = useState("");
   const [dateOfBirth, setDateOfBirth] = useState("");
   const [bankCode, setBankCode] = useState("");
@@ -239,12 +91,32 @@ export default function KycPage() {
     isError,
     refetch,
   } = useQuery({
-    queryKey: ["kyc-status"],
+    queryKey: ["kyc-status", user?.id],
+    enabled: !!user,
     queryFn: async () => (await kycApi.getStatus()).data,
+    refetchInterval: (query) =>
+      query.state.data?.providerValidationStatus === "PENDING" ? 15_000 : false,
   });
+  const { data: banks = [] } = useQuery({
+    queryKey: ["banks"],
+    queryFn: async () =>
+      (await paymentApi.listBanks()).data as Array<{
+        name: string;
+        code: string;
+      }>,
+    staleTime: 3_600_000,
+  });
+  const syncedTier = useRef<string | number | null>(null);
+  useEffect(() => {
+    if (overview && overview.kycTier !== syncedTier.current) {
+      syncedTier.current = overview.kycTier;
+      void refreshProfile().catch(() => undefined);
+      void queryClient.invalidateQueries({ queryKey: ["wallets"] });
+    }
+  }, [overview, refreshProfile, queryClient]);
 
   const documents = overview?.documents ?? [];
-  const isTierTwo = tierRank(overview?.kycTier) >= 2;
+  const isTierTwo = kycTierRank(overview?.kycTier) >= 2;
   const hasNin = verifiedTypes(documents).has("NIN");
   const paystackDocumentBvn = documents.some(
     (document) =>
@@ -257,11 +129,35 @@ export default function KycPage() {
     (paystackDocumentBvn ? "VERIFIED" : "UNVERIFIED");
   const paystackValidated = paystackValidationStatus === "VERIFIED";
   const paystackValidationPending = paystackValidationStatus === "PENDING";
+  const ninDocument = documents.find((document) => document.type === "NIN");
+  const ninPending = ["PENDING", "SUBMITTED", "REVIEW_REQUIRED"].includes(
+    ninDocument?.status ?? "",
+  );
+  const restricted =
+    overview?.isSuspended === true || profile?.isSuspended === true;
+  const active =
+    !restricted &&
+    kycTierRank(overview?.kycTier) >= 1 &&
+    overview?.kycStatus === "VERIFIED";
+  const title = restricted
+    ? "Your account is under review"
+    : isTierTwo && paystackValidated
+      ? "You’re fully verified"
+      : active
+        ? "Your account is active"
+        : paystackValidationPending
+          ? "We’re checking your BVN"
+          : "Activate your account";
   const today = new Date().toISOString().slice(0, 10);
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (inFlightRef.current || paystackValidated || paystackValidationPending) {
+    if (
+      restricted ||
+      inFlightRef.current ||
+      paystackValidated ||
+      paystackValidationPending
+    ) {
       return;
     }
     if (!/^\d{11}$/.test(idNumber)) {
@@ -339,12 +235,16 @@ export default function KycPage() {
   };
 
   const handleManualNinSubmit = async () => {
-    if (!manualFile || isManualSubmitting) return;
+    if (restricted || !manualFile || isManualSubmitting) return;
     if (!manualNinConsent) {
       toast.error("Confirm consent before submitting NIN evidence");
       return;
     }
-    if (!['image/jpeg', 'image/png', 'image/webp', 'application/pdf'].includes(manualFile.type)) {
+    if (
+      !["image/jpeg", "image/png", "image/webp", "application/pdf"].includes(
+        manualFile.type,
+      )
+    ) {
       toast.error("Choose a JPG, PNG, WEBP, or PDF document");
       return;
     }
@@ -368,13 +268,19 @@ export default function KycPage() {
       ].join("|");
       if (manualNinAttemptFingerprintRef.current !== manualFingerprint) {
         manualNinAttemptFingerprintRef.current = manualFingerprint;
-        manualNinAttemptKeyRef.current = createMoneyAttemptIdempotencyKey("mutation");
+        manualNinAttemptKeyRef.current =
+          createMoneyAttemptIdempotencyKey("mutation");
       }
-      const upload = (await kycApi.createDocumentUploadUrl({
-        fileName: manualFile.name,
-        contentType: manualFile.type || "application/octet-stream",
-        fileSize: manualFile.size,
-      }, manualNinAttemptKeyRef.current!)).data as { signedUrl: string; objectKey: string };
+      const upload = (
+        await kycApi.createDocumentUploadUrl(
+          {
+            fileName: manualFile.name,
+            contentType: manualFile.type || "application/octet-stream",
+            fileSize: manualFile.size,
+          },
+          manualNinAttemptKeyRef.current!,
+        )
+      ).data as { signedUrl: string; objectKey: string };
       const signedUrl = new URL(upload.signedUrl);
       if (signedUrl.protocol !== "https:" || !signedUrl.host) {
         throw new Error("The document upload URL is not secure");
@@ -386,7 +292,12 @@ export default function KycPage() {
       });
       if (!uploadResponse.ok) throw new Error("Document upload failed");
       await kycApi.submitManualDocument(
-        { type: "NIN", idNumber, objectKey: upload.objectKey, consentAccepted: true },
+        {
+          type: "NIN",
+          idNumber,
+          objectKey: upload.objectKey,
+          consentAccepted: true,
+        },
         manualNinAttemptKeyRef.current!,
       );
       manualNinAttemptKeyRef.current = null;
@@ -403,232 +314,615 @@ export default function KycPage() {
     }
   };
 
+  const handleNinSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (
+      restricted ||
+      isNinSubmitting ||
+      !ninConsent ||
+      !/^\d{11}$/.test(ninNumber) ||
+      !ninDob ||
+      ninDob > today ||
+      !paystackValidated ||
+      ninPending ||
+      hasNin
+    )
+      return;
+    setIsNinSubmitting(true);
+    try {
+      const fingerprint = `${ninNumber}|${ninDob}`;
+      if (ninAttempt.current?.fingerprint !== fingerprint)
+        ninAttempt.current = {
+          fingerprint,
+          key: createMoneyAttemptIdempotencyKey("mutation"),
+        };
+      const result = (
+        await kycApi.verifyIdentity(
+          {
+            country: "NG",
+            type: "NIN",
+            idNumber: ninNumber,
+            dateOfBirth: ninDob,
+            consentAccepted: true,
+          },
+          ninAttempt.current!.key,
+        )
+      ).data;
+      ninAttempt.current = null;
+      setNinNumber("");
+      setNinDob("");
+      setNinConsent(false);
+      setNinOpen(false);
+      if (
+        ["REJECTED", "FAILED"].includes(
+          result.verificationStatus ?? result.status,
+        )
+      ) {
+        toast.error(
+          "Your NIN could not be matched. Review your details or contact support. Tier 1 stays active.",
+        );
+      } else {
+        toast.success(
+          result.verificationStatus === "VERIFIED"
+            ? "NIN verified. Your account has been upgraded."
+            : "NIN check received. Your Tier 1 account stays active.",
+        );
+      }
+      await refetch();
+    } catch (error) {
+      toast.error(getErrorMessage(error, "Could not complete your NIN check"));
+    } finally {
+      setIsNinSubmitting(false);
+    }
+  };
+
   return (
     <DashboardLayout>
-      <main className="mx-auto flex w-full max-w-3xl flex-col gap-5">
-        <header className="max-w-xl">
-          <p className="mb-2 text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
-            Account security
-          </p>
-          <h1 className="text-2xl font-semibold tracking-tight">
-            Identity verification
-          </h1>
-          <p className="mt-1.5 text-sm leading-6 text-muted-foreground">
-            Verify your BVN with the Nigerian bank account connected to it.
+      <main className="mx-auto w-full max-w-2xl space-y-7 pb-10">
+        <header className="space-y-3">
+          <div className="mb-5 flex size-11 items-center justify-center rounded-2xl bg-primary/8 text-primary">
+            <ShieldCheck aria-hidden="true" className="size-6" />
+          </div>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <p className="text-sm text-muted-foreground">
+              Identity verification
+            </p>
+            <Badge variant="outline">
+              {restricted
+                ? "Under review"
+                : active
+                  ? `${formatTier(overview?.kycTier)} active`
+                  : "Not verified"}
+            </Badge>
+          </div>
+          <h1 className="text-3xl font-semibold tracking-tight">{title}</h1>
+          <p className="max-w-lg text-sm leading-6 text-muted-foreground">
+            {restricted
+              ? "Money actions are unavailable while your account is under review. Contact support for help."
+              : isTierTwo && paystackValidated
+                ? "Your BVN and NIN are verified. Your account is on Tier 2."
+                : active
+                  ? "Transact within your Tier 1 limits. Add NIN when you’re ready to upgrade."
+                  : paystackValidationPending
+                    ? "Your bank identity check is in progress. We’ll update your status here."
+                    : "Verify your BVN to get a bank account and start transacting within Tier 1 limits."}
           </p>
         </header>
-
-        {isLoading ? (
-          <section aria-label="Loading identity status" className="space-y-3">
-            <Skeleton className="h-24 w-full rounded-xl" />
-            <Skeleton className="h-80 w-full rounded-xl" />
-          </section>
-        ) : null}
-
-        {isError ? (
-          <div
-            role="alert"
-            className="flex items-center justify-between gap-3 rounded-xl border border-destructive/30 p-4 text-sm"
-          >
-            <div>
-              <p className="font-medium">We could not load your KYC status.</p>
-              <p className="mt-1 text-muted-foreground">
-                Check your connection and try again.
-              </p>
-            </div>
-            <Button variant="outline" size="sm" onClick={() => refetch()}>
-              Retry
+        {restricted && (
+          <Button variant="outline" asChild>
+            <Link href="/dashboard/support">Contact support</Link>
+          </Button>
+        )}
+        {isLoading && (
+          <div aria-label="Loading verification">
+            <Skeleton className="h-52 rounded-2xl" />
+          </div>
+        )}
+        {isError && (
+          <div role="alert" className="rounded-xl border p-5">
+            <p className="text-sm">
+              We could not load your verification status.
+            </p>
+            <Button
+              variant="outline"
+              className="mt-3"
+              onClick={() => refetch()}
+            >
+              Try again
             </Button>
           </div>
-        ) : null}
-
-        {overview && !isError ? (
+        )}
+        {overview && !isError && (
           <>
-            <section className="grid gap-4 rounded-xl border bg-card p-4 text-sm sm:grid-cols-[1fr_auto_auto] sm:items-center">
-              <div>
-                <p className="text-muted-foreground">Next step</p>
-                <p className="mt-1 font-medium">
-                  {nextStep(
-                    documents,
-                    overview.kycTier,
-                    paystackValidationStatus,
-                  )}
+            <section
+              className="overflow-hidden rounded-2xl border bg-card"
+              aria-labelledby="tier-one-title"
+            >
+              <div className="space-y-5 p-5 sm:p-7">
+                <div className="flex items-start gap-3">
+                  <span
+                    className={`flex size-9 shrink-0 items-center justify-center rounded-full text-sm font-medium ${paystackValidated ? "bg-emerald-500/10 text-emerald-600" : "bg-muted text-muted-foreground"}`}
+                  >
+                    {paystackValidated ? (
+                      <BadgeCheck aria-hidden="true" className="size-5" />
+                    ) : (
+                      "1"
+                    )}
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[11px] font-medium uppercase tracking-widest text-muted-foreground">
+                      Tier 1
+                    </p>
+                    <h2
+                      id="tier-one-title"
+                      className="mt-1 text-base font-semibold"
+                    >
+                      Bank verification
+                    </h2>
+                  </div>
+                  <Badge variant="secondary">
+                    {paystackValidated
+                      ? "Verified"
+                      : paystackValidationPending
+                        ? "In progress"
+                        : "Get started"}
+                  </Badge>
+                </div>
+                <p className="text-sm leading-6 text-muted-foreground">
+                  {restricted
+                    ? "Your verification history is saved. Contact support about this restriction."
+                    : paystackValidated
+                      ? "Your BVN is verified. Tier 1 lets you send, withdraw, pay bills and exchange within your account limits."
+                      : paystackValidationPending
+                        ? "Your BVN and linked bank details are being checked. There’s no need to submit them again."
+                        : "Have your 11-digit BVN and an existing bank account linked to it ready."}
                 </p>
-              </div>
-              <div className="flex items-center gap-2 sm:border-l sm:pl-4">
-                <MapPin
-                  aria-hidden="true"
-                  className="size-4 text-muted-foreground"
-                />
-                <span>Nigeria</span>
-              </div>
-              <div className="flex items-center gap-2 sm:border-l sm:pl-4">
-                <span className="text-muted-foreground">Access</span>
-                <Badge variant="secondary">
-                  {formatTier(overview.kycTier)}
-                </Badge>
+                {paystackValidationStatus === "FAILED" && (
+                  <p
+                    role="alert"
+                    className="flex gap-2 text-sm text-destructive"
+                  >
+                    <TriangleAlert
+                      aria-hidden="true"
+                      className="size-4 shrink-0"
+                    />
+                    We couldn’t match your bank details. Review them or contact
+                    support.
+                  </p>
+                )}
+                {!restricted &&
+                  !paystackValidated &&
+                  !paystackValidationPending &&
+                  !bvnOpen && (
+                    <Button
+                      className="w-full sm:w-auto"
+                      onClick={() => setBvnOpen(true)}
+                    >
+                      Verify BVN
+                      <ArrowRight aria-hidden="true" className="size-4" />
+                    </Button>
+                  )}
+                {paystackValidationPending && (
+                  <div className="flex flex-wrap gap-3">
+                    <Button
+                      variant="outline"
+                      onClick={() => refetch()}
+                      disabled={isSubmitting}
+                    >
+                      <RefreshCw aria-hidden="true" className="size-4" />
+                      Check status
+                    </Button>
+                    <Button variant="ghost" asChild>
+                      <Link href="/dashboard/support">Get help</Link>
+                    </Button>
+                  </div>
+                )}
+                {!restricted &&
+                  !paystackValidated &&
+                  !paystackValidationPending &&
+                  bvnOpen && (
+                    <form
+                      onSubmit={handleSubmit}
+                      className="border-t pt-6"
+                      aria-busy={isSubmitting}
+                    >
+                      <fieldset disabled={isSubmitting} className="space-y-5">
+                        {overview.fullName && (
+                          <p className="text-sm text-muted-foreground">
+                            Verifying as{" "}
+                            <span className="font-medium text-foreground">
+                              {overview.fullName}
+                            </span>
+                          </p>
+                        )}
+                        <div className="grid gap-5 sm:grid-cols-2">
+                          <div className="space-y-2">
+                            <Label htmlFor="kyc-bvn">BVN</Label>
+                            <Input
+                              id="kyc-bvn"
+                              value={idNumber}
+                              onChange={(event) =>
+                                setIdNumber(
+                                  event.target.value
+                                    .replace(/\D/g, "")
+                                    .slice(0, 11),
+                                )
+                              }
+                              placeholder="11-digit BVN"
+                              inputMode="numeric"
+                              autoComplete="off"
+                              pattern="[0-9]{11}"
+                              required
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <Label htmlFor="kyc-dob">Date of birth</Label>
+                            <Input
+                              id="kyc-dob"
+                              type="date"
+                              value={dateOfBirth}
+                              onChange={(event) =>
+                                setDateOfBirth(event.target.value)
+                              }
+                              max={today}
+                              required
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <Label htmlFor="kyc-bank">Bank</Label>
+                            <select
+                              id="kyc-bank"
+                              value={bankCode}
+                              onChange={(event) =>
+                                setBankCode(event.target.value)
+                              }
+                              required
+                              className="h-10 w-full rounded-md border bg-background px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                            >
+                              <option value="">Select your bank</option>
+                              {banks.map((bank) => (
+                                <option key={bank.code} value={bank.code}>
+                                  {bank.name}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                          <div className="space-y-2">
+                            <Label htmlFor="kyc-account">
+                              Linked account number
+                            </Label>
+                            <Input
+                              id="kyc-account"
+                              value={accountNumber}
+                              onChange={(event) =>
+                                setAccountNumber(
+                                  event.target.value
+                                    .replace(/\D/g, "")
+                                    .slice(0, 10),
+                                )
+                              }
+                              placeholder="10-digit account number"
+                              inputMode="numeric"
+                              autoComplete="off"
+                              pattern="[0-9]{10}"
+                              required
+                            />
+                          </div>
+                        </div>
+                        <p className="text-xs leading-5 text-muted-foreground">
+                          Use a bank account in your legal name that is linked
+                          to this BVN.
+                        </p>
+                        <label className="flex items-start gap-3 text-sm leading-6">
+                          <input
+                            type="checkbox"
+                            checked={consentAccepted}
+                            onChange={(event) =>
+                              setConsentAccepted(event.target.checked)
+                            }
+                            className="mt-1 size-4 shrink-0 accent-primary"
+                          />
+                          <span>
+                            I agree to share my BVN and bank details securely
+                            with Paystack for verification.{" "}
+                            <Link
+                              href="/legal#privacy"
+                              className="underline underline-offset-2"
+                            >
+                              Privacy notice
+                            </Link>
+                          </span>
+                        </label>
+                        <label className="flex items-start gap-3 text-sm leading-6">
+                          <input
+                            type="checkbox"
+                            checked={accountSetupConsent}
+                            onChange={(event) =>
+                              setAccountSetupConsent(event.target.checked)
+                            }
+                            className="mt-1 size-4 shrink-0 accent-primary"
+                          />
+                          <span>
+                            I also agree to an NGN receiving account being
+                            prepared after my BVN is verified.
+                          </span>
+                        </label>
+                        <Button
+                          type="submit"
+                          disabled={!consentAccepted || isSubmitting}
+                          className="w-full sm:w-auto"
+                        >
+                          {isSubmitting ? "Submitting…" : "Submit BVN"}
+                        </Button>
+                      </fieldset>
+                    </form>
+                  )}
+                {paystackValidated && !restricted && (
+                  <Link
+                    href="/dashboard/fund"
+                    className="flex items-center gap-3 rounded-xl bg-muted/50 p-4 text-sm"
+                  >
+                    <Landmark
+                      aria-hidden="true"
+                      className="size-5 text-muted-foreground"
+                    />
+                    <span className="flex-1">
+                      <span className="block font-medium">
+                        {["ACTIVE", "SUCCESS", "READY", "COMPLETED"].includes(
+                          overview.accountProvisioning?.status ?? "",
+                        )
+                          ? "Your bank account is ready"
+                          : ["PENDING", "PROCESSING", "QUEUED"].includes(
+                                overview.accountProvisioning?.status ?? "",
+                              )
+                            ? "Preparing your bank account"
+                            : "Set up your bank account"}
+                      </span>
+                      <span className="mt-1 block text-xs text-muted-foreground">
+                        View your NGN receiving account and setup status
+                      </span>
+                    </span>
+                    <ArrowRight aria-hidden="true" className="size-4" />
+                  </Link>
+                )}
               </div>
             </section>
-
-            <VerificationState overview={overview} />
-
-            {!paystackValidated && !paystackValidationPending ? (
-              <Card>
-                <CardHeader className="border-b pb-4">
-                  <CardTitle>Verify your BVN</CardTitle>
-                  <CardDescription>
-                    Paystack validates your BVN against an existing Nigerian
-                    bank account. This check is asynchronous.
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <form
-                    className="space-y-5"
-                    onSubmit={handleSubmit}
-                    aria-busy={isSubmitting}
+            <section
+              className="rounded-2xl border bg-card p-5 sm:p-7"
+              aria-labelledby="tier-two-title"
+            >
+              <div className="flex items-start gap-3">
+                <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-muted text-sm text-muted-foreground">
+                  {hasNin ? (
+                    <BadgeCheck
+                      aria-hidden="true"
+                      className="size-5 text-emerald-600"
+                    />
+                  ) : (
+                    "2"
+                  )}
+                </span>
+                <div className="flex-1">
+                  <p className="text-[11px] font-medium uppercase tracking-widest text-muted-foreground">
+                    Tier 2
+                  </p>
+                  <h2
+                    id="tier-two-title"
+                    className="mt-1 text-base font-semibold"
                   >
-                    <div className="grid gap-4 sm:grid-cols-2">
-                      <div className="space-y-2">
-                        <Label htmlFor="kyc-id-number">Identity number</Label>
-                        <Input
-                          id="kyc-id-number"
-                          value={idNumber}
+                    NIN verification
+                  </h2>
+                </div>
+                {hasNin && <Badge variant="secondary">Verified</Badge>}
+              </div>
+              <p className="mt-4 text-sm leading-6 text-muted-foreground">
+                {restricted
+                  ? "An identity upgrade will not remove your account restriction."
+                  : hasNin
+                    ? "Your NIN upgrade is complete."
+                    : ninPending
+                      ? "Your NIN is under review. Tier 1 stays active."
+                      : paystackValidated
+                        ? "Add your NIN to upgrade your account limits. You can keep using Tier 1."
+                        : "Available after BVN verification"}
+              </p>
+              {!restricted &&
+                paystackValidated &&
+                !hasNin &&
+                !ninPending &&
+                !ninOpen && (
+                  <Button
+                    variant="outline"
+                    className="mt-5 w-full sm:w-auto"
+                    onClick={() => {
+                      setNinOpen(true);
+                      setIdNumber("");
+                    }}
+                  >
+                    Upgrade to Tier 2
+                    <ArrowRight aria-hidden="true" className="size-4" />
+                  </Button>
+                )}
+              {ninPending && (
+                <p className="mt-4 flex items-center gap-2 text-xs text-muted-foreground">
+                  <Clock3 aria-hidden="true" className="size-4" />
+                  We’ll update your status after verification.
+                </p>
+              )}
+              {ninOpen &&
+                !restricted &&
+                paystackValidated &&
+                !hasNin &&
+                !ninPending &&
+                (overview.ninVerificationAvailable ? (
+                  <form
+                    onSubmit={handleNinSubmit}
+                    className="mt-6 space-y-5 border-t pt-6"
+                  >
+                    <fieldset disabled={isNinSubmitting} className="space-y-5">
+                      <div className="grid gap-5 sm:grid-cols-2">
+                        <div className="space-y-2">
+                          <Label htmlFor="nin-number">NIN</Label>
+                          <Input
+                            id="nin-number"
+                            value={ninNumber}
+                            onChange={(event) =>
+                              setNinNumber(
+                                event.target.value
+                                  .replace(/\D/g, "")
+                                  .slice(0, 11),
+                              )
+                            }
+                            inputMode="numeric"
+                            autoComplete="off"
+                            placeholder="11-digit NIN"
+                            pattern="[0-9]{11}"
+                            required
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="nin-dob">Date of birth</Label>
+                          <Input
+                            id="nin-dob"
+                            value={ninDob}
+                            type="date"
+                            max={today}
+                            onChange={(event) => setNinDob(event.target.value)}
+                            required
+                          />
+                        </div>
+                      </div>
+                      <label className="flex items-start gap-3 text-sm leading-6">
+                        <input
+                          type="checkbox"
+                          checked={ninConsent}
                           onChange={(event) =>
-                            setIdNumber(
-                              event.target.value
-                                .replace(/\D/g, "")
-                                .slice(0, 11),
-                            )
+                            setNinConsent(event.target.checked)
                           }
-                          placeholder="11-digit BVN"
-                          inputMode="numeric"
-                          pattern="[0-9]{11}"
-                          minLength={11}
-                          maxLength={11}
-                          autoComplete="off"
-                          spellCheck={false}
-                          required
+                          className="mt-1 size-4 shrink-0 accent-primary"
                         />
-                        <p className="text-xs text-muted-foreground">
-                          Enter digits only.
-                        </p>
-                      </div>
-
-                      <div className="space-y-2">
-                        <Label htmlFor="kyc-bank-code">Bank code</Label>
-                        <Input id="kyc-bank-code" value={bankCode} onChange={(event) => setBankCode(event.target.value.replace(/\D/g, "").slice(0, 6))} placeholder="e.g. 058" inputMode="numeric" required />
-                      </div>
-
-                      <div className="space-y-2">
-                        <Label htmlFor="kyc-account-number">BVN-linked account number</Label>
-                        <Input id="kyc-account-number" value={accountNumber} onChange={(event) => setAccountNumber(event.target.value.replace(/\D/g, "").slice(0, 10))} placeholder="10-digit account number" inputMode="numeric" required />
-                      </div>
-
-                      <div className="space-y-2">
-                        <Label htmlFor="kyc-date-of-birth">Date of birth</Label>
-                        <Input
-                          id="kyc-date-of-birth"
-                          type="date"
-                          value={dateOfBirth}
-                          max={today}
-                          onChange={(event) =>
-                            setDateOfBirth(event.target.value)
-                          }
-                          required
-                        />
-                        <p className="text-xs text-muted-foreground">
-                          It must match the identity record.
-                        </p>
-                      </div>
-                    </div>
-
-                    <label className="flex cursor-pointer items-start gap-3 rounded-lg border bg-muted/30 p-3 text-sm leading-5">
-                      <input
-                        className="mt-0.5 size-4 shrink-0 accent-primary"
-                        type="checkbox"
-                        checked={consentAccepted}
+                        <span>
+                          I agree that my NIN, legal name and date of birth will
+                          be shared securely with Ninja for verification.
+                        </span>
+                      </label>
+                      <Button
+                        type="submit"
+                        disabled={
+                          !ninConsent ||
+                          isNinSubmitting ||
+                          ninNumber.length !== 11 ||
+                          !ninDob
+                        }
+                      >
+                        {isNinSubmitting ? "Checking…" : "Verify NIN"}
+                      </Button>
+                    </fieldset>
+                  </form>
+                ) : (
+                  <div className="mt-6 space-y-5 border-t pt-6">
+                    <p className="text-sm text-muted-foreground">
+                      Upload your NIN evidence for a secure manual review. Your
+                      upgrade stays pending until an authorized reviewer
+                      verifies it.
+                    </p>
+                    <div className="space-y-2">
+                      <Label htmlFor="manual-nin-number">NIN</Label>
+                      <Input
+                        id="manual-nin-number"
+                        value={idNumber}
                         onChange={(event) =>
-                          setConsentAccepted(event.target.checked)
+                          setIdNumber(
+                            event.target.value.replace(/\D/g, "").slice(0, 11),
+                          )
+                        }
+                        placeholder="11-digit NIN"
+                        inputMode="numeric"
+                        autoComplete="off"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="manual-nin-file">NIN evidence</Label>
+                      <Input
+                        id="manual-nin-file"
+                        type="file"
+                        accept="image/jpeg,image/png,image/webp,application/pdf"
+                        onChange={(event) =>
+                          setManualFile(event.target.files?.[0] ?? null)
                         }
                       />
+                      <p className="text-xs text-muted-foreground">
+                        JPG, PNG, WebP or PDF. Up to 8 MiB.
+                      </p>
+                    </div>
+                    <label className="flex items-start gap-3 text-sm leading-6">
+                      <input
+                        type="checkbox"
+                        checked={manualNinConsent}
+                        onChange={(event) =>
+                          setManualNinConsent(event.target.checked)
+                        }
+                        className="mt-1 size-4 shrink-0 accent-primary"
+                      />
                       <span>
-                        I agree that my BVN and bank details will be shared securely
-                        with Paystack for identity verification. See our{" "}
-                        <Link
-                          className="underline underline-offset-2"
-                          href="/legal#privacy"
-                        >
-                          privacy notice
-                        </Link>
-                        .
+                        I agree to secure storage and authorized review of my
+                        NIN evidence.
                       </span>
                     </label>
-
-                    <label className="flex cursor-pointer items-start gap-3 rounded-lg border bg-muted/30 p-3 text-sm leading-5">
-                      <input className="mt-0.5 size-4 shrink-0 accent-primary" type="checkbox" checked={accountSetupConsent} onChange={(event) => setAccountSetupConsent(event.target.checked)} />
-                      <span>I also consent to creating a dedicated NGN receiving account after my BVN is verified.</span>
-                    </label>
-
-                    <div className="flex flex-col gap-3 border-t pt-4 sm:flex-row sm:items-center sm:justify-between">
-                      <p className="flex items-center gap-2 text-xs text-muted-foreground">
-                        <ShieldCheck aria-hidden="true" className="size-4" />
-                        Your full identity number is never shown in history.
-                      </p>
-                      <Button type="submit" disabled={isSubmitting}>
-                        {isSubmitting
-                          ? "Submitting…"
-                          : accountSetupConsent
-                            ? "Submit and prepare account"
-                            : "Submit BVN check"}
-                      </Button>
-                    </div>
-                  </form>
-                </CardContent>
-              </Card>
-            ) : null}
-
-            {paystackValidated && !hasNin && !isTierTwo ? (
-              <Card>
-                <CardHeader>
-                  <CardTitle>Reach Tier 2 with a manual NIN review</CardTitle>
-                  <CardDescription>
-                    Withdrawals require Tier 2. Upload your NIN evidence for an authorized review; a typed NIN is never treated as verified automatically.
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="space-y-2"><Label htmlFor="manual-nin-number">NIN number</Label><Input id="manual-nin-number" value={idNumber} onChange={(event) => setIdNumber(event.target.value.replace(/\D/g, "").slice(0, 11))} placeholder="11-digit NIN" inputMode="numeric" /></div>
-                  <div className="space-y-2"><Label htmlFor="manual-nin-file">NIN evidence</Label><Input id="manual-nin-file" type="file" accept="image/jpeg,image/png,image/webp,application/pdf" onChange={(event) => setManualFile(event.target.files?.[0] ?? null)} /></div>
-                  <label className="flex cursor-pointer items-start gap-3 rounded-lg border bg-muted/30 p-3 text-sm leading-5">
-                    <input className="mt-0.5 size-4 shrink-0 accent-primary" type="checkbox" checked={manualNinConsent} onChange={(event) => setManualNinConsent(event.target.checked)} />
-                    <span>I consent to secure storage and authorized manual review of this NIN evidence.</span>
-                  </label>
-                  <Button type="button" onClick={handleManualNinSubmit} disabled={!manualFile || !manualNinConsent || isManualSubmitting}>{isManualSubmitting ? "Uploading…" : "Submit NIN for review"}</Button>
-                </CardContent>
-              </Card>
-            ) : null}
-
-            <section aria-labelledby="verification-history-title">
-              <div className="mb-2 flex items-center justify-between">
-                <h2
-                  id="verification-history-title"
-                  className="text-sm font-medium"
-                >
-                  Verification history
+                    <Button
+                      onClick={handleManualNinSubmit}
+                      disabled={
+                        !manualFile || !manualNinConsent || isManualSubmitting
+                      }
+                    >
+                      {isManualSubmitting
+                        ? "Uploading…"
+                        : "Submit NIN for review"}
+                    </Button>
+                  </div>
+                ))}
+            </section>
+            {overview.tierOneLimits && active && !isTierTwo && (
+              <section aria-label="Tier 1 limits" className="px-1">
+                <h2 className="text-xs font-medium uppercase tracking-widest text-muted-foreground">
+                  Your Tier 1 limits
                 </h2>
-                <span className="text-xs text-muted-foreground">
-                  Identifiers are masked
-                </span>
-              </div>
-              {documents.length ? (
-                <div className="divide-y rounded-xl border bg-card">
-                  {documents.map((document) => (
+                <dl className="mt-3 divide-y text-sm">
+                  {[
+                    ["Per transaction", overview.tierOneLimits.perTransaction],
+                    ["Daily spending", overview.tierOneLimits.daily],
+                    ["Wallet balance", overview.tierOneLimits.maxBalance],
+                  ].map(([label, value]) => (
                     <div
+                      className="flex justify-between gap-4 py-3"
+                      key={label}
+                    >
+                      <dt className="text-muted-foreground">{label}</dt>
+                      <dd className="font-medium tabular-nums">
+                        NGN{" "}
+                        {Number(value).toLocaleString("en-NG", {
+                          minimumFractionDigits: 2,
+                        })}
+                      </dd>
+                    </div>
+                  ))}
+                </dl>
+              </section>
+            )}
+            <details className="rounded-xl border">
+              <summary className="cursor-pointer px-5 py-4 text-sm font-medium">
+                Verification history
+              </summary>
+              <div className="divide-y border-t px-5">
+                {documents.length ? (
+                  documents.map((document) => (
+                    <div
+                      className="flex items-center justify-between gap-3 py-4 text-sm"
                       key={document.id}
-                      className="flex items-center justify-between gap-4 p-4 text-sm"
                     >
                       <div>
-                        <p className="font-medium">{humanize(document.type)}</p>
-                        <p className="mt-0.5 font-mono text-xs text-muted-foreground">
+                        <p className="font-medium">{document.type}</p>
+                        <p className="mt-1 font-mono text-xs text-muted-foreground">
                           {maskKycId(document.idNumber)}
                         </p>
                       </div>
@@ -638,25 +932,20 @@ export default function KycPage() {
                         {humanize(document.status)}
                       </Badge>
                     </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="rounded-xl border border-dashed p-7 text-center">
-                  <ShieldCheck
-                    aria-hidden="true"
-                    className="mx-auto size-5 text-muted-foreground"
-                  />
-                  <p className="mt-3 text-sm font-medium">
-                    No identity checks yet.
+                  ))
+                ) : (
+                  <p className="py-5 text-sm text-muted-foreground">
+                    Your identity checks will appear here.
                   </p>
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    Start with BVN; NIN upgrades are submitted as evidence for manual review.
-                  </p>
-                </div>
-              )}
-            </section>
+                )}
+              </div>
+            </details>
+            <p className="flex items-center justify-center gap-2 text-center text-xs leading-5 text-muted-foreground">
+              <LockKeyhole aria-hidden="true" className="size-3.5 shrink-0" />
+              Your identity details are encrypted and kept private.
+            </p>
           </>
-        ) : null}
+        )}
       </main>
     </DashboardLayout>
   );

@@ -75,6 +75,12 @@ services:
         value: "true"
       - key: KYC_PROVIDER
         value: "paystack"
+      - key: NINJA_NIN_ENABLED
+        value: "true"
+      - key: NINJA_BASE_URL
+        value: "https://api.ninja.boucloud.io"
+      - key: NINJA_SECRET_KEY
+        sync: false # Server-only Ninja live secret; never put its value in this file.
       - key: KYC_DOCUMENT_BUCKET
         value: "kyc-documents"
       - key: EXCHANGE_RECEIPT_BUCKET

@@ -5,7 +5,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { CheckCircle2, LockKeyhole, RefreshCw, Send, ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/lib/auth-provider";
-import { getMoneyActionGate } from "@/lib/account-status";
+import { useMoneyActionGate } from "@/lib/use-money-action-gate";
 import { getErrorMessage } from "@/lib/errors";
 import { createMoneyAttemptIdempotencyKey } from "@/lib/idempotency";
 import {
@@ -111,11 +111,11 @@ function PinSetup({ onReady }: { onReady: () => Promise<void> }) {
 export function InternalTransferForm() {
   const { profile, user } = useAuth();
   const queryClient = useQueryClient();
-  const moneyGate = getMoneyActionGate(profile);
   const [recipient, setRecipient] = useState("");
   const [preview, setPreview] = useState<EligibleRecipientPreview | null>(null);
   const [amount, setAmount] = useState("");
   const [currency, setCurrency] = useState<TransferCurrency>("NGN");
+  const moneyGate = useMoneyActionGate(profile, { amount, currency, action: "transfer" });
   const [note, setNote] = useState("");
   const [pin, setPin] = useState("");
   const [errors, setErrors] = useState<TransferValidationErrors>({});

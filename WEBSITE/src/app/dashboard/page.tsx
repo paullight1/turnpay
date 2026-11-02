@@ -27,7 +27,7 @@ import {
   Smartphone,
 } from "lucide-react";
 import { Wallet as WalletType, Transaction } from "@/types";
-import { getMoneyActionGate } from "@/lib/account-status";
+import { useMoneyActionGate } from "@/lib/use-money-action-gate";
 import { maskEmail } from "@/lib/privacy";
 import { getErrorMessage } from "@/lib/errors";
 
@@ -224,7 +224,7 @@ function QueryErrorState({
 export default function DashboardPage() {
   const { user, profile } = useAuth();
   const router = useRouter();
-  const moneyGate = getMoneyActionGate(profile);
+  const moneyGate = useMoneyActionGate(profile);
   const sendHref = moneyGate?.actionHref ?? "/dashboard/send";
   const receiveHref = moneyGate?.actionHref ?? "/dashboard/fund";
 

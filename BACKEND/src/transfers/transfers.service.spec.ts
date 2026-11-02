@@ -476,11 +476,11 @@ describe('TransfersService', () => {
     expect(prisma.user.findFirst).not.toHaveBeenCalled();
   });
 
-  it('requires sender KYC tier 2 for money transfers', async () => {
+  it('requires sender KYC tier 1 for money transfers', async () => {
     prisma.user.findUnique.mockResolvedValue({
       id: 'sender-1',
       kycStatus: 'VERIFIED',
-      kycTier: 'TIER_1',
+      kycTier: 'TIER_0',
       isSuspended: false,
     });
 
@@ -494,7 +494,7 @@ describe('TransfersService', () => {
         },
         requestContext,
       ),
-    ).rejects.toThrow('sender must be at least Tier 2 for transfers');
+    ).rejects.toThrow('sender must be at least Tier 1 for transfers');
     expect(prisma.user.findFirst).not.toHaveBeenCalled();
   });
 
@@ -651,7 +651,7 @@ describe('TransfersService', () => {
       email: 'recipient@example.com',
       fullName: 'Ada Lovelace',
       kycStatus: 'VERIFIED',
-      kycTier: 'TIER_1',
+      kycTier: 'TIER_0',
       isSuspended: false,
     });
 

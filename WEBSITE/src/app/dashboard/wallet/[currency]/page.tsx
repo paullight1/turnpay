@@ -26,7 +26,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { bankingApi, transactionApi, walletApi } from "@/services/api";
-import { getMoneyActionGate } from "@/lib/account-status";
+import { useMoneyActionGate } from "@/lib/use-money-action-gate";
 import { getErrorMessage } from "@/lib/errors";
 import { useAuth } from "@/lib/auth-provider";
 import type { Transaction, VirtualAccount, Wallet } from "@/types";
@@ -138,7 +138,7 @@ export default function WalletDetailPage() {
   const { user, profile } = useAuth();
   const params = useParams<{ currency?: string }>();
   const currency = resolveCurrency(params.currency);
-  const moneyGate = getMoneyActionGate(profile);
+  const moneyGate = useMoneyActionGate(profile);
   const sendHref = moneyGate?.actionHref ?? "/dashboard/send";
   const receiveHref = moneyGate?.actionHref ?? "/dashboard/fund";
 

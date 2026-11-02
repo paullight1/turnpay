@@ -2,9 +2,16 @@
 
 import { hasAdminAccess } from "@/lib/admin-access";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  startTransition,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/lib/auth-provider";
 import { getErrorMessage, getErrorStatus } from "@/lib/errors";
 import { createManualExchangeIdempotencyKey } from "@/lib/idempotency";
@@ -133,6 +140,8 @@ type AttemptIdentity = {
   orderId: string;
   action: string;
 };
+
+type DeepLinkState = "idle" | "loading" | "found" | "not-found" | "error";
 
 function humanize(value: string) {
   return value
@@ -343,6 +352,7 @@ function DetailValue({
 export default function AdminManualExchangeOrdersPage() {
   const { user, profile, isLoading: authLoading } = useAuth();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const queryClient = useQueryClient();
   const [statusFilter, setStatusFilter] =
     useState<(typeof ORDER_STATUS_FILTERS)[number]>("ALL");
@@ -366,6 +376,11 @@ export default function AdminManualExchangeOrdersPage() {
     useState<ManualExchangeProofKind | null>(null);
   const [isForeground, setIsForeground] = useState(true);
   const attemptKeysRef = useRef<Map<string, string>>(new Map());
+  const deepLinkAttemptRef = useRef<string | null>(null);
+  const deepLinkLastIdRef = useRef<string | null | undefined>(undefined);
+  const [deepLinkState, setDeepLinkState] =
+    useState<DeepLinkState>("idle");
+  const deepLinkedOrderId = searchParams.get("orderId");
 
   const isAdmin = hasAdminAccess(user) || hasAdminAccess(profile);
 
@@ -459,6 +474,13 @@ export default function AdminManualExchangeOrdersPage() {
         : false,
     refetchOnWindowFocus: false,
   });
+  const {
+    fetchNextPage: fetchNextManualOrdersPage,
+    hasNextPage: hasNextManualOrdersPage,
+    isError: isManualOrdersError,
+    isFetchingNextPage: isFetchingNextManualOrdersPage,
+    isPending: isManualOrdersPending,
+  } = ordersQuery;
 
   const reconciliationQuery = useQuery({
     queryKey: ["admin-manual-exchange-reconciliation", user?.id],
@@ -502,7 +524,7 @@ export default function AdminManualExchangeOrdersPage() {
     };
   }, [ordersQuery.data]);
 
-  const resetActionState = () => {
+  const resetActionState = useCallback(() => {
     setActionPanel(null);
     setReason("");
     setDepositReference("");
@@ -515,7 +537,76 @@ export default function AdminManualExchangeOrdersPage() {
     setPayoutProofFile(null);
     setPayoutProofObjectKey(null);
     setFormError(null);
-  };
+  }, []);
+
+  useEffect(() => {
+    if (deepLinkLastIdRef.current === deepLinkedOrderId) return;
+
+    deepLinkLastIdRef.current = deepLinkedOrderId;
+    deepLinkAttemptRef.current = null;
+
+    if (!deepLinkedOrderId) {
+      startTransition(() => setDeepLinkState("idle"));
+      return;
+    }
+
+    // A notification may be opened while an operator is looking at a
+    // restrictive status. Return to the full queue before resolving the UUID.
+    startTransition(() => {
+      setDeepLinkState("loading");
+      setSelectedOrderId(null);
+      resetActionState();
+      if (statusFilter !== "ALL") setStatusFilter("ALL");
+    });
+  }, [deepLinkedOrderId, resetActionState, statusFilter]);
+
+  useEffect(() => {
+    if (
+      !deepLinkedOrderId ||
+      deepLinkAttemptRef.current === deepLinkedOrderId
+    ) {
+      return;
+    }
+
+    const matchingOrder = orders.find(
+      (order) => order.id === deepLinkedOrderId,
+    );
+    if (matchingOrder) {
+      deepLinkAttemptRef.current = deepLinkedOrderId;
+      startTransition(() => {
+        setDeepLinkState("found");
+        setSelectedOrderId(matchingOrder.id);
+      });
+      return;
+    }
+
+    if (isManualOrdersPending || isFetchingNextManualOrdersPage) return;
+
+    if (isManualOrdersError) {
+      startTransition(() => setDeepLinkState("error"));
+      return;
+    }
+
+    // Older orders can be beyond the first cursor page. Keep following the
+    // existing queue cursor until the requested order is found.
+    if (
+      hasNextManualOrdersPage &&
+      !isFetchingNextManualOrdersPage
+    ) {
+      void fetchNextManualOrdersPage();
+      return;
+    }
+
+    startTransition(() => setDeepLinkState("not-found"));
+  }, [
+    deepLinkedOrderId,
+    fetchNextManualOrdersPage,
+    hasNextManualOrdersPage,
+    isFetchingNextManualOrdersPage,
+    isManualOrdersError,
+    isManualOrdersPending,
+    orders,
+  ]);
 
   const reviewMutation = useMutation({
     mutationFn: ({
@@ -1098,12 +1189,38 @@ export default function AdminManualExchangeOrdersPage() {
           <Card className="min-w-0 self-start 2xl:sticky 2xl:top-24">
             {!selectedOrder ? (
               <CardContent className="flex min-h-80 flex-col items-center justify-center gap-3 text-center">
-                <WalletCards className="size-8 text-muted-foreground" />
-                <p className="font-medium">Select an order to review</p>
-                <p className="max-w-sm text-sm text-muted-foreground">
-                  Deposit evidence, payout details, and actions will appear
-                  here.
-                </p>
+                {deepLinkedOrderId && deepLinkState === "not-found" ? (
+                  <>
+                    <CircleAlert className="size-8 text-amber-400" />
+                    <p className="font-medium">Order not found</p>
+                    <p
+                      className="max-w-sm text-sm text-muted-foreground"
+                      data-testid="manual-order-deeplink-not-found"
+                    >
+                      We could not find this exchange request in the admin
+                      queue. It may have been removed or you may not have
+                      access to it.
+                    </p>
+                  </>
+                ) : deepLinkedOrderId && deepLinkState === "error" ? (
+                  <>
+                    <CircleAlert className="size-8 text-red-400" />
+                    <p className="font-medium">Exchange request unavailable</p>
+                    <p className="max-w-sm text-sm text-muted-foreground">
+                      The requested order could not be loaded. Retry the queue
+                      to try again.
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <WalletCards className="size-8 text-muted-foreground" />
+                    <p className="font-medium">Select an order to review</p>
+                    <p className="max-w-sm text-sm text-muted-foreground">
+                      Deposit evidence, payout details, and actions will appear
+                      here.
+                    </p>
+                  </>
+                )}
               </CardContent>
             ) : (
               <>

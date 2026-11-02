@@ -38,7 +38,19 @@ describe('LedgerService', () => {
     prisma.reconciliationRun.findMany.mockResolvedValue([]);
     prisma.auditLog.findMany.mockResolvedValue([]);
     prisma.fundingAdverseCase.findMany.mockResolvedValue([]);
-    prisma.$queryRaw.mockResolvedValue([]);
+    prisma.$queryRaw.mockImplementation(async (query: any) =>
+      query.sql?.includes('FOR UPDATE OF w')
+        ? [
+            {
+              id: 'wallet-1',
+              balance: new Decimal(1000),
+              kycTier: 'TIER_2',
+              kycStatus: 'VERIFIED',
+              isSuspended: false,
+            },
+          ]
+        : [],
+    );
     service = new LedgerService(prisma);
   });
 
@@ -162,7 +174,7 @@ describe('LedgerService', () => {
     });
     expect(result.balanceBefore.equals(800)).toBe(true);
     expect(result.balanceAfter.equals(700)).toBe(true);
-    expect(prisma.$queryRaw).toHaveBeenCalledTimes(1);
+    expect(prisma.$queryRaw).toHaveBeenCalledTimes(2);
   });
 
   it('rejects a debit while the persisted transaction PIN reset hold is active', async () => {

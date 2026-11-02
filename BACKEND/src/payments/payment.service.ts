@@ -170,9 +170,9 @@ export class PaymentService {
       throw new ForbiddenException('KYC verification is required');
     }
 
-    if (!isKycTierAtLeast(user.kycTier, 'TIER_2')) {
+    if (!isKycTierAtLeast(user.kycTier, 'TIER_1')) {
       throw new ForbiddenException(
-        `KYC ${formatKycTier('TIER_2')} is required for withdrawals`,
+        `KYC ${formatKycTier('TIER_1')} is required for withdrawals`,
       );
     }
 

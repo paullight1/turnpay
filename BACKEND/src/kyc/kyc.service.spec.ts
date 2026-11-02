@@ -66,6 +66,7 @@ describe('KycService', () => {
       findUnique: jest.fn(),
     },
     $transaction: jest.fn(),
+    $queryRaw: jest.fn().mockResolvedValue([]),
   };
 
   const config = {
@@ -171,7 +172,7 @@ describe('KycService', () => {
     );
   });
 
-  it('verifies a consented identity through Monnify and promotes the KYC tier transactionally', async () => {
+  it('records verified NIN without activating BVN-first Tier 1', async () => {
     prisma.kycDocument.findFirst.mockResolvedValue(null);
     prisma.user.findUnique.mockResolvedValue({
       fullName: 'Ada Okafor',
@@ -244,7 +245,7 @@ describe('KycService', () => {
     );
     expect(prisma.user.update).toHaveBeenCalledWith({
       where: { id: 'user-1' },
-      data: { kycStatus: 'VERIFIED', kycTier: 'TIER_1' },
+      data: { kycStatus: 'VERIFIED', kycTier: 'TIER_0' },
     });
     expect(prisma.auditLog.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
@@ -258,7 +259,7 @@ describe('KycService', () => {
         verificationStatus: 'VERIFIED',
         reference: 'monnify-verification-1',
         idNumber: '*******8901',
-        kycTier: 'TIER_1',
+        kycTier: 'TIER_0',
         accountProvisioning: expect.objectContaining({ status: 'READY' }),
       }),
     );
@@ -364,7 +365,7 @@ describe('KycService', () => {
     );
     expect(prisma.user.update).toHaveBeenCalledWith({
       where: { id: 'user-1' },
-      data: { kycStatus: 'VERIFIED', kycTier: 'TIER_1' },
+      data: { kycStatus: 'VERIFIED', kycTier: 'TIER_0' },
     });
     expect(logger.warn).toHaveBeenCalledWith(
       expect.objectContaining({ userId: 'user-1', errorName: 'Error' }),
@@ -1722,6 +1723,7 @@ describe('KycService', () => {
   });
 
   it('promotes a Ghana user with verified passport and voter card to tier 2', async () => {
+    prisma.user.findUnique.mockResolvedValue({ country: 'GH' });
     prisma.kycDocument.findUnique.mockResolvedValue({
       id: 'kyc-gh-2',
       userId: 'user-gh',
@@ -1801,4 +1803,129 @@ describe('KycService', () => {
       data: { kycStatus: 'REJECTED', kycTier: 'TIER_0' },
     });
   });
+  it('routes NIN to Ninja using the verified profile and promotes BVN plus NIN to Tier 2', async () => {
+    kycProviderGateway.provider = 'PAYSTACK';
+    const ninja = {
+      provider: 'NINJA',
+      configured: true,
+      verifyIdentity: jest.fn().mockResolvedValue({
+        provider: 'NINJA',
+        status: 'VERIFIED',
+        reference: 'ninja:verified',
+        checks: { verified: true },
+        responseHash: 'safe-summary-hash',
+      }),
+    };
+    service = new KycService(
+      prisma as never,
+      config as never,
+      logger as never,
+      supabase as never,
+      kycProviderGateway as never,
+      bankingService as never,
+      ninja as never,
+    );
+    prisma.user.findUnique.mockResolvedValue({
+      fullName: 'Ada Okafor',
+      phone: '+2348012345678',
+      kycStatus: 'VERIFIED',
+      kycTier: 'TIER_1',
+    });
+    prisma.kycDocument.findFirst
+      .mockResolvedValueOnce({ id: 'verified-bvn' })
+      .mockResolvedValueOnce(null);
+    prisma.kycDocument.findMany.mockResolvedValue([{ type: 'BVN' }]);
+    prisma.kycDocument.create.mockImplementation(({ data }) =>
+      Promise.resolve({ ...data, documentUrl: null }),
+    );
+    const result = await service.verifyIdentity('user-1', {
+      country: 'NG',
+      type: 'NIN',
+      idNumber: '77777777777',
+      firstName: 'Other',
+      lastName: 'Person',
+      dateOfBirth: '1990-01-01',
+      consentAccepted: true,
+    });
+    expect(ninja.verifyIdentity).toHaveBeenCalledWith(
+      expect.objectContaining({
+        validation: expect.objectContaining({
+          firstName: 'Ada',
+          lastName: 'Okafor',
+        }),
+      }),
+    );
+    expect(prisma.user.update).toHaveBeenCalledWith({
+      where: { id: 'user-1' },
+      data: { kycStatus: 'VERIFIED', kycTier: 'TIER_2' },
+    });
+    expect(bankingService.provisionVirtualAccount).not.toHaveBeenCalled();
+    expect(result.provider).toBe('NINJA');
+  });
+
+  it('does not send a new NIN check to Ninja before a verified BVN exists', async () => {
+    kycProviderGateway.provider = 'PAYSTACK';
+    const ninja = {
+      provider: 'NINJA',
+      configured: true,
+      verifyIdentity: jest.fn(),
+    };
+    service = new KycService(
+      prisma as never,
+      config as never,
+      logger as never,
+      supabase as never,
+      kycProviderGateway as never,
+      bankingService as never,
+      ninja as never,
+    );
+    prisma.user.findUnique.mockResolvedValue({
+      fullName: 'Ada Okafor',
+      phone: '+2348012345678',
+      kycStatus: 'PENDING',
+      kycTier: 'TIER_0',
+    });
+    prisma.kycDocument.findFirst.mockResolvedValue(null);
+    await expect(
+      service.verifyIdentity('user-1', {
+        country: 'NG',
+        type: 'NIN',
+        idNumber: '77777777777',
+        dateOfBirth: '1990-01-01',
+        consentAccepted: true,
+      }),
+    ).rejects.toThrow('Verify your BVN');
+    expect(ninja.verifyIdentity).not.toHaveBeenCalled();
+    expect(prisma.kycDocument.create).not.toHaveBeenCalled();
+  });
+
+  it.each(['NG', null])(
+    'does not activate a %s customer from a pending legacy passport',
+    async (country) => {
+      prisma.user.findUnique.mockResolvedValue({ country });
+      prisma.kycDocument.findUnique.mockResolvedValue({
+        id: 'legacy-passport',
+        userId: 'user-1',
+        type: 'PASSPORT',
+        status: 'SUBMITTED',
+        user: {
+          id: 'user-1',
+          country,
+          kycTier: 'TIER_0',
+          kycStatus: 'PENDING',
+        },
+        verifications: [],
+      });
+      prisma.kycDocument.findMany.mockResolvedValue([{ type: 'PASSPORT' }]);
+      await service.reviewKyc(
+        'legacy-passport',
+        { status: 'VERIFIED', rejectionNote: 'Document evidence checked' },
+        'admin-1',
+      );
+      expect(prisma.user.update).toHaveBeenCalledWith({
+        where: { id: 'user-1' },
+        data: { kycStatus: 'VERIFIED', kycTier: 'TIER_0' },
+      });
+    },
+  );
 });

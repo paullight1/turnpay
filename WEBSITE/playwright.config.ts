@@ -126,7 +126,7 @@ export default defineConfig({
           {
             command: process.env.CI
               ? `npm run start -- --hostname ${webHost} --port ${webPort}`
-              : `npm run dev -- --hostname ${webHost} --port ${webPort}`,
+              : `npm run dev -- --webpack --hostname ${webHost} --port ${webPort}`,
             url: webServerUrl,
             reuseExistingServer,
             timeout: 180000,

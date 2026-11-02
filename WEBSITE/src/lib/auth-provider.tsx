@@ -95,6 +95,7 @@ interface AuthContextType {
   ) => Promise<void>;
   signOut: () => Promise<void>;
   refreshSession: () => Promise<void>;
+  refreshProfile: () => Promise<void>;
   resetPassword: (email: string) => Promise<void>;
   updatePassword: (password: string) => Promise<void>;
 }
@@ -466,6 +467,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         signUp,
         signOut,
         refreshSession,
+        refreshProfile: async () => { if (session?.access_token) await bootstrapSession(session); },
         resetPassword,
         updatePassword,
       }}

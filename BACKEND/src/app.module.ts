@@ -125,6 +125,17 @@ const defaultNodeEnv =
           .min(60)
           .max(900)
           .default(300),
+        NINJA_NIN_ENABLED: Joi.boolean().default(false),
+        NINJA_SECRET_KEY: Joi.string().allow('').optional(),
+        NINJA_BASE_URL: Joi.string()
+          .valid(
+            'https://api.ninja.boucloud.io',
+            'https://api.sandbox.ninja.boucloud.io',
+          )
+          .default('https://api.ninja.boucloud.io'),
+        TIER_ONE_NGN_PER_TRANSACTION: Joi.string().allow('').optional(),
+        TIER_ONE_NGN_DAILY: Joi.string().allow('').optional(),
+        TIER_ONE_NGN_MAX_BALANCE: Joi.string().allow('').optional(),
         KYC_PROVIDER: Joi.string()
           .trim()
           .lowercase()

@@ -332,6 +332,11 @@ class KycOverview {
   final DateTime? updatedAt;
   final List<KycDocumentSummary> documents;
   final PaystackKycRecovery? recovery;
+  final bool ninVerificationAvailable;
+  final bool isSuspended;
+  final String accountPreparationStatus;
+  final Map<String, dynamic>? tierOneLimits;
+  final bool hasTierOneLimitPolicyInfo;
 
   const KycOverview({
     this.firstName,
@@ -348,6 +353,11 @@ class KycOverview {
     required this.updatedAt,
     required this.documents,
     this.recovery,
+    this.ninVerificationAvailable = false,
+    this.isSuspended = false,
+    this.accountPreparationStatus = 'NOT_REQUESTED',
+    this.tierOneLimits,
+    this.hasTierOneLimitPolicyInfo = false,
   });
 
   factory KycOverview.fromJson(Map<String, dynamic> json) {
@@ -381,11 +391,11 @@ class KycOverview {
           _asString(user['kycStatus']).toUpperCase() == 'VERIFIED',
       status: _normalizedStatus(
         _firstString([
-          latest['status'],
-          json['status'],
           json['kycStatus'],
+          json['status'],
           user['kycStatus'],
           kyc['status'],
+          latest['status'],
         ], fallback: 'PENDING'),
       ),
       tier: _normalizedTier(
@@ -432,6 +442,14 @@ class KycOverview {
           .map((item) => KycDocumentSummary.fromJson(_asMap(item)))
           .toList(growable: false),
       recovery: recovery,
+      ninVerificationAvailable: json['ninVerificationAvailable'] == true,
+      isSuspended: json['isSuspended'] == true || user['isSuspended'] == true,
+      hasTierOneLimitPolicyInfo: json.containsKey('tierOneLimits'),
+      accountPreparationStatus: _asString(
+          _asMap(json['accountProvisioning'])['status'],
+          fallback: 'NOT_REQUESTED'),
+      tierOneLimits:
+          json['tierOneLimits'] is Map ? _asMap(json['tierOneLimits']) : null,
     );
   }
 

@@ -7,6 +7,7 @@ import '../state/exchange_visibility.dart';
 import '../../features/home/screens/dashboard_detail_screen.dart';
 import '../../features/home/screens/home_screen.dart';
 import '../../features/exchange/screens/kora_exchange_screen.dart';
+import '../../features/notifications/services/notifications_service.dart';
 import '../../services/home_data_service.dart';
 import 'micro_interactions.dart';
 
@@ -47,11 +48,14 @@ const _navItems = [
 
 class MainShell extends StatefulWidget {
   final HomeDataService homeDataService;
+  final NotificationsService notificationsService;
 
   MainShell({
     super.key,
     HomeDataService? homeDataService,
-  }) : homeDataService = homeDataService ?? HomeDataService();
+    NotificationsService? notificationsService,
+  })  : homeDataService = homeDataService ?? HomeDataService(),
+        notificationsService = notificationsService ?? NotificationsService();
 
   @override
   State<MainShell> createState() => _MainShellState();
@@ -93,7 +97,11 @@ class _MainShellState extends State<MainShell> {
           offstage: _selectedIndex != 0,
           child: TickerMode(
             enabled: _selectedIndex == 0,
-            child: HomeScreen(homeDataService: widget.homeDataService),
+            child: HomeScreen(
+              homeDataService: widget.homeDataService,
+              notificationsService: widget.notificationsService,
+              isHomeTabActive: _selectedIndex == 0,
+            ),
           ),
         ),
         if (_exchangeVisited)
@@ -137,7 +145,11 @@ class _MainShellState extends State<MainShell> {
         );
       case 0:
       default:
-        return HomeScreen(homeDataService: widget.homeDataService);
+        return HomeScreen(
+          homeDataService: widget.homeDataService,
+          notificationsService: widget.notificationsService,
+          isHomeTabActive: _selectedIndex == 0,
+        );
     }
   }
 }

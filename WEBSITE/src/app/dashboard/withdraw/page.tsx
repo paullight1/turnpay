@@ -14,7 +14,7 @@ import { paymentApi } from "@/services/api";
 import { useQuery } from "@tanstack/react-query";
 import { getErrorMessage } from "@/lib/errors";
 import { useAuth } from "@/lib/auth-provider";
-import { getMoneyActionGate } from "@/lib/account-status";
+import { useMoneyActionGate } from "@/lib/use-money-action-gate";
 import { createMoneyAttemptIdempotencyKey } from "@/lib/idempotency";
 import { maskAccountNumber } from "@/lib/privacy";
 import { canonicalizeMoneyAmount } from "@/lib/money";
@@ -32,7 +32,7 @@ export default function WithdrawPage() {
   const [isConfirming, setIsConfirming] = useState(false);
   const inFlightRef = useRef(false);
   const attemptKeyRef = useRef<string | null>(null);
-  const moneyGate = getMoneyActionGate(profile);
+  const moneyGate = useMoneyActionGate(profile, { amount, action: "withdraw", currency });
   const displayAmount = canonicalizeMoneyAmount(amount) ?? amount;
 
   const resetAttempt = () => {

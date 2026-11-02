@@ -24,7 +24,7 @@ See `DOCS/SECURITY-RULES.MD` for the complete 15-section security checklist.
 - **Mobile:** Flutter + Riverpod + Dio + go_router
 - **Auth:** JWT (15m access / 7d refresh) + OTP
 - **Payments:** Paystack for new NGN banking and payments; retain Monnify only for existing obligations
-- **KYC:** Paystack BVN plus bank-account validation; NIN/document upgrades use audited manual review. Preserve existing tier requirements
+- **KYC:** Paystack BVN plus bank-account validation for Tier 1; approved Ninja NIN verification upgrades verified BVN users to Tier 2. Retain audited manual evidence review as the fallback.
 - **VTU:** VTpass only
 
 ## Code Style

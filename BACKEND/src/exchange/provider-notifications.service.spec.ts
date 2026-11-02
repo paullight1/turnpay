@@ -4,7 +4,7 @@ describe('provider notification read state', () => {
     const prisma = {
       paymentNotification: {
         findMany: jest.fn().mockResolvedValue([{ id: 'n', title: 'Ready' }]),
-        findUnique: jest.fn().mockResolvedValue({ id: 'n' }),
+        findUnique: jest.fn().mockResolvedValue({ id: 'n', audience: 'ADMIN' }),
       },
       paymentNotificationRead: {
         findMany: jest
@@ -18,7 +18,9 @@ describe('provider notification read state', () => {
     const service = new ProviderNotificationsService(prisma as never);
     expect((await service.list('admin-a'))[0].readAt).toBeTruthy();
     expect(prisma.paymentNotificationRead.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { adminId: 'admin-a' } }),
+      expect.objectContaining({
+        where: { adminId: 'admin-a', notificationId: { in: ['n'] } },
+      }),
     );
     await service.read('admin-a', 'n', 'valid-key-123456789');
     await service.read('admin-a', 'n', 'valid-key-123456789');
@@ -30,5 +32,25 @@ describe('provider notification read state', () => {
         update: {},
       }),
     );
+  });
+  it('refuses to mark another customer or admin notification as read', async () => {
+    const prisma = {
+      paymentNotification: {
+        findUnique: jest
+          .fn()
+          .mockResolvedValue({ id: 'private', audience: 'USER:someone-else' }),
+      },
+      paymentNotificationRead: { upsert: jest.fn() },
+    };
+    const service = new ProviderNotificationsService(prisma as never);
+    await expect(
+      (service.read as any)(
+        'user-a',
+        'private',
+        'valid-key-123456789',
+        'USER:user-a',
+      ),
+    ).rejects.toThrow('Notification not found');
+    expect(prisma.paymentNotificationRead.upsert).not.toHaveBeenCalled();
   });
 });

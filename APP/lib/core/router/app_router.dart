@@ -107,10 +107,15 @@ class AppRoutes {
   };
 }
 
+/// Lets mounted tab screens pause background work while another top-level
+/// route is visible, then resume when that route is popped.
+final appRouteObserver = RouteObserver<ModalRoute<dynamic>>();
+
 // ─── ROUTER ───────────────────────────────────────────────────────────────────
 final appRouterProvider = Provider<GoRouter>((ref) {
   return GoRouter(
     initialLocation: AppRoutes.splash,
+    observers: [appRouteObserver],
     debugLogDiagnostics: kDebugMode,
     // Re-run [redirect] whenever the auth signal changes so a server-rejected
     // session is pushed to the login screen even from a deep-linked route.

@@ -6,6 +6,8 @@ import {
   Optional,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import { ConfigService } from '@nestjs/config';
+import { TierOneLimitsService } from '../common/services/tier-one-limits.service';
 import { Decimal } from '@prisma/client/runtime/library';
 import { PrismaService } from '../prisma/prisma.service';
 import {
@@ -29,21 +31,32 @@ interface WalletMovementInput {
 
 type LedgerClient = Pick<
   Prisma.TransactionClient,
-  'wallet' | 'ledgerEntry' | 'reconciliationRun' | 'auditLog' | '$queryRaw'
+  | 'user'
+  | 'wallet'
+  | 'ledgerEntry'
+  | 'manualExchangeOrder'
+  | 'exchangeReceipt'
+  | 'reconciliationRun'
+  | 'auditLog'
+  | '$queryRaw'
 >;
 
 @Injectable()
 export class LedgerService {
   private readonly settlementHold: SettlementHoldService;
+  private readonly tierOneLimits: TierOneLimitsService;
 
   constructor(
     private readonly prisma: PrismaService,
     @Optional() settlementHold?: SettlementHoldService,
+    @Optional() tierOneLimits?: TierOneLimitsService,
   ) {
     // The application module always supplies this provider. The fallback
     // keeps direct service tests honest: they exercise the same persisted
     // hold check instead of silently disabling it when a fixture omits DI.
     this.settlementHold = settlementHold ?? new SettlementHoldService(prisma);
+    this.tierOneLimits =
+      tierOneLimits ?? new TierOneLimitsService(new ConfigService());
   }
 
   creditWallet(input: WalletMovementInput, client?: LedgerClient) {
@@ -106,6 +119,10 @@ export class LedgerService {
             'Transaction PIN was recently reset; money movement is temporarily locked',
           );
         }
+      }
+
+      if (!adverseFundingResolution) {
+        await this.tierOneLimits.checkMovement(tx, input, direction);
       }
 
       let walletId: string;

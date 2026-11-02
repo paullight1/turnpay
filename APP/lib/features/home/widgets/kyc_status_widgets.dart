@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../core/kyc/kyc_tier.dart';
 import '../../../services/kyc_service.dart';
 import 'kyc_illustration.dart';
 import 'kyc_status_presenter.dart';
@@ -14,175 +15,303 @@ class KycStatusOverview extends StatelessWidget {
       required this.onStartNin,
       required this.onHistory,
       required this.onAccount,
-      this.busy = false});
+      this.busy = false,
+      this.onSupport});
   final KycOverview overview;
   final ValueChanged<String> onDetails;
   final VoidCallback onStartBvn, onStartNin, onHistory, onAccount;
   final bool busy;
+  final VoidCallback? onSupport;
+
   @override
   Widget build(BuildContext context) {
     AppColors.watch(context);
-    final bvn = kycCheckStatus(overview, 'BVN'),
-        nin = kycCheckStatus(overview, 'NIN');
-    final complete = (bvn == 'VERIFIED' ? 1 : 0) + (nin == 'VERIFIED' ? 1 : 0);
+    final bvn = kycCheckStatus(overview, 'BVN');
+    final nin = kycCheckStatus(overview, 'NIN');
+    final active = !overview.isSuspended &&
+        overview.isVerified &&
+        kycTierRank(overview.tier) >= 1;
+    final ready = kycPaystackReady(overview);
+    final complete = active &&
+        kycTierRank(overview.tier) >= 2 &&
+        nin == 'VERIFIED' &&
+        bvn == 'VERIFIED';
+    final pending = kycCheckPending(bvn);
+    final title = overview.isSuspended
+        ? 'Your account is under review'
+        : complete
+            ? 'You’re fully verified'
+            : active
+                ? 'Your account is active'
+                : pending
+                    ? 'We’re checking your BVN'
+                    : 'Activate your account';
     return ListView(
-        padding: const EdgeInsets.fromLTRB(20, 24, 20, 40),
-        physics: const AlwaysScrollableScrollPhysics(),
-        children: [
-          Center(
-              child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 600),
-                  child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        Align(
-                            alignment: Alignment.centerLeft,
-                            child: KycIllustration(
-                                kind: complete == 2
-                                    ? KycIllustrationKind.verified
-                                    : KycIllustrationKind.identity,
-                                size: 104)),
-                        const SizedBox(height: 20),
-                        Text(
-                            complete == 2
-                                ? 'You’re verified'
-                                : 'Your identity checks',
-                            style: AppTextStyles.headingL),
-                        const SizedBox(height: 8),
-                        Text(
-                            complete == 2
-                                ? 'Your NIN and BVN are verified.'
-                                : 'Complete two checks. Follow their progress here.',
-                            style: AppTextStyles.bodyM),
+      padding: const EdgeInsets.fromLTRB(24, 28, 24, 36),
+      physics: const AlwaysScrollableScrollPhysics(),
+      children: [
+        Center(
+            child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 560),
+                child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Align(
+                          alignment: Alignment.centerLeft,
+                          child: Container(
+                              padding: const EdgeInsets.all(12),
+                              decoration: BoxDecoration(
+                                  color:
+                                      AppColors.primary.withValues(alpha: .08),
+                                  borderRadius: BorderRadius.circular(14)),
+                              child: Icon(
+                                  complete || active
+                                      ? Icons.verified_user_outlined
+                                      : Icons.shield_outlined,
+                                  color: AppColors.primary,
+                                  size: 28))),
+                      const SizedBox(height: 24),
+                      Text(title, style: AppTextStyles.headingL),
+                      const SizedBox(height: 10),
+                      Text(
+                          overview.isSuspended
+                              ? 'Money actions are unavailable while your account is under review. Contact support for help.'
+                              : complete
+                                  ? 'Your BVN and NIN are verified. You’re on Tier 2.'
+                                  : active
+                                      ? 'Transact within your Tier 1 limits. Add NIN when you’re ready to upgrade.'
+                                      : pending
+                                          ? 'Your bank identity check is in progress. We’ll update your status here.'
+                                          : 'Verify your BVN to get a bank account and start transacting within Tier 1 limits.',
+                          style: AppTextStyles.bodyM),
+                      if (overview.isSuspended && onSupport != null) ...[
                         const SizedBox(height: 16),
-                        Text('$complete of 2 verified',
-                            style: AppTextStyles.labelS
-                                .copyWith(color: AppColors.textSecondary)),
-                        const SizedBox(height: 28),
-                        for (final type in ['BVN', 'NIN']) ...[
-                          _CheckCard(
-                              type: type,
-                              status: type == 'BVN' ? bvn : nin,
-                              recovery: kycRecoveryFor(overview, type),
-                              onTap: () => onDetails(type),
-                              onStart: busy
-                                  ? null
-                                  : type == 'BVN'
-                                      ? bvn != 'VERIFIED' &&
-                                              !kycCheckPending(bvn)
-                                          ? onStartBvn
-                                          : null
-                                      : kycCanStartNin(overview)
-                                          ? onStartNin
-                                          : null),
-                          const SizedBox(height: 16),
-                        ],
+                        OutlinedButton(
+                            onPressed: onSupport,
+                            child: const Text('Contact support'))
+                      ],
+                      const SizedBox(height: 30),
+                      _VerificationTier(
+                        number: '1',
+                        title: 'Bank verification',
+                        detail: overview.isSuspended
+                            ? 'Your verification history is saved. An identity upgrade will not remove this restriction.'
+                            : ready
+                                ? 'BVN verified. Your Tier 1 access is active.'
+                                : pending
+                                    ? 'Your BVN and linked bank details are being checked.'
+                                    : 'Your BVN and an existing bank account linked to it.',
+                        status: bvn,
+                        onDetails: () => onDetails('BVN'),
+                        buttonLabel: overview.isSuspended
+                            ? null
+                            : ready
+                                ? null
+                                : pending
+                                    ? 'View verification status'
+                                    : 'Verify BVN',
+                        onAction: busy
+                            ? null
+                            : pending
+                                ? () => onDetails('BVN')
+                                : onStartBvn,
+                        primary: true,
+                      ),
+                      if (ready && !overview.isSuspended) ...[
                         const SizedBox(height: 12),
-                        OutlinedButton.icon(
-                            onPressed: onHistory,
-                            icon: const Icon(Icons.history_rounded, size: 20),
-                            label: const Text('View verification history')),
-                        if (bvn == 'VERIFIED' &&
-                            !kycPaystackReady(overview) &&
-                            !busy)
-                          TextButton(
-                              onPressed: onStartBvn,
-                              child: const Text('Verify bank details')),
-                        if (kycPaystackReady(overview)) ...[
-                          const SizedBox(height: 12),
-                          TextButton.icon(
-                              onPressed: onAccount,
-                              icon: const Icon(Icons.account_balance_outlined,
-                                  size: 20),
-                              label: const Text('Set up receiving account')),
-                        ],
-                      ]))),
-        ]);
+                        _AccountPreparation(
+                            status: overview.accountPreparationStatus,
+                            onTap: onAccount),
+                      ],
+                      const SizedBox(height: 22),
+                      _VerificationTier(
+                        number: '2',
+                        title: 'NIN verification',
+                        detail: nin == 'VERIFIED'
+                            ? 'Your NIN upgrade is complete.'
+                            : kycCheckPending(nin)
+                                ? 'Your NIN is under review. Tier 1 stays active.'
+                                : ready
+                                    ? 'Add your NIN to upgrade your account limits.'
+                                    : 'Available after BVN verification',
+                        status: nin,
+                        onDetails: () => onDetails('NIN'),
+                        buttonLabel: kycCanStartNin(overview)
+                            ? 'Upgrade to Tier 2'
+                            : null,
+                        onAction: busy ? null : onStartNin,
+                      ),
+                      if (overview.tierOneLimits != null &&
+                          active &&
+                          !complete) ...[
+                        const SizedBox(height: 24),
+                        Text('TIER 1 LIMITS',
+                            style: AppTextStyles.labelS.copyWith(
+                                color: AppColors.textSecondary,
+                                letterSpacing: 1)),
+                        const SizedBox(height: 10),
+                        for (final entry in {
+                          'Per transaction': 'perTransaction',
+                          'Daily spending': 'daily',
+                          'Wallet balance': 'maxBalance'
+                        }.entries)
+                          Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 7),
+                              child: Row(children: [
+                                Expanded(
+                                    child: Text(entry.key,
+                                        style: AppTextStyles.bodyS)),
+                                Text(
+                                    'NGN ${overview.tierOneLimits![entry.value]}',
+                                    style: AppTextStyles.labelS)
+                              ])),
+                      ],
+                      const SizedBox(height: 26),
+                      TextButton.icon(
+                          onPressed: onHistory,
+                          icon: const Icon(Icons.history_rounded, size: 18),
+                          label: const Text('Verification history')),
+                      const SizedBox(height: 8),
+                      Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(Icons.lock_outline_rounded,
+                                size: 14, color: AppColors.textSecondary),
+                            const SizedBox(width: 6),
+                            Flexible(
+                                child: Text(
+                                    'Your identity details are encrypted and kept private.',
+                                    style: AppTextStyles.bodyS,
+                                    textAlign: TextAlign.center))
+                          ]),
+                    ])))
+      ],
+    );
   }
 }
 
-class _CheckCard extends StatelessWidget {
-  const _CheckCard(
-      {required this.type,
+class _VerificationTier extends StatelessWidget {
+  const _VerificationTier(
+      {required this.number,
+      required this.title,
+      required this.detail,
       required this.status,
-      this.recovery,
-      required this.onTap,
-      this.onStart});
-  final String type, status;
-  final PaystackKycRecovery? recovery;
-  final VoidCallback onTap;
-  final VoidCallback? onStart;
+      required this.onDetails,
+      this.buttonLabel,
+      this.onAction,
+      this.primary = false});
+  final String number, title, detail, status;
+  final VoidCallback onDetails;
+  final String? buttonLabel;
+  final VoidCallback? onAction;
+  final bool primary;
   @override
   Widget build(BuildContext context) => Material(
-      color: AppColors.surface,
-      shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(20),
-          side: BorderSide(color: AppColors.border)),
-      clipBehavior: Clip.antiAlias,
+      color: Colors.transparent,
       child: InkWell(
-          key: ValueKey('kyc-status-$type'),
+          onTap: onDetails,
+          borderRadius: BorderRadius.circular(18),
+          child: Container(
+            key: ValueKey('kyc-status-${number == '1' ? 'BVN' : 'NIN'}'),
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+                color: AppColors.surface,
+                borderRadius: BorderRadius.circular(18),
+                border: Border.all(color: AppColors.border)),
+            child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Container(
+                        width: 32,
+                        height: 32,
+                        alignment: Alignment.center,
+                        decoration: BoxDecoration(
+                            color: status == 'VERIFIED'
+                                ? AppColors.success.withValues(alpha: .1)
+                                : AppColors.surfaceVariant,
+                            shape: BoxShape.circle),
+                        child: status == 'VERIFIED'
+                            ? Icon(Icons.check_rounded,
+                                size: 18, color: AppColors.success)
+                            : Text(number, style: AppTextStyles.labelM)),
+                    const SizedBox(width: 12),
+                    Expanded(
+                        child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                          Text('TIER $number',
+                              style: AppTextStyles.labelS.copyWith(
+                                  color: AppColors.textSecondary,
+                                  letterSpacing: 1)),
+                          const SizedBox(height: 4),
+                          Text(title, style: AppTextStyles.labelM)
+                        ])),
+                    IconButton(
+                        tooltip: 'View ${number == '1' ? 'BVN' : 'NIN'} status',
+                        onPressed: onDetails,
+                        constraints:
+                            const BoxConstraints(minHeight: 40, minWidth: 40),
+                        icon: Icon(Icons.chevron_right_rounded,
+                            color: AppColors.textSecondary)),
+                  ]),
+                  const SizedBox(height: 14),
+                  Text(detail, style: AppTextStyles.bodyS),
+                  if (status != 'INCOMPLETE') ...[
+                    const SizedBox(height: 14),
+                    Align(
+                        alignment: Alignment.centerLeft,
+                        child: _StatusPill(status: status))
+                  ],
+                  if (buttonLabel != null) ...[
+                    const SizedBox(height: 18),
+                    primary
+                        ? FilledButton(
+                            onPressed: onAction, child: Text(buttonLabel!))
+                        : OutlinedButton(
+                            onPressed: onAction, child: Text(buttonLabel!))
+                  ],
+                ]),
+          )));
+}
+
+class _AccountPreparation extends StatelessWidget {
+  const _AccountPreparation({required this.status, required this.onTap});
+  final String status;
+  final VoidCallback onTap;
+  @override
+  Widget build(BuildContext context) {
+    final ready = status == 'ACTIVE' ||
+        status == 'READY' ||
+        status == 'COMPLETED' ||
+        status == 'SUCCESS';
+    final preparing = {'PENDING', 'PROCESSING', 'QUEUED'}.contains(status);
+    return Material(
+        color: AppColors.surfaceVariant,
+        borderRadius: BorderRadius.circular(12),
+        child: ListTile(
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          leading: Icon(Icons.account_balance_outlined,
+              color: AppColors.textSecondary, size: 22),
+          title: Text(
+              ready
+                  ? 'Your bank account is ready'
+                  : preparing
+                      ? 'Preparing your bank account'
+                      : 'Set up your bank account',
+              style: AppTextStyles.labelS),
+          subtitle: Text(
+              ready
+                  ? 'View your receiving details'
+                  : preparing
+                      ? 'BVN is verified. Account setup is separate.'
+                      : 'Continue to your NGN receiving account',
+              style: AppTextStyles.bodyS),
+          trailing: const Icon(Icons.chevron_right_rounded, size: 20),
           onTap: onTap,
-          child: Padding(
-              padding: const EdgeInsets.all(22),
-              child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Container(
-                              padding: const EdgeInsets.all(12),
-                              decoration: BoxDecoration(
-                                  color: AppColors.surfaceVariant,
-                                  borderRadius: BorderRadius.circular(14)),
-                              child: Icon(
-                                  type == 'BVN'
-                                      ? Icons.account_balance_outlined
-                                      : Icons.badge_outlined,
-                                  color: AppColors.primary,
-                                  size: 24)),
-                          const SizedBox(width: 16),
-                          Expanded(
-                              child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                Text('$type verification',
-                                    style: AppTextStyles.labelM),
-                                const SizedBox(height: 6),
-                                Text(
-                                    type == 'BVN'
-                                        ? 'Bank identity check'
-                                        : 'Identity document',
-                                    style: AppTextStyles.bodyS),
-                              ])),
-                          const SizedBox(width: 8),
-                          Icon(Icons.chevron_right_rounded,
-                              color: AppColors.textSecondary),
-                        ]),
-                    const SizedBox(height: 20),
-                    _StatusPill(status: status),
-                    if (recovery?.isDelayed == true) ...[
-                      const SizedBox(height: 12),
-                      Text(
-                        recovery!.message,
-                        style: AppTextStyles.bodyS,
-                        maxLines: 3,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ],
-                    if (onStart != null) ...[
-                      const SizedBox(height: 16),
-                      SizedBox(
-                          width: double.infinity,
-                          child: FilledButton(
-                              onPressed: onStart,
-                              child: Text(
-                                  type == 'BVN'
-                                      ? 'Verify BVN'
-                                      : 'Continue to NIN',
-                                  textAlign: TextAlign.center))),
-                    ],
-                  ]))));
+        ));
+  }
 }
 
 class _StatusPill extends StatelessWidget {
@@ -222,6 +351,7 @@ class KycSubmissionConfirmation extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     AppColors.watch(context);
+    final continueNin = verified && type == 'BVN' ? onContinueNin : null;
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(
@@ -253,13 +383,14 @@ class KycSubmissionConfirmation extends StatelessWidget {
                         Text(message,
                             textAlign: TextAlign.center,
                             style: AppTextStyles.bodyM),
-                        if (onContinueNin != null) ...[
+                        if (continueNin != null) ...[
                           const SizedBox(height: 28),
-                          Text('Next: your NIN document',
+                          Text('Optional next step: Tier 2',
                               textAlign: TextAlign.center,
                               style: AppTextStyles.labelM),
                           const SizedBox(height: 8),
-                          Text('You can add your NIN while we check your BVN.',
+                          Text(
+                              'Tier 1 is active. Add NIN when you’re ready for Tier 2.',
                               textAlign: TextAlign.center,
                               style: AppTextStyles.bodyS),
                         ],
@@ -271,13 +402,13 @@ class KycSubmissionConfirmation extends StatelessWidget {
                 SizedBox(
                     width: double.infinity,
                     child: FilledButton(
-                        onPressed: onContinueNin ?? onStatus,
+                        onPressed: continueNin ?? onStatus,
                         child: Text(
-                            onContinueNin == null
+                            continueNin == null
                                 ? 'View verification status'
                                 : 'Continue to NIN',
                             textAlign: TextAlign.center))),
-                if (onContinueNin != null) ...[
+                if (continueNin != null) ...[
                   const SizedBox(height: 8),
                   TextButton(
                       onPressed: onStatus,
@@ -386,7 +517,7 @@ class _KycCheckDetailsSheetState extends State<KycCheckDetailsSheet> {
                       : status == 'FAILED' || status == 'REJECTED'
                           ? 'Your details need another look. Review the information before trying again.'
                           : widget.type == 'NIN' && !canStart
-                              ? 'Submit your BVN first. You can then add your NIN document.'
+                              ? 'Verify your BVN first. NIN is the next step for Tier 2.'
                               : 'This check has not been started.',
               style: AppTextStyles.bodyM),
           if (dates.isNotEmpty) ...[

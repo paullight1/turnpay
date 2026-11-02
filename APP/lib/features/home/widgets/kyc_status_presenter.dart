@@ -1,4 +1,39 @@
 import '../../../services/kyc_service.dart';
+import '../../../core/money/money_value.dart';
+
+class KycActionLimitGate {
+  const KycActionLimitGate(this.title, this.message, {required this.upgrade});
+  final String title, message;
+  final bool upgrade;
+}
+
+KycActionLimitGate? kycActionLimitGate(
+    KycOverview overview, String amount, String currency) {
+  if (overview.isSuspended) {
+    return const KycActionLimitGate('Your account is under review',
+        'Money actions are unavailable while your account is under review. Contact support for help.',
+        upgrade: false);
+  }
+  if (overview.tier != 'TIER_1') return null;
+  if (overview.hasTierOneLimitPolicyInfo && overview.tierOneLimits == null) {
+    return const KycActionLimitGate('Transactions temporarily unavailable',
+        'Your verification is saved. Please try again later or contact support.',
+        upgrade: false);
+  }
+  final limit = overview.tierOneLimits?['perTransaction'];
+  if (currency != 'NGN' || limit is! String) return null;
+  try {
+    if (MoneyValue.parse(amount).minorUnits >
+        MoneyValue.parse(limit).minorUnits) {
+      return KycActionLimitGate('Your Tier 1 limit',
+          'Your limit is NGN $limit per transaction. Use a smaller amount or upgrade to Tier 2.',
+          upgrade: true);
+    }
+  } on FormatException {
+    // Form validation owns malformed amounts; never submit from this helper.
+  }
+  return null;
+}
 
 bool kycCheckPending(String status) => const {
       'PENDING',
@@ -41,7 +76,8 @@ String kycCheckLabel(String status) {
 bool kycCanStartNin(KycOverview overview) {
   final bvn = kycCheckStatus(overview, 'BVN');
   final nin = kycCheckStatus(overview, 'NIN');
-  return (bvn == 'VERIFIED' || kycCheckPending(bvn)) &&
+  return !overview.isSuspended &&
+      bvn == 'VERIFIED' &&
       nin != 'VERIFIED' &&
       !kycCheckPending(nin);
 }
@@ -66,6 +102,11 @@ KycOverview _copy(KycOverview source,
         PaystackKycRecovery? recovery,
         bool clearRecovery = false}) =>
     KycOverview(
+      ninVerificationAvailable: source.ninVerificationAvailable,
+      isSuspended: source.isSuspended,
+      accountPreparationStatus: source.accountPreparationStatus,
+      tierOneLimits: source.tierOneLimits,
+      hasTierOneLimitPolicyInfo: source.hasTierOneLimitPolicyInfo,
       firstName: source.firstName,
       lastName: source.lastName,
       phone: source.phone,

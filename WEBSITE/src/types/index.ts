@@ -45,6 +45,11 @@ export interface KycDocument extends KycVerificationMetadata {
 }
 
 export interface KycStatusOverview {
+  isSuspended?: boolean;
+  fullName?: string | null;
+  ninVerificationAvailable?: boolean;
+  accountProvisioning?: { status: string };
+  tierOneLimits?: { currency: string; perTransaction: string; daily: string; maxBalance: string } | null;
   provider: string;
   providerValidationStatus?:
     | "UNVERIFIED"

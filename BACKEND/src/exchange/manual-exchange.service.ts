@@ -1,3 +1,4 @@
+import { TierOneLimitsService } from '../common/services/tier-one-limits.service';
 import {
   BadRequestException,
   ConflictException,
@@ -126,9 +127,11 @@ export class ManualExchangeService {
     if (user.isSuspended) throw new ForbiddenException('Account is suspended');
     if (
       user.kycStatus !== 'VERIFIED' ||
-      !isKycTierAtLeast(user.kycTier, 'TIER_2')
+      !isKycTierAtLeast(user.kycTier, 'TIER_1')
     )
-      throw new ForbiddenException('KYC Tier 2 is required for exchange');
+      throw new ForbiddenException(
+        'Verify your BVN to activate Tier 1 before exchanging',
+      );
   }
   private collection(currency: 'NGN' | 'GHS' = 'NGN') {
     const prefix =
@@ -230,6 +233,16 @@ export class ManualExchangeService {
     try {
       const result = await this.prisma.$transaction(
         async (tx) => {
+          await this.eligible(userId, tx);
+          await new TierOneLimitsService(this.config).checkExternalExchange(
+            tx,
+            {
+              userId,
+              currency: sourceCurrency,
+              amount: new Decimal(quote.amount),
+              source: 'MANUAL_EXCHANGE',
+            },
+          );
           const transaction = await tx.transaction.create({
             data: {
               userId,
@@ -581,6 +594,17 @@ export class ManualExchangeService {
         'AWAITING_CONFIRMATION',
         'Customer submitted transfer proof',
       );
+      await tx.paymentNotification.createMany({
+        data: [
+          {
+            eventKey: `manual-exchange:${row.id}:payment-submitted:${fingerprint}`,
+            audience: 'ADMIN',
+            orderId: row.id,
+            title: `Exchange payment submitted: ${row.amount.toFixed(2)} ${row.sourceCurrency}. Review ${row.reference}.`,
+          },
+        ],
+        skipDuplicates: true,
+      });
       return this.present(await this.find(id, userId, tx));
     });
   }
@@ -929,6 +953,35 @@ export class ManualExchangeService {
           },
         },
       });
+      const customerNotification =
+        next === 'CREDITED'
+          ? {
+              event: 'completed',
+              title: `Payment confirmed. ${row.targetAmount.toFixed(2)} ${row.targetCurrency} added to your TrustPay wallet. ${row.reference}`,
+            }
+          : dto.action === 'CONFIRM_DEPOSIT'
+            ? {
+                event: 'payment-confirmed',
+                title: `Payment confirmed. We are preparing your ${row.targetCurrency} payout. ${row.reference}`,
+              }
+            : next === 'COMPLETED'
+              ? {
+                  event: 'completed',
+                  title: `Payout complete: ${row.targetAmount.toFixed(2)} ${row.targetCurrency} sent. ${row.reference}`,
+                }
+              : null;
+      if (customerNotification)
+        await tx.paymentNotification.createMany({
+          data: [
+            {
+              eventKey: `manual-exchange:${row.id}:${customerNotification.event}`,
+              audience: `USER:${row.userId}`,
+              orderId: row.id,
+              title: customerNotification.title,
+            },
+          ],
+          skipDuplicates: true,
+        });
       return this.present(await this.find(id, undefined, tx), true);
     });
   }

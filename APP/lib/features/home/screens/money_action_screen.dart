@@ -21,6 +21,8 @@ import '../../../core/widgets/trustpay_lottie.dart';
 import '../../../services/auth_service.dart';
 import '../../../services/api_client.dart';
 import '../../../services/home_data_service.dart';
+import '../../../services/kyc_service.dart';
+import '../widgets/kyc_status_presenter.dart';
 import '../../../services/payment_attempt_store.dart';
 import '../../../services/payment_recovery_service.dart';
 import '../../../services/paystack_checkout_recovery.dart';
@@ -3021,7 +3023,7 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
     var confirmed = false;
     try {
       final recoveryVersion = _paymentRecoveryOutcomeVersion;
-      final kycCanConfirm = await _ensureKycCanConfirm();
+      final kycCanConfirm = await _ensureKycCanConfirm(amount);
       if (!kycCanConfirm || !mounted) return;
       // A previous uncertain payment just reached a final state. Let the user
       // inspect that result before intentionally starting a different payment.
@@ -3449,7 +3451,7 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
       return;
     }
 
-    final kycCanConfirm = await _ensureKycCanConfirm();
+    final kycCanConfirm = await _ensureKycCanConfirm(amount);
     if (!kycCanConfirm) return;
 
     final confirmed = await _confirmSubmission(amount);
@@ -3858,7 +3860,7 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
     ].join('|');
   }
 
-  Future<bool> _ensureKycCanConfirm() async {
+  Future<bool> _ensureKycCanConfirm(String amount) async {
     final route = _routeForKycGate();
     if (route == null) return true;
 
@@ -3880,12 +3882,55 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
       status: user.kycStatus,
       kycTier: user.kycTier,
     );
-    if (!isBlocked) return true;
+    if (!isBlocked) {
+      if (user.kycTier != 'TIER_1') return true;
+      try {
+        final overview =
+            await KycService(apiClient: _apiClient).fetchOverview();
+        final gate = kycActionLimitGate(
+            overview,
+            amount,
+            widget.kind == MoneyActionKind.exchange
+                ? _exchangeFrom
+                : _currency);
+        if (gate == null) return true;
+        if (!mounted) return false;
+        final proceed = await showDialog<bool>(
+            context: context,
+            builder: (dialogContext) => AlertDialog(
+                  title: Text(gate.title),
+                  content: Text(gate.message),
+                  actions: [
+                    TextButton(
+                        onPressed: () => Navigator.pop(dialogContext, false),
+                        child: const Text('Back')),
+                    FilledButton(
+                        onPressed: () => Navigator.pop(dialogContext, true),
+                        child: Text(gate.upgrade
+                            ? 'Upgrade to Tier 2'
+                            : 'Contact support'))
+                  ],
+                ));
+        if (proceed == true && mounted) {
+          await context
+              .push(gate.upgrade ? AppRoutes.kyc : AppRoutes.profileSupport);
+        }
+        return false;
+      } catch (error) {
+        if (mounted) {
+          _showMessage(
+              authErrorMessage(
+                  error, 'Could not check your account limits. Try again.'),
+              type: MoneyActionFeedbackType.error);
+        }
+        return false;
+      }
+    }
     if (!mounted) return false;
 
-    final requiresTier2 = KycGatePolicy.vtuRoutesRequiringTier2.contains(route);
+    final pendingVerification = user.kycStatus.toUpperCase() == 'SUBMITTED';
     final goToKyc = await _showKycConfirmationGate(
-      requiresTier2: requiresTier2,
+      pendingVerification: pendingVerification,
     );
     if (goToKyc == true && mounted) {
       context.push(AppRoutes.kyc);
@@ -3933,12 +3978,13 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
     }
   }
 
-  Future<bool?> _showKycConfirmationGate({required bool requiresTier2}) {
-    final title =
-        requiresTier2 ? 'Tier 2 verification required' : 'KYC required';
-    final message = requiresTier2
-        ? 'Complete or upgrade your KYC before confirming this service.'
-        : 'Complete KYC before confirming this action.';
+  Future<bool?> _showKycConfirmationGate({required bool pendingVerification}) {
+    final title = pendingVerification
+        ? 'Your BVN check is in progress'
+        : 'Verify BVN to continue';
+    final message = pendingVerification
+        ? 'View your verification status. This transaction has not been submitted.'
+        : 'Activate Tier 1 to use this service within your account limits.';
 
     return showDialog<bool>(
       context: context,
@@ -3963,7 +4009,9 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
                 backgroundColor: AppColors.primary,
                 foregroundColor: Colors.white,
               ),
-              child: const Text('Complete KYC'),
+              child: Text(pendingVerification
+                  ? 'View verification status'
+                  : 'Verify BVN'),
             ),
           ],
         );
@@ -6703,7 +6751,7 @@ class _FundingAccountPanel extends StatelessWidget {
                                             Icons.account_balance_rounded),
                                 label: Text(
                                   !canRevealAccountNumber
-                                      ? 'Complete KYC'
+                                      ? 'Verify BVN'
                                       : isRequesting
                                           ? 'Requesting account...'
                                           : 'Request account',
@@ -6875,7 +6923,7 @@ class _KycAccountNumberGate extends StatelessWidget {
             child: OutlinedButton.icon(
               onPressed: onCompleteKyc,
               icon: const Icon(Icons.verified_user_rounded, size: 18),
-              label: const Text('Complete KYC'),
+              label: const Text('Verify BVN'),
             ),
           ),
         ],

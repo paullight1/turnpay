@@ -442,7 +442,8 @@ describe('KYC HTTP flow (isolated PostgreSQL)', () => {
     expect((await review(ninId, 'VERIFIED', decisionKey)).body).toEqual(
       approved.body,
     );
-    expect((await service.getUserKycStatus(userId)).kycTier).toBe('TIER_1');
+    // An NIN review alone cannot newly activate BVN-first Tier 1.
+    expect((await service.getUserKycStatus(userId)).kycTier).toBe('TIER_0');
     expect((await deliver()).status).toBe(200);
     await processor.processDueEvents();
     const overview = await service.getUserKycStatus(userId);

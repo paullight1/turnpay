@@ -46,14 +46,23 @@ describe('quote exchange financial boundaries (real PostgreSQL)', () => {
           .mockResolvedValue({ rate: 0.02, markup: 0, isStale: false }),
       } as never,
       redis as never,
-      new ConfigService(),
+      new ConfigService({
+        TIER_ONE_NGN_PER_TRANSACTION: '1500',
+        TIER_ONE_NGN_DAILY: '2000',
+        TIER_ONE_NGN_MAX_BALANCE: '3000',
+      }),
       { info: jest.fn(), warn: jest.fn(), error: jest.fn() } as never,
       new LedgerService(prisma as never),
       { verifyRequired: jest.fn() } as never,
     );
   });
   afterEach(async () => {
-    if (fixture) await cleanupFinancialTransferFixture(prisma, fixture);
+    if (fixture) {
+      await prisma.exchangeReceipt.deleteMany({
+        where: { userId: fixture.users.sender.id },
+      });
+      await cleanupFinancialTransferFixture(prisma, fixture);
+    }
     fixture = undefined;
   });
   afterAll(async () => {
@@ -65,6 +74,28 @@ describe('quote exchange financial boundaries (real PostgreSQL)', () => {
   }
   const quote = (amount = '100.00') =>
     service.createQuote(user(), { from: 'NGN', to: 'GHS', amount });
+
+  it('rejects Tier 1 GHS-wallet receipts before accepting a paid exchange for an unsupported target', async () => {
+    await prisma.user.update({
+      where: { id: user() },
+      data: { kycTier: 'TIER_1' },
+    });
+    await expect(
+      service.submitManualReceipt(user(), {
+        amount: '1000',
+        bankReference: `receipt-${randomUUID()}`,
+        senderName: 'Financial sender',
+        receiptUrl: 'https://example.test/receipt.png',
+      }),
+    ).rejects.toMatchObject({
+      response: expect.objectContaining({
+        code: 'TIER_ONE_CURRENCY_UNAVAILABLE',
+      }),
+    });
+    expect(
+      await prisma.exchangeReceipt.count({ where: { userId: user() } }),
+    ).toBe(0);
+  });
 
   it('protects legacy writers during a rolling deployment', async () => {
     const quoteId = randomUUID();

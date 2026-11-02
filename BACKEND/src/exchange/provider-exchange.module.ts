@@ -1,4 +1,4 @@
-import { ProviderNotificationsService } from './provider-notifications.service';
+import { NotificationsModule } from '../notifications/notifications.module';
 import { Module } from '@nestjs/common';
 import { ProviderExchangeService } from './provider-exchange.service';
 import { ProviderExchangeSettlementService } from './provider-exchange-settlement.service';
@@ -13,17 +13,14 @@ import { WalletsModule } from '../wallets/wallets.module';
 import { ReconciliationModule } from '../common/services/reconciliation.module';
 @Module({
   imports: [
+    NotificationsModule,
     ExchangeModule,
     KoraModule,
     PaystackModule,
     WalletsModule,
     ReconciliationModule,
   ],
-  providers: [
-    ProviderExchangeService,
-    ProviderExchangeSettlementService,
-    ProviderNotificationsService,
-  ],
+  providers: [ProviderExchangeService, ProviderExchangeSettlementService],
   controllers: [ProviderExchangeController, AdminProviderExchangeController],
   exports: [ProviderExchangeService, ProviderExchangeSettlementService],
 })

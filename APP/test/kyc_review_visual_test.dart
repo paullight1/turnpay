@@ -98,9 +98,10 @@ void main() {
       await capture(tester, key, 'bvn-details-${variant.name}');
       await tester.tap(find.byTooltip('Close status'));
       await tester.pumpAndSettle();
-      await tester.ensureVisible(find.text('View verification history'));
+      await tester.ensureVisible(
+          find.widgetWithText(TextButton, 'Verification history'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('View verification history'));
+      await tester.tap(find.widgetWithText(TextButton, 'Verification history'));
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull);
       await capture(tester, key, 'history-${variant.name}');
@@ -114,7 +115,12 @@ void main() {
           onContinueNin: () {})));
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull);
-      expect(tester.getBottomRight(find.text('Continue to NIN')).dy,
+      expect(find.text('Continue to NIN'), findsNothing);
+      expect(
+          tester
+              .getBottomRight(
+                  find.widgetWithText(FilledButton, 'View verification status'))
+              .dy,
           lessThanOrEqualTo(variant.size.height));
       await capture(tester, key, 'submitted-${variant.name}');
       await tester.pumpWidget(const SizedBox());

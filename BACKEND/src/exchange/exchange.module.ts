@@ -1,3 +1,4 @@
+import { NotificationsModule } from '../notifications/notifications.module';
 import {
   ManualExchangeController,
   AdminManualExchangeController,
@@ -23,6 +24,7 @@ import { ReconciliationModule } from '../common/services/reconciliation.module';
 
 @Module({
   imports: [
+    NotificationsModule,
     HttpModule.register({
       timeout: 10000,
       maxRedirects: 5,

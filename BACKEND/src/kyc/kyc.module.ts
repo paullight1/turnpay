@@ -1,3 +1,4 @@
+import { NinjaProvider } from './providers/ninja.provider';
 import { Module } from '@nestjs/common';
 import { HttpModule } from '@nestjs/axios';
 import { ConfigService } from '@nestjs/config';
@@ -26,6 +27,7 @@ import { selectKycProvider } from './providers/kyc-provider.selector';
     PaystackKycRecoveryService,
     MonnifyProvider,
     PaystackProvider,
+    NinjaProvider,
     {
       provide: KYC_PROVIDER_GATEWAY,
       inject: [ConfigService, MonnifyProvider, PaystackProvider],

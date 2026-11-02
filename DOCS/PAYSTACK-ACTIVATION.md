@@ -1,6 +1,6 @@
 # Paystack activation and payment operations
 
-TRUSTPAY's new Nigerian payment flows use Paystack. Identity validation uses BVN plus the customer's existing bank account; NIN upgrades use the audited manual review queue. VTpass still fulfills airtime and bills. Paystack receives NGN; TRUSTPAY's separate exchange workflow controls conversion and settlement.
+TRUSTPAY's new Nigerian payment flows use Paystack. Identity validation uses BVN plus the customer's existing bank account; NIN upgrades use Ninja when explicitly enabled, otherwise the audited manual review queue. VTpass still fulfills airtime and bills. Paystack receives NGN; TRUSTPAY's separate exchange workflow controls conversion and settlement.
 
 ## Configure the backend
 
@@ -197,3 +197,9 @@ New Monnify-specific exchange deposit requests are disabled with Paystack primar
 - [Dedicated virtual accounts](https://paystack.com/docs/payments/dedicated-virtual-accounts/)
 - [Signed webhooks](https://paystack.com/docs/payments/webhooks/)
 - [Transfer lifecycle and merchant approvals](https://paystack.com/docs/transfers/how-transfers-work/)
+
+## BVN-first policy — 2 November 2026
+
+The owner approved Tier 1 access to supported transfers, withdrawals, VTU and exchange within configured limits. NIN upgrades to Tier 2 and does not block an already verified Tier 1 customer. Earlier historical notes referring to either document granting new Tier 1 or universally requiring Tier 2 for withdrawals are superseded by KYC-GUIDE.MD.
+
+Before enabling these new Tier 1 actions, install the approved per-transaction, daily and maximum-balance settings and an active Tier 1 internal-transfer policy. Missing policy deliberately keeps those actions unavailable; do not copy Tier 2 default allowances. Confirm licensed-partner/product acceptance separately. Ninja is disabled by default until authorized provider access is ready. No live customer decision, activation, configuration change or deployment was made by this implementation.

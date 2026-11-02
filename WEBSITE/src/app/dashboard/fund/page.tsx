@@ -27,7 +27,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { bankingApi, paymentApi } from "@/services/api";
-import { getMoneyActionGate } from "@/lib/account-status";
+import { useMoneyActionGate } from "@/lib/use-money-action-gate";
 import { useAuth } from "@/lib/auth-provider";
 import { createMoneyAttemptIdempotencyKey } from "@/lib/idempotency";
 import { getErrorMessage } from "@/lib/errors";
@@ -92,7 +92,7 @@ function FundingSteps({ hasAccount }: { hasAccount: boolean }) {
 export default function FundPage() {
   const { profile, user } = useAuth();
   const queryClient = useQueryClient();
-  const moneyGate = getMoneyActionGate(profile);
+  const moneyGate = useMoneyActionGate(profile, { action: "fund" });
   const email = profile?.email ?? user?.email ?? "";
   const phone = profile?.phone ?? user?.user_metadata?.phone ?? "";
   const [fundingAmount, setFundingAmount] = useState("");

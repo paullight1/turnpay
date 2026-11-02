@@ -491,7 +491,7 @@ export class TransfersService {
     return (
       !user.isSuspended &&
       user.kycStatus === 'VERIFIED' &&
-      isKycTierAtLeast(user.kycTier, 'TIER_2')
+      isKycTierAtLeast(user.kycTier, 'TIER_1')
     );
   }
 
@@ -544,9 +544,9 @@ export class TransfersService {
       throw new ForbiddenException(`${role} must have verified KYC`);
     }
 
-    if (!isKycTierAtLeast(user.kycTier, 'TIER_2')) {
+    if (!isKycTierAtLeast(user.kycTier, 'TIER_1')) {
       throw new ForbiddenException(
-        `${role} must be at least ${formatKycTier('TIER_2')} for transfers`,
+        `${role} must be at least ${formatKycTier('TIER_1')} for transfers`,
       );
     }
   }
@@ -643,7 +643,7 @@ export class TransfersService {
     if (
       user.isSuspended ||
       user.kycStatus !== 'VERIFIED' ||
-      !isKycTierAtLeast(user.kycTier, 'TIER_2')
+      !isKycTierAtLeast(user.kycTier, 'TIER_1')
     ) {
       throw new NotFoundException('Recipient cannot be found or used');
     }

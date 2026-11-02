@@ -20,6 +20,8 @@ import '../../../services/home_data_service.dart';
 import '../../../services/api_client.dart';
 import '../../../services/vtu_service.dart';
 import '../../auth/widgets/tawk_service.dart';
+import '../../notifications/services/notifications_service.dart';
+import '../../notifications/widgets/notification_inbox.dart';
 import '../../wallet/screens/virtual_account_screen.dart';
 
 enum DashboardDetailKind {
@@ -40,12 +42,15 @@ enum ProfileActionKind {
 class DashboardDetailScreen extends StatefulWidget {
   final DashboardDetailKind kind;
   final HomeDataService homeDataService;
+  final NotificationsService notificationsService;
 
   DashboardDetailScreen({
     super.key,
     required this.kind,
     HomeDataService? homeDataService,
-  }) : homeDataService = homeDataService ?? HomeDataService();
+    NotificationsService? notificationsService,
+  })  : homeDataService = homeDataService ?? HomeDataService(),
+        notificationsService = notificationsService ?? NotificationsService();
 
   @override
   State<DashboardDetailScreen> createState() => _DashboardDetailScreenState();
@@ -199,7 +204,8 @@ class _DashboardDetailScreenState extends State<DashboardDetailScreen>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    if (widget.kind != DashboardDetailKind.virtualAccount) {
+    if (widget.kind != DashboardDetailKind.virtualAccount &&
+        widget.kind != DashboardDetailKind.notifications) {
       _future = widget.homeDataService.fetchDashboard();
     }
   }
@@ -216,7 +222,10 @@ class _DashboardDetailScreenState extends State<DashboardDetailScreen>
   }
 
   void _reload() {
-    if (widget.kind == DashboardDetailKind.virtualAccount) return;
+    if (widget.kind == DashboardDetailKind.virtualAccount ||
+        widget.kind == DashboardDetailKind.notifications) {
+      return;
+    }
     setState(() {
       _future = widget.homeDataService.fetchDashboard();
     });
@@ -229,6 +238,9 @@ class _DashboardDetailScreenState extends State<DashboardDetailScreen>
 
     if (widget.kind == DashboardDetailKind.virtualAccount) {
       return VirtualAccountScreen(service: widget.homeDataService);
+    }
+    if (widget.kind == DashboardDetailKind.notifications) {
+      return NotificationInboxScreen(service: widget.notificationsService);
     }
 
     return Scaffold(
@@ -773,9 +785,7 @@ Widget _bodyFor(DashboardDetailKind kind, HomeDashboardData data) {
     case DashboardDetailKind.kyc:
       return _KycBody(status: data.user.kycStatus);
     case DashboardDetailKind.notifications:
-      return _NotificationsBody(
-        data: data,
-      );
+      return const SizedBox.shrink();
   }
 }
 
@@ -834,8 +844,7 @@ _DetailConfig _configFor(DashboardDetailKind kind) {
     case DashboardDetailKind.notifications:
       return const _DetailConfig(
         title: 'Notifications',
-        subtitle:
-            'Recent account status. Refresh for updates; dismissals last for this visit.',
+        subtitle: 'Durable exchange updates and payout status.',
       );
   }
 }
@@ -893,7 +902,7 @@ class _SecurityLimitsBody extends StatelessWidget {
               Text(
                 verified
                     ? 'Your account is verified. Upgrade tiers unlock higher limits as they become available.'
-                    : 'Complete verification to unlock withdrawals, virtual accounts, and higher limits.',
+                    : 'Verify BVN to activate Tier 1 and start using your account.',
                 style: AppTextStyles.bodyM,
               ),
               const SizedBox(height: AppSpacing.md),
@@ -902,7 +911,7 @@ class _SecurityLimitsBody extends StatelessWidget {
                 child: FilledButton.icon(
                   onPressed: onKyc,
                   icon: const Icon(Icons.trending_up_rounded),
-                  label: Text(verified ? 'View KYC status' : 'Upgrade account'),
+                  label: Text(verified ? 'View verification' : 'Verify BVN'),
                 ),
               ),
             ],
@@ -910,14 +919,15 @@ class _SecurityLimitsBody extends StatelessWidget {
         ),
         _TierStatusCard(
           title: 'Tier 1 verification',
-          detail: 'Basic profile, phone, and starter wallet access.',
+          detail:
+              'Verified BVN. Bank account and transactions within Tier 1 limits.',
           active: tier == 'TIER_1' || tier == 'TIER_2' || tier == 'TIER_3',
           onTap: onKyc,
         ),
         _TierStatusCard(
           title: 'Tier 2 KYC verification',
           detail:
-              'Identity verification for transfers, VTU, and virtual account access.',
+              'Add verified NIN to your BVN to upgrade your account limits.',
           active: tier == 'TIER_2' || tier == 'TIER_3',
           onTap: onKyc,
         ),
@@ -3173,157 +3183,6 @@ class _ActivityBody extends StatelessWidget {
   }
 }
 
-class _NotificationsBody extends StatefulWidget {
-  final HomeDashboardData data;
-
-  const _NotificationsBody({required this.data});
-
-  @override
-  State<_NotificationsBody> createState() => _NotificationsBodyState();
-}
-
-class _NotificationsBodyState extends State<_NotificationsBody> {
-  final Set<String> _dismissedIds = {};
-
-  @override
-  Widget build(BuildContext context) {
-    AppColors.watch(context);
-    final items = _notificationItems(widget.data)
-        .where((item) => !_dismissedIds.contains(item.id))
-        .toList();
-
-    if (items.isEmpty) {
-      return const _HistoryEmptyState();
-    }
-
-    return Column(
-      children: [
-        ...items.map(
-          (item) => Dismissible(
-            key: ValueKey('notification-${item.id}'),
-            direction: DismissDirection.horizontal,
-            onDismissed: (_) => _dismiss(item.id),
-            background: const _NotificationDismissBackground(
-              alignment: Alignment.centerLeft,
-              icon: Icons.check_rounded,
-            ),
-            secondaryBackground: const _NotificationDismissBackground(
-              alignment: Alignment.centerRight,
-              icon: Icons.close_rounded,
-            ),
-            child: _NotificationCard(
-              item: item,
-              onClose: () => _dismiss(item.id),
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-
-  void _dismiss(String id) {
-    setState(() {
-      _dismissedIds.add(id);
-    });
-  }
-}
-
-class _NotificationCard extends StatelessWidget {
-  final _NotificationItem item;
-  final VoidCallback onClose;
-
-  const _NotificationCard({
-    required this.item,
-    required this.onClose,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    AppColors.watch(context);
-    return Container(
-      margin: const EdgeInsets.only(bottom: AppSpacing.sm),
-      child: Material(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(18),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(18),
-          onTap: () => context.push(item.route),
-          child: Container(
-            padding: const EdgeInsets.all(AppSpacing.md),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(18),
-              border: Border.all(color: item.color.withValues(alpha: 0.24)),
-            ),
-            child: Row(
-              children: [
-                Container(
-                  width: 44,
-                  height: 44,
-                  decoration: BoxDecoration(
-                    color: item.color.withValues(alpha: 0.12),
-                    shape: BoxShape.circle,
-                  ),
-                  child: Icon(item.icon, color: item.color, size: 22),
-                ),
-                const SizedBox(width: AppSpacing.md),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        item.title,
-                        style: AppTextStyles.labelM.copyWith(
-                          fontWeight: FontWeight.w900,
-                        ),
-                      ),
-                      const SizedBox(height: 3),
-                      Text(item.detail, style: AppTextStyles.bodyS),
-                    ],
-                  ),
-                ),
-                IconButton(
-                  tooltip: 'Dismiss',
-                  onPressed: onClose,
-                  icon: Icon(
-                    Icons.close_rounded,
-                    color: AppColors.textHint,
-                    size: 20,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _NotificationDismissBackground extends StatelessWidget {
-  final Alignment alignment;
-  final IconData icon;
-
-  const _NotificationDismissBackground({
-    required this.alignment,
-    required this.icon,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    AppColors.watch(context);
-    return Container(
-      alignment: alignment,
-      margin: const EdgeInsets.only(bottom: AppSpacing.sm),
-      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
-      decoration: BoxDecoration(
-        color: AppColors.primary.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(18),
-      ),
-      child: Icon(icon, color: AppColors.primary),
-    );
-  }
-}
-
 class _VtuOrderBody extends StatelessWidget {
   final VtuOrderStatus order;
   final bool isChecking;
@@ -3588,62 +3447,6 @@ class _TransactionTone {
     required this.background,
     required this.amountColor,
   });
-}
-
-class _NotificationItem {
-  final String id;
-  final String title;
-  final String detail;
-  final IconData icon;
-  final Color color;
-  final String route;
-
-  const _NotificationItem({
-    required this.id,
-    required this.title,
-    required this.detail,
-    required this.icon,
-    required this.color,
-    required this.route,
-  });
-}
-
-List<_NotificationItem> _notificationItems(HomeDashboardData data) {
-  return [
-    for (final transaction in data.transactions)
-      _NotificationItem(
-        id: 'transaction-${transaction.reference}-${transaction.status}',
-        title:
-            '${transaction.type.replaceAll('_', ' ')} · ${transaction.status.replaceAll('_', ' ')}',
-        detail: 'Reference: ${transaction.reference}',
-        icon: Icons.receipt_long_outlined,
-        color: transaction.status == 'SUCCESS'
-            ? AppColors.success
-            : AppColors.textSecondary,
-        route: AppRoutes.activity,
-      ),
-    if (data.user.kycStatus.toUpperCase() != 'VERIFIED')
-      _NotificationItem(
-        id: 'kyc-pending',
-        title: data.user.kycStatus.toUpperCase() == 'PENDING'
-            ? 'KYC pending'
-            : 'KYC: ${data.user.kycStatus}',
-        detail: 'Open verification to check your current requirements.',
-        icon: Icons.assignment_ind_outlined,
-        color: AppColors.warning,
-        route: AppRoutes.kyc,
-      ),
-    if (data.transactions.isEmpty)
-      _NotificationItem(
-        id: 'no-transactions',
-        title: 'No recent activity',
-        detail:
-            'Refresh to check for account updates. Dismissals apply only to this visit.',
-        icon: Icons.history_rounded,
-        color: AppColors.textSecondary,
-        route: AppRoutes.activity,
-      ),
-  ];
 }
 
 class _KycBody extends StatelessWidget {

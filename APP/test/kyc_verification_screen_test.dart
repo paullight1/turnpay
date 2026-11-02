@@ -303,7 +303,8 @@ void main() {
     expect(service.attemptKeys, hasLength(2));
     expect(service.attemptKeys.last, service.attemptKeys.first);
   });
-  testWidgets('BVN in review offers NIN next and independent status details',
+  testWidgets(
+      'BVN in review keeps NIN locked and offers independent status details',
       (tester) async {
     final service = _FakeKycService();
     await tester.pumpWidget(MaterialApp(
@@ -320,7 +321,7 @@ void main() {
                 updatedAt: null,
                 documents: []))));
     await tester.pumpAndSettle();
-    expect(find.text('Continue to NIN'), findsOneWidget);
+    expect(find.text('Upgrade to Tier 2'), findsNothing);
     expect(
         find.text(
             'Paystack is reviewing your BVN and linked bank account. Your existing KYC tier remains unchanged.'),
@@ -361,14 +362,14 @@ void main() {
         findsOneWidget);
     await tester.tap(find.byTooltip('Close status'));
     await tester.pumpAndSettle();
-    await tester.ensureVisible(find.text('View verification history'));
+    await tester.ensureVisible(find.text('Verification history'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('View verification history'));
+    await tester.tap(find.text('Verification history'));
     await tester.pumpAndSettle();
-    expect(find.text('Verification history'), findsOneWidget);
+    expect(find.text('Verification history'), findsNWidgets(2));
     expect(service.attemptKeys, isEmpty);
   });
-  testWidgets('submitted BVN shows a simple confirmation then continues to NIN',
+  testWidgets('submitted BVN shows confirmation and waits before offering NIN',
       (tester) async {
     final service = _FakeKycService()..reviewAfterSubmission = true;
     await review(tester, service);
@@ -381,9 +382,11 @@ void main() {
     expect(find.text('BVN under review'), findsOneWidget);
     expect(find.text('We’ve received your BVN and linked bank details.'),
         findsOneWidget);
-    await tester.tap(find.text('Continue to NIN'));
+    expect(find.text('Continue to NIN'), findsNothing);
+    await tester.tap(find.text('View verification status'));
     await tester.pumpAndSettle();
-    expect(find.byKey(const ValueKey('kyc-nin-number')), findsOneWidget);
+    expect(find.byKey(const ValueKey('kyc-nin-number')), findsNothing);
+    expect(find.text('Available after BVN verification'), findsOneWidget);
     expect(service.attemptKeys, hasLength(1));
     expect(service.ninSubmissions, 0);
   });
@@ -404,7 +407,7 @@ void main() {
     await tester.pump(const Duration(seconds: 15));
     await tester.pumpAndSettle();
     expect(find.text('Under review'), findsOneWidget);
-    expect(find.text('Continue to NIN'), findsOneWidget);
+    expect(find.text('Upgrade to Tier 2'), findsNothing);
     expect(service.attemptKeys, hasLength(1));
     service.overview = const KycOverview(
         status: 'REJECTED',
@@ -459,7 +462,7 @@ void main() {
         findsNothing);
     expect(service.attemptKeys, isEmpty);
   });
-  testWidgets('NIN evidence can be submitted while BVN is under review',
+  testWidgets('NIN evidence can be submitted after BVN activates Tier 1',
       (tester) async {
     const channel = MethodChannel('miguelruivo.flutter.plugins.filepicker');
     final bytes = _sampleNinImage();
@@ -477,10 +480,10 @@ void main() {
     addTearDown(() => TestDefaultBinaryMessengerBinding
         .instance.defaultBinaryMessenger
         .setMockMethodCallHandler(channel, null));
-    final service = _FakeKycService()..overview = _bvnInReview;
+    final service = _FakeKycService()..overview = _bvnVerified;
     await tester.pumpWidget(MaterialApp(
         home: KycVerificationScreen(
-            service: service, initialOverview: _bvnInReview)));
+            service: service, initialOverview: _bvnVerified)));
     await tester.pumpAndSettle();
     Future<void> tap(Finder finder) async {
       await tester.ensureVisible(finder);
@@ -489,7 +492,7 @@ void main() {
       await tester.pumpAndSettle();
     }
 
-    await tap(find.text('Continue to NIN'));
+    await tap(find.text('Upgrade to Tier 2'));
     final ninField =
         tester.widget<TextField>(find.byKey(const ValueKey('kyc-nin-number')));
     expect(ninField.obscureText, isFalse);
@@ -510,8 +513,8 @@ void main() {
             .join(' | '));
     expect(find.text('NIN under review'), findsOneWidget);
     await tap(find.text('View verification status'));
-    expect(find.text('Under review'), findsNWidgets(2));
-    expect(find.text('Continue to NIN'), findsNothing);
+    expect(find.text('Under review'), findsOneWidget);
+    expect(find.text('Upgrade to Tier 2'), findsNothing);
   });
 
   for (final variant in [
@@ -550,7 +553,7 @@ void main() {
           .instance.defaultBinaryMessenger
           .setMockMethodCallHandler(channel, null));
       final capture = GlobalKey();
-      final service = _FakeKycService()..overview = _bvnInReview;
+      final service = _FakeKycService()..overview = _bvnVerified;
       await tester.pumpWidget(RepaintBoundary(
         key: capture,
         child: MaterialApp(
@@ -562,7 +565,7 @@ void main() {
             child: child!,
           ),
           home: KycVerificationScreen(
-              service: service, initialOverview: _bvnInReview),
+              service: service, initialOverview: _bvnVerified),
         ),
       ));
       await tester.pumpAndSettle();
@@ -573,7 +576,7 @@ void main() {
         await tester.pumpAndSettle();
       }
 
-      await tap(find.text('Continue to NIN'));
+      await tap(find.text('Upgrade to Tier 2'));
       await tester.enterText(
           find.byKey(const ValueKey('kyc-nin-number')), '77777777777');
       await tap(find.text('Upload NIN'));
@@ -637,7 +640,8 @@ void main() {
     await tester.pump();
     await tester.pumpAndSettle();
     expect(service.fetchCount, 1);
-    expect(find.text('Your NIN and BVN are verified.'), findsOneWidget,
+    expect(find.text('Your BVN and NIN are verified. You’re on Tier 2.'),
+        findsOneWidget,
         reason: tester
             .widgetList<Text>(find.byType(Text))
             .map((text) => text.data)
@@ -687,7 +691,8 @@ void main() {
     await tester.pump();
     await tester.pumpAndSettle();
     expect(service.fetchCount, 1);
-    expect(find.text('Your NIN and BVN are verified.'), findsOneWidget,
+    expect(find.text('Your BVN and NIN are verified. You’re on Tier 2.'),
+        findsOneWidget,
         reason: tester
             .widgetList<Text>(find.byType(Text))
             .map((text) => text.data)
@@ -812,7 +817,8 @@ void main() {
 
     expect(find.text('KYC verification'), findsOneWidget);
     expect(
-      find.text('Complete two checks. Follow their progress here.'),
+      find.text(
+          'Verify your BVN to get a bank account and start transacting within Tier 1 limits.'),
       findsOneWidget,
     );
     expect(find.text('Country'), findsNothing);
@@ -820,7 +826,7 @@ void main() {
     expect(find.text('Nigeria'), findsNothing);
     expect(find.text('Ghana'), findsNothing);
     expect(find.text('NIN verification'), findsOneWidget);
-    expect(find.text('BVN verification'), findsOneWidget);
+    expect(find.text('Bank verification'), findsOneWidget);
     expect(find.text('Verify NIN'), findsNothing);
     await _openBvnVerification(tester);
     expect(find.byKey(const ValueKey('kyc-identity-number')), findsNothing);
@@ -879,7 +885,7 @@ void main() {
             of: find.ancestor(
                 of: find.byKey(const ValueKey('kyc-consent')),
                 matching: find.byType(Scaffold)),
-            matching: find.text('View verification history')),
+            matching: find.text('Verification history')),
         findsNothing);
   });
 
@@ -1173,7 +1179,8 @@ void main() {
     );
     await tester.pump();
 
-    expect(find.text('Your NIN and BVN are verified.'), findsOneWidget);
+    expect(find.text('Your BVN and NIN are verified. You’re on Tier 2.'),
+        findsOneWidget);
     expect(find.byKey(const ValueKey('kyc-identity-number')), findsNothing);
   });
 }
@@ -1344,3 +1351,16 @@ const _bvnInReview = KycOverview(
     verificationUri: null,
     updatedAt: null,
     documents: []);
+
+const _bvnVerified = KycOverview(
+    status: 'VERIFIED',
+    tier: 'TIER_1',
+    provider: 'Paystack',
+    providerValidationStatus: 'VERIFIED',
+    reference: 'bvn-verified',
+    failureReason: '',
+    verificationUri: null,
+    updatedAt: null,
+    documents: [
+      KycDocumentSummary(type: 'BVN', status: 'VERIFIED', updatedAt: null)
+    ]);

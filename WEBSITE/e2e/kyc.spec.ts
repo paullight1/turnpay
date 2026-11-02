@@ -1,221 +1,339 @@
-import { expect, test, type Page } from "@playwright/test";
+import { test, expect as baseExpect, type Page } from "@playwright/test";
+test.setTimeout(120000);
+const expect = baseExpect.configure({ timeout: 15000 });
 
-const accessToken = "access-token-kyc-user";
+test.use({ trace: "retain-on-failure" });
+test.afterEach(async ({ page }, info) => {
+  if (info.status !== info.expectedStatus && !page.isClosed()) {
+    const state = await page
+      .evaluate(() => ({
+        auth: (window as Window & { __TRUSTPAY_AUTH_DEBUG__?: unknown })
+          .__TRUSTPAY_AUTH_DEBUG__,
+        pathname: window.location.pathname,
+      }))
+      .catch(() => null);
+    await info.attach("auth-initialization", {
+      body: JSON.stringify(state),
+      contentType: "application/json",
+    });
+  }
+});
+
 const session = {
-  access_token: accessToken,
+  access_token: "access-token-kyc-user",
   refresh_token: "refresh-token-kyc-user",
   expires_in: 3600,
   expires_at: Math.floor(Date.now() / 1000) + 3600,
   token_type: "bearer",
-  user: { id: "user-kyc", email: "kyc@trustpay.app", role: "USER" },
+  user: { id: "kyc-user", email: "kyc@example.test", role: "USER" },
   authMode: "local",
 };
-
-type KycOverviewFixture = {
-  provider: string;
-  kycStatus: string;
-  kycTier: string;
-  latestVerification?: {
-    provider: string;
-    status: string;
-    reference: string;
-    errorMessage?: string;
-  } | null;
-  documents: Array<{
-    id: string;
-    type: string;
-    idNumber: string;
-    status: string;
-  }>;
-};
-
-function encodeSessionCookie() {
-  return `base64-${Buffer.from(JSON.stringify(session), "utf8").toString("base64url")}`;
-}
-
-async function installKycMocks(page: Page, overview: KycOverviewFixture) {
+async function mocks(
+  page: Page,
+  tier = "TIER_0",
+  bvn = "UNVERIFIED",
+  nin = "",
+  automatic = false,
+  restricted = false,
+) {
+  let currentBvn = bvn;
+  let currentNin = nin;
   await page.context().addCookies([
     {
       name: "supabase.auth.token",
-      value: encodeSessionCookie(),
+      value: `base64-${Buffer.from(JSON.stringify(session)).toString("base64url")}`,
       domain: "127.0.0.1",
       path: "/",
       httpOnly: true,
       sameSite: "Lax",
     },
   ]);
-  await page.route("**/api/auth/session", (route) =>
-    route.fulfill({
-      status: 200,
+  const user = {
+    id: "kyc-user",
+    email: "kyc@example.test",
+    phone: "+2348012345678",
+    fullName: "James Bond",
+    role: "USER",
+    isSuspended: restricted,
+    kycStatus: tier === "TIER_0" ? "PENDING" : "VERIFIED",
+    kycTier: tier,
+  };
+  await page.route("**/api/auth/session", (r) =>
+    r.fulfill({
       json: {
         session: { ...session, refresh_token: "" },
-        csrfToken: "csrf-token-kyc",
+        csrfToken: "kyc-csrf",
       },
     }),
   );
-  await page.route("**/api/auth/bootstrap", (route) =>
-    route.fulfill({
-      status: 200,
+  await page.route("**/api/auth/bootstrap", (r) =>
+    r.fulfill({ json: { user, wallets: [] } }),
+  );
+  await page.route("**/api/users/me", (r) => r.fulfill({ json: user }));
+  await page.route("**/api/payments/banks*", (r) =>
+    r.fulfill({ json: [{ code: "058", name: "Guaranty Trust Bank" }] }),
+  );
+  await page.route("**/api/kyc/status", (r) =>
+    r.fulfill({
       json: {
-        user: {
-          id: "user-kyc",
-          email: "kyc@trustpay.app",
-          phone: "+2348012345678",
-          fullName: "James Bond",
-          role: "USER",
-          kycStatus: overview.kycStatus,
-          kycTier: overview.kycTier,
-        },
-        wallets: [],
-      },
-    }),
-  );
-  await page.route("**/api/kyc/status", (route) =>
-    route.fulfill({ status: 200, json: overview }),
-  );
-}
-
-const emptyOverview: KycOverviewFixture = {
-  provider: "MONNIFY",
-  kycStatus: "PENDING",
-  kycTier: "TIER_0",
-  latestVerification: null,
-  documents: [],
-};
-
-test.describe("Monnify KYC", () => {
-  test("shows a Nigeria-only form, useful empty state, and submits exact DOB", async ({
-    page,
-  }) => {
-    await installKycMocks(page, emptyOverview);
-    let submittedBody: Record<string, unknown> | undefined;
-    let idempotencyKey: string | undefined;
-    await page.route("**/api/kyc/verify", async (route) => {
-      submittedBody = route.request().postDataJSON();
-      idempotencyKey = route.request().headers()["idempotency-key"];
-      await route.fulfill({
-        status: 200,
-        json: {
-          id: "document-1",
-          type: "NIN",
-          idNumber: "*******7777",
-          status: "VERIFIED",
-          verificationStatus: "VERIFIED",
-          provider: "MONNIFY",
-          reference: "document-1",
-        },
-      });
-    });
-
-    await page.goto("/dashboard/kyc");
-
-    await expect(
-      page.getByRole("heading", { name: "Identity verification" }),
-    ).toBeVisible();
-    await expect(page.getByText("Nigeria", { exact: true })).toBeVisible();
-    await expect(page.getByText("Ghana", { exact: true })).toHaveCount(0);
-    await expect(
-      page.getByRole("button", { name: "BVN", exact: true }),
-    ).toBeVisible();
-    await expect(
-      page.getByRole("button", { name: "NIN", exact: true }),
-    ).toBeVisible();
-    await expect(page.getByLabel("Date of birth")).toBeVisible();
-    await expect(
-      page.getByText(/prepare my NGN account automatically/i),
-    ).toBeVisible();
-    await expect(page.getByText("No identity checks yet.")).toBeVisible();
-    await expect(
-      page.getByText(/Choose BVN or NIN above to begin/i),
-    ).toBeVisible();
-
-    await page.getByRole("button", { name: "NIN", exact: true }).click();
-    await page.getByLabel("Identity number").fill("77777777777");
-    await page.getByLabel("Date of birth").fill("1975-01-01");
-    await page.getByRole("checkbox").check();
-    await page.getByRole("button", { name: "Submit and prepare account" }).click();
-
-    await expect
-      .poll(() => submittedBody)
-      .toEqual({
-        country: "NG",
-        type: "NIN",
-        idNumber: "77777777777",
-        dateOfBirth: "1975-01-01",
-        consentAccepted: true,
-      });
-    expect(idempotencyKey).toMatch(/^[0-9a-f-]{36}$/i);
-  });
-
-  for (const [status, message] of [
-    ["REVIEW_REQUIRED", "Your identity check needs a manual review."],
-    ["REJECTED", "We could not match those identity details."],
-    ["FAILED", "The identity service could not complete your check."],
-  ] as const) {
-    test(`renders the ${status} recovery state`, async ({ page }) => {
-      await installKycMocks(page, {
-        provider: "MONNIFY",
-        kycStatus: status === "REVIEW_REQUIRED" ? "SUBMITTED" : "REJECTED",
-        kycTier: "TIER_0",
-        latestVerification: {
-          provider: "MONNIFY",
-          status,
-          reference: "document-state",
-          errorMessage:
-            status === "FAILED" ? "Provider unavailable" : undefined,
+        isSuspended: restricted,
+        provider: "PAYSTACK",
+        providerValidationStatus: currentBvn,
+        kycStatus: user.kycStatus,
+        kycTier: tier,
+        ninVerificationAvailable: automatic,
+        tierOneLimits: {
+          currency: "NGN",
+          perTransaction: "100.00",
+          daily: "200.00",
+          maxBalance: "300.00",
         },
         documents: [
-          {
-            id: "document-state",
-            type: "BVN",
-            idNumber: "*******7777",
-            status,
-          },
+          ...(currentBvn === "VERIFIED"
+            ? [
+                {
+                  id: "bvn-1",
+                  type: "BVN",
+                  provider: "PAYSTACK",
+                  status: "VERIFIED",
+                  idNumber: "*******7777",
+                },
+              ]
+            : []),
+          ...(currentNin
+            ? [
+                {
+                  id: "nin-1",
+                  type: "NIN",
+                  status: currentNin,
+                  idNumber: "*******5555",
+                },
+              ]
+            : []),
         ],
-      });
-
-      await page.goto("/dashboard/kyc");
-
-      await expect(page.getByText(message)).toBeVisible();
-      await expect(
-        page.getByRole("button", { name: /Verify (BVN|NIN)/ }),
-      ).toBeVisible();
-    });
-  }
-
-  test("renders a quiet completion state at Tier 2", async ({ page }) => {
-    await installKycMocks(page, {
-      provider: "MONNIFY",
-      kycStatus: "VERIFIED",
-      kycTier: "TIER_2",
-      latestVerification: {
-        provider: "MONNIFY",
-        status: "VERIFIED",
-        reference: "document-nin",
       },
-      documents: [
-        {
-          id: "document-bvn",
-          type: "BVN",
-          idNumber: "*******1111",
-          status: "VERIFIED",
-        },
-        {
-          id: "document-nin",
-          type: "NIN",
-          idNumber: "*******2222",
-          status: "VERIFIED",
-        },
-      ],
-    });
+    }),
+  );
+  return {
+    setBvn: (status: string) => {
+      currentBvn = status;
+    },
+    setNin: (status: string) => {
+      currentNin = status;
+    },
+  };
+}
 
-    await page.goto("/dashboard/kyc");
-
-    await expect(
-      page.getByText("Identity verification complete"),
-    ).toBeVisible();
-    await expect(page.getByLabel("Identity number")).toHaveCount(0);
-    await expect(page.getByText("*******1111")).toBeVisible();
-    await expect(page.getByText("*******2222")).toBeVisible();
+test("starts with BVN and a quieter locked Tier 2 step", async ({ page }) => {
+  await mocks(page);
+  await page.goto("/dashboard/kyc");
+  await expect(
+    page.getByRole("heading", { name: "Activate your account" }),
+  ).toBeVisible();
+  await expect(
+    page.getByText("Available after BVN verification"),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Verify BVN", exact: true }).click();
+  await expect(page.getByLabel("BVN", { exact: true })).toBeVisible();
+  await expect(page.getByLabel("Bank", { exact: true })).toBeVisible();
+  await expect(page.getByLabel("Date of birth", { exact: true })).toBeVisible();
+  await page.screenshot({
+    path: "output/kyc-bvn-first-form.png",
+    fullPage: true,
   });
+});
+
+test("Tier 1 is active without NIN and has an upgrade rather than a transaction block", async ({
+  page,
+}) => {
+  await mocks(page, "TIER_1", "VERIFIED");
+  await page.goto("/dashboard/kyc");
+  await expect(
+    page.getByRole("heading", { name: "Your account is active" }),
+  ).toBeVisible();
+  await expect(
+    page.getByText(
+      "Transact within your Tier 1 limits. Add NIN when you’re ready to upgrade.",
+    ),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Upgrade to Tier 2" }),
+  ).toBeVisible();
+  await expect(page.getByText("Withdrawals require Tier 2.")).toHaveCount(0);
+  await page.screenshot({
+    path: "output/kyc-bvn-first-tier-one.png",
+    fullPage: true,
+  });
+});
+
+test("a pending NIN keeps Tier 1 active and cannot be submitted twice", async ({
+  page,
+}) => {
+  await mocks(page, "TIER_1", "VERIFIED", "SUBMITTED");
+  await page.goto("/dashboard/kyc");
+  await expect(
+    page.getByRole("heading", { name: "Your account is active" }),
+  ).toBeVisible();
+  await expect(
+    page.getByText("Your NIN is under review. Tier 1 stays active."),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Upgrade to Tier 2" }),
+  ).toHaveCount(0);
+});
+
+test("pending BVN has a status action without another submission", async ({
+  page,
+}) => {
+  await mocks(page, "TIER_0", "PENDING");
+  await page.goto("/dashboard/kyc");
+  await expect(
+    page.getByRole("heading", { name: "We’re checking your BVN" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Check status" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Verify BVN", exact: true }),
+  ).toHaveCount(0);
+});
+
+test("automated NIN upgrade explains sharing and requires fresh consent", async ({
+  page,
+}) => {
+  await mocks(page, "TIER_1", "VERIFIED", "", true);
+  await page.goto("/dashboard/kyc");
+  await page.getByRole("button", { name: "Upgrade to Tier 2" }).click();
+  await expect(page.getByLabel("NIN", { exact: true })).toBeVisible();
+  await expect(page.getByText(/shared securely with Ninja/)).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Verify NIN", exact: true }),
+  ).toBeDisabled();
+});
+
+test("Tier 2 completion has no redundant upgrade or BVN submission", async ({
+  page,
+}) => {
+  await mocks(page, "TIER_2", "VERIFIED", "VERIFIED");
+  await page.goto("/dashboard/kyc");
+  await expect(
+    page.getByRole("heading", { name: "You’re fully verified" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Upgrade to Tier 2" }),
+  ).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: "Verify BVN", exact: true }),
+  ).toHaveCount(0);
+});
+
+test("withdrawal gate gives a BVN-specific next action", async ({ page }) => {
+  await mocks(page);
+  await page.goto("/dashboard/withdraw");
+  await expect(
+    page.getByText("Verify BVN to continue", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("link", { name: "Verify BVN", exact: true }),
+  ).toBeVisible();
+});
+
+test("submits BVN with linked bank details, consent and a single idempotent attempt", async ({
+  page,
+}) => {
+  const state = await mocks(page);
+  let submitted: Record<string, unknown> | undefined;
+  let key: string | undefined;
+  await page.route("**/api/kyc/verify", async (route) => {
+    submitted = route.request().postDataJSON();
+    key = route.request().headers()["idempotency-key"];
+    state.setBvn("PENDING");
+    await route.fulfill({
+      json: {
+        id: "bvn-1",
+        type: "BVN",
+        status: "SUBMITTED",
+        verificationStatus: "PENDING",
+        provider: "PAYSTACK",
+        reference: "test-bvn-ref",
+        idNumber: "*******7777",
+      },
+    });
+  });
+  await page.goto("/dashboard/kyc");
+  await page.getByRole("button", { name: "Verify BVN", exact: true }).click();
+  await page.getByLabel("BVN", { exact: true }).fill("77777777777");
+  await page.getByLabel("Date of birth", { exact: true }).fill("1975-01-01");
+  await page.getByLabel("Bank", { exact: true }).selectOption("058");
+  await page.getByLabel("Linked account number").fill("0123456789");
+  await page.getByRole("checkbox").nth(0).check();
+  await page.getByRole("checkbox").nth(1).check();
+  await page.getByRole("button", { name: "Submit BVN", exact: true }).click();
+  await expect(
+    page.getByRole("heading", { name: "We’re checking your BVN" }),
+  ).toBeVisible();
+  expect(submitted).toMatchObject({
+    type: "BVN",
+    country: "NG",
+    idNumber: "77777777777",
+    accountNumber: "0123456789",
+    bankCode: "058",
+    dateOfBirth: "1975-01-01",
+    consentAccepted: true,
+    accountSetupConsent: true,
+  });
+  expect(key).toBeTruthy();
+  await expect(
+    page.getByRole("button", { name: "Submit BVN", exact: true }),
+  ).toHaveCount(0);
+});
+
+test("a rejected automated NIN reports the real result and preserves Tier 1", async ({
+  page,
+}) => {
+  const state = await mocks(page, "TIER_1", "VERIFIED", "", true);
+  await page.route("**/api/kyc/verify", (route) => {
+    state.setNin("REJECTED");
+    return route.fulfill({
+      json: {
+        id: "nin-1",
+        type: "NIN",
+        status: "REJECTED",
+        verificationStatus: "REJECTED",
+        provider: "NINJA",
+        reference: "test-nin-ref",
+        idNumber: "*******7777",
+      },
+    });
+  });
+  await page.goto("/dashboard/kyc");
+  await page.getByRole("button", { name: "Upgrade to Tier 2" }).click();
+  await page.getByLabel("NIN", { exact: true }).fill("77777777777");
+  await page.getByLabel("Date of birth", { exact: true }).fill("1975-01-01");
+  await page.getByRole("checkbox").check();
+  await page.getByRole("button", { name: "Verify NIN", exact: true }).click();
+  await expect(
+    page.getByText(
+      "Your NIN could not be matched. Review your details or contact support. Tier 1 stays active.",
+    ),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Your account is active" }),
+  ).toBeVisible();
+});
+
+test("account restriction takes precedence over a verified tier", async ({
+  page,
+}) => {
+  await mocks(page, "TIER_1", "VERIFIED", "", false, true);
+  await page.goto("/dashboard/kyc");
+  await expect(
+    page.getByRole("heading", { name: "Your account is under review" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("link", { name: "Contact support" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Upgrade to Tier 2" }),
+  ).toHaveCount(0);
 });

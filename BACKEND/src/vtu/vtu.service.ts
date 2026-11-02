@@ -1054,9 +1054,9 @@ export class VtuService {
       throw new ForbiddenException('KYC verification is required');
     }
 
-    if (!isKycTierAtLeast(user.kycTier, 'TIER_2')) {
+    if (!isKycTierAtLeast(user.kycTier, 'TIER_1')) {
       throw new ForbiddenException(
-        `KYC ${formatKycTier('TIER_2')} is required for VTU purchases`,
+        `KYC ${formatKycTier('TIER_1')} is required for VTU purchases`,
       );
     }
   }

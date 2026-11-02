@@ -702,6 +702,40 @@ export const adminAuditApi = {
   },
 };
 
+export type AdminNotification = {
+  id: string;
+  eventKey: string;
+  audience: string;
+  orderId: string;
+  title: string;
+  createdAt: string;
+  readAt: string | null;
+};
+
+export type AdminNotificationRead = {
+  notificationId?: string;
+  adminId?: string;
+  readAt?: string | null;
+};
+
+export type AdminNotificationUnreadCount = {
+  unreadCount: number;
+};
+
+export const adminNotificationsApi = {
+  list: () => apiClient.get<AdminNotification[]>("/api/admin/notifications"),
+  unreadCount: () =>
+    apiClient.get<AdminNotificationUnreadCount>(
+      "/api/admin/notifications/unread-count",
+    ),
+  markRead: (notificationId: string, idempotencyKey: string) =>
+    apiClient.post<AdminNotificationRead>(
+      `/api/admin/notifications/${encodeURIComponent(notificationId)}/read`,
+      {},
+      withIdempotencyKey(idempotencyKey),
+    ),
+};
+
 export const adminUserApi = {
   getUsers: (role?: "USER" | "ADMIN") => {
     const params = new URLSearchParams({ page: "1", limit: "25" });

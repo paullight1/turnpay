@@ -10,6 +10,7 @@ import '../../../core/theme/app_theme.dart';
 import '../../../core/widgets/tp_page_header.dart';
 import '../../../services/auth_service.dart';
 import '../../../services/kyc_service.dart';
+import '../../home/widgets/kyc_status_presenter.dart';
 import '../../../services/transaction_security_service.dart';
 import '../services/manual_exchange_service.dart';
 import '../../security/screens/transaction_security_screen.dart';
@@ -277,17 +278,23 @@ class _ManualExchangeScreenState extends State<ManualExchangeScreen>
   Future<bool> _ensureKycCanContinue() async {
     try {
       final overview = await _kycService.fetchOverview();
-      // The manual exchange API requires a verified Tier 2 account before it
-      // accepts the transaction PIN and creates an order. Keep this client
-      // gate in step with that server policy so the user gets a useful path
-      // to upgrade instead of an avoidable create-order error.
-      if (overview.isVerified && _isTier2OrHigher(overview.tier)) return true;
+      final limitGate = kycActionLimitGate(
+          overview, _amountController.text.trim(), _sourceCurrency);
+      if (overview.isVerified &&
+          _isTier1OrHigher(overview.tier) &&
+          limitGate == null) {
+        return true;
+      }
       if (!mounted) return false;
-      final title =
-          overview.isVerified ? 'Tier 2 verification required' : 'KYC required';
-      final message = overview.isVerified
-          ? 'Complete or upgrade your KYC to Tier 2 before confirming this action.'
-          : 'Complete KYC before confirming this action.';
+      final pending = overview.providerValidationStatus == 'PENDING';
+      final title = limitGate?.title ??
+          (pending
+              ? 'Your BVN check is in progress'
+              : 'Verify BVN to continue');
+      final message = limitGate?.message ??
+          (pending
+              ? 'View your verification status. Your exchange has not been submitted.'
+              : 'Activate Tier 1 to exchange within your account limits.');
       final goToKyc = await showDialog<bool>(
             context: context,
             builder: (dialogContext) => AlertDialog(
@@ -306,13 +313,23 @@ class _ManualExchangeScreenState extends State<ManualExchangeScreen>
                 ),
                 FilledButton(
                   onPressed: () => Navigator.of(dialogContext).pop(true),
-                  child: const Text('Complete KYC'),
+                  child: Text(limitGate != null
+                      ? limitGate.upgrade
+                          ? 'Upgrade to Tier 2'
+                          : 'Contact support'
+                      : pending
+                          ? 'View verification status'
+                          : 'Verify BVN'),
                 ),
               ],
             ),
           ) ??
           false;
-      if (goToKyc && mounted) await context.push(AppRoutes.kyc);
+      if (goToKyc && mounted) {
+        await context.push(limitGate != null && !limitGate.upgrade
+            ? AppRoutes.profileSupport
+            : AppRoutes.kyc);
+      }
       return false;
     } catch (error) {
       if (mounted) {
@@ -327,10 +344,10 @@ class _ManualExchangeScreenState extends State<ManualExchangeScreen>
     }
   }
 
-  bool _isTier2OrHigher(String tier) {
+  bool _isTier1OrHigher(String tier) {
     final match = RegExp(r'\d+').firstMatch(tier.trim());
     final number = match == null ? null : int.tryParse(match.group(0)!);
-    return number != null && number >= 2;
+    return number != null && number >= 1;
   }
 
   Future<String?> _requireTransactionPin() async {

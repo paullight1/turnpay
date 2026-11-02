@@ -179,6 +179,147 @@ class _KycVerificationScreenState extends State<KycVerificationScreen> {
     }
   }
 
+  Future<void> _openNinUpgrade(KycOverview overview) async {
+    if (!kycCanStartNin(overview) || _isSubmitting) return;
+    if (!overview.ninVerificationAvailable) {
+      await _openManualNinDialog(overview);
+      return;
+    }
+    final number = TextEditingController();
+    final birth = TextEditingController();
+    var consent = false;
+    var busy = false;
+    String? error;
+    KycVerificationResult? submitted;
+    await showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (dialogContext) => StatefulBuilder(
+            builder: (context, update) => PopScope(
+                  canPop: !busy,
+                  child: AlertDialog(
+                    backgroundColor: AppColors.surface,
+                    title: Text('Upgrade to Tier 2',
+                        style: AppTextStyles.headingM),
+                    content: SingleChildScrollView(
+                        child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                          Text(
+                              'Your Tier 1 account stays active while we check your NIN.',
+                              style: AppTextStyles.bodyM),
+                          const SizedBox(height: 24),
+                          TextField(
+                              controller: number,
+                              enabled: !busy,
+                              keyboardType: TextInputType.number,
+                              inputFormatters: [
+                                FilteringTextInputFormatter.digitsOnly,
+                                LengthLimitingTextInputFormatter(11)
+                              ],
+                              decoration: const InputDecoration(
+                                  labelText: 'NIN', hintText: '11-digit NIN'),
+                              onChanged: (_) => update(() {})),
+                          const SizedBox(height: 20),
+                          TextField(
+                              controller: birth,
+                              enabled: !busy,
+                              readOnly: true,
+                              decoration: const InputDecoration(
+                                  labelText: 'Date of birth',
+                                  suffixIcon: Icon(
+                                      Icons.calendar_today_outlined,
+                                      size: 18)),
+                              onTap: () async {
+                                final picked = await showDatePicker(
+                                    context: context,
+                                    initialDate: DateTime(1995),
+                                    firstDate: DateTime(1900),
+                                    lastDate: DateTime.now());
+                                if (picked != null && context.mounted) {
+                                  update(() => birth.text =
+                                      DateFormat('yyyy-MM-dd').format(picked));
+                                }
+                              }),
+                          const SizedBox(height: 20),
+                          CheckboxListTile(
+                              contentPadding: EdgeInsets.zero,
+                              value: consent,
+                              controlAffinity: ListTileControlAffinity.leading,
+                              onChanged: busy
+                                  ? null
+                                  : (value) =>
+                                      update(() => consent = value == true),
+                              title: Text(
+                                  'I agree to share my NIN, legal name and date of birth securely with Ninja for verification.',
+                                  style: AppTextStyles.bodyS)),
+                          if (error != null)
+                            Padding(
+                                padding: const EdgeInsets.only(top: 12),
+                                child: Text(error!,
+                                    style: AppTextStyles.bodyS
+                                        .copyWith(color: AppColors.error))),
+                        ])),
+                    actions: [
+                      TextButton(
+                          onPressed: busy
+                              ? null
+                              : () => Navigator.of(dialogContext).pop(),
+                          child: const Text('Not now')),
+                      FilledButton(
+                          onPressed: busy ||
+                                  !consent ||
+                                  number.text.length != 11 ||
+                                  birth.text.isEmpty
+                              ? null
+                              : () async {
+                                  update(() {
+                                    busy = true;
+                                    error = null;
+                                  });
+                                  try {
+                                    final result = await _service.verifyIdentity(
+                                        type: 'NIN',
+                                        idNumber: number.text,
+                                        dateOfBirth: birth.text,
+                                        consentAccepted: true,
+                                        idempotencyKey:
+                                            _attemptIdempotency.keyFor(sha256
+                                                .convert(utf8.encode(
+                                                    'nin|${number.text}|${birth.text}'))
+                                                .toString()));
+                                    _attemptIdempotency.markFinalOutcome();
+                                    submitted = result;
+                                    if (dialogContext.mounted) {
+                                      Navigator.of(dialogContext).pop();
+                                    }
+                                  } catch (failure) {
+                                    if (dialogContext.mounted) {
+                                      update(() {
+                                        busy = false;
+                                        error = authErrorMessage(failure,
+                                            'Could not complete your NIN check. Try again.');
+                                      });
+                                    }
+                                  }
+                                },
+                          child: Text(busy ? 'Checking…' : 'Verify NIN')),
+                    ],
+                  ),
+                )));
+    number.dispose();
+    birth.dispose();
+    if (submitted != null && mounted) {
+      _reload();
+      _showMessage(submitted!.status == 'VERIFIED'
+          ? 'NIN verified. Refreshing your account tier.'
+          : ['REJECTED', 'FAILED'].contains(submitted!.status)
+              ? 'Your NIN check needs attention. View its status to review your details or contact support. Tier 1 stays active.'
+              : 'Your NIN check is under review. Tier 1 stays active.');
+    }
+  }
+
   Future<void> _openManualNinDialog(KycOverview overview) async {
     if (_isSubmitting ||
         _isManualNinSubmitting ||
@@ -499,7 +640,7 @@ class _KycVerificationScreenState extends State<KycVerificationScreen> {
             onContinue: (latest) {
               Navigator.of(sheetContext).pop();
               if (type == 'NIN') {
-                _openManualNinDialog(latest);
+                _openNinUpgrade(latest);
               } else {
                 _openVerificationDialog(latest);
               }
@@ -546,7 +687,7 @@ class _KycVerificationScreenState extends State<KycVerificationScreen> {
             continueNin ? () => Navigator.of(dialogContext).pop(true) : null,
       ),
     ));
-    if (next == true && mounted) await _openManualNinDialog(overview);
+    if (next == true && mounted) await _openNinUpgrade(overview);
   }
 
   Future<void> _openVerificationDialog(
@@ -1082,8 +1223,9 @@ class _KycVerificationScreenState extends State<KycVerificationScreen> {
               overview: overview,
               busy: _isSubmitting || _isManualNinSubmitting,
               onDetails: (type) => _openCheckDetails(overview, type),
+              onSupport: () => context.push(AppRoutes.profileSupport),
               onStartBvn: () => _openVerificationDialog(overview),
-              onStartNin: () => _openManualNinDialog(overview),
+              onStartNin: () => _openNinUpgrade(overview),
               onHistory: () => _openHistory(overview),
               onAccount: () async {
                 await context.push(AppRoutes.virtualAccount);

@@ -28,6 +28,15 @@ describe('ExchangeService', () => {
 
   const mockPrisma = {
     $transaction: jest.fn(async (fn: any) => fn(mockPrisma)),
+    $queryRaw: jest.fn().mockResolvedValue([
+      {
+        id: 'w',
+        balance: '0',
+        kycTier: 'TIER_2',
+        kycStatus: 'VERIFIED',
+        isSuspended: false,
+      },
+    ]),
     user: {
       findUnique: jest.fn(),
     },
@@ -501,7 +510,7 @@ describe('ExchangeService', () => {
       expect(mockRedis.del).not.toHaveBeenCalledWith('quote:quote-1');
     });
 
-    it('requires tier 2 KYC before executing an exchange', async () => {
+    it('requires tier 1 KYC before executing an exchange', async () => {
       mockRedis.get.mockResolvedValue(
         JSON.stringify({
           id: 'quote-1',
@@ -520,13 +529,13 @@ describe('ExchangeService', () => {
       );
       mockPrisma.user.findUnique.mockResolvedValue({
         kycStatus: 'VERIFIED',
-        kycTier: 'TIER_1',
+        kycTier: 'TIER_0',
         isSuspended: false,
       });
 
       await expect(
         service.executeQuote('user-1', { quoteId: 'quote-1' }),
-      ).rejects.toThrow('KYC Tier 2 is required to execute an exchange');
+      ).rejects.toThrow('KYC Tier 1 is required to execute an exchange');
       expect(mockPrisma.wallet.findUnique).not.toHaveBeenCalled();
       expect(mockLedger.debitWallet).not.toHaveBeenCalled();
     });
@@ -980,11 +989,11 @@ describe('ExchangeService', () => {
       );
     });
 
-    it('requires Tier 2 KYC before submitting a manual exchange receipt', async () => {
+    it('requires Tier 1 KYC before submitting a manual exchange receipt', async () => {
       mockPrisma.user.findUnique.mockResolvedValue({
         id: 'user-1',
         kycStatus: 'VERIFIED',
-        kycTier: 'TIER_1',
+        kycTier: 'TIER_0',
         isSuspended: false,
         wallets: [{ id: 'wallet-ghs' }],
       });
@@ -997,12 +1006,12 @@ describe('ExchangeService', () => {
           senderBankName: 'Test Bank',
           receiptUrl: 'https://example.com/receipt.png',
         }),
-      ).rejects.toThrow('KYC Tier 2 is required to submit an exchange receipt');
+      ).rejects.toThrow('KYC Tier 1 is required to submit an exchange receipt');
       expect(mockPrisma.transaction.create).not.toHaveBeenCalled();
       expect(mockPrisma.exchangeReceipt.create).not.toHaveBeenCalled();
     });
 
-    it('requires Tier 2 KYC before an approved receipt can be credited', async () => {
+    it('requires Tier 1 KYC before an approved receipt can be credited', async () => {
       const receipt = {
         id: 'receipt-1',
         userId: 'user-1',
@@ -1028,7 +1037,7 @@ describe('ExchangeService', () => {
         user: {
           id: 'user-1',
           kycStatus: 'VERIFIED',
-          kycTier: 'TIER_1',
+          kycTier: 'TIER_0',
           isSuspended: false,
         },
         transaction: {
@@ -1045,7 +1054,7 @@ describe('ExchangeService', () => {
           status: 'APPROVED',
           reason: 'Matched bank statement reference',
         }),
-      ).rejects.toThrow('KYC Tier 2 is required to review an exchange receipt');
+      ).rejects.toThrow('KYC Tier 1 is required to review an exchange receipt');
       expect(mockLedger.creditWallet).not.toHaveBeenCalled();
       expect(mockPrisma.auditLog.create).not.toHaveBeenCalled();
     });

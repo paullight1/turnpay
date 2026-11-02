@@ -1,6 +1,7 @@
 import 'package:dio/dio.dart';
 
 import '../core/constants/app_constants.dart';
+import '../core/kyc/kyc_tier.dart';
 import '../core/money/money_value.dart';
 import '../core/state/resource_state.dart';
 import 'api_client.dart';
@@ -471,13 +472,14 @@ class KycGatePolicy {
     '/withdraw',
     '/exchange',
     '/virtual-account',
-  };
-
-  static const Set<String> vtuRoutesRequiringTier2 = {
     '/airtime',
     '/data',
     '/electricity',
+    '/cable',
   };
+
+  // Compatibility for existing callers; supported services now start at Tier 1.
+  static const Set<String> vtuRoutesRequiringTier2 = <String>{};
 
   static bool isBlocked({
     required String route,
@@ -485,7 +487,7 @@ class KycGatePolicy {
     required String kycTier,
   }) {
     if (routesRequiringVerification.contains(route)) {
-      return !_isVerified(status);
+      return !_isVerified(status) || !_isTier1OrHigher(kycTier);
     }
 
     if (vtuRoutesRequiringTier2.contains(route)) {
@@ -514,21 +516,11 @@ class KycGatePolicy {
   }
 
   static bool _isTier2OrHigher(String kycTier) {
-    final normalized = kycTier.trim().toUpperCase();
-    final tierMatch = RegExp(r'\d+').firstMatch(normalized);
-    final tierText = tierMatch?.group(0);
-    final tierNumber = tierText == null ? null : int.tryParse(tierText);
-
-    return tierNumber != null && tierNumber >= 2;
+    return kycTierRank(kycTier) >= 2;
   }
 
   static bool _isTier1OrHigher(String kycTier) {
-    final normalized = kycTier.trim().toUpperCase();
-    final tierMatch = RegExp(r'\d+').firstMatch(normalized);
-    final tierText = tierMatch?.group(0);
-    final tierNumber = tierText == null ? null : int.tryParse(tierText);
-
-    return tierNumber != null && tierNumber >= 1;
+    return kycTierRank(kycTier) >= 1;
   }
 }
 

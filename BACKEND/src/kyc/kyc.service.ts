@@ -1,9 +1,12 @@
+import { NinjaProvider } from './providers/ninja.provider';
+import { TierOneLimitsService } from '../common/services/tier-one-limits.service';
 import {
   Injectable,
   NotFoundException,
   BadRequestException,
   ConflictException,
   Inject,
+  Optional,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createHash, randomUUID } from 'crypto';
@@ -74,6 +77,7 @@ export class KycService {
     @Inject(KYC_PROVIDER_GATEWAY)
     private readonly kycProviderGateway: KycProviderGateway,
     private readonly bankingService: BankingService,
+    @Optional() private readonly ninjaProvider?: NinjaProvider,
   ) {}
 
   async createDocumentUploadUrl(userId: string, dto: CreateKycUploadDto) {
@@ -102,7 +106,19 @@ export class KycService {
   }
 
   async verifyIdentity(userId: string, dto: CreateIdentityVerificationDto) {
-    const provider = this.kycProviderGateway.provider;
+    const gateway =
+      dto.type === 'NIN' && this.kycProviderGateway.provider === 'PAYSTACK'
+        ? this.ninjaProvider
+        : this.kycProviderGateway;
+    if (
+      !gateway ||
+      (gateway.provider === 'NINJA' && !this.ninjaProvider?.configured)
+    ) {
+      throw new BadRequestException(
+        'NIN verification is currently unavailable. Use the document review option.',
+      );
+    }
+    const provider = gateway.provider;
     this.assertSupportedIdentityType(dto.country, dto.type);
     this.assertValidDateOfBirth(dto.dateOfBirth);
     const normalizedIdNumber = this.normalizeIdNumber(dto.type, dto.idNumber);
@@ -112,7 +128,9 @@ export class KycService {
     const consentVersion =
       provider === 'PAYSTACK'
         ? 'paystack-bvn-and-account-setup-consent-v1'
-        : 'monnify-identity-and-account-setup-consent-v2';
+        : provider === 'NINJA'
+          ? 'ninja-nin-verification-consent-v1'
+          : 'monnify-identity-and-account-setup-consent-v2';
 
     if (provider === 'PAYSTACK') {
       this.assertPaystackIdentityInput(dto);
@@ -151,6 +169,36 @@ export class KycService {
         });
         if (!user) {
           throw new NotFoundException('User not found');
+        }
+        if (provider === 'NINJA') {
+          await tx.$queryRaw(
+            Prisma.sql`SELECT "id" FROM "users" WHERE "id" = ${userId} FOR UPDATE`,
+          );
+          const bvn = await tx.kycDocument.findFirst({
+            where: { userId, type: 'BVN', status: 'VERIFIED' },
+            select: { id: true },
+          });
+          if (!bvn)
+            throw new BadRequestException(
+              'Verify your BVN to activate Tier 1 before adding NIN',
+            );
+          const existing = await tx.kycDocument.findFirst({
+            where: {
+              userId,
+              type: 'NIN',
+              status: { in: ['PENDING', 'SUBMITTED', 'VERIFIED'] },
+            },
+            select: { id: true },
+          });
+          if (existing)
+            throw new ConflictException(
+              'Your NIN is already verified or under review',
+            );
+          const name = this.toNameValidation(user.fullName);
+          if (!name?.firstName || !name.lastName)
+            throw new BadRequestException(
+              'Your verified legal name is required for NIN verification',
+            );
         }
         if (provider === 'MONNIFY') {
           const verifiedNin = await tx.kycDocument.findFirst({
@@ -420,7 +468,7 @@ export class KycService {
       ReturnType<KycProviderGateway['verifyIdentity']>
     >;
     try {
-      providerResult = await this.kycProviderGateway.verifyIdentity({
+      providerResult = await gateway.verifyIdentity({
         userId,
         documentId,
         country: dto.country,
@@ -430,8 +478,10 @@ export class KycService {
         consentAccepted: dto.consentAccepted,
         validation: {
           ...this.toNameValidation(
-            [dto.firstName, dto.lastName].filter(Boolean).join(' ') ||
-              reservation.user.fullName,
+            provider === 'NINJA'
+              ? reservation.user.fullName
+              : [dto.firstName, dto.lastName].filter(Boolean).join(' ') ||
+                  reservation.user.fullName,
           ),
           dateOfBirth: dto.dateOfBirth,
           ...(dto.bankCode ? { bankCode: dto.bankCode } : {}),
@@ -634,7 +684,7 @@ export class KycService {
       accountNumberMasked?: string;
       bankName?: string;
     } = { status: 'NOT_REQUIRED' };
-    if (providerResult.status === 'VERIFIED' && provider !== 'PAYSTACK') {
+    if (providerResult.status === 'VERIFIED' && provider === 'MONNIFY') {
       try {
         const account = await this.bankingService.provisionVirtualAccount(
           userId,
@@ -1194,6 +1244,7 @@ export class KycService {
         select: {
           id: true,
           fullName: true,
+          isSuspended: true,
           kycStatus: true,
           kycTier: true,
         },
@@ -1250,6 +1301,16 @@ export class KycService {
       ...(this.kycProviderGateway.provider === 'PAYSTACK'
         ? { providerValidationStatus }
         : {}),
+      ninVerificationAvailable: this.ninjaProvider?.configured === true,
+      accountProvisioning:
+        typeof this.bankingService.getAccountProvisioning === 'function'
+          ? {
+              status: (await this.bankingService.getAccountProvisioning(userId))
+                .status,
+            }
+          : undefined,
+      tierOneLimits: new TierOneLimitsService(this.configService).summary(),
+      isSuspended: user.isSuspended,
       kycStatus: user.kycStatus,
       kycTier: user.kycTier,
       fullName: user.fullName,
@@ -1390,6 +1451,14 @@ export class KycService {
       ) {
         throw new BadRequestException(
           'Paystack identity verification is finalized by provider evidence and cannot be manually reviewed',
+        );
+      }
+      if (
+        dto.status === 'VERIFIED' &&
+        document.verifications?.some(({ provider }) => provider === 'NINJA')
+      ) {
+        throw new BadRequestException(
+          'An automated NIN check requires provider confirmation. Reject the inconclusive check before requesting manual evidence.',
         );
       }
       if (document.status !== 'PENDING' && document.status !== 'SUBMITTED') {
@@ -1917,7 +1986,7 @@ export class KycService {
       where: {
         userId,
         status: 'VERIFIED',
-        type: { in: ['BVN', 'NIN', 'PASSPORT', 'VOTERS_CARD'] },
+        type: { in: ['BVN', 'NIN', 'GHANA_CARD', 'PASSPORT', 'VOTERS_CARD'] },
       },
       select: { type: true },
     });
@@ -1926,19 +1995,31 @@ export class KycService {
       ...verifiedDocuments.map((document) => document.type),
     ]);
 
-    const eligibleTier = verifiedTypes.has('GHANA_CARD')
-      ? 'TIER_2'
-      : verifiedTypes.has('BVN') && verifiedTypes.has('NIN')
+    let eligibleTier: KYCTier =
+      verifiedTypes.has('BVN') && verifiedTypes.has('NIN')
         ? 'TIER_2'
-        : verifiedTypes.has('PASSPORT') && verifiedTypes.has('VOTERS_CARD')
-          ? 'TIER_2'
-          : verifiedTypes.has('BVN') || verifiedTypes.has('NIN')
-            ? 'TIER_1'
-            : verifiedTypes.has('PASSPORT') ||
-                verifiedTypes.has('DRIVERS_LICENSE') ||
-                verifiedTypes.has('VOTERS_CARD')
+        : verifiedTypes.has('BVN')
+          ? 'TIER_1'
+          : 'TIER_0';
+    if (!verifiedTypes.has('BVN') && !['NIN', 'BVN'].includes(reviewedType)) {
+      const owner = await tx.user.findUnique({
+        where: { id: userId },
+        select: { country: true },
+      });
+      // Historical Ghana identity routes keep their rules only when the
+      // authoritative customer country establishes that identity context.
+      if (owner?.country?.toUpperCase() === 'GH') {
+        eligibleTier =
+          verifiedTypes.has('GHANA_CARD') ||
+          (verifiedTypes.has('PASSPORT') && verifiedTypes.has('VOTERS_CARD'))
+            ? 'TIER_2'
+            : ['PASSPORT', 'VOTERS_CARD', 'DRIVERS_LICENSE'].some((type) =>
+                  verifiedTypes.has(type as KYCType),
+                )
               ? 'TIER_1'
               : 'TIER_0';
+      }
+    }
 
     return this.maxKycTier(currentTier, eligibleTier);
   }

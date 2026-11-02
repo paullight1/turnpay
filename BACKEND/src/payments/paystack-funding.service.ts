@@ -75,7 +75,7 @@ export class PaystackFundingService {
       identityVerification: configured,
       manualDocumentReview: true,
       automatedIdentityTypes: ['BVN'],
-      withdrawalMinimumTier: 'TIER_2',
+      withdrawalMinimumTier: 'TIER_1',
     };
   }
 

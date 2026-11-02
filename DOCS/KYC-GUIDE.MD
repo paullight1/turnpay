@@ -1,158 +1,54 @@
-> Provider update, 2026-10-30: new payment and automated BVN flows use Paystack. The Monnify implementation details below apply to legacy obligations. Follow [Paystack activation](PAYSTACK-ACTIVATION.md) and the provider source of truth for current setup.
+# TRUSTPAY KYC: BVN first, NIN upgrade
 
-# TRUSTPAY Monnify KYC Guide
+Updated: 2 November 2026. This supersedes the previous Monnify-first onboarding instructions; retain legacy provider identities and unfinished obligations.
 
-Last reviewed: 2026-09-27
+## Customer journey
 
-Monnify is TRUSTPAY's only KYC provider for Nigerian BVN and NIN checks. Web
-and Flutter call TRUSTPAY's authenticated backend. Monnify credentials must
-never be placed in a browser, mobile build, `NEXT_PUBLIC_*` variable, log,
-screenshot, ticket, or source-controlled environment file.
+1. A new Nigerian customer reviews their legal profile, supplies BVN and a linked Nigerian bank account, and records Paystack verification consent. Bank-account preparation has separate consent.
+2. A genuine successful Paystack identity result earns Tier 1. Request acceptance, a timeout or a client refresh does not verify identity. With account consent, receiving-account preparation follows independently; show ready details only after provider confirmation.
+3. Tier 1 is eligible for supported transfers, withdrawals, bills and exchange within its configured limits. Provider/product availability, suspension, transaction PINs, settlement holds, destination checks and tighter action-specific limits still apply.
+4. A verified NIN in addition to BVN earns Tier 2. New NIN-only approvals do not activate Tier 1. Existing earned tiers are not bulk downgraded. Pending or rejected NIN never removes earned Tier 1 access.
 
-## Verification and account preparation flow
+Web and Flutter use Verify BVN, View verification status, and Upgrade to Tier 2 consistently. Customer web remains retired in production; retained web pages can render only in the existing local QA mode. No customer web relaunch is part of this change.
 
-1. The authenticated client first sends `country: NG`, `type: NIN`, an
-   11-digit identifier, ISO date of birth, explicit consent, and an
-   `Idempotency-Key` to `POST /api/kyc/verify`. The consent notice explains
-   that identity details are sent to Monnify for verification and automatic
-   NGN account setup. After NIN succeeds, the client can submit the second
-   check with `type: BVN`.
-2. The backend validates the DTO, reserves a single active attempt, reads the
-   user's legal names and phone, and uses the KYC document row ID as the local
-   verification reference.
-3. The backend obtains a short-lived Monnify access token server-side.
-4. The backend calls Monnify's NIN or BVN verification endpoint and maps the
-   response match flag into TRUSTPAY's verified or rejected status.
-5. A result is accepted only when Monnify reports a successful request and the
-   relevant identity match flag is true. Invalid or unavailable responses fail
-   closed.
-6. The identifier is encrypted at rest. Only an allowlisted, sanitized evidence
-   summary is stored or returned, and the public identifier remains masked.
-7. Document status, verification status, user status, tier, and audit data are
-   committed transactionally.
-8. After a successful check, the backend automatically provisions or reuses
-   the user's Monnify NGN virtual account. The response reports `READY` with
-   masked account details, or `PENDING` if account setup needs a retry. Existing
-   authenticated account screens can then load the prepared account without
-   requiring another identity-verification action.
+## Automated NIN
 
-Identity verification and account preparation are triggered by one KYC form
-submission. Both provider operations currently run synchronously in the backend
-request, so account preparation can delay the response. Monnify identity
-verification does not use a KYC webhook. Funding webhooks remain separate and
-are used only for payment events.
+Paystack stays the BVN provider (`KYC_PROVIDER=paystack`). Ninja is the approved NIN match-only provider; the owner confirmed approval on 2 November 2026. The existing live credential was checked through Ninja's read-only account endpoint, and local NIN configuration was enabled. No customer identity was submitted in that check.
 
-## Supported checks
-
-| Country | TRUSTPAY type | Monnify endpoint | Required input |
-| --- | --- | --- | --- |
-| Nigeria | `NIN` first | `/api/v1/vas/nin-verification` | 11-digit NIN |
-| Nigeria | `BVN` second | `/api/v1/vas/bvn-details-match` | 11-digit BVN, legal name, date of birth, phone |
-
-The clients do not offer Ghana, passport, driver's licence, or voter's card in
-this release. Unsupported combinations are rejected before a provider call.
-
-## Backend environment
-
-Sandbox or production:
-
-```env
-KYC_PROVIDER=monnify
-MONNIFY_API_KEY=<server-side Monnify API key>
-MONNIFY_SECRET_KEY=<server-side Monnify secret key>
-MONNIFY_BASE_URL=https://sandbox.monnify.com
-PII_ENCRYPTION_KEY=<at least 32 characters from the secret manager>
-PII_KEY_VERSION=1
+```dotenv
+NINJA_NIN_ENABLED=false
+NINJA_SECRET_KEY=
+NINJA_BASE_URL=https://api.ninja.boucloud.io
 ```
 
-Production uses separate live credentials and URL:
+The example remains disabled until a key is supplied. Approved local/deployment configuration uses `NINJA_NIN_ENABLED=true`. `NINJA_SECRET_KEY` is the canonical server setting; the previous local `NINJA_CLIENT_SECRET` was migrated without exposing it. The public client key and browser session-token flow are not needed for backend verification. The Render blueprint includes the live URL, enable flag and a secret-only environment entry; updating this file does not deploy or install the secret remotely.
 
-```env
-KYC_PROVIDER=monnify
-MONNIFY_API_KEY=<exact live dashboard value>
-MONNIFY_SECRET_KEY=<exact live dashboard value>
-MONNIFY_BASE_URL=https://api.monnify.com
+Use the documented sandbox host and separate sandbox key for local/provider testing. Production rejects the sandbox host/key for readiness. Credentials stay server-side. The adapter uses `POST /api/identity/identify` in verify mode with legal first/last name and date of birth, strict required fields and an internal document reference. It requires complete exact match evidence, stores only a sanitized result and never retrieves a registry record for storage or logging.
+
+The backend reports `ninVerificationAvailable` in `GET /api/kyc/status`. The UI only offers automated verification when ready; otherwise the explicitly labeled private document-review path remains. Inconclusive Ninja results require support/review; an administrator cannot manually approve an automated result. Reject an inconclusive automated check before collecting separate manual evidence. Existing manual submissions remain attached to their original evidence and review history.
+
+Current provider contract: https://www.ninja.ng/docs/ . Do not copy the old removed adapter's short-lived-token assumptions into server-to-server calls.
+
+## Tier 1 limits and activation
+
+No production amounts are supplied by this change. The owner/licensed partner approves these positive NGN decimal strings and operations installs them through the audited release/configuration process:
+
+```dotenv
+TIER_ONE_NGN_PER_TRANSACTION=
+TIER_ONE_NGN_DAILY=
+TIER_ONE_NGN_MAX_BALANCE=
 ```
 
-TRUSTPAY obtains and caches the Monnify access token internally. Never place
-Monnify credentials in Flutter, website code, logs, or source control.
+All three must be present and valid, and daily must be at least the per-transaction limit. Missing or malformed policy fails closed. These fields do not authorize a regulated product or enable a disabled provider. A separate active Tier 1 internal-transfer policy must also be created and approved through the existing admin policy workflow; its tighter per-transfer/daily/monthly caps continue to apply.
 
-Official references:
+The common ledger checks the policy under a wallet row lock in the same database transaction as the movement. Covered debits, direct manual exchange orders and legacy external exchange receipts share the daily allowance. The daily period starts at 00:00 UTC, matching existing withdrawal counter conventions. Pending spending consumes allowance; original transactions explicitly marked FAILED/REVERSED no longer consume it. Direct exchange instructions reserve their value until rejected or the daily period ends; expiry alone does not prove an external transfer did not occur. This conservative behavior prevents releasing an ambiguous external payment reservation.
 
-- Verification API: https://developers.monnify.com/docs/verification-api/verifying-your-customers
-- BVN/NIN account guide: https://developers.monnify.com/docs/integration-guide-bvn-nin-update
+Incoming non-compensating credits cannot exceed Tier 1 maximum balance. An over-limit provider receipt stays uncredited in the existing receipt/inbox/reconciliation workflow; do not discard it, mark received money unpaid, or create an unrelated replacement credit. Refunds, reversals and operator-authorized adverse-funding recovery retain their original accounting protections and are not stranded by these new customer-spend caps.
 
-## Sandbox validation
+The BVN-first policy is NGN-scoped. It does not activate Ghana services or bypass Ghana/cross-border product requirements. Tier 1 cannot settle exchange proceeds into a GHS wallet; unsupported legacy receipt paths reject before accepting payment evidence. Supported bank/MoMo delivery orders retain their own availability and destination checks. Existing Tier 2 action limits and historic provider obligations remain.
 
-Use only Monnify-provided sandbox identities and instructions supplied through
-the authorized Monnify dashboard or integration documentation. Do not copy
-identity test values from historical Ninja or Youverify notes into this guide.
-Never submit test identities to the production endpoint.
+## Evidence and operations
 
-## Status and tier mapping
+Identifiers remain encrypted and masked. All mutations retain JWT/role checks, DTO validation, rate limiting, idempotency and audit trails. Private uploads and expiring reviewer links are retained. A manual NIN approval requires sufficient authorized verification evidence; visually approving a slip alone is not proof of NIMC validation.
 
-| Monnify result | TRUSTPAY verification | User effect |
-| --- | --- | --- |
-| Monnify request succeeds and the relevant identity-match flag is true | `VERIFIED` | First BVN/NIN reaches at least Tier 1; both reach Tier 2 |
-| Monnify reports a non-matching identity | `REJECTED` | `REJECTED`; no automatic tier promotion |
-| Monnify rejects or cannot match the identity | `REJECTED` | `REJECTED` unless the user already has a stronger terminal state |
-| Invalid response or transport failure | `FAILED` | No promotion; safe retry is allowed |
-
-HTTP success alone never means identity success.
-
-## Security and privacy controls
-
-- `JwtAuthGuard`, rate limiting, DTO validation, explicit consent, and
-  `Idempotency-Key` are mandatory on `POST /api/kyc/verify`.
-- The client-supplied name is not trusted. Legal names come from the authenticated
-  TRUSTPAY profile.
-- Identifier and date of birth must not appear in application logs, audit
-  metadata, error messages, Sentry, analytics, or provider evidence.
-- Raw provider responses, images, phone numbers, addresses, and supplied values
-  must not be stored or returned.
-- Production accepts only `KYC_PROVIDER=monnify`, HTTPS Monnify endpoints, shared
-  Monnify API credentials, and a PII encryption key.
-- All status, tier, and audit changes remain in one Prisma transaction.
-- Consent version and time are recorded with each attempt.
-
-## Sandbox certification
-
-- [ ] Confirm Monnify sandbox identity-verification access is enabled for the
-      account and obtain the current test identities from the authorized
-      Monnify dashboard/documentation.
-- [ ] Configure sandbox Monnify API credentials and the sandbox base URL only
-      in the backend staging secret manager.
-- [ ] Confirm `/api/health/live` is `ok` and `/api/health/ready` reports KYC
-      `configured` without returning config values.
-- [ ] Verify successful match, mismatch/rejection, provider error, timeout, and
-      malformed response behavior using Monnify's authorized sandbox data.
-- [ ] Retry an identical client request and confirm the idempotency response is
-      replayed without a second active attempt.
-- [ ] Race two requests for the same user/type and confirm only one reservation
-      reaches Monnify.
-- [ ] Search logs, traces, Sentry, admin responses, and analytics for raw BVN,
-      NIN, date of birth, names, and provider payloads; all must be absent.
-- [ ] Confirm the web and mobile screens cover empty, loading, network error,
-      review, rejected, provider failure, Tier 1 next step, and Tier 2 complete.
-
-## Production gates
-
-- [ ] Monnify has approved the business for the identity-verification product
-      and issued production credentials.
-- [ ] Compliance/privacy owners approve consent language, lawful basis,
-      retention/deletion, tier rules, and Nigerian BVN/NIN use.
-- [ ] Live shared Monnify credentials exist only in the production backend secret
-      manager.
-- [ ] `KYC_PROVIDER=monnify`; live endpoint and no sandbox/test identity are
-      present in production.
-- [ ] `./scripts/validate-production-config.sh true` succeeds in the target
-      environment.
-- [ ] A controlled live happy path and mismatch path succeed with masked
-      evidence and no PII leakage.
-- [ ] Provider error rate, latency, circuit-breaker state, and repeated
-      authentication failures have alerts and a named owner.
-- [ ] A named accountable owner records the final GO decision.
-
-Passing automated tests is necessary but is not regulatory certification.
-Transfers, withdrawals, VTU, and virtual-account provisioning must stay behind
-the approved KYC/tier gates until production certification is complete.
+See PAYSTACK-ACTIVATION.md for merchant access, callback delivery and separate account preparation, and KYC-RECOVERY-OPERATIONS.md for existing unresolved BVN checks and manual review operations. Local tests use synthetic customers and fake external providers. They do not certify live Paystack/Ninja access or approve a real identity.

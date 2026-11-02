@@ -1,3 +1,4 @@
+import { ProviderNotificationsService } from '../src/exchange/provider-notifications.service';
 import { randomUUID, createHash } from 'crypto';
 import { ConfigService } from '@nestjs/config';
 import { PrismaClient, Prisma } from '@prisma/client';
@@ -36,9 +37,13 @@ describe('manual exchange financial boundaries (real PostgreSQL)', () => {
     MANUAL_EXCHANGE_GHS_COLLECTION_ACCOUNT_NUMBER: '0240000000',
     MANUAL_EXCHANGE_GHS_COLLECTION_VERSION: 'test-ghs-v1',
   });
-  const makeService = (ledger?: LedgerService, rates?: RateService) =>
+  const makeService = (
+    ledger?: LedgerService,
+    rates?: RateService,
+    database: unknown = prisma,
+  ) =>
     new ManualExchangeService(
-      prisma as PrismaService,
+      database as PrismaService,
       config,
       (rates ?? {
         getRate: jest.fn().mockImplementation(async (source: string) => ({
@@ -98,6 +103,9 @@ describe('manual exchange financial boundaries (real PostgreSQL)', () => {
       select: { id: true },
     });
     const ids = orders.map((o) => o.id);
+    await prisma.paymentNotification.deleteMany({
+      where: { orderId: { in: ids } },
+    });
     await prisma.exchangeDepositAllocation.deleteMany({
       where: { settlementId: { in: ids } },
     });
@@ -488,7 +496,224 @@ describe('manual exchange financial boundaries (real PostgreSQL)', () => {
       where: { userId_currency: { userId: user(), currency: 'NGN' } },
     });
     expect(after.balance.minus(before.balance).toFixed(2)).toBe('10000.00');
+    const notifications = await prisma.paymentNotification.findMany({
+      where: { orderId: created[0].id },
+    });
+    expect(notifications.filter((n) => n.audience === 'ADMIN')).toHaveLength(1);
+    expect(
+      notifications.filter((n) => n.audience === `USER:${user()}`),
+    ).toHaveLength(1);
+    expect(
+      notifications.find((n) => n.audience === `USER:${user()}`)?.title,
+    ).toContain('10000.00 NGN');
+    const inbox = new ProviderNotificationsService(prisma as PrismaService);
+    const userInbox = await inbox.list(user(), `USER:${user()}`);
+    expect(userInbox).toHaveLength(1);
+    expect(
+      await inbox.list(
+        fixture.users.recipientA.id,
+        `USER:${fixture.users.recipientA.id}`,
+      ),
+    ).toEqual([]);
+    const notificationId = userInbox[0].id;
+    await expect(
+      inbox.read(otherAdmin(), notificationId, randomUUID()),
+    ).rejects.toThrow('Notification not found');
+    await expect(
+      inbox.read(
+        fixture.users.recipientA.id,
+        notificationId,
+        randomUUID(),
+        `USER:${fixture.users.recipientA.id}`,
+      ),
+    ).rejects.toThrow('Notification not found');
+    const firstRead = await inbox.read(
+      user(),
+      notificationId,
+      randomUUID(),
+      `USER:${user()}`,
+    );
+    const retryRead = await inbox.read(
+      user(),
+      notificationId,
+      randomUUID(),
+      `USER:${user()}`,
+    );
+    expect(retryRead.readAt).toEqual(firstRead.readAt);
+    expect(
+      await prisma.paymentNotificationRead.count({ where: { notificationId } }),
+    ).toBe(1);
+
     expect((await balance()).toFixed(2)).toBe('1000.00');
+  });
+  it('deduplicates retried payment submissions but alerts again for a corrected receipt', async () => {
+    const created = await order('MOMO');
+    const upload = await service.uploadUrl(
+      created.id,
+      user(),
+      {
+        fileName: 'proof.pdf',
+        contentType: 'application/pdf',
+        fileSize: pdf.length,
+      },
+      randomUUID(),
+    );
+    objects.set(upload.objectKey, pdf);
+    const proof = {
+      objectKey: upload.objectKey,
+      bankReference: 'BANK-' + randomUUID(),
+    };
+    const key = randomUUID();
+    await Promise.allSettled([
+      service.attach(created.id, user(), proof, key),
+      service.attach(created.id, user(), proof, key),
+    ]);
+    await service.attach(created.id, user(), proof, key);
+    expect(
+      await prisma.paymentNotification.count({
+        where: { orderId: created.id, audience: 'ADMIN' },
+      }),
+    ).toBe(1);
+    await service.review(
+      created.id,
+      admin(),
+      {
+        action: 'REQUEST_INFO',
+        reason: 'Please attach the complete payment receipt',
+      },
+      randomUUID(),
+    );
+    await attach(created.id);
+    expect(
+      await prisma.paymentNotification.count({
+        where: { orderId: created.id, audience: 'ADMIN' },
+      }),
+    ).toBe(2);
+    expect(
+      await prisma.paymentNotification.count({
+        where: { orderId: created.id, audience: `USER:${user()}` },
+      }),
+    ).toBe(0);
+  });
+  it('keeps notification content server-only even if a Data API role is accidentally granted table reads', async () => {
+    const created = await order('MOMO');
+    await attach(created.id);
+    const protections = await prisma.$queryRaw<
+      Array<{ relname: string; relrowsecurity: boolean }>
+    >`SELECT relname, relrowsecurity FROM pg_class WHERE oid IN ('public.payment_notifications'::regclass, 'public.payment_notification_reads'::regclass)`;
+    expect(protections).toHaveLength(2);
+    expect(protections.every((row) => row.relrowsecurity)).toBe(true);
+    const rollback = new Error('rollback test-only privileges');
+    await expect(
+      prisma.$transaction(async (tx) => {
+        await tx.$executeRawUnsafe(
+          'GRANT SELECT ON payment_notifications, payment_notification_reads TO anon',
+        );
+        await tx.$executeRawUnsafe('SET LOCAL ROLE anon');
+        expect(await tx.paymentNotification.findMany()).toEqual([]);
+        expect(await tx.paymentNotificationRead.findMany()).toEqual([]);
+        await tx.$executeRawUnsafe('RESET ROLE');
+        throw rollback;
+      }),
+    ).rejects.toBe(rollback);
+  });
+  it('keeps an older unread customer alert accessible beyond fifty newer read items', async () => {
+    const created = await order('MOMO');
+    const older = await prisma.paymentNotification.create({
+      data: {
+        eventKey: `${created.id}:old`,
+        audience: `USER:${user()}`,
+        orderId: created.id,
+        title: 'Older unpaid attention',
+        createdAt: new Date('2020-01-01'),
+      },
+    });
+    for (let index = 0; index < 50; index++) {
+      const newer = await prisma.paymentNotification.create({
+        data: {
+          eventKey: `${created.id}:new-${index}`,
+          audience: `USER:${user()}`,
+          orderId: created.id,
+          title: 'Already read update',
+        },
+      });
+      await prisma.paymentNotificationRead.create({
+        data: { notificationId: newer.id, adminId: user() },
+      });
+    }
+    const inbox = new ProviderNotificationsService(prisma as PrismaService);
+    expect(
+      (await inbox.list(user(), `USER:${user()}`)).some(
+        (n) => n.id === older.id,
+      ),
+    ).toBe(true);
+    expect(await (inbox as any).countUnread(user(), `USER:${user()}`)).toBe(1);
+    expect(
+      await (inbox as any).countUnread(
+        fixture.users.recipientA.id,
+        `USER:${fixture.users.recipientA.id}`,
+      ),
+    ).toBe(0);
+    await inbox.read(user(), older.id, randomUUID(), `USER:${user()}`);
+    expect(await (inbox as any).countUnread(user(), `USER:${user()}`)).toBe(0);
+  });
+  it('rolls back wallet credit and approval if its durable notification cannot be saved, then retries once', async () => {
+    const created = await service.create(
+      user(),
+      {
+        sourceCurrency: 'GHS',
+        amount: '100.00',
+        settlementMode: 'WALLET',
+        transactionPin: '2468',
+      },
+      randomUUID(),
+    );
+    await attach(created.id);
+    const before = await prisma.wallet.findUniqueOrThrow({
+      where: { userId_currency: { userId: user(), currency: 'NGN' } },
+    });
+    const failingDatabase = prisma.$extends({
+      query: {
+        paymentNotification: {
+          async createMany({ args, query }) {
+            const rows = Array.isArray(args.data) ? args.data : [args.data];
+            if (rows.some((row) => row.audience?.startsWith('USER:')))
+              throw new Error('Simulated durable notification save failure');
+            return query(args);
+          },
+        },
+      },
+    });
+    const failingService = makeService(undefined, undefined, failingDatabase);
+    const input = confirm('DEP-' + randomUUID());
+    const key = randomUUID();
+    await expect(
+      failingService.review(created.id, admin(), input, key),
+    ).rejects.toThrow('Simulated durable notification save failure');
+    expect((await service.get(created.id, user())).status).toBe(
+      'AWAITING_CONFIRMATION',
+    );
+    const after = await prisma.wallet.findUniqueOrThrow({
+      where: { userId_currency: { userId: user(), currency: 'NGN' } },
+    });
+    expect(after.balance).toEqual(before.balance);
+    expect(
+      await prisma.exchangeDepositAllocation.count({
+        where: { settlementId: created.id },
+      }),
+    ).toBe(0);
+    expect(
+      await prisma.paymentNotification.count({
+        where: { orderId: created.id, audience: `USER:${user()}` },
+      }),
+    ).toBe(0);
+    await service.review(created.id, admin(), input, key);
+    await service.review(created.id, admin(), input, key);
+    expect(
+      await prisma.paymentNotification.count({
+        where: { orderId: created.id, audience: `USER:${user()}` },
+      }),
+    ).toBe(1);
   });
   it('uses the saved admin rate without a feed and preserves an order price after the admin changes it', async () => {
     const where = { from_to: { from: 'GHS', to: 'NGN' } };
@@ -937,9 +1162,25 @@ describe('manual exchange financial boundaries (real PostgreSQL)', () => {
     const key = randomUUID();
     const paid = await service.review(created.id, admin(), input, key);
     expect(paid.status).toBe('COMPLETED');
+    expect(
+      await prisma.paymentNotification.count({
+        where: { orderId: created.id, audience: 'ADMIN' },
+      }),
+    ).toBe(1);
+    expect(
+      await prisma.paymentNotification.count({
+        where: { orderId: created.id, audience: `USER:${user()}` },
+      }),
+    ).toBe(2);
+
     expect((await service.review(created.id, admin(), input, key)).status).toBe(
       'COMPLETED',
     );
+    expect(
+      await prisma.paymentNotification.count({
+        where: { orderId: created.id },
+      }),
+    ).toBe(3);
     const row = await prisma.manualExchangeOrder.findUniqueOrThrow({
       where: { id: created.id },
     });

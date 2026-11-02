@@ -27,7 +27,7 @@ import { toast } from "sonner";
 import { vtuApi } from "@/services/api";
 import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/lib/auth-provider";
-import { getMoneyActionGate } from "@/lib/account-status";
+import { useMoneyActionGate } from "@/lib/use-money-action-gate";
 import { createMoneyAttemptIdempotencyKey } from "@/lib/idempotency";
 import { maskPhone } from "@/lib/privacy";
 import { Loader2, RefreshCw } from "lucide-react";
@@ -137,7 +137,7 @@ function VtuContent() {
   const [isCheckingOrder, setIsCheckingOrder] = useState(false);
   const inFlightRef = useRef(false);
   const attemptKeyRef = useRef<string | null>(null);
-  const moneyGate = getMoneyActionGate(profile);
+  const moneyGate = useMoneyActionGate(profile, { amount, action: "purchase" });
 
   const resetAttempt = () => {
     attemptKeyRef.current = null;

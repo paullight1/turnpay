@@ -8,6 +8,7 @@ import 'package:trustpay_app/features/home/screens/dashboard_detail_screen.dart'
 import 'package:trustpay_app/features/home/screens/home_screen.dart';
 import 'package:trustpay_app/features/home/screens/home_task_screen.dart';
 import 'package:trustpay_app/features/home/screens/money_action_screen.dart';
+import 'package:trustpay_app/features/notifications/services/notifications_service.dart';
 
 import 'support/trustpay_test_api.dart';
 
@@ -40,8 +41,8 @@ void main() {
             'Your Paystack account is waiting for identity verification.'),
         findsOneWidget);
     expect(find.text('Request'), findsNothing);
-    final progress = find.text(
-        'Your identity checks are in progress. View your BVN and NIN status.');
+    final progress =
+        find.text('Your BVN check is in progress. View verification status.');
     await tester.scrollUntilVisible(progress, 180,
         scrollable: find.byType(Scrollable).first);
     expect(progress, findsOneWidget);
@@ -319,15 +320,16 @@ void main() {
     expect(find.text('Account number locked'), findsOneWidget);
     expect(find.textContaining('0123456789'), findsNothing);
     expect(find.byTooltip('Copy account number'), findsNothing);
-    expect(find.text('Complete KYC'), findsOneWidget);
+    expect(find.text('Verify BVN'), findsOneWidget);
   });
 
-  testWidgets('home screen opens notifications and dismisses them',
+  testWidgets('home screen opens durable notifications and marks them read',
       (tester) async {
     final bundle = buildTrustPayTestBundle(
       kycStatus: 'PENDING',
       includeTransactions: false,
     );
+    final notificationsService = _HomeTestNotificationService();
 
     await tester.pumpWidget(
       MaterialApp.router(
@@ -336,14 +338,17 @@ void main() {
           routes: [
             GoRoute(
               path: AppRoutes.home,
-              builder: (context, state) =>
-                  HomeScreen(homeDataService: bundle.homeDataService),
+              builder: (context, state) => HomeScreen(
+                homeDataService: bundle.homeDataService,
+                notificationsService: notificationsService,
+              ),
             ),
             GoRoute(
               path: AppRoutes.notifications,
               builder: (context, state) => DashboardDetailScreen(
                 kind: DashboardDetailKind.notifications,
                 homeDataService: bundle.homeDataService,
+                notificationsService: notificationsService,
               ),
             ),
           ],
@@ -357,11 +362,42 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Notifications'), findsOneWidget);
-    expect(find.text('KYC pending'), findsOneWidget);
+    expect(find.text('Exchange payment confirmed'), findsOneWidget);
 
-    await tester.drag(find.text('KYC pending'), const Offset(-500, 0));
+    await tester.tap(find.byTooltip('Mark as read'));
     await tester.pumpAndSettle();
 
-    expect(find.text('KYC pending'), findsNothing);
+    expect(find.text('Exchange payment confirmed'), findsOneWidget);
+    expect(find.byTooltip('Mark as read'), findsNothing);
   });
+}
+
+class _HomeTestNotificationService extends NotificationsService {
+  final TrustPayNotification notification = TrustPayNotification.fromJson({
+    'id': 'notification-1',
+    'eventKey': 'exchange-payment-confirmed:order-1',
+    'audience': 'USER:user-1',
+    'orderId': 'order-1',
+    'title': 'Exchange payment confirmed',
+    'createdAt': '2026-10-02T10:00:00.000Z',
+    'readAt': null,
+  });
+
+  @override
+  Future<List<TrustPayNotification>> fetchNotifications() async =>
+      [notification];
+
+  @override
+  Future<int> fetchUnreadCount() async => 1;
+
+  @override
+  Future<NotificationReadRecord> markRead(
+    String notificationId, {
+    String? idempotencyKey,
+  }) async {
+    return NotificationReadRecord(
+      notificationId: notificationId,
+      readAt: DateTime.utc(2026, 10, 2, 11),
+    );
+  }
 }

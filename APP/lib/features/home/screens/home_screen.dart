@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -15,28 +17,46 @@ import '../../../core/widgets/tp_illustration.dart';
 import '../../../core/widgets/tp_snackbar.dart';
 import '../../../services/auth_service.dart';
 import '../../../services/home_data_service.dart';
+import '../../notifications/services/notifications_service.dart';
 
 class HomeScreen extends StatefulWidget {
   final HomeDataService homeDataService;
+  final NotificationsService notificationsService;
+  final Duration notificationPollInterval;
+  final bool isHomeTabActive;
 
   HomeScreen({
     super.key,
     HomeDataService? homeDataService,
-  }) : homeDataService = homeDataService ?? HomeDataService();
+    NotificationsService? notificationsService,
+    this.notificationPollInterval = const Duration(seconds: 30),
+    this.isHomeTabActive = true,
+  })  : homeDataService = homeDataService ?? HomeDataService(),
+        notificationsService = notificationsService ?? NotificationsService();
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+class _HomeScreenState extends State<HomeScreen>
+    with WidgetsBindingObserver, RouteAware {
   late Future<HomeDashboardData> _dashboardFuture;
   bool _showBalances = true;
   bool _refreshing = false;
+  int _unreadNotificationCount = 0;
+  bool _foreground = true;
+  bool _routeVisible = true;
+  Timer? _notificationPollTimer;
+  Future<void>? _notificationCountInFlight;
+  ModalRoute<dynamic>? _subscribedRoute;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _dashboardFuture = widget.homeDataService.fetchDashboard();
+    _refreshNotificationCount();
+    _scheduleNotificationPoll();
     // Re-fetch balances whenever a money action completes elsewhere in the
     // app so the dashboard never shows stale figures.
     walletRefreshSignal.addListener(_refreshDashboard);
@@ -44,8 +64,96 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   void dispose() {
+    _notificationPollTimer?.cancel();
+    _notificationPollTimer = null;
+    if (_subscribedRoute != null) {
+      appRouteObserver.unsubscribe(this);
+      _subscribedRoute = null;
+    }
+    WidgetsBinding.instance.removeObserver(this);
     walletRefreshSignal.removeListener(_refreshDashboard);
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    _foreground = state == AppLifecycleState.resumed;
+    if (_foreground) {
+      if (_notificationPollingEnabled) _refreshNotificationCount();
+      _scheduleNotificationPoll();
+    } else {
+      _notificationPollTimer?.cancel();
+      _notificationPollTimer = null;
+    }
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final route = ModalRoute.of(context);
+    if (route == _subscribedRoute) return;
+    if (_subscribedRoute != null) appRouteObserver.unsubscribe(this);
+    if (route != null) appRouteObserver.subscribe(this, route);
+    _subscribedRoute = route;
+  }
+
+  @override
+  void didUpdateWidget(covariant HomeScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.isHomeTabActive == widget.isHomeTabActive) return;
+    if (widget.isHomeTabActive) {
+      _refreshNotificationCount();
+      _scheduleNotificationPoll();
+    } else {
+      _notificationPollTimer?.cancel();
+      _notificationPollTimer = null;
+    }
+  }
+
+  @override
+  void didPush() {
+    _routeVisible = true;
+    _scheduleNotificationPoll();
+  }
+
+  @override
+  void didPopNext() {
+    _routeVisible = true;
+    if (_notificationPollingEnabled) _refreshNotificationCount();
+    _scheduleNotificationPoll();
+  }
+
+  @override
+  void didPushNext() {
+    _routeVisible = false;
+    _notificationPollTimer?.cancel();
+    _notificationPollTimer = null;
+  }
+
+  @override
+  void didPop() {
+    _routeVisible = false;
+    _notificationPollTimer?.cancel();
+    _notificationPollTimer = null;
+  }
+
+  bool get _notificationPollingEnabled =>
+      mounted && _foreground && _routeVisible && widget.isHomeTabActive;
+
+  void _scheduleNotificationPoll() {
+    if (!_notificationPollingEnabled || _notificationPollTimer != null) {
+      return;
+    }
+    final interval = widget.notificationPollInterval <= Duration.zero
+        ? const Duration(milliseconds: 1)
+        : widget.notificationPollInterval;
+    _notificationPollTimer = Timer(interval, _runNotificationPoll);
+  }
+
+  void _runNotificationPoll() {
+    _notificationPollTimer = null;
+    if (!_notificationPollingEnabled) return;
+    _refreshNotificationCount().whenComplete(_scheduleNotificationPoll);
   }
 
   void _toggleBalances() {
@@ -55,6 +163,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _refreshDashboard() async {
     if (_refreshing || !mounted) return;
+    if (_notificationPollingEnabled) _refreshNotificationCount();
     setState(() {
       _refreshing = true;
       _dashboardFuture = widget.homeDataService.fetchDashboard();
@@ -66,6 +175,38 @@ class _HomeScreenState extends State<HomeScreen> {
     } finally {
       if (mounted) setState(() => _refreshing = false);
     }
+  }
+
+  Future<void> _refreshNotificationCount() {
+    final inFlight = _notificationCountInFlight;
+    if (inFlight != null) return inFlight;
+
+    final request = _loadNotificationCount();
+    _notificationCountInFlight = request;
+    request.whenComplete(() {
+      if (identical(_notificationCountInFlight, request)) {
+        _notificationCountInFlight = null;
+      }
+    });
+    return request;
+  }
+
+  Future<void> _loadNotificationCount() async {
+    try {
+      final count = await widget.notificationsService.fetchUnreadCount();
+      if (mounted) setState(() => _unreadNotificationCount = count);
+    } catch (_) {
+      // Notification availability should never block balances or hide a
+      // previously known badge count during a transient outage.
+    }
+  }
+
+  void _openNotifications() {
+    unawaited(
+      context.push(AppRoutes.notifications).then((_) {
+        if (mounted) _refreshNotificationCount();
+      }),
+    );
   }
 
   @override
@@ -114,7 +255,11 @@ class _HomeScreenState extends State<HomeScreen> {
                     const LinearProgressIndicator(minHeight: 2),
                     const Text('Updating balances…'),
                   ],
-                  _HomeTopBar(user: data.user),
+                  _HomeTopBar(
+                    user: data.user,
+                    notificationCount: _unreadNotificationCount,
+                    onNotifications: _openNotifications,
+                  ),
                   const SizedBox(height: AppSpacing.md),
                   _BalancePanel(
                     data: data,
@@ -167,8 +312,14 @@ class _HomeScreenState extends State<HomeScreen> {
 
 class _HomeTopBar extends StatelessWidget {
   final HomeUser user;
+  final int notificationCount;
+  final VoidCallback onNotifications;
 
-  const _HomeTopBar({required this.user});
+  const _HomeTopBar({
+    required this.user,
+    required this.notificationCount,
+    required this.onNotifications,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -220,7 +371,8 @@ class _HomeTopBar extends StatelessWidget {
         _IconButton(
           icon: Icons.notifications_none_rounded,
           tooltip: 'Notifications',
-          onTap: () => context.push(AppRoutes.notifications),
+          badgeCount: notificationCount,
+          onTap: onNotifications,
         ),
       ],
     );
@@ -1087,10 +1239,10 @@ class _KycStatusBanner extends StatelessWidget {
     final isVerified = status.toUpperCase() == 'VERIFIED';
     final color = isVerified ? AppColors.success : AppColors.warning;
     final message = isVerified
-        ? 'KYC verified. Withdrawals, higher limits, and virtual account access are enabled.'
+        ? 'Your account is active. View your verification and account limits.'
         : status.toUpperCase() == 'SUBMITTED'
-            ? 'Your identity checks are in progress. View your BVN and NIN status.'
-            : 'Complete KYC to unlock higher limits, withdrawals, and virtual account access.';
+            ? 'Your BVN check is in progress. View verification status.'
+            : 'Verify BVN to activate your account and transact within Tier 1 limits.';
 
     return TapScale(
       onTap: () => context.push(AppRoutes.kyc),
@@ -1813,11 +1965,13 @@ class _SectionTitle extends StatelessWidget {
 class _IconButton extends StatelessWidget {
   final IconData icon;
   final String tooltip;
+  final int badgeCount;
   final VoidCallback onTap;
 
   const _IconButton({
     required this.icon,
     required this.tooltip,
+    this.badgeCount = 0,
     required this.onTap,
   });
 
@@ -1828,24 +1982,63 @@ class _IconButton extends StatelessWidget {
       message: tooltip,
       child: TapScale(
         onTap: onTap,
+        semanticLabel: badgeCount > 0
+            ? '$tooltip, $badgeCount unread notifications'
+            : tooltip,
         borderRadius: BorderRadius.circular(AppRadius.sm),
         pressedScale: 0.94,
-        child: Container(
-          width: 44,
-          height: 44,
-          decoration: BoxDecoration(
-            color: AppColors.surface,
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: AppColors.border),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.04),
-                blurRadius: 18,
-                offset: const Offset(0, 8),
+        child: Stack(
+          clipBehavior: Clip.none,
+          children: [
+            Container(
+              width: 44,
+              height: 44,
+              decoration: BoxDecoration(
+                color: AppColors.surface,
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: AppColors.border),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.04),
+                    blurRadius: 18,
+                    offset: const Offset(0, 8),
+                  ),
+                ],
               ),
-            ],
-          ),
-          child: Icon(icon, color: AppColors.textPrimary, size: 20),
+              child: Icon(icon, color: AppColors.textPrimary, size: 20),
+            ),
+            if (badgeCount > 0)
+              Positioned(
+                top: -6,
+                right: -6,
+                child: Semantics(
+                  label: '$badgeCount unread notifications',
+                  child: Container(
+                    constraints: const BoxConstraints(minWidth: 20),
+                    height: 20,
+                    padding: const EdgeInsets.symmetric(horizontal: 5),
+                    decoration: BoxDecoration(
+                      color: AppColors.primary,
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: AppColors.background,
+                        width: 1.5,
+                      ),
+                    ),
+                    child: Center(
+                      child: Text(
+                        badgeCount > 9 ? '9+' : '$badgeCount',
+                        style: const TextStyle(
+                          fontSize: 9,
+                          fontWeight: FontWeight.w700,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+          ],
         ),
       ),
     );

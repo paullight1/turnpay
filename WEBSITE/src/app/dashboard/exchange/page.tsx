@@ -24,7 +24,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import { exchangeApi } from "@/services/api";
 import { useAuth } from "@/lib/auth-provider";
-import { getMoneyActionGate } from "@/lib/account-status";
+import { useMoneyActionGate } from "@/lib/use-money-action-gate";
 import { createMoneyAttemptIdempotencyKey } from "@/lib/idempotency";
 import { getErrorMessage } from "@/lib/errors";
 import { config } from "@/lib/config";
@@ -272,7 +272,7 @@ export default function ExchangePage() {
   const payoutInFlightRef = useRef(false);
   const attemptKeyRef = useRef<string | null>(null);
   const payoutAttemptKeyRef = useRef<string | null>(null);
-  const moneyGate = getMoneyActionGate(profile);
+  const moneyGate = useMoneyActionGate(profile, { amount, action: "exchange" });
 
   // --- Payout state ---
   const [payoutAmount, setPayoutAmount] = useState("");

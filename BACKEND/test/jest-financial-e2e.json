@@ -6,7 +6,7 @@
   ],
   "rootDir": ".",
   "testEnvironment": "node",
-  "testRegex": "(?:email-otp\\.financial|kyc-flow\\.financial|kora-(?:collections|exchange)\\.financial|internal-transfer\\.(financial|fault)|adverse-funding\\.financial|withdrawal-idempotency\\.financial|vtpass-vtu\\.financial|banking-webhook\\.financial|manual-exchange\\.financial|exchange\\.financial)\\.e2e-spec\\.ts$",
+  "testRegex": "(?:bvn-tier-one\\.financial|email-otp\\.financial|kyc-flow\\.financial|kora-(?:collections|exchange)\\.financial|internal-transfer\\.(financial|fault)|adverse-funding\\.financial|withdrawal-idempotency\\.financial|vtpass-vtu\\.financial|banking-webhook\\.financial|manual-exchange\\.financial|exchange\\.financial)\\.e2e-spec\\.ts$",
   "testTimeout": 30000,
   "transform": {
     "^.+\\.(t|j)s$": "ts-jest"

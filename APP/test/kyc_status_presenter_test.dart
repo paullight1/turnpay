@@ -26,9 +26,9 @@ KycVerificationResult result(String status, {String reference = 'new-check'}) =>
         accountProvisioningStatus: 'PENDING');
 
 void main() {
-  test('pending BVN can continue to NIN without changing a tier', () {
+  test('pending BVN waits before offering the Tier 2 NIN upgrade', () {
     final state = overview(providerStatus: 'PENDING');
-    expect(kycCanStartNin(state), isTrue);
+    expect(kycCanStartNin(state), isFalse);
     expect(state.tier, 'TIER_0');
   });
   test('pending NIN cannot be submitted again', () {
@@ -53,7 +53,7 @@ void main() {
     final state =
         kycOverviewAfterSubmission(overview(), result('SUBMITTED'), 'BVN');
     expect(kycCheckStatus(state, 'BVN'), 'SUBMITTED');
-    expect(kycCanStartNin(state), isTrue);
+    expect(kycCanStartNin(state), isFalse);
     expect(state.tier, 'TIER_0');
     expect(state.documents.single.updatedAt, isNull);
   });

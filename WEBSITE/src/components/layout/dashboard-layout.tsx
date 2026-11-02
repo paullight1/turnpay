@@ -7,6 +7,7 @@ import { useAuth } from "@/lib/auth-provider";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { TrustPayLogo } from "@/components/brand/trustpay-logo";
+import { AdminNotificationBell } from "@/components/admin/admin-notification-bell";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -312,6 +313,7 @@ export default function DashboardLayout({
             )}
           </div>
           <div className="flex items-center gap-2 sm:gap-4">
+            {adminWorkspace && <AdminNotificationBell />}
             <ThemeToggle />
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
