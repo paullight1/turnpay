@@ -41,15 +41,18 @@ void main() {
         (tester) async {
       final amount = TextEditingController(text: '10000');
       final service = _Rates()..rate = source == 'NGN' ? '87' : '0.0111';
+      final formKey = GlobalKey<FormState>();
       await tester.pumpWidget(MaterialApp(
           home: Scaffold(
-              body: ExchangeConverter(
-        source: source,
-        amount: amount,
-        service: service,
-        onSwap: null,
-        enabled: true,
-      ))));
+              body: Form(
+                  key: formKey,
+                  child: ExchangeConverter(
+                    source: source,
+                    amount: amount,
+                    service: service,
+                    onSwap: null,
+                    enabled: true,
+                  )))));
       await tester.pumpAndSettle();
       expect(
           find.text(
@@ -59,6 +62,7 @@ void main() {
           tester.widget<TextFormField>(find.byType(TextFormField).last).enabled,
           isFalse);
       expect(find.text('870,000.00'), findsNothing);
+      expect(formKey.currentState!.validate(), isFalse);
       await tester.pumpWidget(const SizedBox());
       amount.dispose();
     });

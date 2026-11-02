@@ -258,6 +258,9 @@ class _ExchangeConverterState extends State<ExchangeConverter> {
             validator: receiving
                 ? null
                 : (value) {
+                    if (_rate == null) {
+                      return 'A valid exchange rate is required to continue.';
+                    }
                     try {
                       if ((value?.length ?? 0) > 14 ||
                           MoneyValue.parse((value ?? '').replaceAll(',', ''))
