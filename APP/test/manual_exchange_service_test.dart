@@ -7,10 +7,81 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import 'package:trustpay_app/features/exchange/services/manual_exchange_service.dart';
+import 'package:trustpay_app/features/exchange/services/ghana_bank_directory.dart';
 import 'package:trustpay_app/services/api_client.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+
+  test('recipient resolution sends an idempotency key and binds the response',
+      () async {
+    final adapter = _GhanaResolveAdapter();
+    final dio = Dio(BaseOptions(baseUrl: 'https://manual-exchange.test'))
+      ..httpClientAdapter = adapter;
+    final service = ManualExchangeService(apiClient: ApiClient(dio: dio));
+    final result = await service.resolveGhanaMomoRecipient(
+        number: '0241234567', operator: 'mtn');
+    expect(result.name, 'Verified Recipient');
+    expect(adapter.key, isNotEmpty);
+  });
+
+  test('a lookup for another number cannot become the verified recipient',
+      () async {
+    final adapter = _GhanaResolveAdapter(otherNumber: true);
+    final dio = Dio(BaseOptions(baseUrl: 'https://manual-exchange.test'))
+      ..httpClientAdapter = adapter;
+    final service = ManualExchangeService(apiClient: ApiClient(dio: dio));
+    await expectLater(
+        service.resolveGhanaMomoRecipient(
+            number: '0241234567', operator: 'mtn'),
+        throwsA(isA<FormatException>()));
+  });
+
+  test('normalizes only valid Ghana MoMo numbers', () {
+    expect(normalizeGhanaMobileNumber('024 123 4567'), '233241234567');
+    expect(normalizeGhanaMobileNumber('+233241234567'), '233241234567');
+    expect(
+      () => normalizeGhanaMobileNumber('024123456'),
+      throwsA(isA<FormatException>()),
+    );
+  });
+
+  test('parses provider recipient names without inventing a fallback', () {
+    final result = ManualGhanaRecipientResolution.fromJson({
+      'name': 'A Verified Recipient',
+      'number': '233241234567',
+      'operator': 'mtn',
+    });
+    expect(result.name, 'A Verified Recipient');
+    expect(
+      () => ManualGhanaRecipientResolution.fromJson({
+        'number': '233241234567',
+        'operator': 'mtn',
+      }),
+      throwsA(isA<FormatException>()),
+    );
+  });
+
+  test('fails closed when provider capabilities do not expose bank payouts',
+      () {
+    final capabilities = ManualGhanaPayoutCapabilities.fromJson({
+      'enabled': true,
+      'momoPayouts': true,
+      'bankPayouts': false,
+    });
+    expect(capabilities.momoPayouts, isTrue);
+    expect(capabilities.bankPayouts, isFalse);
+  });
+
+  test('directory uses the current Ghana bank names without provider codes',
+      () {
+    expect(ghanaLicensedBanks, hasLength(23));
+    expect(
+        ghanaLicensedBanks.any((bank) => bank.name == 'GCB Bank Plc'), isTrue);
+    expect(searchGhanaBanks('gcb').single.name, 'GCB Bank Plc');
+    expect(
+        ghanaLicensedBanks.every((bank) => bank.monogram.isNotEmpty), isTrue);
+  });
 
   setUp(() {
     FlutterSecureStorage.setMockInitialValues({
@@ -548,5 +619,30 @@ class _SignedUploadAdapter implements HttpClientAdapter {
       bytes = data;
     }
     return ResponseBody.fromString('', 200);
+  }
+}
+
+class _GhanaResolveAdapter implements HttpClientAdapter {
+  final bool otherNumber;
+  String key = '';
+  _GhanaResolveAdapter({this.otherNumber = false});
+  @override
+  void close({bool force = false}) {}
+  @override
+  Future<ResponseBody> fetch(RequestOptions options,
+      Stream<Uint8List>? requestStream, Future<void>? cancelFuture) async {
+    key = '${options.headers['Idempotency-Key'] ?? ''}';
+    return ResponseBody.fromString(
+        jsonEncode(key.isEmpty
+            ? {'message': 'Idempotency-Key required'}
+            : {
+                'name': 'Verified Recipient',
+                'number': otherNumber ? '233201234567' : '233241234567',
+                'operator': 'mtn',
+              }),
+        key.isEmpty ? 400 : 200,
+        headers: {
+          Headers.contentTypeHeader: [Headers.jsonContentType]
+        });
   }
 }

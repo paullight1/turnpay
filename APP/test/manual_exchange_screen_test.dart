@@ -1,4 +1,9 @@
 import 'dart:async';
+import 'dart:io';
+import 'dart:ui' as ui;
+import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:trustpay_app/core/theme/app_theme.dart';
@@ -8,6 +13,18 @@ import 'package:trustpay_app/features/exchange/services/manual_exchange_service.
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  setUpAll(() async {
+    GoogleFonts.config.allowRuntimeFetching = false;
+    if (!const bool.fromEnvironment('EXCHANGE_CAPTURE')) return;
+    final icons = File(
+        '${File(Platform.resolvedExecutable).parent.parent.parent.path}/material_fonts/MaterialIcons-Regular.otf');
+    if (await icons.exists()) {
+      await (FontLoader('MaterialIcons')
+            ..addFont(
+                Future.value(ByteData.sublistView(await icons.readAsBytes()))))
+          .load();
+    }
+  });
 
   testWidgets('header back returns through exchange steps and keeps the amount',
       (tester) async {
@@ -112,7 +129,147 @@ void main() {
     expect(find.text('TrustPay wallet'), findsNothing);
     expect(find.text('Bank account'), findsOneWidget);
     expect(find.text('Mobile money'), findsOneWidget);
+    expect(find.text('Select a receiving method to enter its details.'),
+        findsOneWidget);
+    expect(find.byKey(const ValueKey('exchange-bank-field')), findsNothing);
+    await tester.tap(find.text('Mobile money'));
+    await tester.pumpAndSettle();
     expect(find.text('View transfer account'), findsOneWidget);
+  });
+
+  testWidgets('converter does not show the PIN helper copy', (tester) async {
+    await tester.pumpWidget(MaterialApp(
+        home: ManualExchangeScreen(
+      service: _FakeManualExchangeService(enabled: true),
+    )));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Naira to cedis'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Your PIN protects this exchange.'), findsNothing);
+    expect(find.text('Your PIN protects this exchange'), findsNothing);
+  });
+
+  testWidgets('asks where to receive before revealing the cedi form',
+      (tester) async {
+    await tester.pumpWidget(MaterialApp(
+        home: ManualExchangeScreen(
+      service: _FakeManualExchangeService(enabled: true),
+    )));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Naira to cedis'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextFormField).first, '1000');
+    await tester.ensureVisible(find.text('Continue'));
+    await tester.tap(find.text('Continue'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Choose where to receive your cedis.'), findsOneWidget);
+    expect(find.byKey(const ValueKey('exchange-bank-field')), findsNothing);
+    expect(
+        find.byKey(const ValueKey('exchange-momo-number-field')), findsNothing);
+    expect(find.text('Recipient name'), findsNothing);
+    expect(find.text('MoMo number'), findsNothing);
+    expect(find.text('Bank name'), findsNothing);
+    expect(find.text('Mobile money'), findsOneWidget);
+    expect(find.text('Bank account'), findsOneWidget);
+  });
+
+  testWidgets('mobile money selection reveals its destination form',
+      (tester) async {
+    await tester.pumpWidget(MaterialApp(
+        home: ManualExchangeScreen(
+      service: _FakeManualExchangeService(enabled: true),
+    )));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Naira to cedis'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextFormField).first, '1000');
+    await tester.ensureVisible(find.text('Continue'));
+    await tester.tap(find.text('Continue'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Mobile money'));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('exchange-momo-number-field')),
+        findsOneWidget);
+    expect(find.text('Recipient name'), findsOneWidget);
+    expect(
+      find.text(
+          'We check the recipient name with the provider after you choose a network.'),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets(
+      'MoMo recipient name appears automatically after number and network',
+      (tester) async {
+    await tester.pumpWidget(MaterialApp(
+        home: ManualExchangeScreen(
+            service: _FakeManualExchangeService(enabled: true))));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Naira to cedis'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextFormField).first, '1000');
+    await tester.ensureVisible(find.text('Continue'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Continue'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Mobile money'));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+        find.byKey(const ValueKey('exchange-momo-number-field')), '0241234567');
+    await tester.tap(find.byType(DropdownButtonFormField<String>));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('MTN MoMo').last);
+    await tester.pump(const Duration(milliseconds: 650));
+    await tester.pumpAndSettle();
+    expect(find.text('Synthetic Verified Recipient'), findsOneWidget);
+  });
+
+  testWidgets('bank form puts account number before searchable bank field',
+      (tester) async {
+    tester.view.physicalSize = const Size(430, 932);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final key = GlobalKey();
+    await tester.pumpWidget(RepaintBoundary(
+        key: key,
+        child: MaterialApp(
+            debugShowCheckedModeBanner: false,
+            theme: AppTheme.light,
+            home: ManualExchangeScreen(
+                service: _FakeManualExchangeService(enabled: true)))));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Naira to cedis'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextFormField).first, '1000');
+    await tester.ensureVisible(find.text('Continue'));
+    await tester.tap(find.text('Continue'));
+    await tester.pumpAndSettle();
+    await _captureExchange(tester, key, 'receive-choice');
+    await tester.tap(find.text('Bank account'));
+    await tester.pumpAndSettle();
+
+    final account = find.byKey(const ValueKey('exchange-bank-account-field'));
+    final bank = find.byKey(const ValueKey('exchange-bank-field'));
+    expect(account, findsOneWidget);
+    expect(bank, findsOneWidget);
+    expect(tester.getTopLeft(account).dy, lessThan(tester.getTopLeft(bank).dy));
+
+    await _captureExchange(tester, key, 'receive-bank');
+    await tester.tap(bank);
+    await tester.pumpAndSettle();
+    expect(find.text('Absa Bank Ghana LTD'), findsOneWidget);
+    await _captureExchange(tester, key, 'receive-bank-list');
+    await tester.enterText(
+        find.byKey(const ValueKey('exchange-bank-search')), 'gcb');
+    await tester.pumpAndSettle();
+    expect(find.text('GCB Bank Plc'), findsOneWidget);
+    await tester.tap(find.text('GCB Bank Plc'));
+    await tester.pumpAndSettle();
+    expect(find.text('GCB Bank Plc'), findsOneWidget);
   });
 
   testWidgets(
@@ -267,6 +424,29 @@ class _FakeManualExchangeService extends ManualExchangeService {
         'effectiveRate': source == 'NGN' ? '0.01' : '100',
         'isStale': false,
       };
+
+  @override
+  Future<ManualGhanaPayoutCapabilities> fetchGhanaPayoutCapabilities() async =>
+      const ManualGhanaPayoutCapabilities(
+        enabled: true,
+        momoPayouts: true,
+        bankPayouts: false,
+      );
+
+  @override
+  Future<List<ManualGhanaMomoOperator>> fetchGhanaMomoOperators() async =>
+      const [ManualGhanaMomoOperator(slug: 'mtn', name: 'MTN MoMo')];
+
+  @override
+  Future<ManualGhanaRecipientResolution> resolveGhanaMomoRecipient({
+    required String number,
+    required String operator,
+  }) async =>
+      ManualGhanaRecipientResolution(
+        name: 'Synthetic Verified Recipient',
+        number: normalizeGhanaMobileNumber(number),
+        operator: operator,
+      );
   bool enabled;
   int configReads = 0;
   final List<String>? availableSourceCurrencies;
@@ -303,4 +483,22 @@ class _SlowHistory extends _FakeManualExchangeService {
   final orders = Completer<List<ManualExchangeOrder>>();
   @override
   Future<List<ManualExchangeOrder>> listOrders() => orders.future;
+}
+
+Future<void> _captureExchange(
+    WidgetTester tester, GlobalKey key, String name) async {
+  if (!const bool.fromEnvironment('EXCHANGE_CAPTURE')) return;
+  await tester
+      .runAsync(() => Future<void>.delayed(const Duration(milliseconds: 500)));
+  await tester.pumpAndSettle();
+  await tester.runAsync(() async {
+    final boundary =
+        key.currentContext!.findRenderObject()! as RenderRepaintBoundary;
+    final image = await boundary.toImage(pixelRatio: 2);
+    final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
+    final file = File('../output/exchange-ux/$name.png');
+    await file.parent.create(recursive: true);
+    await file.writeAsBytes(bytes!.buffer.asUint8List());
+    image.dispose();
+  });
 }

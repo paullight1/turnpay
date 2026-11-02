@@ -14,6 +14,71 @@ const int manualExchangeMaxProofBytes = 8 * 1024 * 1024;
 
 enum ManualSettlementMode { wallet, bank, momo }
 
+class ManualGhanaPayoutCapabilities {
+  final bool enabled;
+  final bool momoPayouts;
+  final bool bankPayouts;
+
+  const ManualGhanaPayoutCapabilities({
+    required this.enabled,
+    required this.momoPayouts,
+    required this.bankPayouts,
+  });
+
+  factory ManualGhanaPayoutCapabilities.fromJson(Map<String, dynamic> json) {
+    return ManualGhanaPayoutCapabilities(
+      enabled: json['enabled'] == true,
+      momoPayouts: json['momoPayouts'] == true,
+      bankPayouts: json['bankPayouts'] == true,
+    );
+  }
+}
+
+class ManualGhanaMomoOperator {
+  final String slug;
+  final String name;
+
+  const ManualGhanaMomoOperator({required this.slug, required this.name});
+
+  factory ManualGhanaMomoOperator.fromJson(Map<String, dynamic> json) {
+    final slug = _requiredString(json['slug'], 'MoMo operator slug');
+    if (!RegExp(r'^[a-z0-9-]{2,32}$').hasMatch(slug)) {
+      throw const FormatException('Invalid Ghana MoMo operator.');
+    }
+    return ManualGhanaMomoOperator(
+      slug: slug,
+      name: _requiredString(json['name'], 'MoMo operator name'),
+    );
+  }
+}
+
+class ManualGhanaRecipientResolution {
+  final String name;
+  final String number;
+  final String operator;
+
+  const ManualGhanaRecipientResolution({
+    required this.name,
+    required this.number,
+    required this.operator,
+  });
+
+  factory ManualGhanaRecipientResolution.fromJson(Map<String, dynamic> json) {
+    final name = _requiredString(json['name'], 'recipient name');
+    if (name.length < 2 || name.length > 120) {
+      throw const FormatException(
+          'The MoMo recipient name could not be verified.');
+    }
+    final number = _requiredString(json['number'], 'recipient number');
+    final operator = _requiredString(json['operator'], 'recipient operator');
+    return ManualGhanaRecipientResolution(
+      name: name,
+      number: number,
+      operator: operator,
+    );
+  }
+}
+
 extension ManualSettlementModeX on ManualSettlementMode {
   String get value {
     switch (this) {
@@ -741,6 +806,66 @@ class ManualExchangeService {
 
   Future<ManualExchangeConfig> getConfig() => fetchConfig();
 
+  /// Reads the provider capability contract before attempting a Ghana
+  /// recipient lookup. This keeps an unavailable provider honest and avoids
+  /// guessing a bank route from an account number.
+  Future<ManualGhanaPayoutCapabilities> fetchGhanaPayoutCapabilities() async {
+    final response = await _apiClient.client.get<dynamic>(
+      '/api/ghana/capabilities',
+    );
+    return ManualGhanaPayoutCapabilities.fromJson(_mapValue(response.data));
+  }
+
+  Future<List<ManualGhanaMomoOperator>> fetchGhanaMomoOperators() async {
+    final capabilities = await fetchGhanaPayoutCapabilities();
+    if (!capabilities.enabled || !capabilities.momoPayouts) {
+      throw const FormatException(
+        'Automatic MoMo name check is unavailable. Enter the recipient details for manual review.',
+      );
+    }
+    final response =
+        await _apiClient.client.get<dynamic>('/api/ghana/operators');
+    final data = response.data;
+    if (data is! List) {
+      throw const FormatException('Ghana MoMo networks could not be read.');
+    }
+    final operators = data
+        .whereType<Map>()
+        .map((item) =>
+            ManualGhanaMomoOperator.fromJson(Map<String, dynamic>.from(item)))
+        .toList(growable: false);
+    if (operators.isEmpty) {
+      throw const FormatException('No Ghana MoMo network is available.');
+    }
+    return operators;
+  }
+
+  Future<ManualGhanaRecipientResolution> resolveGhanaMomoRecipient({
+    required String number,
+    required String operator,
+  }) async {
+    final normalizedNumber = normalizeGhanaMobileNumber(number);
+    final normalizedOperator = _requireText(operator, 'MoMo operator');
+    if (!RegExp(r'^[a-z0-9-]{2,32}$').hasMatch(normalizedOperator)) {
+      throw const FormatException('Choose an available Ghana MoMo network.');
+    }
+    final response = await _apiClient.client.post<dynamic>(
+      '/api/ghana/recipients/resolve',
+      data: {
+        'mobileNumber': normalizedNumber,
+        'operator': normalizedOperator,
+      },
+    );
+    final resolved =
+        ManualGhanaRecipientResolution.fromJson(_mapValue(response.data));
+    if (normalizeGhanaMobileNumber(resolved.number) != normalizedNumber ||
+        resolved.operator != normalizedOperator) {
+      throw const FormatException(
+          'The name check did not match this recipient. Try again.');
+    }
+    return resolved;
+  }
+
   Future<List<ManualExchangeOrder>> listOrders() async {
     final response = await _apiClient.client.get<dynamic>(
       '/api/exchange/manual-orders',
@@ -1196,6 +1321,22 @@ String _normalizeBankReference(String raw) {
     throw const FormatException('Enter a valid bank reference.');
   }
   return reference;
+}
+
+String normalizeGhanaMobileNumber(String raw) {
+  var number = raw
+      .trim()
+      .replaceAll(RegExp(r'[\s-]'), '')
+      .replaceFirst(RegExp(r'^\+'), '');
+  if (RegExp(r'^0\d{9}$').hasMatch(number)) {
+    number = '233${number.substring(1)}';
+  }
+  if (!RegExp(r'^233\d{9}$').hasMatch(number)) {
+    throw const FormatException(
+      'Enter a Ghana MoMo number, for example 0241234567.',
+    );
+  }
+  return number;
 }
 
 String _requireText(dynamic value, String field) {

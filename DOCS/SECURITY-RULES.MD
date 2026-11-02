@@ -714,3 +714,8 @@ Verification passed 767 backend unit tests, 89 isolated PostgreSQL/Redis financi
 ### 2026-11-02 receiving-account setup intent
 
 NGN receiving-account setup may now be requested before KYC completion. This records an authenticated, validated, rate-limited and idempotent consent intent in `WAITING_FOR_KYC`; it never creates or reveals a usable account at that stage. The user row lock serializes intent creation, and consent plus audit are written atomically. Existing requests are reused without resetting provider processing. The worker selects only active verified Tier 1/2 owners with verified Paystack BVN, and actual provisioning retains the existing KYC and provider checks, lease and recovery behavior. No tier, transaction limit, identity decision or account-number disclosure rule was relaxed. Wallet balance visibility now depends on the user's eye-toggle preference rather than account issuance. Validation uses synthetic data and does not perform live financial actions.
+
+
+### 2026-11-02 Ghana exchange receiving details
+
+The exchange form now separates receiving-method selection from recipient details. The Ghana bank picker uses named institutions and local logo assets, never inferred bank codes. Account-number-based bank detection and bank-name lookup remain unavailable rather than being simulated. Provider-backed MoMo lookup validates returned number/operator and rejects stale responses after edits, method changes, submission or disposal. Failed/unavailable lookups retain the existing explicit manual-review flow. Transaction PIN, idempotency, manual settlement, tier limits and server-side money checks are unchanged. Validation uses synthetic recipients and does not execute live financial or identity actions.
