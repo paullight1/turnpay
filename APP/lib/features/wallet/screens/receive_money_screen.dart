@@ -1,7 +1,6 @@
 import '../../ghana/ghana_money_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_svg/flutter_svg.dart';
 import 'package:intl/intl.dart';
 import 'package:go_router/go_router.dart';
 
@@ -121,7 +120,7 @@ class _ReceiveMoneyScreenState extends State<ReceiveMoneyScreen> {
           future: _accountsFuture,
           builder: (context, accountsSnapshot) {
             // Loading: no account data has arrived yet. Never fall through to
-            // the "No Paystack account yet" empty state while a fetch is pending.
+            // the "No receiving account yet" empty state while a fetch is pending.
             if (accountsSnapshot.connectionState == ConnectionState.waiting &&
                 !accountsSnapshot.hasData) {
               return const _ReceiveMoneyLoadingState();
@@ -179,66 +178,39 @@ class _ReceiveMoneyScreenState extends State<ReceiveMoneyScreen> {
                   if (hasPendingAccount ||
                       provisioning?.isPending == true ||
                       actionRequired) {
-                    return CustomScrollView(
-                      physics: const AlwaysScrollableScrollPhysics(
-                        parent: BouncingScrollPhysics(),
+                    return _ReceiveMoneyStateScroll(
+                      child: _PaystackProvisioningCard(
+                        message: provisioning?.message,
+                        actionRequired: actionRequired,
+                        onRefresh: _refresh,
+                        onRetry: _openAccountSetup,
                       ),
-                      slivers: [
-                        SliverFillRemaining(
-                          hasScrollBody: false,
-                          child: Center(
-                            child: _PaystackProvisioningCard(
-                              message: provisioning?.message,
-                              actionRequired: actionRequired,
-                              onRefresh: _refresh,
-                              onRetry: _openAccountSetup,
-                            ),
-                          ),
-                        ),
-                      ],
                     );
                   }
-                  return CustomScrollView(
-                    physics: const AlwaysScrollableScrollPhysics(
-                      parent: BouncingScrollPhysics(),
+                  return _ReceiveMoneyStateScroll(
+                    child: _NoVirtualAccountCard(
+                      isRequesting: false,
+                      onRequest: _openAccountSetup,
                     ),
-                    slivers: [
-                      SliverFillRemaining(
-                        hasScrollBody: false,
-                        child: Center(
-                          child: _NoVirtualAccountCard(
-                            isRequesting: false,
-                            onRequest: _openAccountSetup,
-                          ),
-                        ),
-                      ),
-                    ],
                   );
                 },
               );
             }
 
             if (!hasShareableAccount) {
-              return CustomScrollView(
-                physics: const AlwaysScrollableScrollPhysics(
-                  parent: BouncingScrollPhysics(),
+              return _ReceiveMoneyStateScroll(
+                child: TpEmptyState(
+                  variant: TpIllustrationVariant.kyc,
+                  illustrationAsset:
+                      'assets/images/empty_states/receive-account.svg',
+                  title: 'Verify your identity',
+                  message:
+                      'Complete KYC to get your receiving account details.',
+                  primaryActionLabel: 'Complete KYC',
+                  onPrimaryAction: _openKyc,
+                  illustrationSize: 176,
+                  compact: true,
                 ),
-                slivers: [
-                  SliverFillRemaining(
-                    hasScrollBody: false,
-                    child: TpEmptyState(
-                      variant: TpIllustrationVariant.kyc,
-                      illustrationAsset:
-                          'assets/images/empty_states/receive-account.svg',
-                      title: 'Verify your identity',
-                      message:
-                          'Complete KYC to get your receiving account details.',
-                      primaryActionLabel: 'Complete KYC',
-                      onPrimaryAction: _openKyc,
-                      illustrationSize: 236,
-                    ),
-                  ),
-                ],
               );
             }
 
@@ -316,7 +288,7 @@ class _ReceiveMoneyScreenState extends State<ReceiveMoneyScreen> {
                                   const _InstructionStep(
                                     number: '1',
                                     text:
-                                        'Share your Paystack NGN account number above with the sender',
+                                        'Share your TrustPay NGN account number above with the sender',
                                   ),
                                   const SizedBox(height: AppSpacing.sm),
                                   const _InstructionStep(
@@ -421,7 +393,7 @@ class _ReceiveMoneyScreenState extends State<ReceiveMoneyScreen> {
                 ),
                 const SizedBox(height: AppSpacing.xs),
                 Text(
-                  'Deposits will appear here once someone sends money to your Paystack account',
+                  'Deposits will appear here once someone sends money to your TrustPay account',
                   style: AppTextStyles.bodyS,
                   textAlign: TextAlign.center,
                 ),
@@ -518,7 +490,7 @@ class _VirtualAccountCard extends StatelessWidget {
                   children: [
                     Text(
                       account.bankName.isEmpty
-                          ? 'Paystack NGN account'
+                          ? 'TrustPay NGN account'
                           : account.bankName,
                       style: AppTextStyles.labelM.copyWith(
                         color: AppColors.textPrimary,
@@ -750,55 +722,132 @@ class _NoVirtualAccountCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     AppColors.watch(context);
+    final isCompact = MediaQuery.sizeOf(context).width < 440;
     return ConstrainedBox(
-      constraints: const BoxConstraints(maxWidth: 380),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Semantics(
-              image: true,
-              label: 'No Paystack account yet',
-              child: SizedBox(
-                width: 224,
-                height: 176,
-                child: SvgPicture.asset(
-                  'assets/images/empty_states/receive-account.svg',
-                  fit: BoxFit.contain,
-                ),
+      constraints: const BoxConstraints(maxWidth: 560),
+      child: Container(
+        width: double.infinity,
+        padding: EdgeInsets.all(isCompact ? AppSpacing.md : AppSpacing.lg),
+        decoration: BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.circular(AppRadius.md),
+          border: Border.all(color: AppColors.border),
+        ),
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final horizontal = constraints.maxWidth >= 420;
+            final icon = Container(
+              width: 56,
+              height: 56,
+              decoration: BoxDecoration(
+                color: AppColors.primary.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(AppRadius.sm),
               ),
-            ),
-            const SizedBox(height: AppSpacing.sm),
-            Text(
-              'No Paystack account yet',
-              style: AppTextStyles.labelM,
-            ),
-            const SizedBox(height: AppSpacing.xs),
-            Text(
-              'Request a dedicated Paystack NGN account to receive bank transfers directly into your TrustPay wallet.',
-              style: AppTextStyles.bodyS,
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: AppSpacing.lg),
-            FilledButton(
-              onPressed: isRequesting
-                  ? null
-                  : () {
-                      Haptics.medium();
-                      onRequest();
-                    },
-              child: isRequesting
-                  ? const SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Text('Request Paystack account'),
-            ),
-          ],
+              child: Icon(
+                Icons.account_balance_rounded,
+                color: AppColors.primary,
+                size: 28,
+              ),
+            );
+            final copy = Column(
+              crossAxisAlignment: horizontal
+                  ? CrossAxisAlignment.start
+                  : CrossAxisAlignment.center,
+              children: [
+                Text(
+                  'No TrustPay account yet',
+                  style: AppTextStyles.headingM,
+                  textAlign: horizontal ? TextAlign.start : TextAlign.center,
+                ),
+                const SizedBox(height: AppSpacing.xs),
+                Text(
+                  'Create a TrustPay NGN account to receive bank transfers directly in your wallet.',
+                  style: AppTextStyles.bodyM,
+                  textAlign: horizontal ? TextAlign.start : TextAlign.center,
+                ),
+                const SizedBox(height: AppSpacing.md),
+                SizedBox(
+                  width: horizontal ? null : double.infinity,
+                  child: FilledButton.icon(
+                    onPressed: isRequesting
+                        ? null
+                        : () {
+                            Haptics.medium();
+                            onRequest();
+                          },
+                    icon: isRequesting
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.add_rounded, size: 18),
+                    label: Text(
+                      isRequesting
+                          ? 'Creating account…'
+                          : 'Create TrustPay account',
+                    ),
+                  ),
+                ),
+              ],
+            );
+
+            if (!horizontal) {
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Align(alignment: Alignment.center, child: icon),
+                  const SizedBox(height: AppSpacing.md),
+                  copy,
+                ],
+              );
+            }
+
+            return Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                icon,
+                const SizedBox(width: AppSpacing.md),
+                Expanded(child: copy),
+              ],
+            );
+          },
         ),
       ),
+    );
+  }
+}
+
+/// Keeps empty and provisioning states near the page header instead of
+/// centering a short message in a large viewport. The bounded content remains
+/// readable on tablets while the scroll physics preserve pull-to-refresh.
+class _ReceiveMoneyStateScroll extends StatelessWidget {
+  final Widget child;
+
+  const _ReceiveMoneyStateScroll({required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    return CustomScrollView(
+      physics: const AlwaysScrollableScrollPhysics(
+        parent: BouncingScrollPhysics(),
+      ),
+      slivers: [
+        SliverPadding(
+          padding: const EdgeInsets.fromLTRB(
+            AppSpacing.lg,
+            AppSpacing.md,
+            AppSpacing.lg,
+            AppSpacing.xxl,
+          ),
+          sliver: SliverToBoxAdapter(
+            child: Align(
+              alignment: Alignment.topCenter,
+              child: child,
+            ),
+          ),
+        ),
+      ],
     );
   }
 }
@@ -835,8 +884,8 @@ class _PaystackProvisioningCard extends StatelessWidget {
             const SizedBox(height: AppSpacing.md),
             Text(
               actionRequired
-                  ? 'Paystack account setup needs attention'
-                  : 'Paystack is preparing your NGN account',
+                  ? 'TrustPay account setup needs attention'
+                  : 'TrustPay is preparing your NGN account',
               style: AppTextStyles.labelM,
               textAlign: TextAlign.center,
             ),

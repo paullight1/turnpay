@@ -1,5 +1,6 @@
 import { ConflictException } from '@nestjs/common';
 import { UsersService } from './users.service';
+import { Prisma } from '@prisma/client';
 
 describe('UsersService identity updates', () => {
   const prisma = {
@@ -75,6 +76,32 @@ describe('UsersService identity updates', () => {
         targetId: 'user-1',
         metadata: { actorUserId: 'user-1' },
       }),
+    });
+  });
+
+  it('returns a correctable phone conflict instead of an internal server error', async () => {
+    prisma.user.findUnique.mockResolvedValue({
+      id: 'user-1',
+      phone: '+2348012345678',
+      country: 'NG',
+      kycStatus: 'PENDING',
+      profileDetailsUpdatedAt: null,
+    });
+    prisma.user.update.mockRejectedValue(
+      new Prisma.PrismaClientKnownRequestError('Unique constraint', {
+        code: 'P2002',
+        clientVersion: 'test',
+        meta: { target: ['phone'] },
+      }),
+    );
+    await expect(
+      service.update('user-1', { phone: '+2348012345679' }),
+    ).rejects.toMatchObject({
+      response: {
+        code: 'PROFILE_PHONE_IN_USE',
+        message:
+          'This phone number is already linked to another account. Use your own registered number or contact support.',
+      },
     });
   });
 });

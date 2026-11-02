@@ -300,6 +300,10 @@ String authErrorMessage(Object error, String fallback) {
 
   if (error is DioException) {
     final data = error.response?.data;
+    if (path == '/api/kyc/verify' &&
+        (error.response == null || (error.response?.statusCode ?? 0) >= 500)) {
+      return 'We could not confirm your verification result. Check verification status before retrying. Your entered details have been kept.';
+    }
     if (_isAuthRequest(path)) {
       if (error.response == null) {
         return error.type == DioExceptionType.cancel
@@ -386,7 +390,7 @@ String _authSafeMessage(
   }
 
   if (path.contains('/login')) {
-    return 'Incorrect email or password. Try again or reset your password.';
+    return 'Unable to sign in. Check your email and password, or choose Verify email if you have not confirmed it yet.';
   }
 
   if (path.contains('/refresh') && statusCode == 401) {

@@ -828,7 +828,7 @@ _DetailConfig _configFor(DashboardDetailKind kind) {
       );
     case DashboardDetailKind.virtualAccount:
       return const _DetailConfig(
-        title: 'Paystack NGN account',
+        title: 'TrustPay NGN account',
         subtitle: 'Receive NGN bank transfers directly into your wallet.',
       );
     case DashboardDetailKind.activity:
@@ -1233,7 +1233,7 @@ class _AccountDetailsBodyState extends State<_AccountDetailsBody> {
       setState(() {
         _message = _provisioning?.message.isNotEmpty == true
             ? _provisioning!.message
-            : 'Paystack is already preparing your NGN receiving account. Refresh shortly.';
+            : 'TrustPay is already preparing your NGN receiving account. Refresh shortly.';
       });
       await _loadProvisioningStatus();
       return;
@@ -1242,7 +1242,7 @@ class _AccountDetailsBodyState extends State<_AccountDetailsBody> {
     final consentAccepted = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: const Text('Set up your Paystack account'),
+        title: const Text('Set up your TrustPay account'),
         content: const Text(
           'I authorize TRUSTPAY to create a dedicated NGN receiving account with Paystack for wallet funding. Paystack will confirm incoming transfers before your wallet is credited.',
         ),
@@ -1285,10 +1285,10 @@ class _AccountDetailsBodyState extends State<_AccountDetailsBody> {
               item.displayAccountNumber != account.displayAccountNumber),
         ];
         _message = account.status.toUpperCase() == 'PENDING'
-            ? 'Paystack is preparing your NGN receiving account. Refresh shortly.'
+            ? 'TrustPay is preparing your NGN receiving account. Refresh shortly.'
             : account.status.toUpperCase() == 'ACTION_REQUIRED'
-                ? 'Paystack account setup needs attention. Review your details or contact support, then retry.'
-                : 'Paystack receiving account is ready.';
+                ? 'TrustPay account setup needs attention. Review your details or contact support, then retry.'
+                : 'TrustPay receiving account is ready.';
       });
     } on DioException catch (error) {
       if ((error.response?.statusCode ?? 0) >= 400 &&
@@ -1763,7 +1763,7 @@ class _VirtualAccountSummaryCard extends StatelessWidget {
               const SizedBox(width: AppSpacing.md),
               Expanded(
                 child: Text(
-                  'Paystack NGN receiving account',
+                  'TrustPay NGN receiving account',
                   style: AppTextStyles.headingM,
                 ),
               ),
@@ -1775,7 +1775,7 @@ class _VirtualAccountSummaryCard extends StatelessWidget {
             const Icon(Icons.warning_amber_rounded),
             const SizedBox(height: AppSpacing.sm),
             Text(
-              'Paystack account setup needs attention. Review the details or contact support, then retry.',
+              'TrustPay account setup needs attention. Review the details or contact support, then retry.',
               style: AppTextStyles.bodyM,
             ),
             const SizedBox(height: AppSpacing.md),
@@ -1795,12 +1795,12 @@ class _VirtualAccountSummaryCard extends StatelessWidget {
             const Icon(Icons.schedule_rounded),
             const SizedBox(height: AppSpacing.sm),
             Text(
-              'Paystack is preparing your NGN receiving account. Refresh shortly.',
+              'TrustPay is preparing your NGN receiving account. Refresh shortly.',
               style: AppTextStyles.bodyM,
             ),
           ] else if (current == null) ...[
             Text(
-              'Get a dedicated Paystack account number for receiving NGN transfers into your wallet.',
+              'Get a dedicated TrustPay account number for receiving NGN transfers into your wallet.',
               style: AppTextStyles.bodyM,
             ),
             const SizedBox(height: AppSpacing.md),

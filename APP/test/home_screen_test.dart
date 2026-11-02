@@ -38,7 +38,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(
         find.text(
-            'Your Paystack account is waiting for identity verification.'),
+            'Your TrustPay account is waiting for identity verification.'),
         findsOneWidget);
     expect(find.text('Request'), findsNothing);
     final progress =

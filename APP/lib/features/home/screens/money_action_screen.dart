@@ -412,7 +412,7 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
       if (!mounted) return;
       setState(() {
         _checkoutMessage =
-            'Saved Paystack checkout data could not be read safely. Sending is paused until it can be checked.';
+            'Saved checkout data could not be read safely. This flow is paused until it can be checked.';
       });
     }
   }
@@ -1353,11 +1353,11 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
           _fundingAccountMessage = provisioning?.isActionRequired == true
               ? (provisioning?.message.isNotEmpty == true
                   ? provisioning!.message
-                  : 'Paystack account setup needs attention. Review your details or contact support, then retry.')
+                  : 'TrustPay account setup needs attention. Review your details or contact support, then retry.')
               : provisioning?.isPending == true
                   ? (provisioning?.message.isNotEmpty == true
                       ? provisioning!.message
-                      : 'Paystack is preparing your NGN receiving account. Refresh shortly.')
+                      : 'TrustPay is preparing your NGN receiving account. Refresh shortly.')
                   : _canRevealFundingAccount
                       ? 'Request your NGN funding account before making a bank transfer.'
                       : 'Complete BVN and bank verification before requesting a funding account.';
@@ -1395,7 +1395,7 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
         _paymentCapabilities = null;
         _checkoutMessage = authErrorMessage(
           error,
-          'Paystack funding options are temporarily unavailable.',
+          'Funding options are temporarily unavailable.',
         );
       });
     } finally {
@@ -1426,7 +1426,7 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
     }
     if (_paymentCapabilities?.checkout != true) {
       _showMessage(
-        'Paystack checkout is not available for this account yet.',
+        'Secure checkout is not available for this account yet.',
         type: MoneyActionFeedbackType.warning,
       );
       return;
@@ -1441,7 +1441,7 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
       userId = await _resolvePaystackCheckoutUser();
       if (userId == null || userId.isEmpty) {
         throw const PaystackCheckoutRecoveryException(
-          'Sign in again before starting Paystack checkout.',
+          'Sign in again before starting secure checkout.',
         );
       }
       final result = await _paystackCheckoutRecoveryService.initializeCheckout(
@@ -1482,7 +1482,7 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
           _checkoutAuthorizationUrl = null;
           _checkoutMessage = checkout.message.isNotEmpty
               ? checkout.message
-              : 'Paystack marked this payment as failed. You can start a new attempt.';
+              : 'The payment provider marked this payment as failed. You can start a new attempt.';
         });
         return;
       }
@@ -1491,7 +1491,7 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
         setState(() {
           _checkoutMessage = checkout.message.isNotEmpty
               ? checkout.message
-              : 'Payment is pending. We will credit your wallet after Paystack confirmation.';
+              : 'Payment is pending. We will credit your wallet after provider confirmation.';
         });
         return;
       }
@@ -1517,7 +1517,7 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
       setState(() {
         _checkoutMessage = authErrorMessage(
           error,
-          'Could not open Paystack checkout. Retry the same amount to resume safely.',
+          'Could not open secure checkout. Retry the same amount to resume safely.',
         );
       });
     } finally {
@@ -1544,7 +1544,7 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
       final userId = await _resolvePaystackCheckoutUser();
       if (userId == null || userId.isEmpty || attempt == null) {
         throw const PaystackCheckoutRecoveryException(
-          'Sign in again before checking Paystack payment status.',
+          'Sign in again before checking payment status.',
         );
       }
       final resolved = await _paystackCheckoutRecoveryService.verifyCheckout(
@@ -1576,7 +1576,7 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
           _checkoutReference = null;
           _checkoutAuthorizationUrl = null;
           _checkoutMessage =
-              'Paystack marked this payment as failed. You can start a new attempt.';
+              'The payment provider marked this payment as failed. You can start a new attempt.';
         });
       } else {
         setState(() {
@@ -1588,7 +1588,7 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
     } catch (error) {
       if (mounted) {
         _showMessage(
-          authErrorMessage(error, 'Could not verify Paystack payment status.'),
+          authErrorMessage(error, 'Could not verify payment status.'),
           type: MoneyActionFeedbackType.warning,
         );
         if (_checkoutAuthorizationUrl == null) {
@@ -1649,7 +1649,7 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
       setState(() {
         _checkoutMessage = authErrorMessage(
           error,
-          'Could not reopen Paystack checkout. Check your payment status before retrying.',
+          'Could not reopen secure checkout. Check your payment status before retrying.',
         );
       });
     }
@@ -1985,7 +1985,7 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
       _showMessage(
         _fundingProvisioning?.message.isNotEmpty == true
             ? _fundingProvisioning!.message
-            : 'Paystack is already preparing your NGN receiving account. Refresh shortly.',
+            : 'TrustPay is already preparing your NGN receiving account. Refresh shortly.',
         type: MoneyActionFeedbackType.info,
       );
       await _loadFundingAccounts();
@@ -2044,9 +2044,9 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
             {'ACTION_REQUIRED', 'FAILED', 'REJECTED'}.contains(status);
         _setMessageState(
           isPending
-              ? 'Paystack is preparing your NGN receiving account. Refresh shortly; the account number appears after server confirmation.'
+              ? 'TrustPay is preparing your NGN receiving account. Refresh shortly; the account number appears after server confirmation.'
               : isActionRequired
-                  ? 'Paystack account setup needs attention. Review your details or contact support, then retry.'
+                  ? 'TrustPay account setup needs attention. Review your details or contact support, then retry.'
                   : 'Funding account is ready. Transfer NGN to this account and your wallet will update after payment confirmation.',
           type: isPending
               ? MoneyActionFeedbackType.info
@@ -6483,7 +6483,7 @@ class _PaystackCheckoutPanelState extends State<_PaystackCheckoutPanel> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('Paystack checkout', style: AppTextStyles.headingM),
+          Text('Secure checkout', style: AppTextStyles.headingM),
           const SizedBox(height: AppSpacing.xs),
           Text(
             'Pay by card or bank transfer. TRUSTPAY verifies the reference on the server before crediting your NGN wallet.',
@@ -6526,7 +6526,7 @@ class _PaystackCheckoutPanelState extends State<_PaystackCheckoutPanel> {
                   : const Icon(Icons.lock_outline_rounded),
               label: Text(
                 widget.isOpening
-                    ? 'Checking Paystack...'
+                    ? 'Checking checkout...'
                     : widget.reference != null && widget.reference!.isNotEmpty
                         ? 'Payment pending'
                         : widget.hasPendingAttempt
@@ -6667,7 +6667,7 @@ class _FundingAccountPanel extends StatelessWidget {
                     const Icon(Icons.schedule_rounded),
                     const SizedBox(height: AppSpacing.sm),
                     Text(
-                      'Paystack is preparing your NGN receiving account.',
+                      'TrustPay is preparing your NGN receiving account.',
                       style: AppTextStyles.labelM,
                     ),
                     const SizedBox(height: AppSpacing.xs),
@@ -6697,7 +6697,7 @@ class _FundingAccountPanel extends StatelessWidget {
                               const SizedBox(width: AppSpacing.sm),
                               Expanded(
                                 child: Text(
-                                  'Paystack account setup needs attention',
+                                  'TrustPay account setup needs attention',
                                   style: AppTextStyles.labelM,
                                 ),
                               ),
@@ -6866,7 +6866,7 @@ class _FundingAccountPanel extends StatelessWidget {
                         _FundingUserSummary(user: user),
                         const SizedBox(height: AppSpacing.md),
                         Text(
-                          'Transfer NGN to this Paystack account. Your wallet is credited after TRUSTPAY verifies the transaction.',
+                          'Transfer NGN to this receiving account. Your wallet is credited after TRUSTPAY verifies the transaction.',
                           style: AppTextStyles.bodyS.copyWith(
                             color: AppColors.textSecondary,
                           ),

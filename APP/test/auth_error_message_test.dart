@@ -3,6 +3,19 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:trustpay_app/services/auth_service.dart';
 
 void main() {
+  test(
+      'an uncertain BVN response does not falsely claim submission or rejection',
+      () {
+    final request = RequestOptions(path: '/api/kyc/verify');
+    final error = DioException(
+        requestOptions: request,
+        response: Response(
+            requestOptions: request,
+            statusCode: 500,
+            data: {'message': 'Internal server error'}));
+    expect(authErrorMessage(error, 'Unable to verify identity'),
+        'We could not confirm your verification result. Check verification status before retrying. Your entered details have been kept.');
+  });
   for (final route in ['login', 'bootstrap', 'refresh']) {
     test('$route network failures do not imply invalid credentials', () {
       final request = RequestOptions(path: '/api/auth/$route');
@@ -63,7 +76,9 @@ void main() {
     );
   });
 
-  test('login rejection offers password recovery without exposing details', () {
+  test(
+      'generic login rejection offers verification without claiming a wrong password',
+      () {
     final request = RequestOptions(path: '/api/auth/login');
     final error = DioException(
       requestOptions: request,
@@ -75,7 +90,7 @@ void main() {
 
     expect(
       authErrorMessage(error, 'Login failed'),
-      'Incorrect email or password. Try again or reset your password.',
+      'Unable to sign in. Check your email and password, or choose Verify email if you have not confirmed it yet.',
     );
   });
 }

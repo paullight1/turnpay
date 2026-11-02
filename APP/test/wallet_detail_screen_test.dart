@@ -104,11 +104,11 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('Request Paystack account'), findsOneWidget);
+    expect(find.text('Create TrustPay account'), findsOneWidget);
     expect(find.text('Recent Deposits'), findsNothing);
     expect(find.text('No deposits yet'), findsNothing);
     final previousTick = walletRefreshSignal.tick;
-    await tester.tap(find.text('Request Paystack account'));
+    await tester.tap(find.text('Create TrustPay account'));
     await tester.pumpAndSettle();
     expect(walletRefreshSignal.tick, previousTick);
     expect(find.byType(DashboardDetailScreen), findsOneWidget);
@@ -119,7 +119,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.pageBack();
     await tester.pumpAndSettle();
-    expect(find.text('Request Paystack account'), findsNothing);
+    expect(find.text('Create TrustPay account'), findsNothing);
     expect(find.text('Copy account number'), findsOneWidget);
     expect(find.text('0123456789'), findsOneWidget);
   });

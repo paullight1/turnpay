@@ -20,6 +20,42 @@ import '../widgets/kyc_status_presenter.dart';
 import '../widgets/kyc_status_widgets.dart';
 import '../widgets/kyc_evidence_preview.dart';
 
+const double _kycInputMinHeight = 64;
+
+TextStyle _kycInputTextStyle() => AppTextStyles.bodyL.copyWith(
+      color: AppColors.textPrimary,
+      fontWeight: FontWeight.w700,
+    );
+
+InputDecoration _kycInputDecoration({
+  required String labelText,
+  String? hintText,
+  String? helperText,
+  int? helperMaxLines,
+  Widget? prefixIcon,
+  Widget? suffixIcon,
+}) {
+  final labelStyle = AppTextStyles.labelM.copyWith(
+    color: AppColors.textSecondary,
+    fontWeight: FontWeight.w700,
+  );
+  return InputDecoration(
+    labelText: labelText,
+    hintText: hintText,
+    helperText: helperText,
+    helperMaxLines: helperMaxLines,
+    prefixIcon: prefixIcon,
+    suffixIcon: suffixIcon,
+    // Keep the field's purpose visible even after a value is entered. This is
+    // especially useful when users review a long, scrollable KYC step.
+    floatingLabelBehavior: FloatingLabelBehavior.always,
+    constraints: const BoxConstraints(minHeight: _kycInputMinHeight),
+    labelStyle: labelStyle,
+    floatingLabelStyle: labelStyle.copyWith(color: AppColors.primary),
+    helperStyle: AppTextStyles.bodyS,
+  );
+}
+
 class KycVerificationScreen extends StatefulWidget {
   final KycOverview? initialOverview;
   final KycService? service;
@@ -161,6 +197,15 @@ class _KycVerificationScreenState extends State<KycVerificationScreen> {
     setState(() {
       _future = _loadStatus();
     });
+  }
+
+  void _prefetchBankOptions() {
+    // Warm the service cache while the first step is on screen. The picker
+    // deliberately calls the service again when it mounts, so a failed or
+    // empty warm-up can never poison its retry path.
+    unawaited(_service.fetchBanks().catchError((Object _) {
+      return const <KycBankOption>[];
+    }));
   }
 
   String? _manualDocumentContentType(PlatformFile file) {
@@ -708,6 +753,7 @@ class _KycVerificationScreenState extends State<KycVerificationScreen> {
       _bankCodeController.clear();
       _accountNumberController.clear();
     });
+    _prefetchBankOptions();
     final documentType = documentTypeOverride ?? _effectiveType(overview);
     final dialogMessengerKey = GlobalKey<ScaffoldMessengerState>();
 
@@ -736,7 +782,7 @@ class _KycVerificationScreenState extends State<KycVerificationScreen> {
                 backgroundColor: AppColors.background,
                 resizeToAvoidBottomInset: true,
                 appBar: _pageHeader(
-                  title: 'Verify $documentType',
+                  title: 'TrustPay KYC',
                   enabled: !_isSubmitting,
                   onBack: () => _handleVerificationBack(
                     pageContext: pageContext,
@@ -1394,7 +1440,11 @@ class _KycBankPickerState extends State<_KycBankPicker> {
       key: const ValueKey('kyc-bank-picker'),
       onPressed: widget.enabled ? _openPicker : null,
       style: OutlinedButton.styleFrom(
-        padding: const EdgeInsets.all(AppSpacing.md),
+        minimumSize: const Size(double.infinity, _kycInputMinHeight),
+        padding: const EdgeInsets.symmetric(
+          horizontal: AppSpacing.md,
+          vertical: AppSpacing.sm,
+        ),
         alignment: Alignment.centerLeft,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(AppRadius.md),
@@ -1408,11 +1458,16 @@ class _KycBankPickerState extends State<_KycBankPicker> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('Bank', style: AppTextStyles.caption),
+                Text(
+                  'Bank',
+                  style: AppTextStyles.labelM.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
                 const SizedBox(height: AppSpacing.xs),
                 Text(
                   selectedName ?? 'Choose your bank',
-                  style: AppTextStyles.labelM,
+                  style: AppTextStyles.labelL,
                   overflow: TextOverflow.ellipsis,
                 ),
               ],
@@ -1599,10 +1654,11 @@ class _KycConsentTile extends StatelessWidget {
         value: value,
         onChanged: enabled ? (next) => onChanged(next ?? false) : null,
         controlAffinity: ListTileControlAffinity.leading,
-        contentPadding: EdgeInsets.zero,
-        dense: true,
-        visualDensity: VisualDensity.compact,
-        title: Text(title, style: AppTextStyles.bodyS),
+        contentPadding: const EdgeInsets.symmetric(vertical: AppSpacing.xs),
+        title: Text(
+          title,
+          style: AppTextStyles.bodyM.copyWith(fontWeight: FontWeight.w600),
+        ),
       ),
     );
   }
@@ -1670,11 +1726,11 @@ class _VerificationForm extends StatelessWidget {
       'Review and consent',
     ];
     final descriptions = [
-      'Use your BVN name and Nigerian phone number.',
-      'Paystack checks the bank account connected to your BVN.',
+      'Use your BVN name and Nigerian phone number so TrustPay can match your details.',
+      'We check the bank account connected to your BVN.',
       'Use the 11-digit number linked to your profile.',
       'This must match the identity record exactly.',
-      'Your details are shared securely with Paystack for verification.',
+      'We use your details to complete your identity check securely.',
     ];
 
     return AnimatedSwitcher(
@@ -1684,9 +1740,9 @@ class _VerificationForm extends StatelessWidget {
         keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
         padding: const EdgeInsets.fromLTRB(
           AppSpacing.lg,
-          AppSpacing.lg,
-          AppSpacing.lg,
           AppSpacing.xl,
+          AppSpacing.lg,
+          AppSpacing.xxl,
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -1700,16 +1756,22 @@ class _VerificationForm extends StatelessWidget {
                   ? Icons.fact_check_outlined
                   : Icons.verified_user_outlined,
             ),
-            const SizedBox(height: AppSpacing.lg),
+            const SizedBox(height: AppSpacing.xl),
             _KycProgressIndicator(currentStep: stepIndex),
-            const SizedBox(height: AppSpacing.lg),
+            const SizedBox(height: AppSpacing.xl),
             _Panel(
+              padding: const EdgeInsets.fromLTRB(
+                AppSpacing.lg,
+                AppSpacing.xl,
+                AppSpacing.lg,
+                AppSpacing.xl,
+              ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   if (stepIndex == 0) ...[
-                    Text('Legal name and phone', style: AppTextStyles.labelM),
-                    const SizedBox(height: AppSpacing.sm),
+                    Text('Legal name and phone', style: AppTextStyles.headingM),
+                    const SizedBox(height: AppSpacing.md),
                     LayoutBuilder(
                       builder: (context, constraints) {
                         final fields = [
@@ -1722,7 +1784,8 @@ class _VerificationForm extends StatelessWidget {
                             enabled: !isSubmitting,
                             textInputAction: TextInputAction.next,
                             textCapitalization: TextCapitalization.words,
-                            decoration: const InputDecoration(
+                            style: _kycInputTextStyle(),
+                            decoration: _kycInputDecoration(
                               labelText: 'First name',
                               hintText: 'e.g. Ada',
                             ),
@@ -1736,17 +1799,18 @@ class _VerificationForm extends StatelessWidget {
                             enabled: !isSubmitting,
                             textInputAction: TextInputAction.done,
                             textCapitalization: TextCapitalization.words,
-                            decoration: const InputDecoration(
+                            style: _kycInputTextStyle(),
+                            decoration: _kycInputDecoration(
                               labelText: 'Last name',
                               hintText: 'e.g. Lovelace',
                             ),
                           ),
                         ];
-                        if (constraints.maxWidth < 420) {
+                        if (constraints.maxWidth < 520) {
                           return Column(
                             children: [
                               fields[0],
-                              const SizedBox(height: AppSpacing.sm),
+                              const SizedBox(height: AppSpacing.md),
                               fields[1],
                             ],
                           );
@@ -1754,13 +1818,13 @@ class _VerificationForm extends StatelessWidget {
                         return Row(
                           children: [
                             Expanded(child: fields[0]),
-                            const SizedBox(width: AppSpacing.sm),
+                            const SizedBox(width: AppSpacing.md),
                             Expanded(child: fields[1]),
                           ],
                         );
                       },
                     ),
-                    const SizedBox(height: AppSpacing.lg),
+                    const SizedBox(height: AppSpacing.xl),
                     TextField(
                       key: const ValueKey('kyc-phone'),
                       controller: phoneController,
@@ -1770,19 +1834,20 @@ class _VerificationForm extends StatelessWidget {
                       keyboardType: TextInputType.phone,
                       textInputAction: TextInputAction.done,
                       autofillHints: const [AutofillHints.telephoneNumber],
-                      decoration: const InputDecoration(
+                      style: _kycInputTextStyle(),
+                      decoration: _kycInputDecoration(
                         labelText: 'Phone number',
                         hintText: '0801 234 5678',
                         helperText: 'Nigerian number, starting with 0 or +234',
                         helperMaxLines: 2,
                       ),
                     ),
-                    const SizedBox(height: AppSpacing.sm),
+                    const SizedBox(height: AppSpacing.md),
                     Text(
                         'Submitting saves your reviewed name, phone and birth year to your profile. Later corrections require support.',
                         style: AppTextStyles.caption),
                     if (detailsError != null) ...[
-                      const SizedBox(height: AppSpacing.md),
+                      const SizedBox(height: AppSpacing.lg),
                       Semantics(
                           liveRegion: true,
                           child: Text(detailsError!,
@@ -1804,7 +1869,7 @@ class _VerificationForm extends StatelessWidget {
                       enabled: !isSubmitting,
                       onSelected: onBankSelected,
                     ),
-                    const SizedBox(height: AppSpacing.sm),
+                    const SizedBox(height: AppSpacing.lg),
                     TextField(
                       key: const ValueKey('kyc-account-number'),
                       controller: accountNumberController,
@@ -1815,19 +1880,20 @@ class _VerificationForm extends StatelessWidget {
                         FilteringTextInputFormatter.digitsOnly,
                         LengthLimitingTextInputFormatter(10),
                       ],
-                      decoration: const InputDecoration(
+                      style: _kycInputTextStyle(),
+                      decoration: _kycInputDecoration(
                         labelText: 'Account number',
                         hintText: '10 digits',
                       ),
                     ),
-                    const SizedBox(height: AppSpacing.sm),
+                    const SizedBox(height: AppSpacing.md),
                     Text(
-                      'Your account number is sent over the encrypted TRUSTPAY connection and is not shown in history.',
+                      'Your account number is sent over the encrypted TrustPay connection and is not shown in history.',
                       style: AppTextStyles.caption,
                     ),
                   ] else if (stepIndex == 2) ...[
-                    Text('$documentType number', style: AppTextStyles.labelM),
-                    const SizedBox(height: AppSpacing.sm),
+                    Text('$documentType number', style: AppTextStyles.headingM),
+                    const SizedBox(height: AppSpacing.md),
                     TextField(
                       key: const ValueKey('kyc-identity-number'),
                       controller: idNumberController,
@@ -1840,39 +1906,38 @@ class _VerificationForm extends StatelessWidget {
                         FilteringTextInputFormatter.digitsOnly,
                         LengthLimitingTextInputFormatter(11),
                       ],
-                      decoration: InputDecoration(
+                      style: _kycInputTextStyle(),
+                      decoration: _kycInputDecoration(
                         labelText: '$documentType number',
                         hintText: '11 digits',
                       ),
                     ),
-                    const SizedBox(height: AppSpacing.sm),
+                    const SizedBox(height: AppSpacing.md),
                     Text(
                       'Your full identity number is never shown in history.',
                       style: AppTextStyles.caption,
                     ),
                   ] else if (stepIndex == 3) ...[
-                    Text('Date of birth', style: AppTextStyles.labelM),
-                    const SizedBox(height: AppSpacing.sm),
                     _DateOfBirthPickerField(
                       controller: dateOfBirthController,
                       enabled: !isSubmitting,
                       onDateSelected: onDateSelected,
                     ),
-                    const SizedBox(height: AppSpacing.sm),
+                    const SizedBox(height: AppSpacing.md),
                     Text(
                       'Choose the date linked to your identity record. Future dates are not accepted.',
                       style: AppTextStyles.caption,
                     ),
                   ] else ...[
-                    Text('Check your details', style: AppTextStyles.labelM),
-                    const SizedBox(height: AppSpacing.sm),
+                    Text('Check your details', style: AppTextStyles.headingM),
+                    const SizedBox(height: AppSpacing.md),
                     _ReviewRow(
                       label: 'Legal name',
                       value:
                           '${firstNameController.text.trim()} ${lastNameController.text.trim()}'
                               .trim(),
                     ),
-                    const SizedBox(height: AppSpacing.sm),
+                    const SizedBox(height: AppSpacing.md),
                     _ReviewRow(
                         label: 'Phone number',
                         value: reviewedPhone == null
@@ -1884,14 +1949,14 @@ class _VerificationForm extends StatelessWidget {
                             onPressed: isSubmitting ? null : onEditDetails,
                             icon: const Icon(Icons.edit_outlined, size: 18),
                             label: const Text('Edit personal details'))),
-                    const SizedBox(height: AppSpacing.sm),
+                    const SizedBox(height: AppSpacing.md),
                     _ReviewRow(label: 'Bank', value: bankName),
-                    const SizedBox(height: AppSpacing.sm),
+                    const SizedBox(height: AppSpacing.md),
                     _ReviewRow(
                         label: 'Linked account',
                         value:
                             '••••••${accountNumberController.text.length >= 4 ? accountNumberController.text.substring(accountNumberController.text.length - 4) : ''}'),
-                    const SizedBox(height: AppSpacing.sm),
+                    const SizedBox(height: AppSpacing.md),
                     _ReviewRow(label: 'Identity type', value: documentType),
                     const SizedBox(height: AppSpacing.sm),
                     _ReviewRow(
@@ -1903,7 +1968,7 @@ class _VerificationForm extends StatelessWidget {
                       label: 'Date of birth',
                       value: dateOfBirthController.text,
                     ),
-                    const SizedBox(height: AppSpacing.lg),
+                    const SizedBox(height: AppSpacing.xl),
                     _KycConsentTile(
                       tileKey: const ValueKey('kyc-consent'),
                       value: consentAccepted,
@@ -1912,13 +1977,13 @@ class _VerificationForm extends StatelessWidget {
                           'I agree to share my identity and bank details securely with Paystack for verification.',
                       onChanged: onConsentChanged,
                     ),
-                    const SizedBox(height: AppSpacing.xs),
+                    const SizedBox(height: AppSpacing.md),
                     _KycConsentTile(
                       tileKey: const ValueKey('kyc-account-setup-consent'),
                       value: accountSetupConsent,
                       enabled: !isSubmitting,
                       title:
-                          'I authorize TRUSTPAY to create a dedicated NGN receiving account after verification.',
+                          'I authorize TrustPay to create a dedicated NGN receiving account after verification.',
                       onChanged: onAccountSetupConsentChanged,
                     ),
                   ],
@@ -1953,9 +2018,9 @@ class _VerificationNavigation extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.fromLTRB(
         AppSpacing.lg,
-        AppSpacing.sm,
-        AppSpacing.lg,
         AppSpacing.md,
+        AppSpacing.lg,
+        AppSpacing.lg,
       ),
       decoration: BoxDecoration(
         color: AppColors.surface,
@@ -1963,34 +2028,60 @@ class _VerificationNavigation extends StatelessWidget {
       ),
       child: SafeArea(
         top: false,
-        child: Row(
-          children: [
-            if (stepIndex > 0)
-              Expanded(
-                child: OutlinedButton(
-                  onPressed: isSubmitting ? null : onBack,
-                  child: const Text('Back'),
-                ),
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final textScale = MediaQuery.textScalerOf(context).scale(18) / 18;
+            final stackActions = constraints.maxWidth < 360 * textScale;
+            final action = ElevatedButton(
+              onPressed: isSubmitting
+                  ? null
+                  : stepIndex == 4
+                      ? onSubmit
+                      : onNext,
+              style: ElevatedButton.styleFrom(
+                minimumSize: const Size(double.infinity, 60),
               ),
-            if (stepIndex > 0) const SizedBox(width: AppSpacing.sm),
-            Expanded(
-              flex: stepIndex > 0 ? 2 : 1,
-              child: ElevatedButton(
-                onPressed: isSubmitting
-                    ? null
-                    : stepIndex == 4
-                        ? onSubmit
-                        : onNext,
-                child: isSubmitting
-                    ? const SizedBox(
-                        width: 20,
-                        height: 20,
+              child: isSubmitting
+                  ? Semantics(
+                      label: 'Submitting verification',
+                      child: const SizedBox(
+                        width: 22,
+                        height: 22,
                         child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : Text(stepIndex == 4 ? 'Submit verification' : 'Continue'),
+                      ),
+                    )
+                  : Text(stepIndex == 4 ? 'Submit verification' : 'Continue'),
+            );
+            final back = OutlinedButton(
+              onPressed: isSubmitting ? null : onBack,
+              style: OutlinedButton.styleFrom(
+                minimumSize: const Size(double.infinity, 60),
               ),
-            ),
-          ],
+              child: const Text('Back'),
+            );
+
+            if (stackActions) {
+              return Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  action,
+                  if (stepIndex > 0) ...[
+                    const SizedBox(height: AppSpacing.sm),
+                    back,
+                  ],
+                ],
+              );
+            }
+
+            return Row(
+              children: [
+                if (stepIndex > 0) Expanded(child: back),
+                if (stepIndex > 0) const SizedBox(width: AppSpacing.sm),
+                Expanded(flex: stepIndex > 0 ? 2 : 1, child: action),
+              ],
+            );
+          },
         ),
       ),
     );
@@ -2091,15 +2182,16 @@ class _DateOfBirthPickerField extends StatelessWidget {
         key: const ValueKey('kyc-date-of-birth-picker'),
         onTap: enabled ? () => _openPicker(context) : null,
         child: InputDecorator(
-          decoration: const InputDecoration(
+          decoration: _kycInputDecoration(
+            labelText: 'Date of birth',
             hintText: 'Select your date of birth',
-            suffixIcon: Icon(Icons.calendar_today_rounded),
+            suffixIcon: const Icon(Icons.calendar_today_rounded),
           ),
           child: Text(
             value == null ? 'Select your date of birth' : controller.text,
             style: value == null
-                ? AppTextStyles.bodyM.copyWith(color: AppColors.textHint)
-                : AppTextStyles.bodyM,
+                ? _kycInputTextStyle().copyWith(color: AppColors.textHint)
+                : _kycInputTextStyle(),
           ),
         ),
       ),
@@ -2119,13 +2211,22 @@ class _ReviewRow extends StatelessWidget {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Expanded(child: Text(label, style: AppTextStyles.caption)),
+        Expanded(
+          child: Text(
+            label,
+            style: AppTextStyles.labelM.copyWith(
+              color: AppColors.textSecondary,
+            ),
+          ),
+        ),
         const SizedBox(width: AppSpacing.sm),
         Expanded(
           child: Text(
             value,
             textAlign: TextAlign.right,
-            style: AppTextStyles.labelS,
+            style: AppTextStyles.labelL.copyWith(
+              fontWeight: FontWeight.w700,
+            ),
           ),
         ),
       ],

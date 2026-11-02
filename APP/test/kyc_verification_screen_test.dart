@@ -751,6 +751,14 @@ void main() {
       await _openBvnVerification(tester);
       expect(find.text('Confirm your legal name'), findsOneWidget);
       expect(tester.takeException(), isNull);
+      final firstName = find.byKey(const ValueKey('kyc-first-name'));
+      final lastName = find.byKey(const ValueKey('kyc-last-name'));
+      expect(tester.getSize(firstName).height, greaterThanOrEqualTo(64));
+      expect(tester.getSize(lastName).height, greaterThanOrEqualTo(64));
+      expect(
+        tester.getRect(firstName).bottom,
+        lessThanOrEqualTo(tester.getRect(lastName).top),
+      );
       await _captureKyc(tester, capture,
           'bvn-personal-details-${dark ? '320-dark-large' : '430-light'}');
 
@@ -800,6 +808,36 @@ void main() {
       expect(tester.takeException(), isNull);
       await _captureKyc(tester, capture,
           'bvn-review-${dark ? '320-dark-large' : '430-light'}');
+    });
+  }
+
+  for (final mode in ['empty', 'failed']) {
+    testWidgets('bank picker retries after a $mode warm-up', (tester) async {
+      final service = _BankPrefetchRetryService(mode);
+      await tester.pumpWidget(MaterialApp(
+        home: KycVerificationScreen(
+          service: service,
+          initialOverview: _pendingOverview,
+        ),
+      ));
+      await tester.pumpAndSettle();
+      await _openBvnVerification(tester);
+      await tester.enterText(
+          find.byKey(const ValueKey('kyc-first-name')), 'Ada');
+      await tester.enterText(
+          find.byKey(const ValueKey('kyc-last-name')), 'Lovelace');
+      await tester.tap(find.text('Continue'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Retry'), findsOneWidget);
+      expect(find.byKey(const ValueKey('kyc-bank-picker')), findsNothing);
+      expect(service.bankCalls, 2);
+
+      await tester.tap(find.text('Retry'));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('kyc-bank-picker')), findsOneWidget);
+      expect(service.bankCalls, 3);
+      expect(tester.takeException(), isNull);
     });
   }
 
@@ -870,8 +908,8 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('Continue'));
     await tester.pumpAndSettle();
-    expect(
-        find.textContaining('shared securely with Paystack'), findsOneWidget);
+    expect(find.textContaining('complete your identity check securely'),
+        findsOneWidget);
     expect(
       find.text(
           'I agree to share my identity and bank details securely with Paystack for verification.'),
@@ -1338,6 +1376,25 @@ class _FakeKycService extends KycService {
       reference: 'paystack-verification-1',
       accountProvisioningStatus: reviewAfterSubmission ? 'PENDING' : 'READY',
     );
+  }
+}
+
+class _BankPrefetchRetryService extends _FakeKycService {
+  final String mode;
+  int bankCalls = 0;
+
+  _BankPrefetchRetryService(this.mode);
+
+  @override
+  Future<List<KycBankOption>> fetchBanks() async {
+    bankCalls++;
+    if (bankCalls <= 2) {
+      if (mode == 'failed') throw StateError('Bank list unavailable');
+      return const [];
+    }
+    return const [
+      KycBankOption(name: 'Test Bank', code: '058', slug: 'test-bank'),
+    ];
   }
 }
 

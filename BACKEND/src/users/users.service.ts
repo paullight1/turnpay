@@ -7,6 +7,7 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
+import { Prisma } from '@prisma/client';
 
 @Injectable()
 export class UsersService {
@@ -108,57 +109,79 @@ export class UsersService {
       this.assertPhoneMatchesCountry(nextCountry, nextPhone);
     }
 
-    return this.prisma.$transaction(async (tx) => {
-      const updated = await tx.user.update({
-        where: { id },
-        data: {
-          ...updateUserDto,
-          ...(updateUserDto.phone ? { phone: updateUserDto.phone.trim() } : {}),
-          ...(updateUserDto.country
-            ? { country: updateUserDto.country.trim().toUpperCase() }
-            : {}),
-          ...(updatesIdentity ? { profileDetailsUpdatedAt: new Date() } : {}),
-        },
-        select: {
-          id: true,
-          email: true,
-          phone: true,
-          fullName: true,
-          yearOfBirth: true,
-          country: true,
-          profileDetailsUpdatedAt: true,
-          role: true,
-          kycStatus: true,
-          kycTier: true,
-          updatedAt: true,
-        },
-      });
-
-      if (updatesIdentity) {
-        await tx.auditLog.create({
+    try {
+      return await this.prisma.$transaction(async (tx) => {
+        const updated = await tx.user.update({
+          where: { id },
           data: {
-            action: 'user_identity_profile_updated',
-            targetType: 'USER',
-            targetId: id,
-            before: {
-              fullName: existing.fullName,
-              phone: existing.phone,
-              yearOfBirth: existing.yearOfBirth,
-              country: existing.country,
-            },
-            after: {
-              fullName: updated.fullName,
-              phone: updated.phone,
-              yearOfBirth: updated.yearOfBirth,
-              country: updated.country,
-            },
-            metadata: { actorUserId: id },
+            ...updateUserDto,
+            ...(updateUserDto.phone
+              ? { phone: updateUserDto.phone.trim() }
+              : {}),
+            ...(updateUserDto.country
+              ? { country: updateUserDto.country.trim().toUpperCase() }
+              : {}),
+            ...(updatesIdentity ? { profileDetailsUpdatedAt: new Date() } : {}),
+          },
+          select: {
+            id: true,
+            email: true,
+            phone: true,
+            fullName: true,
+            yearOfBirth: true,
+            country: true,
+            profileDetailsUpdatedAt: true,
+            role: true,
+            kycStatus: true,
+            kycTier: true,
+            updatedAt: true,
           },
         });
-      }
 
-      return updated;
-    });
+        if (updatesIdentity) {
+          await tx.auditLog.create({
+            data: {
+              action: 'user_identity_profile_updated',
+              targetType: 'USER',
+              targetId: id,
+              before: {
+                fullName: existing.fullName,
+                phone: existing.phone,
+                yearOfBirth: existing.yearOfBirth,
+                country: existing.country,
+              },
+              after: {
+                fullName: updated.fullName,
+                phone: updated.phone,
+                yearOfBirth: updated.yearOfBirth,
+                country: updated.country,
+              },
+              metadata: { actorUserId: id },
+            },
+          });
+        }
+
+        return updated;
+      });
+    } catch (error) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2002'
+      ) {
+        const target = error.meta?.target;
+        if (
+          (Array.isArray(target) && target.includes('phone')) ||
+          target === 'users_phone_key'
+        ) {
+          throw new ConflictException({
+            code: 'PROFILE_PHONE_IN_USE',
+            message:
+              'This phone number is already linked to another account. Use your own registered number or contact support.',
+          });
+        }
+      }
+      throw error;
+    }
   }
 
   async findAll(page = 1, limit = 20) {

@@ -11,20 +11,64 @@ class KycService {
 
   final ApiClient _apiClient;
   final _paystackReconcileAttempt = MoneyAttemptIdempotency();
+  Future<List<KycBankOption>>? _banksRequest;
+  DateTime? _banksRequestedAt;
 
-  Future<List<KycBankOption>> fetchBanks() async {
-    final response =
-        await _apiClient.client.get<dynamic>('/api/payments/banks');
-    final payload = response.data;
-    final source = payload is List
-        ? payload
-        : _asList(_asMap(payload)['banks'] ?? _asMap(payload)['data']);
-    final banks = source
-        .whereType<Map>()
-        .map((item) => KycBankOption.fromJson(Map<String, dynamic>.from(item)))
-        .where((bank) => bank.name.isNotEmpty && bank.code.isNotEmpty)
-        .toList(growable: false);
-    return [...banks]..sort((a, b) => a.name.compareTo(b.name));
+  Future<Response<dynamic>> _identityProfileRequest(
+      Future<Response<dynamic>> Function() request) async {
+    try {
+      return await request();
+    } on DioException catch (error) {
+      final status = error.response?.statusCode;
+      final body = error.response?.data;
+      final details =
+          body is Map && body['message'] is Map ? body['message'] as Map : body;
+      if (status == 409 &&
+          details is Map &&
+          details['code'] == 'PROFILE_PHONE_IN_USE') {
+        throw const KycProfileException(
+            'This phone number is already linked to another account. Use your own registered number or contact support.');
+      }
+      if (status == null || status >= 500) {
+        throw const KycProfileException(
+            'We could not confirm your saved details. Your BVN has not been submitted. Try again; we will check your saved details first.');
+      }
+      rethrow;
+    }
+  }
+
+  Future<List<KycBankOption>> fetchBanks() {
+    if (_banksRequest != null &&
+        _banksRequestedAt != null &&
+        DateTime.now().difference(_banksRequestedAt!) <
+            const Duration(minutes: 5)) {
+      return _banksRequest!;
+    }
+    _banksRequestedAt = DateTime.now();
+    return _banksRequest = _fetchBanks();
+  }
+
+  Future<List<KycBankOption>> _fetchBanks() async {
+    try {
+      final response =
+          await _apiClient.client.get<dynamic>('/api/payments/banks');
+      final payload = response.data;
+      final source = payload is List
+          ? payload
+          : _asList(_asMap(payload)['banks'] ?? _asMap(payload)['data']);
+      final banks = source
+          .whereType<Map>()
+          .map(
+              (item) => KycBankOption.fromJson(Map<String, dynamic>.from(item)))
+          .where((bank) => bank.name.isNotEmpty && bank.code.isNotEmpty)
+          .toList(growable: false);
+      if (banks.isEmpty) _banksRequestedAt = null;
+      return [...banks]..sort((a, b) => a.name.compareTo(b.name));
+    } catch (_) {
+      _banksRequest = null;
+      _banksRequestedAt = null;
+      rethrow;
+    }
   }
 
   Future<KycOverview> fetchOverview(
@@ -108,7 +152,8 @@ class KycService {
       throw const KycProfileException(
           'Check your date of birth before continuing.');
     }
-    final response = await _apiClient.client.get<dynamic>('/api/users/me');
+    final response = await _identityProfileRequest(
+        () => _apiClient.client.get<dynamic>('/api/users/me'));
     final profile = _asMap(response.data);
     if (profile.isEmpty) {
       throw const KycProfileException(
@@ -135,14 +180,15 @@ class KycService {
           'BVN verification requires a Nigerian profile. Contact support to review your country.',
           requiresSupport: true);
     }
-    await _apiClient.client.patch<dynamic>('/api/users/me',
-        options: Options(headers: {'Idempotency-Key': idempotencyKey}),
-        data: {
-          'fullName': fullName,
-          'phone': normalizedPhone,
-          'yearOfBirth': yearOfBirth,
-          'country': 'NG'
-        });
+    await _identityProfileRequest(() => _apiClient.client.patch<dynamic>(
+            '/api/users/me',
+            options: Options(headers: {'Idempotency-Key': idempotencyKey}),
+            data: {
+              'fullName': fullName,
+              'phone': normalizedPhone,
+              'yearOfBirth': yearOfBirth,
+              'country': 'NG'
+            }));
     return true;
   }
 

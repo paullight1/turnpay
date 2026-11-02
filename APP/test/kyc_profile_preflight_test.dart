@@ -10,6 +10,9 @@ void main() {
   late List<RequestOptions> requests;
   late KycService service;
   var loseSaveResponse = false;
+  int? patchFailure;
+  var bankFailure = false;
+  var bankEmpty = false;
   setUp(() {
     FlutterSecureStorage.setMockInitialValues({});
     profile = {
@@ -20,6 +23,9 @@ void main() {
     };
     requests = [];
     loseSaveResponse = false;
+    patchFailure = null;
+    bankFailure = false;
+    bankEmpty = false;
     final dio = Dio(BaseOptions(baseUrl: 'https://kyc.example.test'));
     final api = ApiClient(dio: dio);
     dio.interceptors.add(InterceptorsWrapper(onRequest: (options, handler) {
@@ -28,6 +34,24 @@ void main() {
         handler.resolve(Response(
             requestOptions: options, statusCode: 200, data: {...profile}));
       } else if (options.path == '/api/users/me' && options.method == 'PATCH') {
+        if (patchFailure != null) {
+          handler.reject(DioException(
+              requestOptions: options,
+              response: Response(
+                  requestOptions: options,
+                  statusCode: patchFailure,
+                  data: {
+                    'statusCode': patchFailure,
+                    'message': patchFailure == 409
+                        ? {
+                            'code': 'PROFILE_PHONE_IN_USE',
+                            'message':
+                                'This phone number is already linked to another account.'
+                          }
+                        : 'Internal server error'
+                  })));
+          return;
+        }
         profile.addAll(Map<String, dynamic>.from(options.data as Map));
         profile['profileDetailsUpdatedAt'] = '2026-10-31T10:00:00Z';
         if (loseSaveResponse) {
@@ -36,6 +60,21 @@ void main() {
         } else {
           handler.resolve(Response(
               requestOptions: options, statusCode: 200, data: {...profile}));
+        }
+      } else if (options.path == '/api/payments/banks') {
+        if (bankFailure) {
+          handler.reject(DioException(
+              requestOptions: options,
+              response: Response(requestOptions: options, statusCode: 503)));
+        } else {
+          handler.resolve(Response(
+              requestOptions: options,
+              statusCode: 200,
+              data: bankEmpty
+                  ? []
+                  : [
+                      {'name': 'Example Bank', 'code': '001'}
+                    ]));
         }
       } else if (options.path == '/api/kyc/status') {
         handler.resolve(Response(
@@ -112,7 +151,7 @@ void main() {
   test('a lost profile-save response retries by reading the saved details',
       () async {
     loseSaveResponse = true;
-    await expectLater(prepare(), throwsA(isA<DioException>()));
+    await expectLater(prepare(), throwsA(isA<KycProfileException>()));
     await prepare();
     expect(
         requests.where((request) => request.method == 'PATCH'), hasLength(1));
@@ -127,5 +166,54 @@ void main() {
             idempotencyKey: 'invalid'),
         throwsA(isA<KycProfileException>()));
     expect(requests, isEmpty);
+  });
+  test(
+      'temporary profile failure explains that BVN was not submitted and allows retry',
+      () async {
+    patchFailure = 500;
+    await expectLater(
+        prepare(),
+        throwsA(isA<KycProfileException>()
+            .having((e) => e.requiresSupport, 'requiresSupport', false)
+            .having((e) => e.message, 'message',
+                contains('Your BVN has not been submitted'))));
+    patchFailure = null;
+    expect(await prepare(), isTrue);
+  });
+
+  test('a phone conflict is correctable without freezing the profile',
+      () async {
+    patchFailure = 409;
+    await expectLater(
+        prepare(),
+        throwsA(isA<KycProfileException>()
+            .having((e) => e.requiresSupport, 'requiresSupport', false)
+            .having((e) => e.message, 'message', contains('phone number'))));
+    expect(profile['profileDetailsUpdatedAt'], isNull);
+    patchFailure = null;
+    expect(await prepare(), isTrue);
+  });
+
+  test('bank lists reuse an in-flight request and successful result', () async {
+    final lists =
+        await Future.wait([service.fetchBanks(), service.fetchBanks()]);
+    expect(lists.first.single.name, 'Example Bank');
+    await service.fetchBanks();
+    expect(
+        requests.where((r) => r.path == '/api/payments/banks'), hasLength(1));
+  });
+
+  test('a failed bank read does not poison a later retry', () async {
+    bankFailure = true;
+    await expectLater(service.fetchBanks(), throwsA(isA<DioException>()));
+    bankFailure = false;
+    expect((await service.fetchBanks()).single.code, '001');
+  });
+
+  test('an empty bank response remains immediately retryable', () async {
+    bankEmpty = true;
+    expect(await service.fetchBanks(), isEmpty);
+    bankEmpty = false;
+    expect((await service.fetchBanks()).single.code, '001');
   });
 }

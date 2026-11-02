@@ -698,6 +698,10 @@ The owner confirmed approval and authorized restoring Ninja as the NIN provider.
 
 Web and Flutter eligibility/presentation now share strict parsers for supported tiers rather than extracting arbitrary digits. The web query hook delegates status precedence and exact amount checks to a pure function; explicit invalid Tier 1 policy produces availability/support guidance. Backend debit and external exchange checks share the same eligibility assertion, and external Tier 1 exchange validates the user state returned with the wallet lock. Pending BVN confirmation cannot enable NIN or claim active Tier 1 through a supplied callback. Existing JWT/role guards, DTOs, idempotency, Decimal amounts, holds, financial transactions and audit history remain authoritative. No new endpoint/schema, production setting, provider action or deployment was introduced. Verification and regression evidence are recorded in `DOCS/implementation/2026-11-02-eligibility-refactor.md`.
 
+### BVN retry and profile conflict correction — 2 November 2026
+
+The precise duplicate-phone constraint now returns a structured conflict instead of a generic internal error; successful profile edits retain their transaction and audit, and identity locks remain enforced. Flutter handles nested errors without falsely locking a correctable phone conflict, preserves uncertain-attempt keys and reads saved details before retrying. No real profile unlock, KYC submission, account creation or identity approval was performed. Customer-facing account branding and form layout were improved while preserving explicit provider consent. Tests and limits are recorded in `DOCS/implementation/2026-11-02-bvn-retry-ux.md`.
+
 
 ### Durable manual exchange notifications — 2 November 2026
 

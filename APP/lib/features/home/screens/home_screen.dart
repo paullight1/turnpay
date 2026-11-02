@@ -692,8 +692,8 @@ class _AccountSetupBanner extends StatelessWidget {
         Expanded(
             child: Text(
                 awaitingVerification
-                    ? 'Your Paystack account is waiting for identity verification.'
-                    : 'Request a dedicated Paystack NGN account to fund your wallet and start transacting.',
+                    ? 'Your TrustPay account is waiting for identity verification.'
+                    : 'Create a TrustPay NGN account to fund your wallet and start transacting.',
                 style: AppTextStyles.bodyS)),
         TextButton(
             onPressed: onRequest,
@@ -986,7 +986,7 @@ class _VirtualAccountSection extends StatelessWidget {
                     Text(
                       activeAccount.provider.toUpperCase() == 'PAYSTACK' &&
                               activeAccount.currency.toUpperCase() == 'NGN'
-                          ? 'Paystack NGN receiving account'
+                          ? 'TrustPay NGN receiving account'
                           : 'Virtual account',
                       style: AppTextStyles.labelM.copyWith(
                         color: AppColors.textPrimary,
@@ -1046,7 +1046,7 @@ class _VirtualAccountSection extends StatelessWidget {
                   showTpSnackbar(
                     context,
                     activeAccount.provider.toUpperCase() == 'PAYSTACK'
-                        ? 'Paystack account copied'
+                        ? 'TrustPay account copied'
                         : 'Virtual account copied',
                     type: TpSnackbarType.success,
                   );
@@ -1136,7 +1136,7 @@ class _NoVirtualAccountHomeCard extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'No Paystack account yet',
+                  'No TrustPay account yet',
                   style: AppTextStyles.labelM.copyWith(
                     color: AppColors.textPrimary,
                     fontWeight: FontWeight.w900,
@@ -1144,7 +1144,7 @@ class _NoVirtualAccountHomeCard extends StatelessWidget {
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  'Request a dedicated Paystack NGN account to receive bank transfers directly into your TrustPay wallet.',
+                  'Create a TrustPay NGN account to receive bank transfers directly into your wallet.',
                   style: AppTextStyles.bodyS.copyWith(
                     color: AppColors.textSecondary,
                     height: 1.45,
