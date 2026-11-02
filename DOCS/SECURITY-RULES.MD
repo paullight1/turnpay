@@ -724,3 +724,8 @@ The exchange form now separates receiving-method selection from recipient detail
 ### 2026-11-02 FX rate direction and support
 
 Admin rate reads and writes now reject reversed NGN/GHS rate units under the current Ghana-pair direction policy. The canonical rate remains target units per source unit, with existing persisted precision and frozen historical quotes. Flutter hides invalid estimates rather than inverting only the screen; admin input displays the unit and blocks reversed values. Hosted rates were read only, and owner-approved business prices remain required before correction through the existing authenticated, idempotent, audited endpoint. Page-menu WhatsApp links contain only a generic greeting and the public support number; no customer details or automatic sending are included. Validation and limits are recorded in DOCS/implementation/2026-11-02-fx-direction-support.md.
+
+
+### 2026-11-02 approved-provider CI alignment
+
+The deployment manifest gate now recognises the owner-approved Ninja NIN adapter while requiring the pinned live endpoint, explicit boolean enable flag and one server-only sync:false secret slot without inline values. Legacy key naming and all other provider/OTP/financial deployment restrictions remain checked. Two simulated e2e fixtures were updated to the current canonical business:v2 request hash; no production idempotency logic or stored replay record was changed. Manifest portability/negative fixtures and both 16-test replay suites passed.

@@ -9,6 +9,7 @@ import { PrismaService } from '../src/prisma/prisma.service';
 import { RedisService } from '../src/redis/redis.service';
 import { PinoLogger } from 'nestjs-pino';
 import { IdempotencyInterceptor } from '../src/common/interceptors/idempotency.interceptor';
+import { businessRequestFingerprint } from '../src/common/utils/financial-request';
 import { JwtAuthGuard } from '../src/auth/guards/jwt-auth.guard';
 import { SupabaseService } from '../src/supabase/supabase.service';
 import { ProvisionVirtualAccountDto } from '../src/banking/dto/banking.dto';
@@ -63,9 +64,9 @@ describe('Banking — Virtual Account Provisioning (e2e simulated)', () => {
   };
 
   const hash = (value: unknown) =>
-    createHash('sha256')
-      .update(JSON.stringify(value ?? {}))
-      .digest('hex');
+    `business:v2:${createHash('sha256')
+      .update(JSON.stringify(businessRequestFingerprint(value ?? {})))
+      .digest('hex')}`;
 
   let bankingController: BankingController;
   let interceptor: IdempotencyInterceptor;

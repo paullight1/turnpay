@@ -23,6 +23,7 @@ import { TransactionPinService } from '../src/common/services/transaction-pin.se
 import { BankingService } from '../src/banking/banking.service';
 import { JwtAuthGuard } from '../src/auth/guards/jwt-auth.guard';
 import { IdempotencyInterceptor } from '../src/common/interceptors/idempotency.interceptor';
+import { businessRequestFingerprint } from '../src/common/utils/financial-request';
 import { PinoLogger } from 'nestjs-pino';
 import { ConfigModule } from '@nestjs/config';
 import { Decimal } from '@prisma/client/runtime/library';
@@ -149,9 +150,9 @@ class MockJwtAuthGuard implements CanActivate {
 
 /** SHA-256 hex digest — matches what IdempotencyInterceptor uses. */
 const hash = (value: unknown) =>
-  createHash('sha256')
-    .update(JSON.stringify(value ?? {}))
-    .digest('hex');
+  `business:v2:${createHash('sha256')
+    .update(JSON.stringify(businessRequestFingerprint(value ?? {})))
+    .digest('hex')}`;
 
 /**
  * Build a fake receipt as it would be returned from Prisma (Decimal fields +

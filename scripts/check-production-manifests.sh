@@ -68,11 +68,37 @@ check_env_value() {
   fi
 }
 
+check_ninja_secret_slot() {
+  # The approved NIN provider uses a server-managed secret, never an inline
+  # value or a synchronised Blueprint value. Reject duplicate secret slots.
+  if ! awk '
+    /^[[:space:]]*- key:[[:space:]]*/ {
+      line = $0
+      sub(/^[[:space:]]*- key:[[:space:]]*/, "", line)
+      sub(/[[:space:]]*$/, "", line)
+      active = (line == "NINJA_SECRET_KEY")
+      if (active) count++
+      next
+    }
+    active && /^[[:space:]]*value:/ { unsafe = 1 }
+    active && /^[[:space:]]*sync:/ {
+      line = $0
+      sub(/^[[:space:]]*sync:[[:space:]]*/, "", line)
+      sub(/[[:space:]]*#.*/, "", line)
+      sub(/[[:space:]]*$/, "", line)
+      if (line == "false") protected_slot = 1
+    }
+    END { exit(count == 1 && protected_slot && !unsafe ? 0 : 1) }
+  ' render.yaml; then
+    printf '%s\n' 'Ninja secret must use one server-only sync: false slot' >&2
+    exit 1
+  fi
+}
+
 if has_env_value "NODE_ENV" "staging" "render.yaml"; then
   check_present "PAYSTACK_SECRET_KEY" "render.yaml"
   check_present "https://sandbox.vtpass.com/api" "render.yaml"
   check_absent "https://vtpass.com/api" "render.yaml"
-  check_absent "NINJA_" "render.yaml"
   check_absent "YOUVERIFY_" "render.yaml"
   check_env_value "KYC_PROVIDER" "paystack" "render.yaml"
   check_env_value "BANKING_SANDBOX_MODE" "true" "render.yaml"
@@ -85,9 +111,19 @@ if has_env_value "NODE_ENV" "staging" "render.yaml"; then
 else
   check_absent "https://sandbox.monnify.com" "render.yaml"
   check_absent "https://sandbox.vtpass.com/api" "render.yaml"
-  check_absent "NINJA_" "render.yaml"
   check_absent "YOUVERIFY_" "render.yaml"
 fi
+
+# Ninja NIN was owner-approved; Paystack still handles Tier 1 BVN. Retain
+# strict endpoint/secret checks instead of the obsolete blanket provider ban.
+check_env_value "NINJA_BASE_URL" "https://api.ninja.boucloud.io" "render.yaml"
+if ! has_env_value "NINJA_NIN_ENABLED" "true" "render.yaml" &&
+   ! has_env_value "NINJA_NIN_ENABLED" "false" "render.yaml"; then
+  printf '%s\n' 'NINJA_NIN_ENABLED must be an explicit boolean' >&2
+  exit 1
+fi
+check_ninja_secret_slot
+check_absent "NINJA_API_KEY" "render.yaml"
 
 # Keep an explicit non-Render fallback. On Render, the platform-provided RENDER
 # variable selects Render's normalized first-address trust policy instead.
