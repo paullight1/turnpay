@@ -35,6 +35,34 @@ void main() {
     expect(convertExchangePreview('1', '0.03', inverse: true), '33.34');
     expect(() => convertExchangePreview('1', '0'), throwsFormatException);
   });
+  for (final source in ['NGN', 'GHS']) {
+    testWidgets(
+        'hides reversed $source pricing instead of showing a false estimate',
+        (tester) async {
+      final amount = TextEditingController(text: '10000');
+      final service = _Rates()..rate = source == 'NGN' ? '87' : '0.0111';
+      await tester.pumpWidget(MaterialApp(
+          home: Scaffold(
+              body: ExchangeConverter(
+        source: source,
+        amount: amount,
+        service: service,
+        onSwap: null,
+        enabled: true,
+      ))));
+      await tester.pumpAndSettle();
+      expect(
+          find.text(
+              'This exchange rate is being corrected. Please try again shortly.'),
+          findsOneWidget);
+      expect(
+          tester.widget<TextFormField>(find.byType(TextFormField).last).enabled,
+          isFalse);
+      expect(find.text('870,000.00'), findsNothing);
+      await tester.pumpWidget(const SizedBox());
+      amount.dispose();
+    });
+  }
   testWidgets('explains an unset admin rate without showing a fallback price',
       (tester) async {
     final amount = TextEditingController();

@@ -719,3 +719,8 @@ NGN receiving-account setup may now be requested before KYC completion. This rec
 ### 2026-11-02 Ghana exchange receiving details
 
 The exchange form now separates receiving-method selection from recipient details. The Ghana bank picker uses named institutions and local logo assets, never inferred bank codes. Account-number-based bank detection and bank-name lookup remain unavailable rather than being simulated. Provider-backed MoMo lookup validates returned number/operator and rejects stale responses after edits, method changes, submission or disposal. Failed/unavailable lookups retain the existing explicit manual-review flow. Transaction PIN, idempotency, manual settlement, tier limits and server-side money checks are unchanged. Validation uses synthetic recipients and does not execute live financial or identity actions.
+
+
+### 2026-11-02 FX rate direction and support
+
+Admin rate reads and writes now reject reversed NGN/GHS rate units under the current Ghana-pair direction policy. The canonical rate remains target units per source unit, with existing persisted precision and frozen historical quotes. Flutter hides invalid estimates rather than inverting only the screen; admin input displays the unit and blocks reversed values. Hosted rates were read only, and owner-approved business prices remain required before correction through the existing authenticated, idempotent, audited endpoint. Page-menu WhatsApp links contain only a generic greeting and the public support number; no customer details or automatic sending are included. Validation and limits are recorded in DOCS/implementation/2026-11-02-fx-direction-support.md.

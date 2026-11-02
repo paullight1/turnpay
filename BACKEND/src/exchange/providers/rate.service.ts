@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Injectable,
   OnModuleInit,
   ServiceUnavailableException,
@@ -210,6 +211,7 @@ export class RateService implements OnModuleInit {
     if (
       stored?.source !== 'admin' ||
       !this.isFinitePositiveRate(rate) ||
+      !this.isGhanaRateDirectionValid(from, to, rate) ||
       markup === undefined ||
       !Number.isFinite(markup) ||
       markup < 0 ||
@@ -238,6 +240,11 @@ export class RateService implements OnModuleInit {
     options: { refreshCache?: boolean } = {},
   ): Promise<{ rate: number; markup: number }> {
     const persistedRate = this.normalizePersistedRate(rate);
+    if (!this.isGhanaRateDirectionValid(from, to, persistedRate)) {
+      throw new BadRequestException(
+        'Rate direction is invalid. Enter GHS received per 1 NGN (below 1), or NGN received per 1 GHS (above 1).',
+      );
+    }
     const persistedMarkup = this.normalizePersistedMarkup(markup);
 
     const persistRateAndAudit = async (
@@ -923,6 +930,14 @@ export class RateService implements OnModuleInit {
 
   private isFinitePositiveRate(value: unknown): value is number {
     return typeof value === 'number' && Number.isFinite(value) && value > 0;
+  }
+
+  // This pair's current quote convention is target units per source unit.
+  // Reject inverted units; never silently invert an operator's price.
+  private isGhanaRateDirectionValid(from: string, to: string, rate: number) {
+    if (from === 'NGN' && to === 'GHS') return rate < 1;
+    if (from === 'GHS' && to === 'NGN') return rate > 1;
+    return true;
   }
 
   private normalizePersistedRate(value: number): number {

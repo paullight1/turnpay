@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:url_launcher/url_launcher.dart';
 
+import '../constants/app_constants.dart';
 import '../router/app_router.dart';
 import '../theme/app_theme.dart';
 
@@ -115,6 +117,11 @@ class TpPageHeader extends StatelessWidget {
         ),
       ...menuActions,
       TpPageMenuAction(
+        label: 'Contact support',
+        icon: Icons.chat_bubble_outline_rounded,
+        onTap: () => _openSupport(context),
+      ),
+      TpPageMenuAction(
         label: 'Home',
         icon: Icons.home_rounded,
         onTap: () => context.go(AppRoutes.home),
@@ -155,6 +162,22 @@ class TpPageHeader extends StatelessWidget {
         );
       },
     );
+  }
+
+  Future<void> _openSupport(BuildContext context) async {
+    try {
+      if (await launchUrl(AppConstants.supportWhatsAppUri,
+          mode: LaunchMode.externalApplication)) {
+        return;
+      }
+    } catch (_) {
+      // Keep launch failures recoverable without exposing platform errors.
+    }
+    if (!context.mounted) return;
+    ScaffoldMessenger.maybeOf(context)?.showSnackBar(const SnackBar(
+      content: Text(
+          'Could not open WhatsApp. Contact ${AppConstants.supportPhone}.'),
+    ));
   }
 }
 

@@ -137,15 +137,21 @@ function DirectionRateEditor({ selectedPair }: {
   });
 
   const submitRate = () => {
-    const numericRate = Number(rate);
-    if (!Number.isFinite(numericRate) || numericRate <= 0) {
-      toast.error("Enter a positive rate");
+    if (!validDraft) {
+      toast.error(directionError ?? "Enter a positive rate");
       return;
     }
     updateRateMutation.mutate();
   };
 
-  const validDraft = Number.isFinite(numericDraftRate) && numericDraftRate > 0;
+  const positiveDraft = Number.isFinite(numericDraftRate) && numericDraftRate > 0;
+  const directionError = positiveDraft &&
+    (selectedPair.from === "NGN" ? numericDraftRate >= 1 : numericDraftRate <= 1)
+    ? selectedPair.from === "NGN"
+      ? "Enter cedis received for ₦1, below 1. A naira-per-cedi price must be inverted first."
+      : "Enter naira received for GH₵1, above 1."
+    : null;
+  const validDraft = positiveDraft && !directionError;
   const minimumCedis = selectedPair.from === "GHS" && validDraft
     ? minimumSendForOneUnit(rate) : null;
   return (
@@ -176,7 +182,7 @@ function DirectionRateEditor({ selectedPair }: {
       </div>
       <div className="rounded-2xl border border-primary/25 bg-primary/5 p-4 focus-within:border-primary focus-within:ring-2 focus-within:ring-primary/25">
         <div className="mb-2 flex items-center justify-between gap-2">
-          <Label htmlFor={inputId} className="text-sm text-muted-foreground">Customer gets</Label>
+          <Label htmlFor={inputId} className="text-sm text-muted-foreground">{selectedPair.inputLabel}</Label>
           <span className="flex shrink-0 items-center gap-1.5 rounded-full bg-card px-2.5 py-1 text-sm font-semibold">
             <span aria-hidden="true">{selectedPair.toFlag}</span>{selectedPair.to}
           </span>
@@ -189,6 +195,7 @@ function DirectionRateEditor({ selectedPair }: {
           className="h-10 w-full rounded-none border-0 bg-transparent! p-0 text-3xl! font-semibold shadow-none focus-visible:ring-0" />
       </div>
       <div id={`${inputId}-preview`} className="text-xs text-muted-foreground" aria-live="polite">
+        {directionError && <p role="alert" className="text-destructive">{directionError}</p>}
         {validDraft && <p>{`1 ${selectedPair.from} = ${rate.trim()} ${selectedPair.to}`}</p>}
         {minimumCedis && <p>To receive at least 1 NGN, send {minimumCedis} GHS.</p>}
       </div>

@@ -4,6 +4,12 @@ class AppConstants {
   AppConstants._();
 
   static const String appName = 'TrustPay';
+  static const String supportPhone = '+233 55 550 7240';
+  static final Uri supportWhatsAppUri = Uri.https(
+    'wa.me',
+    '/233555507240',
+    {'text': 'Hello TrustPay, I need help.'},
+  );
   static const bool allowVtuWithoutKyc =
       bool.fromEnvironment('ALLOW_VTU_WITHOUT_KYC');
   static final String apiBaseUrl = _resolveApiBaseUrl();

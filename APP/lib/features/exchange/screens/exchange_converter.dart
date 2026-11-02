@@ -49,6 +49,7 @@ class _ExchangeConverterState extends State<ExchangeConverter> {
   bool _loading = true;
   bool _stale = false;
   bool _adminRateMissing = false;
+  bool _rateDirectionInvalid = false;
   int _generation = 0;
   Timer? _refreshDebounce;
   DateTime? _lastRateCheck;
@@ -89,6 +90,7 @@ class _ExchangeConverterState extends State<ExchangeConverter> {
     setState(() {
       _loading = true;
       _adminRateMissing = false;
+      _rateDirectionInvalid = false;
     });
     try {
       final data = await widget.service.previewRate(widget.source);
@@ -108,6 +110,22 @@ class _ExchangeConverterState extends State<ExchangeConverter> {
       final parts = raw.split('.');
       final rate =
           '${parts.first}.${(parts.length == 2 ? parts[1] : '').padRight(6, '0').substring(0, 6)}';
+      final whole = BigInt.parse(parts.first);
+      final inverted = widget.source == 'NGN'
+          ? whole >= BigInt.one
+          : whole < BigInt.one ||
+              (whole == BigInt.one &&
+                  !RegExp(r'[1-9]')
+                      .hasMatch(parts.length == 2 ? parts[1] : ''));
+      if (inverted) {
+        if (!mounted || generation != _generation) return;
+        setState(() {
+          _rateDirectionInvalid = true;
+          _rate = null;
+          _receive.clear();
+        });
+        return;
+      }
       convertExchangePreview('1', rate);
       if (!mounted || generation != _generation) return;
       setState(() {
@@ -268,9 +286,11 @@ class _ExchangeConverterState extends State<ExchangeConverter> {
               _loading
                   ? 'Updating estimate…'
                   : _rate == null
-                      ? (_adminRateMissing
-                          ? 'This exchange rate is not set yet.'
-                          : 'Estimate unavailable. Edit your amount to try again.')
+                      ? (_rateDirectionInvalid
+                          ? 'This exchange rate is being corrected. Please try again shortly.'
+                          : _adminRateMissing
+                              ? 'This exchange rate is not set yet.'
+                              : 'Estimate unavailable. Edit your amount to try again.')
                       : _stale
                           ? 'Estimate · final price confirmed next'
                           : 'Estimate',

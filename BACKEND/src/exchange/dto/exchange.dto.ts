@@ -90,9 +90,8 @@ export class AdminUpdateRateDto {
   @IsIn(SUPPORTED_CURRENCIES)
   to: (typeof SUPPORTED_CURRENCIES)[number];
 
-  // Absolute sanity ceiling. NGN/GHS pairs sit near 0.3–3.2; a value beyond
-  // this can only be a fat-finger or abuse. Admin changes are applied directly
-  // and remain recorded in the audit log.
+  // Absolute ceiling; the service also validates the Ghana pair's direction.
+  // Rates always mean target units received per 1 source unit.
   @IsNumber()
   @Type(() => Number)
   @IsPositive()

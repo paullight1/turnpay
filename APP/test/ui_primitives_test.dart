@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:trustpay_app/core/widgets/tp_card.dart';
@@ -133,6 +134,33 @@ void main() {
     await tester.pump();
 
     expect(menuTapped, isTrue);
+  });
+
+  testWidgets('page menu opens the published WhatsApp support chat',
+      (tester) async {
+    final launches = <MethodCall>[];
+    const channel = MethodChannel('plugins.flutter.io/url_launcher');
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(channel,
+        (call) async {
+      launches.add(call);
+      return true;
+    });
+    addTearDown(() => tester.binding.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, null));
+    await tester.pumpWidget(const MaterialApp(
+      home: Scaffold(
+          body: TpPageHeader(label: 'Exchange', showBackButton: false)),
+    ));
+    await tester.tap(find.byTooltip('Menu'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Contact support'));
+    await tester.pumpAndSettle();
+    final launch = launches.singleWhere((call) => call.method == 'launch');
+    final url = Uri.parse((launch.arguments as Map)['url'] as String);
+    expect(url.scheme, 'https');
+    expect(url.host, 'wa.me');
+    expect(url.path, '/233555507240');
+    expect(url.queryParameters['text'], 'Hello TrustPay, I need help.');
   });
 
   testWidgets('tp app header renders its label and back callback',

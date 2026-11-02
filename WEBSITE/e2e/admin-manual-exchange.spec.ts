@@ -518,6 +518,9 @@ test.describe("Admin manual exchange queue", () => {
     const cedis = rates.getByRole("region", { name: "Cedis to naira", exact: true });
     await expect(naira.getByRole("status")).toHaveText("Not set");
     await expect(cedis.getByRole("status")).toHaveText("Not set");
+    await naira.getByLabel("Cedis for 1 naira").fill("87");
+    await expect(naira.getByRole("button", { name: "Save naira to cedis", exact: true })).toBeDisabled();
+    await expect(naira.getByRole("alert")).toContainText("below 1");
     await naira.getByLabel("Cedis for 1 naira").fill("0.0086");
     await expect(naira.getByText("1 NGN = 0.0086 GHS", { exact: true })).toBeVisible();
     await naira.getByRole("button", { name: "Save naira to cedis", exact: true }).click();
@@ -525,7 +528,8 @@ test.describe("Admin manual exchange queue", () => {
     await expect(cedis.getByLabel("Naira for 1 cedi")).toHaveValue("");
     await expect(cedis.getByRole("status")).toHaveText("Not set");
     await cedis.getByLabel("Naira for 1 cedi").fill("0.03");
-    await expect(cedis.getByText("To receive at least 1 NGN, send 33.34 GHS.", { exact: true })).toBeVisible();
+    await expect(cedis.getByRole("button", { name: "Save cedis to naira", exact: true })).toBeDisabled();
+    await expect(cedis.getByRole("alert")).toContainText("above 1");
     await cedis.getByLabel("Naira for 1 cedi").fill("125.50");
     await expect(cedis.getByText("1 GHS = 125.50 NGN", { exact: true })).toBeVisible();
     await expect(cedis.getByText("To receive at least 1 NGN, send 0.01 GHS.", { exact: true })).toBeVisible();

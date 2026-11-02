@@ -360,6 +360,42 @@ describe('RateService provider mapping and persistence safety', () => {
 });
 
 describe('admin-controlled exchange rates', () => {
+  it.each([
+    ['NGN', 'GHS', '87'],
+    ['GHS', 'NGN', '0.0111'],
+  ])(
+    'rejects reversed saved %s/%s rates before quoting',
+    async (from, to, rate) => {
+      const { service } = createRateService({
+        rateSource: 'admin',
+        stored: {
+          rate: new Decimal(rate),
+          markup: new Decimal(0),
+          source: 'admin',
+          validUntil: null,
+        },
+      });
+      await expect(service.getRate(from, to)).rejects.toThrow(
+        'Admin has not set an active exchange rate',
+      );
+    },
+  );
+  it.each([
+    ['NGN', 'GHS', 87],
+    ['GHS', 'NGN', 0.0111],
+    ['NGN', 'GHS', 1],
+    ['GHS', 'NGN', 1],
+  ])(
+    'rejects inverted %s/%s admin input before persistence',
+    async (from, to, rate) => {
+      const { service, prisma } = createRateService({ rateSource: 'admin' });
+      await expect(service.setManualRate(from, to, rate, 0)).rejects.toThrow(
+        'Rate direction',
+      );
+      expect(prisma.rate.upsert).not.toHaveBeenCalled();
+    },
+  );
+
   it('uses an active saved admin rate after days and cache loss without an FX API', async () => {
     const { service, redis, http } = createRateService({
       rateSource: 'admin',
