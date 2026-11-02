@@ -28,9 +28,11 @@ import {
 } from './dto/manual-exchange.dto';
 import {
   ManualStatus,
+  ManualPayoutOutcome,
   manualDeliveryOptions,
   assertManualDelivery,
   nextManualExchangeStatus,
+  nextManualPayoutHandoverStatus,
   quoteManualExchange,
 } from './manual-exchange.policy';
 import { SettlementHoldService } from '../common/services/settlement-hold.service';
@@ -70,10 +72,24 @@ export class ManualExchangeService {
   }
 
   configuration() {
+    const availableSourceCurrencies = (['GHS', 'NGN'] as const).filter(
+      (currency) => {
+        if (!this.enabled()) return false;
+        try {
+          this.collection(currency);
+          return true;
+        } catch (error) {
+          if (error instanceof ServiceUnavailableException) return false;
+          throw error;
+        }
+      },
+    );
+    const sourceCurrency = availableSourceCurrencies[0] ?? 'GHS';
     return {
-      enabled: this.enabled(),
-      sourceCurrency: 'GHS',
-      targetCurrency: 'NGN',
+      enabled: availableSourceCurrencies.length > 0,
+      sourceCurrency,
+      targetCurrency: sourceCurrency === 'GHS' ? 'NGN' : 'GHS',
+      availableSourceCurrencies,
       supportedSourceCurrencies: ['GHS', 'NGN'],
       deliveryPolicyVersion: 1,
       settlementOptions: {
@@ -374,11 +390,19 @@ export class ManualExchangeService {
     dto: ManualProofUploadDto,
     key: string,
     admin = false,
+    handover = false,
   ) {
     const row = await this.find(id, admin ? undefined : actorId);
+    const ownsPayoutClaim =
+      row.status === 'PAYOUT_PROCESSING' && row.payoutClaimedBy === actorId;
+    const mayPrepareHandoverEvidence =
+      handover &&
+      row.status === 'PAYOUT_PROCESSING' &&
+      !!row.payoutClaimedBy &&
+      row.payoutClaimedBy !== actorId;
     if (
       admin
-        ? row.status !== 'PAYOUT_PROCESSING' || row.payoutClaimedBy !== actorId
+        ? !ownsPayoutClaim && !mayPrepareHandoverEvidence
         : !proofOpen.includes(row.status)
     )
       throw new ConflictException(
@@ -441,6 +465,16 @@ export class ManualExchangeService {
       );
     }
   }
+
+  async uploadHandoverUrl(
+    id: string,
+    actorId: string,
+    dto: ManualProofUploadDto,
+    key: string,
+  ) {
+    return this.uploadUrl(id, actorId, dto, key, true, true);
+  }
+
   private async verifyProof(
     id: string,
     actorId: string,
@@ -550,6 +584,39 @@ export class ManualExchangeService {
       return this.present(await this.find(id, userId, tx));
     });
   }
+
+  private async assertActiveAdmin(
+    tx: Prisma.TransactionClient,
+    adminId: string,
+    currentOwnerId: string,
+  ) {
+    if (adminId === currentOwnerId)
+      throw new ConflictException(
+        'Choose an admin other than the current payout owner',
+      );
+    const target = await tx.user.findUnique({
+      where: { id: adminId },
+      select: { role: true, isSuspended: true },
+    });
+    if (!target || target.role !== 'ADMIN' || target.isSuspended)
+      throw new ForbiddenException(
+        'Handover target must be an active administrator',
+      );
+  }
+
+  private exactPayoutAmount(
+    value: string | undefined,
+    expected: Decimal,
+  ): boolean {
+    if (!value) return false;
+    try {
+      const amount = new Decimal(value);
+      return amount.isFinite() && amount.eq(expected);
+    } catch {
+      return false;
+    }
+  }
+
   async review(
     id: string,
     adminId: string,
@@ -575,6 +642,29 @@ export class ManualExchangeService {
       if (!dto.payoutProofObjectKey)
         throw new BadRequestException('Payout evidence is required');
       await this.verifyProof(id, adminId, dto.payoutProofObjectKey, 'PAYOUT');
+    }
+    if (dto.action === 'HANDOVER_PAYOUT') {
+      if (!dto.payoutOutcome)
+        throw new BadRequestException(
+          'Classify the real bank or MoMo payout outcome before handing over',
+        );
+      if (!dto.handoverToAdminId)
+        throw new BadRequestException(
+          'An active administrator is required to receive the payout claim',
+        );
+      if (dto.payoutOutcome === 'UNKNOWN')
+        throw new ConflictException(
+          'The external payout outcome is unknown. Do not reassign or send again; reconcile the original claim first',
+        );
+      if (!dto.payoutProofObjectKey)
+        throw new BadRequestException(
+          'Protected evidence of the checked payout outcome is required',
+        );
+      await this.verifyProof(id, adminId, dto.payoutProofObjectKey, 'PAYOUT');
+      if (dto.payoutOutcome === 'ALREADY_SENT' && !dto.payoutReference)
+        throw new BadRequestException(
+          'The confirmed payout reference is required when the payout was already sent',
+        );
     }
     return this.mutate(async (tx) => {
       const row = await this.find(id, undefined, tx);
@@ -604,15 +694,76 @@ export class ManualExchangeService {
         throw new ConflictException(
           'Use Confirm cedis sent with the actual cedi amount for this order',
         );
-      const next = nextManualExchangeStatus(
-        row.status,
-        row.settlementMode,
-        dto.action,
-      );
+      let next: ManualStatus;
       const update: Prisma.ManualExchangeOrderUpdateManyMutationInput = {
-        status: next,
+        status: row.status,
         reviewReason: dto.reason,
       };
+      if (dto.action === 'HANDOVER_PAYOUT') {
+        if (!row.payoutClaimedBy)
+          throw new ConflictException(
+            'Only an actively owned payout can be handed over',
+          );
+        if (row.payoutReference || row.payoutProofKey)
+          throw new ConflictException(
+            'Payout evidence is already recorded. Refresh the order before taking another action',
+          );
+        const outcome = dto.payoutOutcome as ManualPayoutOutcome;
+        await this.assertActiveAdmin(
+          tx,
+          dto.handoverToAdminId as string,
+          row.payoutClaimedBy,
+        );
+        next = nextManualPayoutHandoverStatus(
+          row.status,
+          row.settlementMode,
+          outcome,
+        );
+        if (outcome !== 'ALREADY_SENT') {
+          await this.eligible(row.userId, tx);
+          const credential = await tx.transactionPinCredential.findUnique({
+            where: { userId: row.userId },
+            select: { resetHoldUntil: true },
+          });
+          if (
+            credential?.resetHoldUntil &&
+            credential.resetHoldUntil > new Date()
+          )
+            throw new ForbiddenException(
+              'Payout is paused while the customer transaction PIN reset hold is active',
+            );
+          for (const currency of [row.sourceCurrency, row.targetCurrency])
+            await this.settlementHold.assertSettlementAllowed(
+              {
+                operation: 'MANUAL_EXCHANGE',
+                scope: 'MANUAL_EXCHANGE',
+                currency,
+                provider: 'MANUAL_ADMIN',
+                reference: row.reference,
+              },
+              tx,
+            );
+        } else {
+          if (
+            !this.exactPayoutAmount(dto.payoutAmount, row.targetAmount) ||
+            !dto.payoutProofObjectKey
+          )
+            throw new BadRequestException(
+              'Record the exact frozen payout amount and protected evidence for an already-sent payout',
+            );
+          update.payoutReference = dto.payoutReference!.trim().toUpperCase();
+          update.payoutProofKey = dto.payoutProofObjectKey;
+        }
+        update.status = next;
+        update.payoutClaimedBy = dto.handoverToAdminId;
+      } else {
+        next = nextManualExchangeStatus(
+          row.status,
+          row.settlementMode,
+          dto.action,
+        );
+        update.status = next;
+      }
       if (dto.action === 'CREDIT_WALLET' || dto.action === 'CONFIRM_DEPOSIT') {
         this.requireEnabled();
         await this.eligible(row.userId, tx);
@@ -727,7 +878,9 @@ export class ManualExchangeService {
         keyHash,
         fingerprint,
         next,
-        dto.reason,
+        dto.action === 'HANDOVER_PAYOUT'
+          ? `Payout handover outcome ${dto.payoutOutcome}: ${dto.reason}`
+          : dto.reason,
       );
       await tx.auditLog.create({
         data: {
@@ -737,8 +890,22 @@ export class ManualExchangeService {
           targetId: id,
           reference: row.reference,
           reason: dto.reason,
-          before: { status: row.status },
-          after: { status: next, settlementMode: row.settlementMode },
+          before: {
+            status: row.status,
+            ...(dto.action === 'HANDOVER_PAYOUT'
+              ? { payoutClaimedBy: row.payoutClaimedBy }
+              : {}),
+          },
+          after: {
+            status: next,
+            settlementMode: row.settlementMode,
+            ...(dto.action === 'HANDOVER_PAYOUT'
+              ? {
+                  payoutClaimedBy: dto.handoverToAdminId,
+                  payoutOutcome: dto.payoutOutcome,
+                }
+              : {}),
+          },
           metadata: {
             ...auditContext,
             amount: row.amount.toFixed(2),
@@ -750,6 +917,13 @@ export class ManualExchangeService {
               ? {
                   acceptedExpiredQuote: true,
                   originalExpiresAt: row.expiresAt.toISOString(),
+                }
+              : {}),
+            ...(dto.action === 'HANDOVER_PAYOUT'
+              ? {
+                  handoverToAdminId: dto.handoverToAdminId,
+                  payoutOutcome: dto.payoutOutcome,
+                  previousOwnerId: row.payoutClaimedBy,
                 }
               : {}),
           },

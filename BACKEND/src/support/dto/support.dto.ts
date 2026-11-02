@@ -8,6 +8,7 @@ import {
 
 const SUPPORT_CATEGORIES = [
   'ACCOUNT',
+  'ACCOUNT_DELETION',
   'KYC',
   'WALLET',
   'TRANSACTION',

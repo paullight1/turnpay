@@ -57,8 +57,14 @@ export class PaymentController {
   async withdraw(
     @CurrentUser() user: { userId: string },
     @Body() dto: WithdrawDto,
+    @Headers('idempotency-key') key?: string,
+    @Headers('x-idempotency-key') legacyKey?: string,
   ) {
-    return this.paymentService.withdraw(user.userId, dto);
+    return this.paymentService.withdraw(
+      user.userId,
+      dto,
+      key ?? legacyKey ?? '',
+    );
   }
 
   @Get('withdrawals/:reference')

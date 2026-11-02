@@ -1,6 +1,11 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
+import {
+  createCipheriv,
+  createDecipheriv,
+  createHmac,
+  randomBytes,
+} from 'node:crypto';
 
 export type IdempotencyEncryptionContext = {
   route: string;
@@ -47,6 +52,18 @@ export class IdempotencyResponseCryptoService {
       this.config
         .get<string>('IDEMPOTENCY_RESPONSE_ENCRYPTION_KEY_ID')
         ?.trim() || 'v1';
+  }
+
+  /** Full auth semantics are preserved without storing an unkeyed digest of
+   * low-entropy PIN/OTP/password input. Derive a distinct domain from AES use. */
+  fingerprintRequest(body: unknown, context: IdempotencyEncryptionContext) {
+    const fingerprintKey = createHmac('sha256', this.key)
+      .update('trustpay:idempotency:request-fingerprint:v1')
+      .digest();
+    return `hmac:${this.keyId}:${createHmac('sha256', fingerprintKey)
+      .update(this.additionalAuthenticatedData(context))
+      .update(JSON.stringify(body ?? {}))
+      .digest('hex')}`;
   }
 
   encrypt(

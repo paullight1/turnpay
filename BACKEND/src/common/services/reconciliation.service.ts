@@ -598,7 +598,7 @@ export class ReconciliationService {
       const actualBalance = new Decimal(wallet.balance);
       const difference = expectedBalance.minus(actualBalance).abs();
 
-      if (difference.greaterThan(new Decimal('0.01'))) {
+      if (!difference.isZero()) {
         mismatches.push({
           walletId: wallet.id,
           userId: wallet.userId,

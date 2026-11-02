@@ -138,6 +138,16 @@ export class AdminManualExchangeController {
   ) {
     return this.service.uploadUrl(id, user.userId, dto, key, true);
   }
+  @Post(':id/handover-upload-url')
+  @Throttle({ default: { limit: 5, ttl: 600000 } })
+  uploadHandoverEvidence(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: { userId: string },
+    @Body() dto: ManualProofUploadDto,
+    @Headers('idempotency-key') key: string,
+  ) {
+    return this.service.uploadHandoverUrl(id, user.userId, dto, key);
+  }
   @Post(':id/proof-url') proof(
     @Param('id', ParseUUIDPipe) id: string,
     @CurrentUser() user: { userId: string },

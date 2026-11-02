@@ -1,36 +1,26 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { isAxiosError } from "axios";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { ArrowDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { getErrorMessage } from "@/lib/errors";
+import { minimumSendForOneUnit } from "@/lib/money";
 import { createMoneyAttemptIdempotencyKey } from "@/lib/idempotency";
 import { adminExchangeRateApi } from "@/services/api";
 
 type CurrentRate = {
   from: string;
   to: string;
-  baseRate: number | string;
-  markupPercent: number | string;
-  effectiveRate: number | string;
+  baseRate: number | string | null;
+  markupPercent: number | string | null;
+  effectiveRate: number | string | null;
   isStale: boolean;
+  configured?: boolean;
 };
 
 type UpdateRateResponse = {
@@ -44,28 +34,39 @@ type UpdateRateResponse = {
 };
 
 const CURRENCY_PAIRS = [
-  { value: "NGN:GHS", from: "NGN", to: "GHS", label: "NGN → GHS" },
-  { value: "GHS:NGN", from: "GHS", to: "NGN", label: "GHS → NGN" },
+  {
+    from: "NGN", to: "GHS", title: "Naira to cedis",
+    inputLabel: "Cedis for 1 naira", fromName: "naira",
+    fromFlag: "🇳🇬", toFlag: "🇬🇭", saveLabel: "Save naira to cedis",
+  },
+  {
+    from: "GHS", to: "NGN", title: "Cedis to naira",
+    inputLabel: "Naira for 1 cedi", fromName: "cedi",
+    fromFlag: "🇬🇭", toFlag: "🇳🇬", saveLabel: "Save cedis to naira",
+  },
 ] as const;
 
-const CURRENCY_DETAILS = {
-  NGN: { name: "Nigerian Naira", flag: "🇳🇬" },
-  GHS: { name: "Ghanaian Cedi", flag: "🇬🇭" },
-} as const;
-
 export function RateControlCard() {
-  const queryClient = useQueryClient();
-  const [pair, setPair] = useState<(typeof CURRENCY_PAIRS)[number]["value"]>(
-    "NGN:GHS",
+  return (
+    <div className="grid gap-4">
+      <h2 className="text-lg font-semibold">Exchange rates</h2>
+      <div className="grid min-w-0 gap-4 lg:grid-cols-2">
+        {CURRENCY_PAIRS.map((direction) => (
+          <DirectionRateEditor key={direction.from} selectedPair={direction} />
+        ))}
+      </div>
+    </div>
   );
+}
+
+function DirectionRateEditor({ selectedPair }: {
+  selectedPair: (typeof CURRENCY_PAIRS)[number];
+}) {
+  const queryClient = useQueryClient();
   const [rate, setRate] = useState("");
   const [rateAttemptKey, setRateAttemptKey] = useState<string | null>(null);
-  const [prefilledPair, setPrefilledPair] = useState<string | null>(null);
-
-  const selectedPair = useMemo(
-    () => CURRENCY_PAIRS.find((item) => item.value === pair) ?? CURRENCY_PAIRS[0],
-    [pair],
-  );
+  const [prefilled, setPrefilled] = useState(false);
+  const inputId = `rate-${selectedPair.from.toLowerCase()}-${selectedPair.to.toLowerCase()}`;
 
   const rateQuery = useQuery({
     queryKey: ["admin-exchange-rate", selectedPair.from, selectedPair.to],
@@ -81,12 +82,11 @@ export function RateControlCard() {
   });
 
   const numericDraftRate = Number(rate);
-  // Prefill the set-rate form from the live rate once per pair (React's
-  // "adjust state during render" pattern) so a background refetch never
-  // clobbers an admin's in-progress edits.
-  if (rateQuery.data && prefilledPair !== selectedPair.value) {
-    setPrefilledPair(selectedPair.value);
-    setRate(String(rateQuery.data.effectiveRate ?? ""));
+  // Prefill each fixed direction once; background refreshes preserve edits.
+  if (rateQuery.data && !prefilled) {
+    setPrefilled(true);
+    setRate(rateQuery.data.configured === false || rateQuery.data.isStale
+      ? "" : String(rateQuery.data.effectiveRate ?? ""));
     setRateAttemptKey(null);
   }
 
@@ -117,6 +117,7 @@ export function RateControlCard() {
           markupPercent: data.markup,
           effectiveRate: data.effectiveRate,
           isStale: false,
+          configured: true,
         }),
       );
       setRate(String(data.effectiveRate));
@@ -144,75 +145,64 @@ export function RateControlCard() {
     updateRateMutation.mutate();
   };
 
-  const currencySelector = (side: "from" | "to") => (
-    <Select
-      value={selectedPair[side]}
-      disabled={updateRateMutation.isPending}
-      onValueChange={(currency) => {
-        if (currency === selectedPair[side]) return;
-        const nextPair = CURRENCY_PAIRS.find((item) => item[side] === currency)!;
-        setPair(nextPair.value);
-        setRate("");
-        setRateAttemptKey(null);
-        setPrefilledPair(null);
-      }}
-    >
-      <SelectTrigger aria-label={side === "from" ? "Source currency" : "Receiving currency"}
-        className="h-12! w-32 shrink-0 rounded-none border-0 border-l border-border bg-transparent! px-3 text-base shadow-none">
-        <SelectValue />
-      </SelectTrigger>
-      <SelectContent>
-        {(["NGN", "GHS"] as const).map((currency) => (
-          <SelectItem key={currency} value={currency} textValue={currency} className="min-h-11 text-base">
-            <span aria-hidden="true" className="text-xl">{CURRENCY_DETAILS[currency].flag}</span>
-            <span>{currency}</span>
-            <span className="sr-only">{CURRENCY_DETAILS[currency].name}</span>
-          </SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
-  );
-
+  const validDraft = Number.isFinite(numericDraftRate) && numericDraftRate > 0;
+  const minimumCedis = selectedPair.from === "GHS" && validDraft
+    ? minimumSendForOneUnit(rate) : null;
   return (
-    <Card className="min-w-0 w-full border-0 bg-transparent py-0 shadow-none ring-0">
-      <CardHeader className="flex flex-row items-center justify-between px-0">
-        <CardTitle>Exchange rate</CardTitle>
-        <span role="status" className="text-xs text-muted-foreground">
+    <section aria-label={selectedPair.title} className="min-w-0 space-y-3">
+      <div className="flex items-center justify-between gap-3">
+        <h3 className="text-base font-semibold">{selectedPair.title}</h3>
+        <span role="status" className="shrink-0 text-xs text-muted-foreground">
           {rateQuery.isLoading ? "Loading…" : rateQuery.isError ? "Unavailable" :
             rateQuery.data && numericDraftRate > 0 && numericDraftRate !== Number(rateQuery.data.effectiveRate)
-              ? "Unsaved" : rateQuery.data?.isStale ? "Stale" : "Saved"}
+              ? "Unsaved" : rateQuery.data?.configured === false ? "Not set" : rateQuery.data?.isStale ? "Stale" : "Saved"}
         </span>
-      </CardHeader>
-      <CardContent className="grid gap-4 px-0">
-        <div className="grid gap-2">
-          <Label htmlFor="source-amount">For</Label>
-          <div className="flex min-w-0 items-center overflow-hidden rounded-lg border border-input">
-            <Input id="source-amount" value="1" readOnly aria-label="Source amount"
-              className="h-14 min-w-0 flex-1 rounded-none border-0 bg-transparent! px-4 text-2xl! shadow-none" />
-            {currencySelector("from")}
-          </div>
+      </div>
+      <div className="rounded-2xl border border-border bg-card p-4">
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <Label htmlFor={`${inputId}-source`} className="text-sm text-muted-foreground">Customer sends</Label>
+          <span className="flex shrink-0 items-center gap-1.5 rounded-full bg-muted px-2.5 py-1 text-sm font-semibold">
+            <span aria-hidden="true">{selectedPair.fromFlag}</span>{selectedPair.from}
+          </span>
         </div>
-        <div className="grid gap-2">
-          <Label htmlFor="rate-value">Customers receive</Label>
-          <div className="flex min-w-0 items-center overflow-hidden rounded-lg border border-input">
-            <Input id="rate-value" inputMode="decimal" placeholder={rateQuery.isLoading ? "Loading…" : "0.00"}
-              value={rate} onChange={(event) => { setRate(event.target.value); setRateAttemptKey(null); }}
-              disabled={updateRateMutation.isPending || rateQuery.isLoading || rateQuery.isError}
-              className="h-14 min-w-0 flex-1 rounded-none border-0 bg-transparent! px-4 text-2xl! shadow-none" />
-            {currencySelector("to")}
-          </div>
+        <Input id={`${inputId}-source`} value="1" readOnly tabIndex={-1}
+          aria-label={`Customer sends 1 ${selectedPair.fromName}`}
+          className="h-10 w-full rounded-none border-0 bg-transparent! p-0 text-3xl! font-semibold shadow-none focus-visible:ring-0" />
+      </div>
+      <div aria-hidden="true" className="flex h-6 items-center justify-center">
+        <span className="grid size-8 place-items-center rounded-full border border-border bg-background text-primary">
+          <ArrowDown className="size-4" />
+        </span>
+      </div>
+      <div className="rounded-2xl border border-primary/25 bg-primary/5 p-4 focus-within:border-primary focus-within:ring-2 focus-within:ring-primary/25">
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <Label htmlFor={inputId} className="text-sm text-muted-foreground">Customer gets</Label>
+          <span className="flex shrink-0 items-center gap-1.5 rounded-full bg-card px-2.5 py-1 text-sm font-semibold">
+            <span aria-hidden="true">{selectedPair.toFlag}</span>{selectedPair.to}
+          </span>
         </div>
-        {rateQuery.isError && (
-          <div role="alert" className="flex flex-wrap items-center gap-3 text-sm">
-            <p>{getErrorMessage(rateQuery.error, "Could not load the rate.")}</p>
-            <Button variant="outline" size="sm" onClick={() => void rateQuery.refetch()}>Retry</Button>
-          </div>
-        )}
-        <Button onClick={submitRate} className="h-11 sm:w-fit sm:min-w-32"
-          disabled={updateRateMutation.isPending || rateQuery.isLoading || rateQuery.isError || !Number.isFinite(numericDraftRate) || numericDraftRate <= 0}>
-          {updateRateMutation.isPending ? "Saving..." : "Save rate"}
-        </Button>
-      </CardContent>
-    </Card>
+        <Input id={inputId} inputMode="decimal" autoComplete="off"
+          aria-label={selectedPair.inputLabel} aria-describedby={`${inputId}-preview`}
+          placeholder={rateQuery.isLoading ? "Loading…" : "0.00"}
+          value={rate} onChange={(event) => { setRate(event.target.value); setRateAttemptKey(null); }}
+          disabled={updateRateMutation.isPending || rateQuery.isLoading || rateQuery.isError}
+          className="h-10 w-full rounded-none border-0 bg-transparent! p-0 text-3xl! font-semibold shadow-none focus-visible:ring-0" />
+      </div>
+      <div id={`${inputId}-preview`} className="text-xs text-muted-foreground" aria-live="polite">
+        {validDraft && <p>{`1 ${selectedPair.from} = ${rate.trim()} ${selectedPair.to}`}</p>}
+        {minimumCedis && <p>To receive at least 1 NGN, send {minimumCedis} GHS.</p>}
+      </div>
+      {rateQuery.isError && (
+        <div role="alert" className="flex flex-wrap items-center gap-3 text-sm">
+          <p>{getErrorMessage(rateQuery.error, "Could not load the rate.")}</p>
+          <Button variant="outline" size="sm" onClick={() => void rateQuery.refetch()}>Retry</Button>
+        </div>
+      )}
+      <Button onClick={submitRate} aria-label={selectedPair.saveLabel}
+        className="h-12 w-full rounded-full text-base font-semibold"
+        disabled={updateRateMutation.isPending || rateQuery.isLoading || rateQuery.isError || !validDraft}>
+        {updateRateMutation.isPending ? "Saving..." : "Save rate"}
+      </Button>
+    </section>
   );
 }

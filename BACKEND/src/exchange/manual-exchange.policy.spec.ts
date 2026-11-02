@@ -1,6 +1,7 @@
 import { BadRequestException, ConflictException } from '@nestjs/common';
 import {
   nextManualExchangeStatus,
+  nextManualPayoutHandoverStatus,
   quoteManualExchange,
   manualDeliveryOptions,
   assertManualDelivery,
@@ -82,6 +83,34 @@ describe('manual exchange policy', () => {
     ).toThrow(ConflictException);
     expect(() =>
       nextManualExchangeStatus('CREDITED', 'WALLET', 'RECORD_CEDIS_SENT'),
+    ).toThrow(ConflictException);
+  });
+  it('only hands a claimed payout to another operator after a known external outcome', () => {
+    expect(
+      nextManualPayoutHandoverStatus('PAYOUT_PROCESSING', 'MOMO', 'NOT_SENT'),
+    ).toBe('PAYOUT_PROCESSING');
+    expect(
+      nextManualPayoutHandoverStatus(
+        'PAYOUT_PROCESSING',
+        'BANK',
+        'CONFIRMED_FAILED',
+      ),
+    ).toBe('PAYOUT_PROCESSING');
+    expect(
+      nextManualPayoutHandoverStatus(
+        'PAYOUT_PROCESSING',
+        'BANK',
+        'ALREADY_SENT',
+      ),
+    ).toBe('PAYOUT_SENT');
+    expect(() =>
+      nextManualPayoutHandoverStatus('PAYOUT_PROCESSING', 'BANK', 'UNKNOWN'),
+    ).toThrow(ConflictException);
+    expect(() =>
+      nextManualPayoutHandoverStatus('PAYOUT_PENDING', 'BANK', 'NOT_SENT'),
+    ).toThrow(ConflictException);
+    expect(() =>
+      nextManualPayoutHandoverStatus('PAYOUT_PROCESSING', 'WALLET', 'NOT_SENT'),
     ).toThrow(ConflictException);
   });
   it('freezes exact amounts with existing rate markup and zero extra receipt fee', () => {

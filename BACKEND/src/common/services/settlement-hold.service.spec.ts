@@ -12,6 +12,9 @@ describe('SettlementHoldService', () => {
       findFirst: jest.fn(),
       create: jest.fn(),
     },
+    fundingAdverseCase: {
+      findMany: jest.fn(),
+    },
     $transaction: jest.fn(async (operation: (tx: unknown) => unknown) =>
       operation(prisma),
     ),
@@ -35,6 +38,7 @@ describe('SettlementHoldService', () => {
     );
     prisma.reconciliationRun.findMany.mockResolvedValue([]);
     prisma.auditLog.findMany.mockResolvedValue([]);
+    prisma.fundingAdverseCase.findMany.mockResolvedValue([]);
   });
 
   beforeEach(() => {
@@ -73,6 +77,32 @@ describe('SettlementHoldService', () => {
         where: expect.objectContaining({
           status: 'BLOCKED',
           scope: { in: expect.arrayContaining(['WALLET_BALANCES']) },
+        }),
+      }),
+    );
+  });
+
+  it('blocks every outbound operation while a Paystack adverse-funding case is held', async () => {
+    prisma.fundingAdverseCase.findMany.mockResolvedValue([
+      {
+        id: 'adverse-case-1',
+        provider: 'PAYSTACK',
+        eventType: 'refund.processed',
+        providerReference: 'refund-1',
+        status: 'OPEN',
+        holdRequired: true,
+      },
+    ]);
+
+    await expect(
+      service.assertOutboundAllowed({ operation: 'WITHDRAWAL' }),
+    ).rejects.toThrow('funding event is under review');
+
+    expect(prisma.fundingAdverseCase.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          holdRequired: true,
+          status: { in: ['OPEN', 'UNDER_REVIEW'] },
         }),
       }),
     );

@@ -17,3 +17,17 @@ export function canonicalizeMoneyAmount(value: string) {
 
   return `${whole}.${fraction}`;
 }
+
+/** Display-only: the smallest two-decimal send amount covering one receive unit.
+ * Round up to match the exchange quote's round-down receive policy. */
+export function minimumSendForOneUnit(rate: string) {
+  const match = /^(\d{1,6})(?:\.(\d{0,12}))?$/.exec(rate.trim());
+  if (!match) return null;
+  const fraction = match[2] ?? "";
+  const numerator = BigInt(match[1] + fraction);
+  if (numerator <= BigInt(0)) return null;
+  const denominator = BigInt(10) ** BigInt(fraction.length);
+  const minor =
+    (BigInt(100) * denominator + numerator - BigInt(1)) / numerator;
+  return `${minor / BigInt(100)}.${(minor % BigInt(100)).toString().padStart(2, "0")}`;
+}

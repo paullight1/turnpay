@@ -29,12 +29,9 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  static const _storage = FlutterSecureStorage();
   late Future<HomeDashboardData> _dashboardFuture;
   bool _showBalances = true;
   bool _refreshing = false;
-  Set<String> _visibleOtherWallets = {'USD', 'EUR', 'GBP', 'ZAR'};
-  String? _walletPreferencesUserId;
 
   @override
   void initState() {
@@ -54,98 +51,6 @@ class _HomeScreenState extends State<HomeScreen> {
   void _toggleBalances() {
     HapticFeedback.selectionClick();
     setState(() => _showBalances = !_showBalances);
-  }
-
-  Future<void> _loadOtherWalletPreferences(String userId) async {
-    try {
-      final saved = await _storage.read(key: 'dashboard-other-wallets-$userId');
-      if (!mounted || saved == null) return;
-      final selected =
-          saved.split(',').where({'USD', 'EUR', 'GBP', 'ZAR'}.contains).toSet();
-      setState(() => _visibleOtherWallets = selected);
-    } catch (_) {
-      // Keep the default visible wallets if device preferences are unavailable.
-    }
-  }
-
-  Future<void> _manageOtherWallets() async {
-    final selected = Set<String>.of(_visibleOtherWallets);
-    final result = await showModalBottomSheet<Set<String>>(
-      context: context,
-      backgroundColor: AppColors.surface,
-      showDragHandle: true,
-      builder: (context) => StatefulBuilder(builder: (context, update) {
-        return SafeArea(
-          child: SingleChildScrollView(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(
-                AppSpacing.lg,
-                AppSpacing.sm,
-                AppSpacing.lg,
-                AppSpacing.lg,
-              ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text('Manage wallets', style: AppTextStyles.headingM),
-                  const SizedBox(height: AppSpacing.xs),
-                  Text(
-                    'Choose which wallets appear on your home screen.',
-                    style: AppTextStyles.bodyS.copyWith(
-                      color: AppColors.textSecondary,
-                    ),
-                  ),
-                  const SizedBox(height: AppSpacing.sm),
-                  for (final wallet in _supportedWallets.where(
-                    (wallet) =>
-                        {'USD', 'EUR', 'GBP', 'ZAR'}.contains(wallet.currency),
-                  ))
-                    SwitchListTile.adaptive(
-                      contentPadding: EdgeInsets.zero,
-                      title: Text('${wallet.flag}  ${wallet.currency}'),
-                      subtitle: Text(wallet.name),
-                      value: selected.contains(wallet.currency),
-                      onChanged: (enabled) => update(() {
-                        if (enabled) {
-                          selected.add(wallet.currency);
-                        } else {
-                          selected.remove(wallet.currency);
-                        }
-                      }),
-                    ),
-                  const SizedBox(height: AppSpacing.sm),
-                  SizedBox(
-                    width: double.infinity,
-                    child: FilledButton(
-                      onPressed: () => Navigator.pop(context, selected),
-                      child: const Text('Save'),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        );
-      }),
-    );
-    if (!mounted || result == null) return;
-    setState(() => _visibleOtherWallets = result);
-    final userId = _walletPreferencesUserId;
-    if (userId == null) return;
-    try {
-      await _storage.write(
-        key: 'dashboard-other-wallets-$userId',
-        value: result.join(','),
-      );
-    } catch (_) {
-      if (mounted) {
-        showTpSnackbar(
-          context,
-          'Wallets updated. Could not save this preference on your device.',
-        );
-      }
-    }
   }
 
   Future<void> _refreshDashboard() async {
@@ -188,10 +93,6 @@ class _HomeScreenState extends State<HomeScreen> {
             }
 
             final data = snapshot.data!;
-            if (_walletPreferencesUserId != data.user.id) {
-              _walletPreferencesUserId = data.user.id;
-              _loadOtherWalletPreferences(data.user.id);
-            }
             final hasNgnAccount =
                 _hasActiveAccount(data.virtualAccounts, 'NGN');
             return RefreshIndicator(
@@ -227,7 +128,12 @@ class _HomeScreenState extends State<HomeScreen> {
                       !_hasActiveAccount(data.virtualAccounts, 'NGN')) ...[
                     const SizedBox(height: AppSpacing.md),
                     _AccountSetupBanner(
-                      onRequest: () => context.push(AppRoutes.receiveMoney),
+                      awaitingVerification:
+                          data.user.kycStatus.toUpperCase() == 'SUBMITTED',
+                      onRequest: () => context.push(
+                          data.user.kycStatus.toUpperCase() == 'SUBMITTED'
+                              ? AppRoutes.kyc
+                              : AppRoutes.receiveMoney),
                     ),
                   ],
                   const SizedBox(height: AppSpacing.lg),
@@ -243,20 +149,6 @@ class _HomeScreenState extends State<HomeScreen> {
                     const SizedBox(height: AppSpacing.lg),
                     _BeneficiaryStrip(
                       beneficiaries: data.beneficiaries,
-                    ),
-                  ],
-                  if (_visibleOtherWallets.isNotEmpty) ...[
-                    const SizedBox(height: AppSpacing.lg),
-                    _SectionTitle(
-                      title: 'Other wallets',
-                      actionLabel: 'Manage',
-                      onTap: _manageOtherWallets,
-                    ),
-                    const SizedBox(height: AppSpacing.md),
-                    _WalletSummaryRow(
-                      wallets: data.wallets,
-                      showBalances: _showBalances,
-                      visibleCurrencies: _visibleOtherWallets,
                     ),
                   ],
                   const SizedBox(height: AppSpacing.lg),
@@ -628,7 +520,9 @@ class _BalanceCardData {
 
 class _AccountSetupBanner extends StatelessWidget {
   final VoidCallback onRequest;
-  const _AccountSetupBanner({required this.onRequest});
+  final bool awaitingVerification;
+  const _AccountSetupBanner(
+      {required this.onRequest, this.awaitingVerification = false});
 
   @override
   Widget build(BuildContext context) {
@@ -645,9 +539,13 @@ class _AccountSetupBanner extends StatelessWidget {
         const SizedBox(width: AppSpacing.sm),
         Expanded(
             child: Text(
-                'Request a dedicated Paystack NGN account to fund your wallet and start transacting.',
+                awaitingVerification
+                    ? 'Your Paystack account is waiting for identity verification.'
+                    : 'Request a dedicated Paystack NGN account to fund your wallet and start transacting.',
                 style: AppTextStyles.bodyS)),
-        TextButton(onPressed: onRequest, child: const Text('Request')),
+        TextButton(
+            onPressed: onRequest,
+            child: Text(awaitingVerification ? 'View status' : 'Request')),
       ]),
     );
   }
@@ -1190,7 +1088,9 @@ class _KycStatusBanner extends StatelessWidget {
     final color = isVerified ? AppColors.success : AppColors.warning;
     final message = isVerified
         ? 'KYC verified. Withdrawals, higher limits, and virtual account access are enabled.'
-        : 'Complete KYC to unlock higher limits, withdrawals, and virtual account access.';
+        : status.toUpperCase() == 'SUBMITTED'
+            ? 'Your identity checks are in progress. View your BVN and NIN status.'
+            : 'Complete KYC to unlock higher limits, withdrawals, and virtual account access.';
 
     return TapScale(
       onTap: () => context.push(AppRoutes.kyc),
@@ -1717,298 +1617,6 @@ class _BeneficiaryCard extends StatelessWidget {
   }
 }
 
-class _WalletSummaryRow extends StatelessWidget {
-  final List<HomeWallet> wallets;
-  final bool showBalances;
-  final Set<String> visibleCurrencies;
-
-  const _WalletSummaryRow({
-    required this.wallets,
-    required this.showBalances,
-    required this.visibleCurrencies,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    AppColors.watch(context);
-    final walletByCurrency = {
-      for (final wallet in wallets) wallet.currency.toUpperCase(): wallet,
-    };
-    final items = _supportedWallets
-        .where((template) => visibleCurrencies.contains(template.currency))
-        .map((template) {
-      final wallet = walletByCurrency[template.currency];
-      final isUnlocked = template.isUnlocked;
-      return _WalletDisplayItem(
-        currency: template.currency,
-        name: template.name,
-        flag: template.flag,
-        icon: template.icon,
-        colors: template.colors,
-        isUnlocked: isUnlocked,
-        balanceDecimalString:
-            isUnlocked ? wallet?.balanceDecimalString ?? '0.00' : '0.00',
-      );
-    }).toList(growable: false);
-
-    return SizedBox(
-      height: 96,
-      child: ListView.separated(
-        clipBehavior: Clip.none,
-        scrollDirection: Axis.horizontal,
-        physics: const BouncingScrollPhysics(),
-        itemCount: items.length,
-        separatorBuilder: (_, __) => const SizedBox(width: AppSpacing.sm),
-        itemBuilder: (context, index) {
-          final item = items[index];
-          return SizedBox(
-            width: 120,
-            child: _WalletCard(
-              key: ValueKey('wallet-summary-${item.currency}'),
-              item: item,
-              balance: item.isUnlocked
-                  ? showBalances
-                      ? _compactMoney(item.balanceDecimalString)
-                      : '••••'
-                  : 'Coming soon',
-            ),
-          );
-        },
-      ),
-    );
-  }
-}
-
-class _SupportedWallet {
-  final String currency;
-  final String name;
-  final String flag;
-  final IconData icon;
-  final List<Color> colors;
-  final bool isUnlocked;
-
-  const _SupportedWallet({
-    required this.currency,
-    required this.name,
-    required this.flag,
-    required this.icon,
-    required this.colors,
-    required this.isUnlocked,
-  });
-}
-
-class _WalletDisplayItem {
-  final String currency;
-  final String name;
-  final String flag;
-  final IconData icon;
-  final List<Color> colors;
-  final bool isUnlocked;
-  final String balanceDecimalString;
-
-  const _WalletDisplayItem({
-    required this.currency,
-    required this.name,
-    required this.flag,
-    required this.icon,
-    required this.colors,
-    required this.isUnlocked,
-    required this.balanceDecimalString,
-  });
-}
-
-const _supportedWallets = [
-  _SupportedWallet(
-    currency: 'GHS',
-    name: 'Ghana cedi',
-    flag: '🇬🇭',
-    icon: Icons.account_balance_wallet_rounded,
-    colors: [Color(0xFFB42318), Color(0xFFE2574C)],
-    isUnlocked: true,
-  ),
-  _SupportedWallet(
-    currency: 'NGN',
-    name: 'Nigerian naira',
-    flag: '🇳🇬',
-    icon: Icons.account_balance_wallet_rounded,
-    colors: [Color(0xFF047857), Color(0xFF13A169)],
-    isUnlocked: true,
-  ),
-  _SupportedWallet(
-    currency: 'USD',
-    name: 'US dollar',
-    flag: '🇺🇸',
-    icon: Icons.lock_rounded,
-    colors: [Color(0xFF1D4ED8), Color(0xFF60A5FA)],
-    isUnlocked: false,
-  ),
-  _SupportedWallet(
-    currency: 'EUR',
-    name: 'Euro',
-    flag: '🇪🇺',
-    icon: Icons.lock_rounded,
-    colors: [Color(0xFF4338CA), Color(0xFF8B5CF6)],
-    isUnlocked: false,
-  ),
-  _SupportedWallet(
-    currency: 'GBP',
-    name: 'British pound',
-    flag: '🇬🇧',
-    icon: Icons.lock_rounded,
-    colors: [Color(0xFFBE185D), Color(0xFFF472B6)],
-    isUnlocked: false,
-  ),
-  _SupportedWallet(
-    currency: 'ZAR',
-    name: 'South African rand',
-    flag: '🇿🇦',
-    icon: Icons.lock_rounded,
-    colors: [Color(0xFF0F766E), Color(0xFF2DD4BF)],
-    isUnlocked: false,
-  ),
-];
-
-class _WalletCard extends StatelessWidget {
-  final _WalletDisplayItem item;
-  final String balance;
-
-  const _WalletCard({
-    super.key,
-    required this.item,
-    required this.balance,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    AppColors.watch(context);
-    final contentOpacity = item.isUnlocked ? 1.0 : 0.74;
-    return Container(
-      constraints: const BoxConstraints(minHeight: 96),
-      clipBehavior: Clip.antiAlias,
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: item.colors,
-        ),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.14)),
-        boxShadow: [
-          BoxShadow(
-            color: item.colors.first.withValues(alpha: 0.20),
-            blurRadius: 18,
-            offset: const Offset(0, 8),
-          ),
-        ],
-      ),
-      child: Stack(
-        children: [
-          Positioned(
-            right: -10,
-            bottom: -14,
-            child: Text(
-              item.currency,
-              style: AppTextStyles.displayLarge.copyWith(
-                color: Colors.white.withValues(alpha: 0.07),
-                fontSize: 50,
-                fontWeight: FontWeight.w900,
-                letterSpacing: 0,
-              ),
-            ),
-          ),
-          if (item.isUnlocked)
-            Positioned(
-              right: 10,
-              top: 10,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.18),
-                  borderRadius: BorderRadius.circular(AppRadius.full),
-                  border:
-                      Border.all(color: Colors.white.withValues(alpha: 0.18)),
-                ),
-                child: Text(
-                  'Active',
-                  style: AppTextStyles.caption.copyWith(
-                    color: Colors.white,
-                    fontSize: 9,
-                    fontWeight: FontWeight.w900,
-                    height: 1,
-                  ),
-                ),
-              ),
-            ),
-          Padding(
-            padding: const EdgeInsets.all(AppSpacing.sm),
-            child: Opacity(
-              opacity: contentOpacity,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Container(
-                        width: 24,
-                        height: 24,
-                        alignment: Alignment.center,
-                        decoration: BoxDecoration(
-                          color: Colors.white.withValues(alpha: 0.18),
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                        child: Text(item.flag,
-                            style: const TextStyle(fontSize: 16)),
-                      ),
-                      const SizedBox(width: AppSpacing.sm),
-                      Text(
-                        item.currency,
-                        style: AppTextStyles.labelM.copyWith(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w900,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const Spacer(),
-                  Text(
-                    balance,
-                    style: (item.isUnlocked
-                            ? AppTextStyles.headingM
-                            : AppTextStyles.caption)
-                        .copyWith(
-                      color: Colors.white,
-                      letterSpacing: 0,
-                      fontWeight: FontWeight.w900,
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  Row(
-                    children: [
-                      Icon(item.icon, color: Colors.white, size: 14),
-                      const SizedBox(width: 4),
-                      Expanded(
-                        child: Text(
-                          item.name,
-                          style: AppTextStyles.caption.copyWith(
-                            color: Colors.white.withValues(alpha: 0.90),
-                            fontWeight: FontWeight.w700,
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
 class _RecentTransactionsSection extends StatelessWidget {
   final List<HomeTransaction> transactions;
 
@@ -2164,13 +1772,11 @@ class _SectionTitle extends StatelessWidget {
   final String title;
   final String actionLabel;
   final String? route;
-  final VoidCallback? onTap;
 
   const _SectionTitle({
     required this.title,
     required this.actionLabel,
     this.route,
-    this.onTap,
   });
 
   @override
@@ -2188,7 +1794,7 @@ class _SectionTitle extends StatelessWidget {
           ),
         ),
         TapScale(
-          onTap: onTap ?? (route == null ? null : () => context.push(route!)),
+          onTap: route == null ? null : () => context.push(route!),
           borderRadius: BorderRadius.circular(AppRadius.full),
           pressedScale: 0.96,
           child: Text(
@@ -2422,47 +2028,6 @@ Color _transactionColor(String status) {
 
 String _money(String currency, String decimalString) {
   return '$currency ${_formatExactAmount(decimalString)}';
-}
-
-String _compactMoney(String decimalString) {
-  final value = MoneyValue.parse(decimalString);
-  final absoluteMinorUnits = value.minorUnits.abs();
-  final thousandMinorUnits = BigInt.from(100000);
-  final millionMinorUnits = BigInt.from(100000000);
-
-  if (absoluteMinorUnits >= millionMinorUnits) {
-    return _compactScaled(
-      value,
-      unitMinorUnits: millionMinorUnits,
-      decimalPlaces: 2,
-      suffix: 'M',
-    );
-  }
-  if (absoluteMinorUnits >= thousandMinorUnits) {
-    return _compactScaled(
-      value,
-      unitMinorUnits: thousandMinorUnits,
-      decimalPlaces: 1,
-      suffix: 'K',
-    );
-  }
-  return _formatExactAmount(value.decimalString);
-}
-
-String _compactScaled(
-  MoneyValue value, {
-  required BigInt unitMinorUnits,
-  required int decimalPlaces,
-  required String suffix,
-}) {
-  final scale = BigInt.from(10).pow(decimalPlaces);
-  final rounded =
-      (value.minorUnits.abs() * scale + unitMinorUnits ~/ BigInt.from(2)) ~/
-          unitMinorUnits;
-  final whole = rounded ~/ scale;
-  final fraction = (rounded % scale).toString().padLeft(decimalPlaces, '0');
-  final sign = value.isNegative ? '-' : '';
-  return '$sign$whole.$fraction$suffix';
 }
 
 String _walletCardAmount(String decimalString) {

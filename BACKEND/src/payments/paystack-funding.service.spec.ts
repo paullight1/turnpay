@@ -152,6 +152,11 @@ describe('verified Paystack funding', () => {
       '/transaction/initialize',
       expect.objectContaining({ reference: result.reference, amount: 10001 }),
     );
+    expect(client.request).toHaveBeenCalledWith(
+      'POST',
+      '/transaction/initialize',
+      expect.objectContaining({ channels: ['bank_transfer'] }),
+    );
   });
   it('returns an actionable support reference for an existing pending checkout without a URL', async () => {
     transaction.findUnique.mockResolvedValue({

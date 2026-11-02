@@ -3,6 +3,7 @@ import { GhsWithdrawalsService } from '../../kora/ghs-withdrawals.service';
 import { KoraAccountsService } from '../../kora/kora-accounts.service';
 import { KoraCollectionsService } from '../../kora/kora-collections.service';
 import { PaystackFundingService } from '../paystack-funding.service';
+import { PaystackAdverseFundingService } from '../paystack-adverse-funding.service';
 import { KycService } from '../../kyc/kyc.service';
 import { Injectable, Optional } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
@@ -36,6 +37,8 @@ export class PaymentWebhookProcessorService {
     @Optional()
     private readonly providerExchange?: ProviderExchangeSettlementService,
     @Optional() private readonly ghsWithdrawals?: GhsWithdrawalsService,
+    @Optional()
+    private readonly adverseFunding?: PaystackAdverseFundingService,
   ) {}
 
   @Cron(CronExpression.EVERY_MINUTE)
@@ -139,6 +142,25 @@ export class PaymentWebhookProcessorService {
 
   private async processPaystackEvent(event: InboxEventRecord) {
     const data = this.getRecord(this.asRecord(event.payload), 'data');
+    if (
+      [
+        'charge.dispute.create',
+        'charge.dispute.resolve',
+        'refund.processed',
+      ].includes(event.eventType)
+    ) {
+      if (!this.adverseFunding)
+        throw new Error('Paystack adverse funding processor unavailable');
+      return this.adverseFunding.processPaystackEvent({
+        eventType: event.eventType as
+          | 'charge.dispute.create'
+          | 'charge.dispute.resolve'
+          | 'refund.processed',
+        providerReference: event.providerReference,
+        data,
+        rawPayload: this.asRecord(event.payload),
+      });
+    }
     if (event.eventType === 'charge.success') {
       if (!this.funding)
         throw new Error('Paystack funding processor unavailable');

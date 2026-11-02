@@ -7,10 +7,31 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:image/image.dart' as img;
 import 'package:trustpay_app/core/theme/app_theme.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:trustpay_app/features/home/screens/kyc_verification_screen.dart';
 import 'package:trustpay_app/services/kyc_service.dart';
+
+Uint8List _sampleNinImage() {
+  final image = img.Image(width: 320, height: 200);
+  img.fill(image, color: img.ColorRgb8(255, 255, 255));
+  img.fillRect(image,
+      x1: 0, y1: 0, x2: 319, y2: 38, color: img.ColorRgb8(219, 239, 224));
+  img.drawString(image, 'SAMPLE NIN',
+      font: img.arial24, x: 12, y: 8, color: img.ColorRgb8(30, 73, 45));
+  img.fillRect(image,
+      x1: 14, y1: 60, x2: 84, y2: 150, color: img.ColorRgb8(226, 230, 236));
+  for (final y in [68, 98, 128]) {
+    img.fillRect(image,
+        x1: 108,
+        y1: y,
+        x2: 292,
+        y2: y + 8,
+        color: img.ColorRgb8(100, 110, 120));
+  }
+  return Uint8List.fromList(img.encodePng(image));
+}
 
 Future<void> _openBvnVerification(WidgetTester tester) async {
   final action = find.text('Verify BVN');
@@ -441,15 +462,16 @@ void main() {
   testWidgets('NIN evidence can be submitted while BVN is under review',
       (tester) async {
     const channel = MethodChannel('miguelruivo.flutter.plugins.filepicker');
+    final bytes = _sampleNinImage();
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(
             channel,
             (call) async => [
                   {
-                    'name': 'nin.pdf',
-                    'size': 3,
-                    'bytes': Uint8List.fromList([1, 2, 3]),
-                    'path': '/test/nin.pdf'
+                    'name': 'nin.png',
+                    'size': bytes.length,
+                    'bytes': bytes,
+                    'path': '/test/nin.png'
                   }
                 ]);
     addTearDown(() => TestDefaultBinaryMessengerBinding
@@ -468,14 +490,16 @@ void main() {
     }
 
     await tap(find.text('Continue to NIN'));
-    final privateNinField =
+    final ninField =
         tester.widget<TextField>(find.byKey(const ValueKey('kyc-nin-number')));
-    expect(privateNinField.obscureText, isTrue);
-    expect(privateNinField.enableSuggestions, isFalse);
-    expect(privateNinField.autocorrect, isFalse);
+    expect(ninField.obscureText, isFalse);
+    expect(ninField.enableSuggestions, isFalse);
+    expect(ninField.autocorrect, isFalse);
     await tester.enterText(
         find.byKey(const ValueKey('kyc-nin-number')), '77777777777');
-    await tap(find.text('Choose NIN evidence'));
+    await tap(find.text('Upload NIN'));
+    await tester.drag(find.byType(ListView).last, const Offset(0, -240));
+    await tester.pumpAndSettle();
     await tap(find.byKey(const ValueKey('kyc-nin-consent')));
     expect(service.ninSubmissions, 0);
     await tap(find.text('Submit for review'));
@@ -489,6 +513,91 @@ void main() {
     expect(find.text('Under review'), findsNWidgets(2));
     expect(find.text('Continue to NIN'), findsNothing);
   });
+
+  for (final variant in [
+    (name: '430-light', size: const Size(430, 932), dark: false, scale: 1.0),
+    (
+      name: '320-dark-large',
+      size: const Size(320, 740),
+      dark: true,
+      scale: 1.5
+    ),
+    (name: '726-light', size: const Size(726, 804), dark: false, scale: 1.0),
+  ]) {
+    testWidgets('NIN file preview and consent fit ${variant.name}',
+        (tester) async {
+      tester.view.physicalSize = variant.size;
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      const channel = MethodChannel('miguelruivo.flutter.plugins.filepicker');
+      final bytes = _sampleNinImage();
+      var selections = 0;
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (call) async {
+        selections++;
+        if (selections == 2) return null;
+        return [
+          {
+            'name': selections == 1 ? 'nin-slip.png' : 'nin-card.png',
+            'size': bytes.length,
+            'bytes': bytes,
+            'path': '/test/nin.png',
+          }
+        ];
+      });
+      addTearDown(() => TestDefaultBinaryMessengerBinding
+          .instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, null));
+      final capture = GlobalKey();
+      final service = _FakeKycService()..overview = _bvnInReview;
+      await tester.pumpWidget(RepaintBoundary(
+        key: capture,
+        child: MaterialApp(
+          debugShowCheckedModeBanner: false,
+          theme: variant.dark ? AppTheme.dark : AppTheme.light,
+          builder: (context, child) => MediaQuery(
+            data: MediaQuery.of(context)
+                .copyWith(textScaler: TextScaler.linear(variant.scale)),
+            child: child!,
+          ),
+          home: KycVerificationScreen(
+              service: service, initialOverview: _bvnInReview),
+        ),
+      ));
+      await tester.pumpAndSettle();
+      Future<void> tap(Finder finder) async {
+        await tester.ensureVisible(finder);
+        await tester.pumpAndSettle();
+        await tester.tap(finder);
+        await tester.pumpAndSettle();
+      }
+
+      await tap(find.text('Continue to NIN'));
+      await tester.enterText(
+          find.byKey(const ValueKey('kyc-nin-number')), '77777777777');
+      await tap(find.text('Upload NIN'));
+      expect(find.text('nin-slip.png'), findsOneWidget);
+      expect(
+          find.bySemanticsLabel('Selected NIN image preview'), findsOneWidget);
+      final submit = find.widgetWithText(ElevatedButton, 'Submit for review');
+      expect(tester.widget<ElevatedButton>(submit).onPressed, isNull);
+      expect(tester.getSize(submit).height, greaterThanOrEqualTo(54));
+      expect(tester.getSize(find.text('Cancel')).height, lessThan(40));
+      await tap(find.text('Upload NIN'));
+      expect(find.text('nin-slip.png'), findsOneWidget);
+      await tap(find.text('Upload NIN'));
+      expect(find.text('nin-slip.png'), findsNothing);
+      expect(find.text('nin-card.png'), findsOneWidget);
+      await tap(find.byKey(const ValueKey('kyc-nin-consent')));
+      expect(tester.widget<ElevatedButton>(submit).onPressed, isNotNull);
+      expect(service.ninSubmissions, 0);
+      expect(tester.takeException(), isNull);
+      await _captureKyc(tester, capture, 'nin-upload-${variant.name}');
+      await tap(find.text('Cancel'));
+      expect(service.ninSubmissions, 0);
+    });
+  }
   testWidgets('pending review refreshes to approval without resubmission',
       (tester) async {
     final service = _FakeKycService();
@@ -737,7 +846,7 @@ void main() {
             .widget<TextField>(
                 find.byKey(const ValueKey('kyc-identity-number')))
             .obscureText,
-        isTrue);
+        isFalse);
     expect(find.text('Date of birth'), findsNothing);
     await tester.enterText(
       find.byKey(const ValueKey('kyc-identity-number')),

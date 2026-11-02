@@ -246,6 +246,9 @@ export interface VtuOrderStatus {
   requeryAttempts: number;
   lastRequeryAt?: string | null;
   nextRequeryAt?: string | null;
+  actionRequired?: boolean;
+  actionRequiredCode?: string | null;
+  customerAction?: string | null;
   completedAt?: string | null;
   failedAt?: string | null;
   createdAt: string;
@@ -277,6 +280,9 @@ export interface AdminVtuStaleOrder {
   attempts: number;
   lastRequeryAt?: string | null;
   nextRequeryAt?: string | null;
+  actionRequired?: boolean;
+  actionRequiredCode?: string | null;
+  actionRequiredReason?: string | null;
   createdAt: string;
   updatedAt: string;
   transactionCreatedAt: string;
@@ -288,6 +294,7 @@ export interface AdminVtuStaleOrdersResponse {
   olderThanMinutes: number;
   cutoff: string;
   count: number;
+  actionRequiredCount?: number;
   orders: AdminVtuStaleOrder[];
 }
 
@@ -316,6 +323,7 @@ export interface AdminVtuRequeryResponse {
   reference: string;
   result?: {
     processed?: boolean;
+    actionRequired?: boolean;
     status?: string;
     message?: string;
   } | null;
@@ -334,6 +342,7 @@ export interface AdminVtuReconciliationSummary {
   feeMismatches?: number;
   missingDebits?: number;
   missingReversals?: number;
+  actionRequiredOrders?: number;
   staleOrders?: number;
   highRiskExceptions?: number;
 }
@@ -373,6 +382,8 @@ export interface AdminVtuReconciliationException {
   updatedAt?: string | null;
   lastRequeryAt?: string | null;
   nextRequeryAt?: string | null;
+  actionRequired?: boolean;
+  actionRequiredCode?: string | null;
 }
 
 export interface AdminVtuReconciliationExceptions {
@@ -407,6 +418,8 @@ export interface AdminVtuReconciliationResponse {
     currency: string;
     targetMasked?: string | null;
     requeryAttempts: number;
+    actionRequired?: boolean;
+    actionRequiredCode?: string | null;
     createdAt: string;
     updatedAt: string;
   }>;

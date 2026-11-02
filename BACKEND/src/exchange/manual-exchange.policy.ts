@@ -18,13 +18,21 @@ export const MANUAL_ACTIONS = [
   'REQUEST_INFO',
   'REJECT',
   'CLAIM_PAYOUT',
+  'HANDOVER_PAYOUT',
   'MARK_SENT',
   'RECORD_CEDIS_SENT',
   'COMPLETE',
 ] as const;
+export const MANUAL_PAYOUT_OUTCOMES = [
+  'NOT_SENT',
+  'CONFIRMED_FAILED',
+  'ALREADY_SENT',
+  'UNKNOWN',
+] as const;
 export type ManualAction = (typeof MANUAL_ACTIONS)[number];
 export type ManualStatus = (typeof MANUAL_STATUSES)[number];
 export type SettlementMode = 'WALLET' | 'BANK' | 'MOMO';
+export type ManualPayoutOutcome = (typeof MANUAL_PAYOUT_OUTCOMES)[number];
 
 /** New manual orders follow the approved delivery contract; old orders keep their stored mode. */
 export function manualDeliveryOptions(source: 'NGN' | 'GHS'): SettlementMode[] {
@@ -68,6 +76,28 @@ export function nextManualExchangeStatus(
   throw new ConflictException(
     'This action is not available for this exchange state and settlement choice',
   );
+}
+
+/**
+ * A handover never starts a new order or releases a claim automatically. It
+ * may only move an actively claimed external payout to another operator after
+ * a supervisor has classified the real-world outcome. An unknown outcome is
+ * deliberately not actionable: reassigning it could cause a duplicate send.
+ */
+export function nextManualPayoutHandoverStatus(
+  status: string,
+  mode: SettlementMode,
+  outcome: ManualPayoutOutcome,
+): ManualStatus {
+  if (mode === 'WALLET' || status !== 'PAYOUT_PROCESSING')
+    throw new ConflictException(
+      'Only an actively claimed external payout can be handed over',
+    );
+  if (outcome === 'UNKNOWN')
+    throw new ConflictException(
+      'The external payout outcome is unknown. Do not reassign or send again; reconcile the original claim first',
+    );
+  return outcome === 'ALREADY_SENT' ? 'PAYOUT_SENT' : 'PAYOUT_PROCESSING';
 }
 
 export function quoteManualExchange(

@@ -149,12 +149,17 @@ describe('Paystack withdrawal confirmation', () => {
       { assertSettlementAllowed: jest.fn() } as never,
       provider as never,
     );
-    const result = await withdrawing.withdraw('owner', {
-      amount: '100.00',
-      currency: 'NGN',
-      bankCode: '058',
-      accountNumber: '0123456789',
-    });
+    tx.transaction.findUnique.mockResolvedValueOnce(null);
+    const result = await withdrawing.withdraw(
+      'owner',
+      {
+        amount: '100.00',
+        currency: 'NGN',
+        bankCode: '058',
+        accountNumber: '0123456789',
+      },
+      'test-idempotency-key',
+    );
     expect(result.status).toBe('FAILED');
     expect(ledger.creditWallet).toHaveBeenCalledTimes(1);
     expect(tx.user.updateMany).toHaveBeenCalledWith(

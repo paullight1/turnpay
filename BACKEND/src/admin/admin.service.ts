@@ -35,7 +35,11 @@ import { Decimal } from '@prisma/client/runtime/library';
 import * as Sentry from '@sentry/nestjs';
 import { LedgerService } from '../wallets/ledger.service';
 import { SupabaseService } from '../supabase/supabase.service';
-import { VtuService } from '../vtu/vtu.service';
+import {
+  VtuService,
+  VTU_ACTION_REQUIRED_CODE,
+  VTU_REQUERY_MAX_ATTEMPTS,
+} from '../vtu/vtu.service';
 import { BankingService } from '../banking/banking.service';
 import { maskAccountNumber } from '../common/utils/masking';
 import {
@@ -1636,55 +1640,80 @@ export class AdminService {
     }
 
     const cutoff = new Date(Date.now() - olderThanMinutes * 60 * 1000);
-    const orders = await this.prisma.vtuOrder.findMany({
-      take: limit,
-      where: {
-        status: { in: STALE_VTU_STATUSES },
-        createdAt: { lt: cutoff },
-      },
-      orderBy: [{ createdAt: 'asc' }],
-      select: {
-        id: true,
-        provider: true,
-        providerRequestId: true,
-        providerTransactionId: true,
-        providerStatus: true,
-        status: true,
-        scope: true,
-        serviceType: true,
-        countryCode: true,
-        localProvider: true,
-        operatorId: true,
-        amount: true,
-        currency: true,
-        costAmount: true,
-        providerCommission: true,
-        fee: true,
-        margin: true,
-        targetMasked: true,
-        requeryAttempts: true,
-        lastRequeryAt: true,
-        nextRequeryAt: true,
-        createdAt: true,
-        updatedAt: true,
-        transaction: {
-          select: {
-            id: true,
-            reference: true,
-            status: true,
-            createdAt: true,
-            updatedAt: true,
-          },
+    const select = {
+      id: true,
+      provider: true,
+      providerRequestId: true,
+      providerTransactionId: true,
+      providerStatus: true,
+      status: true,
+      scope: true,
+      serviceType: true,
+      countryCode: true,
+      localProvider: true,
+      operatorId: true,
+      amount: true,
+      currency: true,
+      costAmount: true,
+      providerCommission: true,
+      fee: true,
+      margin: true,
+      targetMasked: true,
+      requeryAttempts: true,
+      lastRequeryAt: true,
+      nextRequeryAt: true,
+      createdAt: true,
+      updatedAt: true,
+      transaction: {
+        select: {
+          id: true,
+          reference: true,
+          status: true,
+          createdAt: true,
+          updatedAt: true,
         },
       },
-    });
+    } as const;
+    const [actionRequiredOrders, staleOrders] = await Promise.all([
+      // This is intentionally a direct threshold query. An old unresolved
+      // order must not disappear just because a recent-order sample is full.
+      this.prisma.vtuOrder.findMany({
+        take: limit,
+        where: {
+          status: { in: STALE_VTU_STATUSES },
+          requeryAttempts: { gte: VTU_REQUERY_MAX_ATTEMPTS },
+          transaction: { status: 'PENDING' },
+        },
+        orderBy: [{ lastRequeryAt: 'asc' }, { createdAt: 'asc' }],
+        select,
+      }),
+      this.prisma.vtuOrder.findMany({
+        take: limit,
+        where: {
+          status: { in: STALE_VTU_STATUSES },
+          requeryAttempts: { lt: VTU_REQUERY_MAX_ATTEMPTS },
+          createdAt: { lt: cutoff },
+          transaction: { status: 'PENDING' },
+        },
+        orderBy: [{ createdAt: 'asc' }],
+        select,
+      }),
+    ]);
+    const orders = Array.from(
+      new Map(
+        [...actionRequiredOrders, ...staleOrders].map((order) => [
+          order.id,
+          order,
+        ]),
+      ).values(),
+    ).slice(0, limit);
 
-    return {
-      generatedAt: new Date(),
-      olderThanMinutes,
-      cutoff,
-      count: orders.length,
-      orders: orders.map((order) => ({
+    const mappedOrders = orders.map((order) => {
+      const actionRequired =
+        STALE_VTU_STATUSES.includes(order.status) &&
+        order.transaction.status === 'PENDING' &&
+        order.requeryAttempts >= VTU_REQUERY_MAX_ATTEMPTS;
+      return {
         orderId: order.id,
         provider: order.provider,
         providerRequestId: order.providerRequestId,
@@ -1709,11 +1738,25 @@ export class AdminService {
         attempts: order.requeryAttempts,
         lastRequeryAt: order.lastRequeryAt,
         nextRequeryAt: order.nextRequeryAt,
+        actionRequired,
+        actionRequiredCode: actionRequired ? VTU_ACTION_REQUIRED_CODE : null,
+        actionRequiredReason: actionRequired
+          ? 'Automatic provider checks stopped after the retry limit. Supervised manual recovery is required; no automatic refund or resend was issued.'
+          : null,
         createdAt: order.createdAt,
         updatedAt: order.updatedAt,
         transactionCreatedAt: order.transaction.createdAt,
         transactionUpdatedAt: order.transaction.updatedAt,
-      })),
+      };
+    });
+    return {
+      generatedAt: new Date(),
+      olderThanMinutes,
+      cutoff,
+      count: mappedOrders.length,
+      actionRequiredCount: mappedOrders.filter((order) => order.actionRequired)
+        .length,
+      orders: mappedOrders,
     };
   }
 
@@ -1728,81 +1771,103 @@ export class AdminService {
 
     const generatedAt = new Date();
     const cutoff = new Date(generatedAt.getTime() - olderThanMinutes * 60000);
-    const [orders, callbackFailures] = await Promise.all([
-      this.prisma.vtuOrder.findMany({
-        take: limit,
-        orderBy: [{ createdAt: 'desc' }],
+    const select = {
+      id: true,
+      provider: true,
+      providerRequestId: true,
+      providerTransactionId: true,
+      providerStatus: true,
+      scope: true,
+      serviceType: true,
+      countryCode: true,
+      localProvider: true,
+      operatorId: true,
+      amount: true,
+      currency: true,
+      costAmount: true,
+      providerCommission: true,
+      fee: true,
+      margin: true,
+      status: true,
+      targetMasked: true,
+      requeryAttempts: true,
+      lastRequeryAt: true,
+      nextRequeryAt: true,
+      completedAt: true,
+      failedAt: true,
+      createdAt: true,
+      updatedAt: true,
+      transaction: {
         select: {
           id: true,
-          provider: true,
-          providerRequestId: true,
-          providerTransactionId: true,
-          providerStatus: true,
-          scope: true,
-          serviceType: true,
-          countryCode: true,
-          localProvider: true,
-          operatorId: true,
+          reference: true,
+          type: true,
           amount: true,
-          currency: true,
-          costAmount: true,
-          providerCommission: true,
           fee: true,
-          margin: true,
+          currency: true,
           status: true,
-          targetMasked: true,
-          requeryAttempts: true,
-          lastRequeryAt: true,
-          nextRequeryAt: true,
-          completedAt: true,
-          failedAt: true,
           createdAt: true,
           updatedAt: true,
-          transaction: {
+          ledgerEntries: {
             select: {
               id: true,
-              reference: true,
-              type: true,
+              direction: true,
               amount: true,
-              fee: true,
               currency: true,
-              status: true,
+              reference: true,
+              source: true,
               createdAt: true,
-              updatedAt: true,
-              ledgerEntries: {
-                select: {
-                  id: true,
-                  direction: true,
-                  amount: true,
-                  currency: true,
-                  reference: true,
-                  source: true,
-                  createdAt: true,
-                },
-              },
             },
           },
         },
-      }),
-      this.prisma.vtuWebhookInbox.findMany({
-        where: {
-          processedAt: null,
-          attempts: { gt: 0 },
-        },
-        take: limit,
-        orderBy: [{ attempts: 'desc' }, { updatedAt: 'asc' }],
-        select: {
-          providerRequestId: true,
-          providerTransactionId: true,
-          providerStatus: true,
-          attempts: true,
-          nextAttemptAt: true,
-          lastError: true,
-          createdAt: true,
-          updatedAt: true,
-        },
-      }),
-    ]);
+      },
+    } as const;
+    const [recentOrders, actionRequiredOrders, callbackFailures] =
+      await Promise.all([
+        this.prisma.vtuOrder.findMany({
+          take: limit,
+          orderBy: [{ createdAt: 'desc' }],
+          select,
+        }),
+        // Keep exhausted unresolved obligations visible even when the recent
+        // reconciliation sample is filled with newer rows.
+        this.prisma.vtuOrder.findMany({
+          take: limit,
+          where: {
+            status: { in: STALE_VTU_STATUSES },
+            requeryAttempts: { gte: VTU_REQUERY_MAX_ATTEMPTS },
+            transaction: { status: 'PENDING' },
+          },
+          orderBy: [{ lastRequeryAt: 'asc' }, { createdAt: 'asc' }],
+          select,
+        }),
+        this.prisma.vtuWebhookInbox.findMany({
+          where: {
+            processedAt: null,
+            attempts: { gt: 0 },
+          },
+          take: limit,
+          orderBy: [{ attempts: 'desc' }, { updatedAt: 'asc' }],
+          select: {
+            providerRequestId: true,
+            providerTransactionId: true,
+            providerStatus: true,
+            attempts: true,
+            nextAttemptAt: true,
+            lastError: true,
+            createdAt: true,
+            updatedAt: true,
+          },
+        }),
+      ]);
+    const orders = Array.from(
+      new Map(
+        [...actionRequiredOrders, ...recentOrders].map((order) => [
+          order.id,
+          order,
+        ]),
+      ).values(),
+    ).slice(0, limit);
 
     const summary = {
       ordersReviewed: orders.length,
@@ -1816,6 +1881,7 @@ export class AdminService {
       feeMismatches: 0,
       missingDebitLedger: 0,
       staleOrders: 0,
+      actionRequiredOrders: 0,
       terminalWithoutReversalCredit: 0,
     };
     const providerBreakdown = new Map<
@@ -1932,9 +1998,15 @@ export class AdminService {
         });
       }
 
-      if (
+      const actionRequired =
         STALE_VTU_STATUSES.includes(order.status) &&
-        order.createdAt < cutoff
+        order.transaction.status === 'PENDING' &&
+        order.requeryAttempts >= VTU_REQUERY_MAX_ATTEMPTS;
+      if (actionRequired) summary.actionRequiredOrders += 1;
+
+      if (
+        actionRequired ||
+        (STALE_VTU_STATUSES.includes(order.status) && order.createdAt < cutoff)
       ) {
         summary.staleOrders += 1;
         exceptions.staleOrders.push({
@@ -1964,21 +2036,29 @@ export class AdminService {
       olderThanMinutes,
       limit,
       cutoff,
-      orders: orders.map((order) => ({
-        ...this.toVtuReconciliationOrderReference(order),
-        costAmount: this.toDecimalOrZero(order.costAmount).toString(),
-        providerCommission: this.toDecimalOrZero(
-          order.providerCommission,
-        ).toString(),
-        margin: this.toDecimalOrZero(order.margin).toString(),
-        providerStatus: order.providerStatus,
-        targetMasked: order.targetMasked,
-        requeryAttempts: order.requeryAttempts,
-        lastRequeryAt: order.lastRequeryAt,
-        nextRequeryAt: order.nextRequeryAt,
-        createdAt: order.createdAt,
-        updatedAt: order.updatedAt,
-      })),
+      orders: orders.map((order) => {
+        const actionRequired =
+          STALE_VTU_STATUSES.includes(order.status) &&
+          order.transaction.status === 'PENDING' &&
+          order.requeryAttempts >= VTU_REQUERY_MAX_ATTEMPTS;
+        return {
+          ...this.toVtuReconciliationOrderReference(order),
+          costAmount: this.toDecimalOrZero(order.costAmount).toString(),
+          providerCommission: this.toDecimalOrZero(
+            order.providerCommission,
+          ).toString(),
+          margin: this.toDecimalOrZero(order.margin).toString(),
+          providerStatus: order.providerStatus,
+          targetMasked: order.targetMasked,
+          requeryAttempts: order.requeryAttempts,
+          lastRequeryAt: order.lastRequeryAt,
+          nextRequeryAt: order.nextRequeryAt,
+          actionRequired,
+          actionRequiredCode: actionRequired ? VTU_ACTION_REQUIRED_CODE : null,
+          createdAt: order.createdAt,
+          updatedAt: order.updatedAt,
+        };
+      }),
       callbackFailures,
       summary: this.stringifyVtuReconciliationSummary(summary),
       providerBreakdown: this.stringifyVtuBreakdown(providerBreakdown),
@@ -2016,7 +2096,7 @@ export class AdminService {
     let requeryError: string | null = null;
 
     try {
-      requeryResult = await this.vtuService.requeryOrder(before.id);
+      requeryResult = await this.vtuService.requeryOrder(before.id, true);
     } catch (error) {
       requeryError = error instanceof Error ? error.message : 'Unknown error';
     }
@@ -3360,6 +3440,7 @@ export class AdminService {
     feeMismatches: number;
     missingDebitLedger: number;
     staleOrders: number;
+    actionRequiredOrders: number;
     terminalWithoutReversalCredit: number;
   }) {
     return {
@@ -3388,6 +3469,7 @@ export class AdminService {
     providerRequestId: string;
     providerTransactionId: string | null;
     status: string;
+    requeryAttempts?: number;
     serviceType: string;
     amount: Decimal;
     fee: Decimal | null;
@@ -3417,6 +3499,11 @@ export class AdminService {
       transactionAmount: order.transaction.amount.toString(),
       transactionFee: order.transaction.fee.toString(),
       transactionCurrency: order.transaction.currency,
+      requeryAttempts: order.requeryAttempts,
+      actionRequired:
+        STALE_VTU_STATUSES.includes(order.status as VtuOrderStatus) &&
+        order.transaction.status === 'PENDING' &&
+        (order.requeryAttempts ?? 0) >= VTU_REQUERY_MAX_ATTEMPTS,
     };
   }
 
@@ -3521,6 +3608,10 @@ export class AdminService {
       currency: order.currency,
       targetMasked: order.targetMasked,
       attempts: order.requeryAttempts,
+      actionRequired:
+        STALE_VTU_STATUSES.includes(order.status) &&
+        order.transaction.status === 'PENDING' &&
+        order.requeryAttempts >= VTU_REQUERY_MAX_ATTEMPTS,
       lastRequeryAt: order.lastRequeryAt?.toISOString() ?? null,
       nextRequeryAt: order.nextRequeryAt?.toISOString() ?? null,
       completedAt: order.completedAt?.toISOString() ?? null,

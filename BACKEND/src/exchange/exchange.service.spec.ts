@@ -3,7 +3,10 @@ import { ConfigModule } from '@nestjs/config';
 import { ConflictException, ServiceUnavailableException } from '@nestjs/common';
 import { ExchangeService } from './exchange.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { RateService } from './providers/rate.service';
+import {
+  RateService,
+  AdminExchangeRateNotSetException,
+} from './providers/rate.service';
 import { RedisService } from '../redis/redis.service';
 import { PinoLogger } from 'nestjs-pino';
 import { LedgerService } from '../wallets/ledger.service';
@@ -1309,5 +1312,44 @@ describe('ExchangeService', () => {
       expect(mockPrisma.transaction.create).not.toHaveBeenCalled();
       expect(mockLedger.debitWallet).not.toHaveBeenCalled();
     });
+  });
+});
+
+describe('unset admin rate preview', () => {
+  function preview(getRate: jest.Mock) {
+    return new ExchangeService(
+      {} as never,
+      { getRate } as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+    );
+  }
+  it('returns an honest empty read-only preview without a fallback price', async () => {
+    const service = preview(
+      jest.fn().mockRejectedValue(new AdminExchangeRateNotSetException()),
+    );
+    await expect(service.getRate('GHS', 'NGN')).resolves.toEqual({
+      from: 'GHS',
+      to: 'NGN',
+      configured: false,
+      baseRate: null,
+      markupPercent: null,
+      effectiveRate: null,
+      isStale: true,
+    });
+    await expect(
+      service.createQuote('user', { from: 'GHS', to: 'NGN', amount: '100.00' }),
+    ).rejects.toThrow('Admin has not set an active exchange rate');
+  });
+  it('does not disguise database/provider errors as an unset rate', async () => {
+    await expect(
+      preview(jest.fn().mockRejectedValue(new Error('unavailable'))).getRate(
+        'GHS',
+        'NGN',
+      ),
+    ).rejects.toThrow('unavailable');
   });
 });

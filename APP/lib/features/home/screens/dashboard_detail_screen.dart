@@ -1381,10 +1381,11 @@ class _AccountDetailsBodyState extends State<_AccountDetailsBody> {
             }
             final requests = (snapshot.data ?? [])
                 .where((ticket) =>
-                    ticket.type == 'ACCOUNT' &&
-                    ticket.description
-                        .toLowerCase()
-                        .contains('account deletion'))
+                    ticket.type == 'ACCOUNT_DELETION' ||
+                    (ticket.type == 'ACCOUNT' &&
+                        ticket.description
+                            .toLowerCase()
+                            .contains('account deletion')))
                 .toList();
             return Column(children: [
               for (final request in requests)

@@ -23,6 +23,9 @@ describe('LedgerService', () => {
     auditLog: {
       findMany: jest.fn(),
     },
+    fundingAdverseCase: {
+      findMany: jest.fn(),
+    },
     $queryRaw: jest.fn(),
     $transaction: jest.fn(async (fn: any) => fn(prisma)),
   };
@@ -34,6 +37,7 @@ describe('LedgerService', () => {
     prisma.$transaction.mockImplementation(async (fn: any) => fn(prisma));
     prisma.reconciliationRun.findMany.mockResolvedValue([]);
     prisma.auditLog.findMany.mockResolvedValue([]);
+    prisma.fundingAdverseCase.findMany.mockResolvedValue([]);
     prisma.$queryRaw.mockResolvedValue([]);
     service = new LedgerService(prisma);
   });
@@ -248,6 +252,63 @@ describe('LedgerService', () => {
 
     expect(prisma.$queryRaw).not.toHaveBeenCalled();
     expect(prisma.wallet.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('allows only audited adverse recovery past its own case hold while retaining reconciliation holds', async () => {
+    prisma.fundingAdverseCase.findMany.mockResolvedValue([
+      {
+        id: 'case-1',
+        provider: 'PAYSTACK',
+        eventType: 'refund.processed',
+        providerReference: 'refund-1',
+      },
+    ]);
+    prisma.wallet.updateMany.mockResolvedValue({ count: 1 });
+    prisma.wallet.findUnique.mockResolvedValue({
+      id: 'wallet-1',
+      userId: 'user-1',
+      currency: 'NGN',
+      balance: new Decimal(700),
+    });
+    prisma.ledgerEntry.create.mockResolvedValue({ id: 'ledger-1' });
+
+    await expect(
+      service.debitWalletForAdverseFunding(
+        {
+          userId: 'user-1',
+          currency: 'NGN',
+          amount: new Decimal(100),
+          transactionId: 'tx-1',
+          reference: 'RECOVERY-1',
+          source: 'PAYSTACK_ADVERSE_RECOVERY',
+        },
+        prisma,
+      ),
+    ).resolves.toEqual(expect.objectContaining({ walletId: 'wallet-1' }));
+    expect(prisma.fundingAdverseCase.findMany).not.toHaveBeenCalled();
+
+    prisma.reconciliationRun.findMany.mockResolvedValue([
+      {
+        id: 'blocked-run',
+        scope: 'WALLET_BALANCES',
+        status: 'BLOCKED',
+        createdAt: new Date(),
+        mismatchCount: 1,
+      },
+    ]);
+    await expect(
+      service.debitWalletForAdverseFunding(
+        {
+          userId: 'user-1',
+          currency: 'NGN',
+          amount: new Decimal(100),
+          transactionId: 'tx-2',
+          reference: 'RECOVERY-2',
+          source: 'PAYSTACK_ADVERSE_RECOVERY',
+        },
+        prisma,
+      ),
+    ).rejects.toThrow('reconciliation is blocked');
   });
 
   it('fails when the target wallet does not exist', async () => {

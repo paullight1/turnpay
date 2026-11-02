@@ -28,6 +28,19 @@ type Payment = {
   authorization?: { channel?: string; receiver_bank_account_number?: string };
 };
 
+const PAYSTACK_CHECKOUT_CHANNELS = [
+  'card',
+  'bank',
+  'apple_pay',
+  'ussd',
+  'qr',
+  'mobile_money',
+  'bank_transfer',
+  'eft',
+  'capitec_pay',
+  'payattitude',
+] as const;
+
 @Injectable()
 export class PaystackFundingService {
   constructor(
@@ -49,6 +62,7 @@ export class PaystackFundingService {
       configured,
       activationStatus: 'UNCONFIRMED',
       checkout: enabled('PAYSTACK_CHECKOUT_ENABLED'),
+      checkoutChannels: this.allowedCheckoutChannels(),
       checkoutMinimumAmount: '50.00',
       virtualAccounts:
         enabled('BANKING_ENABLED') && enabled('VIRTUAL_ACCOUNTS_ENABLED'),
@@ -79,6 +93,7 @@ export class PaystackFundingService {
     if (amount.gt(10000000))
       throw new BadRequestException('Amount must be at most 10000000');
     const user = await this.assertEligible(userId);
+    const checkoutChannels = this.allowedCheckoutChannels();
     const reference = `fund-${createHash('sha256').update(`${userId}:${key}`).digest('hex').slice(0, 40)}`;
     const existing = await this.prisma.transaction.findUnique({
       where: { reference },
@@ -122,6 +137,7 @@ export class PaystackFundingService {
             provider: 'PAYSTACK',
             channel: 'checkout',
             customerCode: customer.customerCode,
+            allowedChannels: checkoutChannels,
           },
         },
       });
@@ -152,6 +168,7 @@ export class PaystackFundingService {
           currency: 'NGN',
           reference,
           callback_url: callback.toString(),
+          channels: checkoutChannels,
         },
       );
     } catch (error) {
@@ -268,6 +285,7 @@ export class PaystackFundingService {
           throw new BadRequestException(
             'Payment failure confirmation does not match the funding attempt',
           );
+        this.assertCheckoutChannelAllowed(payment, metadata);
         await this.prisma.transaction.updateMany({
           where: { id: transaction.id, status: 'PENDING' },
           data: { status: 'FAILED' },
@@ -288,8 +306,10 @@ export class PaystackFundingService {
         transaction.status === 'SUCCESS' &&
         transaction.currency === payment.currency &&
         transaction.amount.eq(amount)
-      )
+      ) {
+        this.assertCheckoutChannelAllowed(payment, metadata);
         return { reference, status: 'SUCCESS' };
+      }
       if (
         transaction.type !== 'FUND' ||
         metadata.provider !== 'PAYSTACK' ||
@@ -301,6 +321,7 @@ export class PaystackFundingService {
         throw new BadRequestException(
           'Payment confirmation does not match the funding attempt',
         );
+      this.assertCheckoutChannelAllowed(payment, metadata);
       if (transaction.status === 'SUCCESS')
         return { reference, status: 'SUCCESS' };
       await this.assertEligible(transaction.userId);
@@ -425,6 +446,44 @@ export class PaystackFundingService {
       ? (value as Record<string, unknown>)
       : {};
   }
+
+  private allowedCheckoutChannels() {
+    const raw = this.config.get<string>(
+      'PAYSTACK_FUNDING_ALLOWED_CHANNELS',
+      'bank_transfer',
+    );
+    const channels = String(raw ?? '')
+      .split(',')
+      .map((channel) => channel.trim().toLowerCase())
+      .filter(
+        (channel): channel is (typeof PAYSTACK_CHECKOUT_CHANNELS)[number] =>
+          (PAYSTACK_CHECKOUT_CHANNELS as readonly string[]).includes(channel),
+      );
+    if (channels.length === 0) {
+      throw new ServiceUnavailableException(
+        'Paystack funding channels are not configured',
+      );
+    }
+    return [...new Set(channels)];
+  }
+
+  private assertCheckoutChannelAllowed(
+    payment: Payment,
+    metadata: Record<string, unknown>,
+  ) {
+    // Legacy/DVA funding records do not have this checkout policy metadata.
+    if (!Array.isArray(metadata.allowedChannels)) return;
+    const allowed = metadata.allowedChannels.filter(
+      (channel): channel is string => typeof channel === 'string',
+    );
+    const channel = payment.authorization?.channel || payment.channel;
+    if (!channel || !allowed.includes(channel)) {
+      throw new BadRequestException(
+        'Payment confirmation used a channel that is not permitted for funding',
+      );
+    }
+  }
+
   private async assertEligible(userId: string) {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },

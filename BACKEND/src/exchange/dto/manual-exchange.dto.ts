@@ -13,8 +13,16 @@ import {
   MinLength,
   ValidateIf,
 } from 'class-validator';
-import type { ManualAction, SettlementMode } from '../manual-exchange.policy';
-import { MANUAL_ACTIONS, MANUAL_STATUSES } from '../manual-exchange.policy';
+import type {
+  ManualAction,
+  ManualPayoutOutcome,
+  SettlementMode,
+} from '../manual-exchange.policy';
+import {
+  MANUAL_ACTIONS,
+  MANUAL_PAYOUT_OUTCOMES,
+  MANUAL_STATUSES,
+} from '../manual-exchange.policy';
 
 export class CreateManualExchangeDto {
   @IsOptional() @IsIn(['NGN', 'GHS']) sourceCurrency?: 'NGN' | 'GHS';
@@ -77,6 +85,18 @@ export class ReviewManualExchangeDto {
   @MinLength(10)
   @MaxLength(500)
   reason: string;
+  @ValidateIf(
+    (dto: ReviewManualExchangeDto, value: unknown) =>
+      dto.action === 'HANDOVER_PAYOUT' || value !== undefined,
+  )
+  @IsUUID()
+  handoverToAdminId?: string;
+  @ValidateIf(
+    (dto: ReviewManualExchangeDto, value: unknown) =>
+      dto.action === 'HANDOVER_PAYOUT' || value !== undefined,
+  )
+  @IsIn(MANUAL_PAYOUT_OUTCOMES)
+  payoutOutcome?: ManualPayoutOutcome;
   @IsOptional()
   @IsString()
   @Matches(/^[A-Za-z0-9._-]{4,100}$/)

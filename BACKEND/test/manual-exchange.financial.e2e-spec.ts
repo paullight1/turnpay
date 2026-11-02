@@ -36,17 +36,17 @@ describe('manual exchange financial boundaries (real PostgreSQL)', () => {
     MANUAL_EXCHANGE_GHS_COLLECTION_ACCOUNT_NUMBER: '0240000000',
     MANUAL_EXCHANGE_GHS_COLLECTION_VERSION: 'test-ghs-v1',
   });
-  const makeService = (ledger?: LedgerService) =>
+  const makeService = (ledger?: LedgerService, rates?: RateService) =>
     new ManualExchangeService(
       prisma as PrismaService,
       config,
-      {
+      (rates ?? {
         getRate: jest.fn().mockImplementation(async (source: string) => ({
           rate: source === 'GHS' ? 100 : 0.02,
           markup: 0,
           isStale: false,
         })),
-      } as unknown as RateService,
+      }) as unknown as RateService,
       ledger ?? new LedgerService(prisma as PrismaService),
       { verifyRequired: jest.fn() } as unknown as TransactionPinService,
       {
@@ -490,6 +490,90 @@ describe('manual exchange financial boundaries (real PostgreSQL)', () => {
     expect(after.balance.minus(before.balance).toFixed(2)).toBe('10000.00');
     expect((await balance()).toFixed(2)).toBe('1000.00');
   });
+  it('uses the saved admin rate without a feed and preserves an order price after the admin changes it', async () => {
+    const where = { from_to: { from: 'GHS', to: 'NGN' } };
+    const original = await prisma.rate.findUnique({ where });
+    const http = { get: jest.fn() };
+    const rates = new RateService(
+      prisma as PrismaService,
+      new ConfigService({ FX_RATE_SOURCE: 'admin' }),
+      http as never,
+      { get: jest.fn(), set: jest.fn().mockResolvedValue(undefined) } as never,
+      { info: jest.fn(), warn: jest.fn(), error: jest.fn() } as never,
+    );
+    try {
+      await rates.setManualRate(
+        'GHS',
+        'NGN',
+        100,
+        0,
+        admin(),
+        'Synthetic approved merchant rate',
+      );
+      await prisma.rate.update({
+        where,
+        data: { updatedAt: new Date(Date.now() - 7 * 86400000) },
+      });
+      service = makeService(undefined, rates);
+      const before = await prisma.wallet.findUniqueOrThrow({
+        where: { userId_currency: { userId: user(), currency: 'NGN' } },
+      });
+      const created = await service.create(
+        user(),
+        {
+          sourceCurrency: 'GHS',
+          amount: '100.00',
+          settlementMode: 'WALLET',
+          transactionPin: '2468',
+        },
+        randomUUID(),
+      );
+      expect(created.targetAmount).toBe('10000.00');
+      await rates.setManualRate(
+        'GHS',
+        'NGN',
+        125.5,
+        0,
+        otherAdmin(),
+        'Synthetic replacement merchant rate',
+      );
+      expect((await rates.getRate('GHS', 'NGN')).rate).toBe(125.5);
+      await attach(created.id);
+      const review = confirm('ADMIN-RATE-' + randomUUID());
+      const key = randomUUID();
+      await service.review(created.id, admin(), review, key);
+      await service.review(created.id, admin(), review, key);
+      const after = await prisma.wallet.findUniqueOrThrow({
+        where: { userId_currency: { userId: user(), currency: 'NGN' } },
+      });
+      expect(after.balance.minus(before.balance).toFixed(2)).toBe('10000.00');
+      expect(
+        await prisma.auditLog.count({
+          where: {
+            action: 'FX_RATE_OVERRIDE',
+            adminId: { in: [admin(), otherAdmin()] },
+          },
+        }),
+      ).toBe(2);
+      expect(http.get).not.toHaveBeenCalled();
+    } finally {
+      if (original) {
+        await prisma.rate.update({
+          where,
+          data: {
+            rate: original.rate,
+            markup: original.markup,
+            source: original.source,
+            validUntil: original.validUntil,
+            updatedAt: original.updatedAt,
+          },
+        });
+      } else {
+        await prisma.rate.deleteMany({ where: { from: 'GHS', to: 'NGN' } });
+      }
+    }
+  });
+
   it('freezes GHS collection and credits NGN exactly once for reverse exchange', async () => {
     const before = await prisma.wallet.findUniqueOrThrow({
       where: { userId_currency: { userId: user(), currency: 'NGN' } },
@@ -946,6 +1030,171 @@ describe('manual exchange financial boundaries (real PostgreSQL)', () => {
         key,
       ),
     ).rejects.toThrow('different details');
+  });
+  it('hands an actively claimed payout to another active admin only after a confirmed non-send outcome', async () => {
+    const created = await order('MOMO');
+    await attach(created.id);
+    await service.review(
+      created.id,
+      admin(),
+      { ...confirm('DEP-' + randomUUID()), action: 'CONFIRM_DEPOSIT' },
+      randomUUID(),
+    );
+    await service.review(
+      created.id,
+      admin(),
+      { action: 'CLAIM_PAYOUT', reason: 'Assigned operator preparing payout' },
+      randomUUID(),
+    );
+    const evidence = await service.uploadHandoverUrl(
+      created.id,
+      otherAdmin(),
+      {
+        fileName: 'outcome-check.pdf',
+        contentType: 'application/pdf',
+        fileSize: pdf.length,
+      },
+      randomUUID(),
+    );
+    objects.set(evidence.objectKey, pdf);
+    const input = {
+      action: 'HANDOVER_PAYOUT' as const,
+      reason:
+        'Supervisor checked the bank statement and confirmed no payout was sent',
+      handoverToAdminId: otherAdmin(),
+      payoutOutcome: 'NOT_SENT' as const,
+      payoutProofObjectKey: evidence.objectKey,
+    };
+    const beforeReference = created.reference;
+    const handoverKey = randomUUID();
+    const handedOver = await service.review(
+      created.id,
+      otherAdmin(),
+      input,
+      handoverKey,
+    );
+    expect(handedOver.status).toBe('PAYOUT_PROCESSING');
+    expect(handedOver.payoutClaimedBy).toBe(otherAdmin());
+    expect(handedOver.reference).toBe(beforeReference);
+    const row = await prisma.manualExchangeOrder.findUniqueOrThrow({
+      where: { id: created.id },
+    });
+    expect(row.payoutReference).toBeNull();
+    expect(
+      await prisma.manualExchangeEvent.count({
+        where: { orderId: created.id, action: 'HANDOVER_PAYOUT' },
+      }),
+    ).toBe(1);
+    const audit = await prisma.auditLog.findFirstOrThrow({
+      where: {
+        targetType: 'ManualExchangeOrder',
+        targetId: created.id,
+        action: 'MANUAL_EXCHANGE_HANDOVER_PAYOUT',
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+    expect(audit.reference).toBe(beforeReference);
+    expect((audit.metadata as { payoutOutcome?: string }).payoutOutcome).toBe(
+      'NOT_SENT',
+    );
+    objects.delete(evidence.objectKey);
+    expect(
+      (await service.review(created.id, otherAdmin(), input, handoverKey))
+        .status,
+    ).toBe('PAYOUT_PROCESSING');
+  });
+  it('records an already-sent external payout during handover without authorizing another send', async () => {
+    const created = await order('MOMO');
+    await attach(created.id);
+    await service.review(
+      created.id,
+      admin(),
+      { ...confirm('DEP-' + randomUUID()), action: 'CONFIRM_DEPOSIT' },
+      randomUUID(),
+    );
+    await service.review(
+      created.id,
+      admin(),
+      { action: 'CLAIM_PAYOUT', reason: 'Assigned operator preparing payout' },
+      randomUUID(),
+    );
+    const evidence = await service.uploadHandoverUrl(
+      created.id,
+      otherAdmin(),
+      {
+        fileName: 'already-sent.pdf',
+        contentType: 'application/pdf',
+        fileSize: pdf.length,
+      },
+      randomUUID(),
+    );
+    objects.set(evidence.objectKey, pdf);
+    const payoutReference = 'OUT-' + randomUUID();
+    const input = {
+      action: 'HANDOVER_PAYOUT' as const,
+      reason:
+        'Supervisor checked the bank statement and confirmed the original payout settled',
+      handoverToAdminId: otherAdmin(),
+      payoutOutcome: 'ALREADY_SENT' as const,
+      payoutReference,
+      payoutAmount: created.targetAmount,
+      payoutProofObjectKey: evidence.objectKey,
+    };
+    const result = await service.review(
+      created.id,
+      otherAdmin(),
+      input,
+      randomUUID(),
+    );
+    expect(result.status).toBe('PAYOUT_SENT');
+    expect(result.reference).toBe(created.reference);
+    expect(result.payoutReference).toBe(payoutReference.toUpperCase());
+    expect(result.payoutClaimedBy).toBe(otherAdmin());
+    await expect(
+      service.review(
+        created.id,
+        otherAdmin(),
+        { ...input, payoutReference: 'OUT-DUPLICATE' },
+        randomUUID(),
+      ),
+    ).rejects.toThrow();
+  });
+  it('refuses an unknown payout outcome without changing the original owner', async () => {
+    const created = await order('MOMO');
+    await attach(created.id);
+    await service.review(
+      created.id,
+      admin(),
+      { ...confirm('DEP-' + randomUUID()), action: 'CONFIRM_DEPOSIT' },
+      randomUUID(),
+    );
+    await service.review(
+      created.id,
+      admin(),
+      { action: 'CLAIM_PAYOUT', reason: 'Assigned operator preparing payout' },
+      randomUUID(),
+    );
+    await expect(
+      service.review(
+        created.id,
+        otherAdmin(),
+        {
+          action: 'HANDOVER_PAYOUT',
+          reason: 'Provider response is still unavailable for this payout',
+          handoverToAdminId: otherAdmin(),
+          payoutOutcome: 'UNKNOWN',
+        },
+        randomUUID(),
+      ),
+    ).rejects.toThrow('outcome is unknown');
+    const current = await service.get(created.id, user());
+    expect(current.status).toBe('PAYOUT_PROCESSING');
+    expect(current.payoutClaimedBy).toBe(admin());
+    expect(
+      await prisma.manualExchangeEvent.count({
+        where: { orderId: created.id, action: 'HANDOVER_PAYOUT' },
+      }),
+    ).toBe(0);
   });
   it('keeps bank/MoMo pending until evidence; exclusive payout claim never credits a wallet', async () => {
     const created = await order('MOMO');

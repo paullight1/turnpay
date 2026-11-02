@@ -26,6 +26,13 @@ export type SettlementHoldOperation =
 
 export interface SettlementHoldCheck {
   operation?: SettlementHoldOperation;
+  /** User whose outbound movement is being authorized, when known. */
+  userId?: string;
+  /**
+   * Internal-only recovery authorization: skip only adverse-funding cases;
+   * reconciliation holds remain enforced.
+   */
+  skipAdverseFundingHold?: boolean;
   /** Optional reconciliation scope for a provider or product-specific run. */
   scope?: string;
   currency?: WalletCurrency;
@@ -36,7 +43,11 @@ export interface SettlementHoldCheck {
 type SettlementHoldClient = Pick<
   Prisma.TransactionClient,
   'reconciliationRun' | 'auditLog'
->;
+> & {
+  // Optional keeps lightweight unit-test transaction doubles honest while
+  // real Prisma clients use the additive adverse-case table when available.
+  fundingAdverseCase?: Prisma.TransactionClient['fundingAdverseCase'];
+};
 
 type ReconciliationRunForHold = {
   id: string;
@@ -90,6 +101,47 @@ export class SettlementHoldService {
     client?: SettlementHoldClient | PrismaService,
   ) {
     const db = client ?? this.prisma;
+
+    // A signed provider refund/dispute is a merchant exposure until it has
+    // been independently correlated and explicitly resolved. Keep this check
+    // global because some provider-dispatch paths do not carry a user id; a
+    // user-scoped-only hold there would let an already-reserved payout bypass
+    // the adverse-funding review. Incoming credits and compensating reversals
+    // intentionally do not call this outbound guard.
+    const adverseCaseDelegate = (db as SettlementHoldClient).fundingAdverseCase;
+    if (!input.skipAdverseFundingHold && adverseCaseDelegate?.findMany) {
+      const activeCases = await adverseCaseDelegate.findMany({
+        where: {
+          holdRequired: true,
+          status: { in: ['OPEN', 'UNDER_REVIEW'] },
+        },
+        orderBy: { createdAt: 'asc' },
+        take: 1,
+        select: {
+          id: true,
+          provider: true,
+          eventType: true,
+          providerReference: true,
+        },
+      });
+
+      if (activeCases.length > 0) {
+        const first = activeCases[0];
+        throw new ServiceUnavailableException(
+          'Outbound settlement is temporarily unavailable while a funding event is under review',
+          {
+            cause: {
+              code: 'PAYSTACK_FUNDING_ADVERSE_HOLD',
+              caseId: first.id,
+              provider: first.provider,
+              eventType: first.eventType,
+              providerReference: first.providerReference,
+            },
+          },
+        );
+      }
+    }
+
     const scopes = this.relevantScopes(input);
     const blockedRuns = (await db.reconciliationRun.findMany({
       where: {

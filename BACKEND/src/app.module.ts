@@ -8,6 +8,7 @@ import { UserThrottlerGuard } from './common/guards/user-throttler.guard';
 import { RedisThrottlerStorage } from './common/services/redis-throttler.storage';
 import { RedisService } from './redis/redis.service';
 import { ScheduleModule } from '@nestjs/schedule';
+import { scheduleOptions } from './common/services/schedule-options';
 import * as Joi from 'joi';
 import { PrismaModule } from './prisma/prisma.module';
 import { AuthModule } from './auth/auth.module';
@@ -130,6 +131,7 @@ const defaultNodeEnv =
           .valid('paystack', 'monnify')
           .default('paystack'),
         EXCHANGE_RECEIPT_BUCKET: Joi.string().default('exchange-receipts'),
+        FX_RATE_SOURCE: Joi.string().valid('admin', 'api').default('admin'),
         MANUAL_EXCHANGE_ENABLED: Joi.boolean().default(false),
         MANUAL_EXCHANGE_COLLECTION_BANK_NAME: Joi.when(
           'MANUAL_EXCHANGE_ENABLED',
@@ -251,6 +253,12 @@ const defaultNodeEnv =
           .truthy('true')
           .falsy('false')
           .default(true),
+        PAYSTACK_FUNDING_ALLOWED_CHANNELS: Joi.string()
+          .trim()
+          .pattern(
+            /^(?:card|bank|apple_pay|ussd|qr|mobile_money|bank_transfer|eft|capitec_pay|payattitude)(?:,(?:card|bank|apple_pay|ussd|qr|mobile_money|bank_transfer|eft|capitec_pay|payattitude))*$/,
+          )
+          .default('bank_transfer'),
         MONNIFY_API_KEY: Joi.when('KYC_PROVIDER', {
           is: 'monnify',
           then: Joi.when('NODE_ENV', {
@@ -444,7 +452,14 @@ const defaultNodeEnv =
         skipIf: () => process.env.NODE_ENV === 'test',
       }),
     }),
-    ScheduleModule.forRoot(),
+    ScheduleModule.forRootAsync({
+      inject: [ConfigService],
+      useFactory: (config: ConfigService) =>
+        scheduleOptions(
+          config.get<string>('NODE_ENV'),
+          config.get<string>('DISABLE_SCHEDULED_JOBS'),
+        ),
+    }),
     RedisModule,
     CircuitBreakerModule,
     ReconciliationModule,

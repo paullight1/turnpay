@@ -223,7 +223,7 @@ void main() {
     expect(find.text('Smile'), findsOneWidget);
     await tester.tap(find.text('International Airtime'));
     await tester.pumpAndSettle();
-    expect(find.text('Destination country'), findsOneWidget);
+    expect(find.byTooltip('Service country'), findsOneWidget);
   });
 
   testWidgets(
@@ -280,6 +280,12 @@ void main() {
     await tester.tap(find.text('Continue to payment'));
     await tester.pumpAndSettle();
     expect(find.byType(VtuPlanPicker), findsNothing);
+    expect(find.text('Buy data'), findsOneWidget);
+    expect(find.text('08031234567'), findsOneWidget);
+    await tester.tap(find.byTooltip('Service country'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Nigeria'));
+    await tester.pumpAndSettle();
     expect(find.text('Buy data'), findsOneWidget);
     expect(find.text('08031234567'), findsOneWidget);
     await _capture(tester, key, 'data-payment-page');

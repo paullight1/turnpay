@@ -8,6 +8,7 @@ function createRateService(options: {
   stored?: Record<string, unknown> | null;
   redisValue?: string | null;
   apiConfigured?: boolean;
+  rateSource?: 'admin' | 'api';
 }) {
   const prisma = {
     $transaction: jest.fn(),
@@ -27,6 +28,7 @@ function createRateService(options: {
   );
   const config = {
     get: jest.fn((key: string) => {
+      if (key === 'FX_RATE_SOURCE') return options.rateSource ?? 'api';
       if (options.apiConfigured && key === 'FX_API_URL') {
         return 'https://rates.example.test/latest';
       }
@@ -354,5 +356,103 @@ describe('RateService provider mapping and persistence safety', () => {
     ).rejects.toThrow('audit unavailable');
     expect(prisma.$transaction).toHaveBeenCalledTimes(1);
     expect(redis.set).not.toHaveBeenCalled();
+  });
+});
+
+describe('admin-controlled exchange rates', () => {
+  it('uses an active saved admin rate after days and cache loss without an FX API', async () => {
+    const { service, redis, http } = createRateService({
+      rateSource: 'admin',
+      stored: {
+        rate: new Decimal('125.50'),
+        markup: new Decimal('0'),
+        source: 'admin',
+        validUntil: null,
+        updatedAt: new Date(Date.now() - 7 * 86400000),
+      },
+      redisValue: JSON.stringify({
+        rate: 3.1746,
+        markup: 2.5,
+        source: 'fallback',
+        fetchedAt: Date.now(),
+      }),
+    });
+    expect(await service.getRate('GHS', 'NGN')).toEqual({
+      rate: 125.5,
+      markup: 0,
+      isStale: false,
+    });
+    expect(redis.get).not.toHaveBeenCalled();
+    expect(http.get).not.toHaveBeenCalled();
+  });
+  it('reads a changed admin rate immediately instead of keeping a process-local price', async () => {
+    const { service, prisma } = createRateService({
+      rateSource: 'admin',
+      stored: {
+        rate: new Decimal('100'),
+        markup: new Decimal('0'),
+        source: 'admin',
+        validUntil: null,
+        updatedAt: new Date(),
+      },
+    });
+    expect((await service.getRate('GHS', 'NGN')).rate).toBe(100);
+    prisma.rate.findUnique.mockResolvedValue({
+      rate: new Decimal('120'),
+      markup: new Decimal('0'),
+      source: 'admin',
+      validUntil: null,
+      updatedAt: new Date(),
+    });
+    expect((await service.getRate('GHS', 'NGN')).rate).toBe(120);
+  });
+  it.each([
+    null,
+    {
+      source: 'fallback',
+      rate: new Decimal('3.1746'),
+      markup: new Decimal('0'),
+      validUntil: null,
+      updatedAt: new Date(),
+    },
+    {
+      source: 'api',
+      rate: new Decimal('100'),
+      markup: new Decimal('0'),
+      validUntil: new Date(Date.now() + 60000),
+      updatedAt: new Date(),
+    },
+    {
+      source: 'admin',
+      rate: new Decimal('100'),
+      markup: new Decimal('0'),
+      validUntil: new Date(0),
+      updatedAt: new Date(),
+    },
+    {
+      source: 'admin',
+      rate: new Decimal('0'),
+      markup: new Decimal('0'),
+      validUntil: null,
+      updatedAt: new Date(),
+    },
+  ])(
+    'rejects a missing, non-admin, expired or invalid rate: %j',
+    async (stored) => {
+      const { service } = createRateService({ rateSource: 'admin', stored });
+      await expect(service.getRate('GHS', 'NGN')).rejects.toThrow(
+        'Admin has not set an active exchange rate',
+      );
+    },
+  );
+  it('does not run provider or fallback writes in admin mode', async () => {
+    const { service, prisma, http } = createRateService({
+      rateSource: 'admin',
+      apiConfigured: true,
+    });
+    await service.onModuleInit();
+    await service.scheduledRateFetch();
+    expect(prisma.rate.upsert).not.toHaveBeenCalled();
+    expect(http.get).not.toHaveBeenCalled();
   });
 });

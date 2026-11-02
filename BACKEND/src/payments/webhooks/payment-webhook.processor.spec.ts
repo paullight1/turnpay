@@ -22,6 +22,10 @@ describe('PaymentWebhookProcessorService', () => {
     processMonnifyExchangeDepositWebhook: jest.fn(),
   };
 
+  const adverseFundingService = {
+    processPaystackEvent: jest.fn(),
+  };
+
   const prisma = {
     webhookLog: {
       updateMany: jest.fn(),
@@ -46,6 +50,56 @@ describe('PaymentWebhookProcessorService', () => {
       exchangeService as any,
       prisma as any,
       logger as any,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      adverseFundingService as any,
+    );
+  });
+
+  it.each([
+    'charge.dispute.create',
+    'charge.dispute.resolve',
+    'refund.processed',
+  ])('routes %s into the adverse funding workflow', async (eventType) => {
+    inbox.findDueEvents.mockResolvedValue([
+      {
+        id: `evt-${eventType}`,
+        provider: 'PAYSTACK',
+        eventType,
+        providerReference: 'fund-reference',
+        payload: {
+          event: eventType,
+          data: {
+            transaction_reference: 'fund-reference',
+            amount: '10000',
+            currency: 'NGN',
+          },
+        },
+      },
+    ]);
+    inbox.claim.mockResolvedValue(true);
+    adverseFundingService.processPaystackEvent.mockResolvedValue({
+      routed: 'adverse-funding',
+    });
+
+    await service.processDueEvents(10);
+
+    expect(adverseFundingService.processPaystackEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType,
+        providerReference: 'fund-reference',
+        data: expect.objectContaining({
+          transaction_reference: 'fund-reference',
+        }),
+      }),
+    );
+    expect(inbox.complete).toHaveBeenCalledWith(
+      `evt-${eventType}`,
+      expect.objectContaining({ routed: 'adverse-funding' }),
     );
   });
 

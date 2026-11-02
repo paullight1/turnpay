@@ -39,6 +39,8 @@ Dio createApiDio(
 
   final releaseError = configuration.releaseValidationError(
     nativePinningSupported: platform.supportsNativeCertificatePinning,
+    androidInternalSystemTls: platform.isAndroid &&
+        const bool.fromEnvironment('ANDROID_INTERNAL_SYSTEM_TLS'),
   );
   if (releaseError != null) {
     throw StateError(releaseError);

@@ -64,6 +64,7 @@ enum DisputeStatus {
 enum TransactionType {
   EXCHANGE
   FUND
+  FUNDING_RECOVERY
   WITHDRAW
   INTERNAL_TRANSFER
   AIRTIME
@@ -129,6 +130,19 @@ enum ProviderEventStatus {
   PROCESSED
   FAILED
   IGNORED
+}
+
+enum FundingAdverseCaseStatus {
+  OPEN
+  UNDER_REVIEW
+  RESOLVED
+  CLOSED
+}
+
+enum FundingAdverseVerificationStatus {
+  PENDING
+  VERIFIED
+  UNMATCHED
 }
 
 enum ReconciliationRunStatus {
@@ -245,6 +259,7 @@ model User {
   transactionPinCredential   TransactionPinCredential?
   paystackCustomer           PaystackCustomer?
   paystackAccountRequest     PaystackAccountRequest?
+  fundingAdverseCases        FundingAdverseCase[]
 
   @@index([referredById])
   @@index([createdAt(sort: Desc)])
@@ -356,6 +371,7 @@ model Transaction {
   exchangePayout        ExchangePayout?
   providerExchangeOrder ProviderExchangeOrder?
   koraCollectionIntent  KoraCollectionIntent?
+  fundingAdverseCases   FundingAdverseCase[]
 
   @@index([userId, status])
   @@index([userId, createdAt(sort: Desc)])
@@ -756,6 +772,7 @@ model VtuOrder {
   requeryAttempts        Int              @default(0)
   lastRequeryAt          DateTime?
   nextRequeryAt          DateTime?
+  actionRequiredAt       DateTime?
   completedAt            DateTime?
   failedAt               DateTime?
   createdAt              DateTime         @default(now())
@@ -766,6 +783,7 @@ model VtuOrder {
   @@unique([provider, providerRequestId])
   @@index([provider, status])
   @@index([status, nextRequeryAt])
+  @@index([status, actionRequiredAt, requeryAttempts, createdAt], map: "vtu_orders_escalation_idx")
   @@index([countryCode, serviceType])
   @@index([status, createdAt])
   @@map("vtu_orders")
@@ -1039,6 +1057,52 @@ model Dispute {
   @@index([userId, status])
   @@index([transactionId])
   @@map("disputes")
+}
+
+/**
+ * A durable, reviewed record for a provider-side refund or dispute affecting
+ * a previously credited funding transaction. Webhook delivery is not proof of
+ * the local transaction or amount: the adverse-funding processor independently
+ * verifies both before marking a case VERIFIED. Every case keeps its hold until
+ * an audited operational resolution explicitly releases it or collects an
+ * amount that is available in the wallet.
+ */
+model FundingAdverseCase {
+  id                 String                           @id @default(uuid())
+  provider           PaymentProvider
+  eventType          String
+  providerReference  String
+  /**
+   * Canonical provider-side economic identity (for example dispute:123 or refund:456).
+   */
+  economicReference  String?
+  fundingReference   String?
+  transactionId      String?
+  userId             String?
+  currency           WalletCurrency?
+  exposureAmount     Decimal?                         @db.Decimal(15, 2)
+  recoveredAmount    Decimal                          @default(0) @db.Decimal(15, 2)
+  status             FundingAdverseCaseStatus         @default(OPEN)
+  verificationStatus FundingAdverseVerificationStatus @default(PENDING)
+  holdRequired       Boolean                          @default(true)
+  providerStatus     String?
+  resolution         String?
+  resolvedBy         String?
+  resolvedAt         DateTime?
+  payload            Json?
+  createdAt          DateTime                         @default(now())
+  updatedAt          DateTime                         @updatedAt
+
+  transaction Transaction? @relation(fields: [transactionId], references: [id], onDelete: SetNull)
+  user        User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@unique([provider, eventType, providerReference], map: "funding_adverse_cases_provider_event_key")
+  @@index([status, holdRequired], map: "funding_adverse_cases_active_hold_idx")
+  @@index([provider, economicReference], map: "funding_adverse_cases_provider_economic_idx")
+  @@index([provider, fundingReference, eventType, verificationStatus], map: "funding_adverse_cases_provider_funding_idx")
+  @@index([userId, status], map: "funding_adverse_cases_user_status_idx")
+  @@index([fundingReference, status], map: "funding_adverse_cases_funding_status_idx")
+  @@map("funding_adverse_cases")
 }
 
 model WebhookLog {

@@ -414,6 +414,7 @@ export const footerGroups = [
     title: "Legal",
     links: [
       { label: "Privacy Policy", href: "/legal#privacy" },
+      { label: "Request account deletion", href: "/account-deletion" },
       { label: "Terms of Use", href: "/legal#terms" },
     ],
   },

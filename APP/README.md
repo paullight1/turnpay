@@ -42,7 +42,7 @@ The JSON object must contain only these string fields:
 | Field | Requirement |
 | --- | --- |
 | `API_BASE_URL` | HTTPS. Production must be exactly `https://api.trustpayhq.com`. |
-| `WEBSITE_BASE_URL` | HTTPS. Production must be exactly `https://trustpay.xyz`. |
+| `WEBSITE_BASE_URL` | HTTPS. Production must be exactly `https://www.trustpayhq.com`. |
 | `SUPABASE_URL` | HTTPS project URL on an allowlisted `*.supabase.co` host. |
 | `SUPABASE_PUBLISHABLE_KEY` | Nonempty public Supabase key. Service-role and secret markers are rejected. |
 | `SENTRY_DSN` | Optional. When supplied, an HTTPS DSN on `sentry.io` or a Sentry subdomain. |
@@ -61,6 +61,11 @@ backend-only in the server secret manager.
 
 The native secure transport factory enforces these pins on both API and refresh
 Dio clients in release builds, in addition to normal CA/hostname validation.
+The owner approved a narrow Android internal-test exception: build with
+`ANDROID_INTERNAL_SYSTEM_TLS=true` and validate the config with
+`--environment internal-android`. That build uses normal CA and hostname
+verification without pins. This flag is not accepted by production preflight,
+does not apply to iOS, and does not authorize public production promotion.
 Pins are SHA-256 of the leaf certificate DER, not SPKI hashes. Supabase SDK
 traffic and browser-opened links use separate TLS transports and are not covered
 by this adapter. Android/iOS local device-risk signals block sensitive API

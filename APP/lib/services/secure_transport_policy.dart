@@ -129,12 +129,18 @@ class SecureTransportConfiguration {
 
   String? releaseValidationError({
     required bool nativePinningSupported,
+    bool androidInternalSystemTls = false,
   }) {
     if (!releaseMode) return null;
     if (apiOrigin.scheme != 'https') {
       return 'API_BASE_URL must use HTTPS in release builds.';
     }
     if (!nativePinningSupported) return null;
+    if (androidInternalSystemTls &&
+        !pinSet.isNonEmpty &&
+        !pinSet.hasMalformedTokens) {
+      return null;
+    }
     if (!pinSet.isNonEmpty) {
       return 'API_CERTIFICATE_SHA256_PINS is required in release builds.';
     }

@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { IdempotencyResponseCryptoService } from './idempotency-response-crypto.service';
 
 describe('IdempotencyResponseCryptoService', () => {
@@ -52,6 +53,29 @@ describe('IdempotencyResponseCryptoService', () => {
         aad,
       ),
     ).toThrow();
+  });
+
+  it('binds auth fingerprints to the server key, route and full secret without storing an offline PIN oracle', () => {
+    const service = new IdempotencyResponseCryptoService(config as never);
+    const body = { pin: '2468', amount: '100.00' };
+    const first = (service as any).fingerprintRequest(body, aad);
+    expect(first).toBe((service as any).fingerprintRequest(body, aad));
+    expect(first).not.toBe(
+      (service as any).fingerprintRequest({ ...body, pin: '2469' }, aad),
+    );
+    expect(first).not.toBe(
+      (service as any).fingerprintRequest(body, { ...aad, scope: 'other' }),
+    );
+    const other = new IdempotencyResponseCryptoService({
+      get: (name: string) =>
+        name === 'IDEMPOTENCY_RESPONSE_ENCRYPTION_KEY'
+          ? Buffer.alloc(32, 8).toString('base64')
+          : 'v1',
+    } as never);
+    expect(first).not.toBe((other as any).fingerprintRequest(body, aad));
+    expect(first).not.toContain(
+      createHash('sha256').update(JSON.stringify(body)).digest('hex'),
+    );
   });
 
   it('fails startup validation for a configured key that is not 32 bytes', () => {

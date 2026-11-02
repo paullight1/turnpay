@@ -1,6 +1,7 @@
 import { BadRequestException } from '@nestjs/common';
 import { Decimal } from '@prisma/client/runtime/library';
 import { VtuService } from './vtu.service';
+import { financialRequestIdentity } from '../common/utils/financial-request';
 
 describe('VtuService purchase ledger handling', () => {
   const prisma = {
@@ -8,6 +9,7 @@ describe('VtuService purchase ledger handling', () => {
       findUnique: jest.fn(),
     },
     transaction: {
+      findUnique: jest.fn(),
       create: jest.fn(),
       update: jest.fn(),
       updateMany: jest.fn(),
@@ -19,6 +21,12 @@ describe('VtuService purchase ledger handling', () => {
       findMany: jest.fn(),
       findUnique: jest.fn(),
       findFirst: jest.fn(),
+    },
+    paymentNotification: {
+      createMany: jest.fn(),
+    },
+    auditLog: {
+      create: jest.fn(),
     },
     vtuPricingRule: {
       findFirst: jest.fn(),
@@ -76,6 +84,8 @@ describe('VtuService purchase ledger handling', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    transactionPin.verifyRequired.mockReset().mockResolvedValue(undefined);
+    prisma.transaction.findUnique.mockReset().mockResolvedValue(null);
     configService.get.mockImplementation((key: string) => {
       if (key === 'VTU_KYC_BYPASS') {
         return false;
@@ -138,6 +148,105 @@ describe('VtuService purchase ledger handling', () => {
     );
   });
 
+  it.each(['pending', 'unknown'])(
+    'keeps a terminal purchase and receipt when the initial provider response is late (%s)',
+    async (kind) => {
+      const state = {
+        transactionStatus: 'SUCCESS',
+        orderStatus: 'SUCCESS',
+        metadata: { requestFingerprint: 'original', providerStatus: 'success' },
+        code: 'receipt',
+      };
+      const db = {
+        transaction: {
+          update: jest.fn(async ({ data }) => {
+            state.metadata = data.metadata;
+          }),
+          updateMany: jest.fn(async ({ where, data }) => {
+            if (where.status !== state.transactionStatus) return { count: 0 };
+            if (data.metadata) state.metadata = data.metadata;
+            return { count: 1 };
+          }),
+        },
+        vtuOrder: {
+          update: jest.fn(async ({ data }) => {
+            state.orderStatus = data.status;
+            state.code = data.purchasedCodeEncrypted ?? state.code;
+          }),
+          updateMany: jest.fn(async ({ where, data }) => {
+            if (!where.status.in.includes(state.orderStatus))
+              return { count: 0 };
+            state.orderStatus = data.status;
+            return { count: 1 };
+          }),
+          findUnique: jest.fn(async () => ({
+            id: 'order-1',
+            requeryAttempts: 1,
+            status: state.orderStatus,
+          })),
+        },
+        paymentNotification: { createMany: jest.fn() },
+        auditLog: { create: jest.fn() },
+      };
+      prisma.$transaction.mockImplementationOnce(async (fn) => fn(db));
+      const purchase = { reference: 'VTU-1', orderId: 'order-1' };
+      if (kind === 'unknown')
+        await (service as any).markProviderResultUnknown(purchase, {
+          providerStatus: 'UNKNOWN',
+        });
+      else
+        await (service as any).markProviderResultPending(
+          purchase,
+          { status: 'pending', reference: 'provider' },
+          { providerStatus: 'pending' },
+        );
+      expect(state).toEqual({
+        transactionStatus: 'SUCCESS',
+        orderStatus: 'SUCCESS',
+        metadata: { requestFingerprint: 'original', providerStatus: 'success' },
+        code: 'receipt',
+      });
+    },
+  );
+
+  it('recovers the original purchase after service disablement and a PIN reset without dispatching new work', async () => {
+    const dto = {
+      type: 'airtime' as const,
+      provider: 'mtn' as const,
+      amount: '100.00',
+      contactPhone: '+2348031234567',
+      recipientNumber: '+2348031234567',
+      transactionPin: '1234',
+    };
+    const identity = financialRequestIdentity('VTU', 'user-1', 'original-key', {
+      ...dto,
+      amount: '100.00',
+    });
+    prisma.transaction.findUnique.mockResolvedValueOnce({
+      userId: 'user-1',
+      reference: identity.reference,
+      status: 'PENDING',
+      amount: new Decimal('100.00'),
+      fee: new Decimal(0),
+      metadata: { requestFingerprint: identity.fingerprint },
+      vtuOrders: [{ id: 'original-order' }],
+    });
+    configService.get.mockImplementation((key: string) =>
+      key === 'VTU_ENABLED' ? false : undefined,
+    );
+    transactionPin.verifyRequired.mockRejectedValueOnce(
+      new Error('PIN reset hold'),
+    );
+    const response = await service.purchase('user-1', dto, 'original-key');
+    expect(response).toMatchObject({
+      reference: identity.reference,
+      orderId: 'original-order',
+      status: 'PENDING',
+    });
+    expect(vtuApi.purchase).not.toHaveBeenCalled();
+    expect(transactionPin.verifyRequired).not.toHaveBeenCalled();
+  });
+
   it('does not advertise service-specific forms to older mobile clients', async () => {
     vtuApi.getProviders.mockResolvedValue([
       { id: 'mtn', type: 'airtime', isActive: true },
@@ -198,20 +307,24 @@ describe('VtuService purchase ledger handling', () => {
         safeResponse: {},
         rawResponse: {},
       });
-      const result = await service.purchase('user-1', {
-        type,
-        provider,
-        amount: '1000',
-        expectedTotal: '1000',
-        packageId: 'plan-1',
-        contactPhone: '+2348031234567',
-        recipientNumber:
-          provider === 'foreign-airtime' ? '+233241234567' : '+2348031234567',
-        smileEmail: 'smile@example.com',
-        smileAccountId: '1111111111',
-        countryCode: 'GH',
-        operatorId: '5',
-      } as any);
+      const result = await service.purchase(
+        'user-1',
+        {
+          type,
+          provider,
+          amount: '1000',
+          expectedTotal: '1000',
+          packageId: 'plan-1',
+          contactPhone: '+2348031234567',
+          recipientNumber:
+            provider === 'foreign-airtime' ? '+233241234567' : '+2348031234567',
+          smileEmail: 'smile@example.com',
+          smileAccountId: '1111111111',
+          countryCode: 'GH',
+          operatorId: '5',
+        } as any,
+        'test-idempotency-key',
+      );
       expect(result).toMatchObject({
         success: true,
         amount: '1000',
@@ -246,14 +359,18 @@ describe('VtuService purchase ledger handling', () => {
       balance: new Decimal(5000),
     });
     await expect(
-      service.purchase('user-1', {
-        type: 'airtime',
-        provider: 'mtn',
-        contactPhone: '+2348031234567',
-        recipientNumber: '+2348031234567',
-        amount: '1000',
-        expectedTotal: '999',
-      }),
+      service.purchase(
+        'user-1',
+        {
+          type: 'airtime',
+          provider: 'mtn',
+          contactPhone: '+2348031234567',
+          recipientNumber: '+2348031234567',
+          amount: '1000',
+          expectedTotal: '999',
+        },
+        'test-idempotency-key',
+      ),
     ).rejects.toThrow('Total price changed');
     expect(ledger.debitWallet).not.toHaveBeenCalled();
   });
@@ -298,15 +415,19 @@ describe('VtuService purchase ledger handling', () => {
       accounts: [{ id: '1111111111', name: 'Account' }],
     });
     await expect(
-      service.purchase('user-1', {
-        type: 'data',
-        provider: 'smile',
-        smileEmail: 'user@example.com',
-        smileAccountId: '9999999999',
-        packageId: '413',
-        amount: '1000',
-        contactPhone: '+2348031234567',
-      } as any),
+      service.purchase(
+        'user-1',
+        {
+          type: 'data',
+          provider: 'smile',
+          smileEmail: 'user@example.com',
+          smileAccountId: '9999999999',
+          packageId: '413',
+          amount: '1000',
+          contactPhone: '+2348031234567',
+        } as any,
+        'test-idempotency-key',
+      ),
     ).rejects.toThrow('Smile account');
     expect(ledger.debitWallet).not.toHaveBeenCalled();
   });
@@ -356,13 +477,17 @@ describe('VtuService purchase ledger handling', () => {
       message: 'Airtime delivered',
     });
 
-    const result = await service.purchase('user-1', {
-      type: 'airtime',
-      provider: 'mtn',
-      contactPhone: '+2348012345678',
-      recipientNumber: '+2348012345678',
-      amount: '500',
-    });
+    const result = await service.purchase(
+      'user-1',
+      {
+        type: 'airtime',
+        provider: 'mtn',
+        contactPhone: '+2348012345678',
+        recipientNumber: '+2348012345678',
+        amount: '500',
+      },
+      'test-idempotency-key',
+    );
 
     expect(ledger.debitWallet).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -426,15 +551,19 @@ describe('VtuService purchase ledger handling', () => {
     );
 
     await expect(
-      service.purchase('user-1', {
-        type: 'cable',
-        provider: 'dstv',
-        contactPhone: '+2348012345678',
-        smartCardNumber: '1234567890',
-        subscriptionType: 'change',
-        packageId: 'dstv-padi',
-        amount: '4400',
-      }),
+      service.purchase(
+        'user-1',
+        {
+          type: 'cable',
+          provider: 'dstv',
+          contactPhone: '+2348012345678',
+          smartCardNumber: '1234567890',
+          subscriptionType: 'change',
+          packageId: 'dstv-padi',
+          amount: '4400',
+        },
+        'test-idempotency-key',
+      ),
     ).rejects.toBeInstanceOf(BadRequestException);
 
     expect(vtuApi.validateSmartCard).toHaveBeenCalledWith('dstv', '1234567890');
@@ -460,13 +589,17 @@ describe('VtuService purchase ledger handling', () => {
     );
 
     await expect(
-      service.purchase('user-1', {
-        type: 'airtime',
-        provider: 'mtn',
-        contactPhone: '+2348012345678',
-        recipientNumber: '+2348012345678',
-        amount: '500',
-      }),
+      service.purchase(
+        'user-1',
+        {
+          type: 'airtime',
+          provider: 'mtn',
+          contactPhone: '+2348012345678',
+          recipientNumber: '+2348012345678',
+          amount: '500',
+        },
+        'test-idempotency-key',
+      ),
     ).rejects.toThrow('reconciliation hold');
 
     expect(vtuApi.purchase).not.toHaveBeenCalled();
@@ -512,14 +645,18 @@ describe('VtuService purchase ledger handling', () => {
       message: 'Token generated',
     });
 
-    const result = await service.purchase('user-1', {
-      type: 'electricity',
-      provider: 'ikedc',
-      contactPhone: '+2348012345678',
-      meterNumber: '45028701',
-      meterType: 'postpaid',
-      amount: '5000',
-    });
+    const result = await service.purchase(
+      'user-1',
+      {
+        type: 'electricity',
+        provider: 'ikedc',
+        contactPhone: '+2348012345678',
+        meterNumber: '45028701',
+        meterType: 'postpaid',
+        amount: '5000',
+      },
+      'test-idempotency-key',
+    );
 
     expect(vtuApi.validateMeter).toHaveBeenCalledWith(
       'ikedc',
@@ -560,13 +697,17 @@ describe('VtuService purchase ledger handling', () => {
       message: 'Airtime delivered',
     });
 
-    const result = await service.purchase('user-1', {
-      type: 'airtime',
-      provider: 'mtn',
-      contactPhone: '+2348012345678',
-      recipientNumber: '+2348012345678',
-      amount: '500',
-    });
+    const result = await service.purchase(
+      'user-1',
+      {
+        type: 'airtime',
+        provider: 'mtn',
+        contactPhone: '+2348012345678',
+        recipientNumber: '+2348012345678',
+        amount: '500',
+      },
+      'test-idempotency-key',
+    );
 
     expect(prisma.vtuPricingRule.findFirst).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -621,13 +762,17 @@ describe('VtuService purchase ledger handling', () => {
     });
 
     await expect(
-      service.purchase('user-1', {
-        type: 'airtime',
-        provider: 'mtn',
-        contactPhone: '+2348012345678',
-        recipientNumber: '+2348012345678',
-        amount: '500',
-      }),
+      service.purchase(
+        'user-1',
+        {
+          type: 'airtime',
+          provider: 'mtn',
+          contactPhone: '+2348012345678',
+          recipientNumber: '+2348012345678',
+          amount: '500',
+        },
+        'test-idempotency-key',
+      ),
     ).rejects.toThrow('KYC verification is required');
 
     expect(walletsService.getWallet).not.toHaveBeenCalled();
@@ -641,13 +786,17 @@ describe('VtuService purchase ledger handling', () => {
     });
 
     await expect(
-      service.purchase('user-1', {
-        type: 'airtime',
-        provider: 'mtn',
-        contactPhone: '+2348012345678',
-        recipientNumber: '+2348012345678',
-        amount: '500',
-      }),
+      service.purchase(
+        'user-1',
+        {
+          type: 'airtime',
+          provider: 'mtn',
+          contactPhone: '+2348012345678',
+          recipientNumber: '+2348012345678',
+          amount: '500',
+        },
+        'test-idempotency-key',
+      ),
     ).rejects.toThrow('VTU services are temporarily unavailable');
     expect(transactionPin.verifyRequired).not.toHaveBeenCalled();
     expect(ledger.debitWallet).not.toHaveBeenCalled();
@@ -683,13 +832,17 @@ describe('VtuService purchase ledger handling', () => {
       message: 'Airtime delivered',
     });
 
-    await service.purchase('user-1', {
-      type: 'airtime',
-      provider: 'mtn',
-      contactPhone: '+2348012345678',
-      recipientNumber: '+2348012345678',
-      amount: '500',
-    });
+    await service.purchase(
+      'user-1',
+      {
+        type: 'airtime',
+        provider: 'mtn',
+        contactPhone: '+2348012345678',
+        recipientNumber: '+2348012345678',
+        amount: '500',
+      },
+      'test-idempotency-key',
+    );
 
     expect(prisma.user.findUnique).not.toHaveBeenCalled();
     expect(walletsService.getWallet).toHaveBeenCalledWith('user-1', 'NGN');
@@ -703,14 +856,18 @@ describe('VtuService purchase ledger handling', () => {
     });
 
     await expect(
-      service.purchase('user-1', {
-        type: 'data',
-        provider: 'mtn',
-        contactPhone: '+2348012345678',
-        recipientNumber: '+2348012345678',
-        amount: '1',
-        packageId: 'mtn-1gb',
-      }),
+      service.purchase(
+        'user-1',
+        {
+          type: 'data',
+          provider: 'mtn',
+          contactPhone: '+2348012345678',
+          recipientNumber: '+2348012345678',
+          amount: '1',
+          packageId: 'mtn-1gb',
+        },
+        'test-idempotency-key',
+      ),
     ).rejects.toThrow('Package price mismatch');
 
     expect(prisma.transaction.create).not.toHaveBeenCalled();
@@ -766,14 +923,18 @@ describe('VtuService purchase ledger handling', () => {
       rawResponse: {},
     });
 
-    await service.purchase('user-1', {
-      type: 'cable',
-      provider: 'dstv',
-      contactPhone: '+2348012345678',
-      smartCardNumber: '1234567890',
-      subscriptionType: 'renew',
-      amount: '6500.00',
-    });
+    await service.purchase(
+      'user-1',
+      {
+        type: 'cable',
+        provider: 'dstv',
+        contactPhone: '+2348012345678',
+        smartCardNumber: '1234567890',
+        subscriptionType: 'renew',
+        amount: '6500.00',
+      },
+      'test-idempotency-key',
+    );
 
     expect(vtuApi.getPackages).not.toHaveBeenCalled();
     expect(vtuApi.purchase).toHaveBeenCalledWith(
@@ -800,14 +961,18 @@ describe('VtuService purchase ledger handling', () => {
     });
 
     await expect(
-      service.purchase('user-1', {
-        type: 'cable',
-        provider: 'dstv',
-        contactPhone: '+2348012345678',
-        smartCardNumber: '1234567890',
-        subscriptionType: 'renew',
-        amount: '6400.00',
-      }),
+      service.purchase(
+        'user-1',
+        {
+          type: 'cable',
+          provider: 'dstv',
+          contactPhone: '+2348012345678',
+          smartCardNumber: '1234567890',
+          subscriptionType: 'renew',
+          amount: '6400.00',
+        },
+        'test-idempotency-key',
+      ),
     ).rejects.toThrow('Cable renewal price mismatch');
     expect(ledger.debitWallet).not.toHaveBeenCalled();
   });
@@ -834,13 +999,17 @@ describe('VtuService purchase ledger handling', () => {
       rawResponse: { code: '000', status: 'delivered' },
     });
 
-    const result = await service.purchase('user-1', {
-      type: 'airtime',
-      provider: 'mtn',
-      contactPhone: '+2348012345678',
-      recipientNumber: '+2348012345678',
-      amount: '500',
-    });
+    const result = await service.purchase(
+      'user-1',
+      {
+        type: 'airtime',
+        provider: 'mtn',
+        contactPhone: '+2348012345678',
+        recipientNumber: '+2348012345678',
+        amount: '500',
+      },
+      'test-idempotency-key',
+    );
 
     expect(prisma.vtuOrder.update).toHaveBeenCalledWith({
       where: { id: 'order-1' },
@@ -914,17 +1083,21 @@ describe('VtuService purchase ledger handling', () => {
     });
     vtuApi.purchase.mockRejectedValue(new Error('VTU provider result unknown'));
 
-    const result = await service.purchase('user-1', {
-      type: 'airtime',
-      provider: 'mtn',
-      contactPhone: '+2348012345678',
-      recipientNumber: '+2348012345678',
-      amount: '500',
-    });
+    const result = await service.purchase(
+      'user-1',
+      {
+        type: 'airtime',
+        provider: 'mtn',
+        contactPhone: '+2348012345678',
+        recipientNumber: '+2348012345678',
+        amount: '500',
+      },
+      'test-idempotency-key',
+    );
 
     expect(ledger.creditWallet).not.toHaveBeenCalled();
-    expect(prisma.transaction.update).toHaveBeenCalledWith({
-      where: { reference: 'VTU-1' },
+    expect(prisma.transaction.updateMany).toHaveBeenCalledWith({
+      where: { reference: 'VTU-1', status: 'PENDING' },
       data: {
         metadata: expect.objectContaining({
           providerStatus: 'UNKNOWN',
@@ -962,17 +1135,21 @@ describe('VtuService purchase ledger handling', () => {
       message: 'TRANSACTION IS PROCESSING',
     });
 
-    const result = await service.purchase('user-1', {
-      type: 'airtime',
-      provider: 'mtn',
-      contactPhone: '+2348012345678',
-      recipientNumber: '+2348012345678',
-      amount: '500',
-    });
+    const result = await service.purchase(
+      'user-1',
+      {
+        type: 'airtime',
+        provider: 'mtn',
+        contactPhone: '+2348012345678',
+        recipientNumber: '+2348012345678',
+        amount: '500',
+      },
+      'test-idempotency-key',
+    );
 
     expect(ledger.creditWallet).not.toHaveBeenCalled();
-    expect(prisma.transaction.update).toHaveBeenCalledWith({
-      where: { reference: 'VTU-1' },
+    expect(prisma.transaction.updateMany).toHaveBeenCalledWith({
+      where: { reference: 'VTU-1', status: 'PENDING' },
       data: {
         metadata: expect.objectContaining({
           providerReference: 'provider-vtu-1',
@@ -992,12 +1169,276 @@ describe('VtuService purchase ledger handling', () => {
     });
   });
 
+  it('escalates the twelfth unresolved provider check into an action-required state', async () => {
+    const order = {
+      id: 'order-1',
+      transactionId: 'tx-1',
+      provider: 'VTPASS',
+      providerRequestId: 'REQ-1',
+      providerTransactionId: null,
+      status: 'UNKNOWN',
+      requeryAttempts: 11,
+      transaction: {
+        id: 'tx-1',
+        userId: 'user-1',
+        reference: 'VTU-1',
+        amount: new Decimal(500),
+        fee: new Decimal(0),
+        currency: 'NGN',
+        status: 'PENDING',
+        metadata: {},
+      },
+    };
+    prisma.vtuOrder.findUnique
+      .mockResolvedValueOnce(order)
+      .mockResolvedValueOnce({ ...order, requeryAttempts: 12 });
+    vtuApi.requery.mockResolvedValue({
+      reference: 'provider-vtu-1',
+      status: 'pending',
+      message: 'Still processing',
+    });
+    prisma.paymentNotification.createMany.mockResolvedValue({ count: 1 });
+
+    await expect(service.requeryOrder('order-1')).resolves.toEqual({
+      processed: true,
+      status: 'pending',
+    });
+
+    expect(prisma.vtuOrder.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ requeryAttempts: { increment: 1 } }),
+      }),
+    );
+    expect(prisma.paymentNotification.createMany).toHaveBeenCalledWith({
+      data: [
+        expect.objectContaining({
+          eventKey: 'vtu:requery-exhausted:order-1',
+          orderId: 'order-1',
+          audience: 'ADMIN',
+        }),
+      ],
+      skipDuplicates: true,
+    });
+    expect(prisma.auditLog.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        action: 'VTU_REQUERY_EXHAUSTED',
+        targetType: 'VtuOrder',
+        targetId: 'order-1',
+        reference: 'VTU-1',
+      }),
+    });
+  });
+
+  it('exposes exhausted unresolved orders as customer action required without offering a replacement', async () => {
+    prisma.vtuOrder.findFirst.mockResolvedValue({
+      id: 'order-1',
+      provider: 'VTPASS',
+      scope: 'LOCAL',
+      serviceType: 'AIRTIME',
+      countryCode: 'NG',
+      localProvider: 'mtn',
+      operatorId: null,
+      providerRequestId: 'REQ-1',
+      providerTransactionId: null,
+      providerStatus: 'pending',
+      status: 'UNKNOWN',
+      amount: new Decimal(500),
+      fee: new Decimal(0),
+      currency: 'NGN',
+      targetMasked: '******1234',
+      purchasedCodeEncrypted: null,
+      requeryAttempts: 12,
+      lastRequeryAt: new Date(),
+      nextRequeryAt: null,
+      completedAt: null,
+      failedAt: null,
+      transaction: {
+        id: 'tx-1',
+        reference: 'VTU-1',
+        status: 'PENDING',
+        amount: new Decimal(500),
+        currency: 'NGN',
+        type: 'AIRTIME',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      },
+    });
+
+    await expect(service.getOrderStatus('user-1', 'VTU-1')).resolves.toEqual(
+      expect.objectContaining({
+        orderStatus: 'UNKNOWN',
+        actionRequired: true,
+        actionRequiredCode: 'VTU_MANUAL_RECOVERY_REQUIRED',
+        customerAction:
+          'Keep this reference and contact support. Do not start a replacement purchase while the provider result is unresolved.',
+      }),
+    );
+  });
+
+  it('blocks automatic customer requery after escalation while allowing supervised admin recovery', async () => {
+    prisma.vtuOrder.findUnique.mockResolvedValueOnce({
+      id: 'order-1',
+      transactionId: 'tx-1',
+      providerRequestId: 'REQ-1',
+      status: 'UNKNOWN',
+      requeryAttempts: 12,
+      transaction: { status: 'PENDING' },
+    });
+
+    await expect(service.requeryOrder('order-1')).resolves.toEqual({
+      processed: false,
+      actionRequired: true,
+      status: 'UNKNOWN',
+    });
+    expect(vtuApi.requery).not.toHaveBeenCalled();
+  });
+
+  it('backfills an exhausted order without calling the provider again', async () => {
+    prisma.vtuOrder.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ id: 'order-1', requeryAttempts: 12 }]);
+    prisma.vtuOrder.findUnique.mockResolvedValueOnce({
+      id: 'order-1',
+      status: 'UNKNOWN',
+      providerStatus: 'pending',
+      requeryAttempts: 12,
+      nextRequeryAt: null,
+      transaction: { status: 'PENDING', reference: 'VTU-1' },
+    });
+    prisma.paymentNotification.createMany.mockResolvedValueOnce({ count: 0 });
+
+    await expect(service.requeryPendingOrders()).resolves.toEqual({
+      checked: 1,
+      results: [{ orderId: 'order-1', processed: false, actionRequired: true }],
+    });
+    expect(vtuApi.requery).not.toHaveBeenCalled();
+  });
+
+  it('returns the committed terminal replay after a late initial success response', async () => {
+    walletsService.getWallet.mockResolvedValue({
+      id: 'wallet-1',
+      balance: new Decimal(5000),
+    });
+    prisma.transaction.create.mockResolvedValue({
+      id: 'tx-1',
+      reference: 'VTU-1',
+    });
+    const fingerprint = financialRequestIdentity(
+      'VTU',
+      'user-1',
+      'test-idempotency-key',
+      {
+        type: 'airtime',
+        provider: 'mtn',
+        contactPhone: '+2348012345678',
+        recipientNumber: '+2348012345678',
+        amount: '500.00',
+      },
+    ).fingerprint;
+    prisma.transaction.findUnique
+      .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce({
+        id: 'tx-1',
+        userId: 'user-1',
+        reference: 'VTU-1',
+        status: 'REVERSED',
+        amount: new Decimal(500),
+        fee: new Decimal(0),
+        metadata: { requestFingerprint: fingerprint },
+        vtuOrders: [{ id: 'order-1', purchasedCodeEncrypted: null }],
+      });
+    ledger.debitWallet.mockResolvedValue({ balanceAfter: new Decimal(4500) });
+    vtuApi.purchase.mockResolvedValue({
+      reference: 'provider-vtu-1',
+      status: 'success',
+      message: 'Delivered',
+    });
+
+    await expect(
+      service.purchase(
+        'user-1',
+        {
+          type: 'airtime',
+          provider: 'mtn',
+          contactPhone: '+2348012345678',
+          recipientNumber: '+2348012345678',
+          amount: '500',
+        },
+        'test-idempotency-key',
+      ),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        status: 'REVERSED',
+        reference: 'VTU-1',
+        orderId: 'order-1',
+      }),
+    );
+  });
+
+  it('does not report a misleading failure when a late initial failure follows a committed success', async () => {
+    walletsService.getWallet.mockResolvedValue({
+      id: 'wallet-1',
+      balance: new Decimal(5000),
+    });
+    prisma.transaction.create.mockResolvedValue({
+      id: 'tx-1',
+      reference: 'VTU-1',
+    });
+    const fingerprint = financialRequestIdentity(
+      'VTU',
+      'user-1',
+      'test-idempotency-key',
+      {
+        type: 'airtime',
+        provider: 'mtn',
+        contactPhone: '+2348012345678',
+        recipientNumber: '+2348012345678',
+        amount: '500.00',
+      },
+    ).fingerprint;
+    prisma.transaction.findUnique
+      .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce({
+        id: 'tx-1',
+        userId: 'user-1',
+        reference: 'VTU-1',
+        status: 'SUCCESS',
+        amount: new Decimal(500),
+        fee: new Decimal(0),
+        metadata: { requestFingerprint: fingerprint },
+        vtuOrders: [{ id: 'order-1', purchasedCodeEncrypted: null }],
+      });
+    prisma.transaction.updateMany.mockResolvedValueOnce({ count: 0 });
+    ledger.debitWallet.mockResolvedValue({ balanceAfter: new Decimal(4500) });
+    vtuApi.purchase.mockResolvedValue({
+      reference: 'provider-vtu-1',
+      status: 'failed',
+      message: 'Provider rejected request',
+    });
+
+    await expect(
+      service.purchase(
+        'user-1',
+        {
+          type: 'airtime',
+          provider: 'mtn',
+          contactPhone: '+2348012345678',
+          recipientNumber: '+2348012345678',
+          amount: '500',
+        },
+        'test-idempotency-key',
+      ),
+    ).resolves.toEqual(
+      expect.objectContaining({ status: 'SUCCESS', orderId: 'order-1' }),
+    );
+  });
+
   it('requeries stale pending VTU orders and finalizes success', async () => {
     prisma.vtuOrder.findUnique.mockResolvedValue({
       id: 'order-1',
       transactionId: 'tx-1',
       provider: 'VTPASS',
-      providerRequestId: '202605211500VTU1',
+      providerRequestId: 'REQ-1',
       providerTransactionId: null,
       status: 'PENDING',
       transaction: {
@@ -1018,7 +1459,7 @@ describe('VtuService purchase ledger handling', () => {
 
     const result = await service.requeryOrder('order-1');
 
-    expect(vtuApi.requery).toHaveBeenCalledWith('202605211500VTU1');
+    expect(vtuApi.requery).toHaveBeenCalledWith('REQ-1');
     expect(prisma.transaction.updateMany).toHaveBeenCalledWith({
       where: { id: 'tx-1', status: 'PENDING' },
       data: {
@@ -1039,6 +1480,50 @@ describe('VtuService purchase ledger handling', () => {
       }),
     });
     expect(result).toEqual({ processed: true, status: 'success' });
+  });
+
+  it('repairs a legacy order status mismatch when its transaction is already terminal', async () => {
+    prisma.vtuOrder.findUnique.mockResolvedValue({
+      id: 'order-legacy',
+      transactionId: 'tx-legacy',
+      provider: 'VTPASS',
+      providerRequestId: 'REQ-LEGACY',
+      providerTransactionId: 'TX-LEGACY',
+      status: 'PENDING',
+      requeryAttempts: 2,
+      transaction: {
+        id: 'tx-legacy',
+        userId: 'user-1',
+        reference: 'VTU-LEGACY',
+        amount: new Decimal(500),
+        fee: new Decimal(0),
+        currency: 'NGN',
+        status: 'SUCCESS',
+        metadata: {},
+      },
+    });
+    vtuApi.requery.mockResolvedValue({
+      reference: 'TX-LEGACY',
+      providerRequestId: 'REQ-LEGACY',
+      providerTransactionId: 'TX-LEGACY',
+      status: 'success',
+    });
+    prisma.transaction.updateMany.mockResolvedValueOnce({ count: 1 });
+
+    await expect(service.requeryOrder('order-legacy')).resolves.toEqual({
+      processed: false,
+      terminal: true,
+    });
+    expect(prisma.vtuOrder.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: 'order-legacy',
+        status: { in: ['PENDING', 'PROCESSING', 'UNKNOWN'] },
+      },
+      data: expect.objectContaining({
+        status: 'SUCCESS',
+        nextRequeryAt: null,
+      }),
+    });
   });
 
   it('requeries a successful VTU order and applies a confirmed reversal', async () => {
@@ -1107,14 +1592,18 @@ describe('VtuService purchase ledger handling', () => {
     prisma.ledgerEntry.findFirst.mockResolvedValue(null);
 
     await expect(
-      service.purchase('user-1', {
-        type: 'data',
-        provider: 'mtn',
-        contactPhone: '+2348012345678',
-        recipientNumber: '+2348012345678',
-        amount: '300',
-        packageId: 'mtn-1gb',
-      }),
+      service.purchase(
+        'user-1',
+        {
+          type: 'data',
+          provider: 'mtn',
+          contactPhone: '+2348012345678',
+          recipientNumber: '+2348012345678',
+          amount: '300',
+          packageId: 'mtn-1gb',
+        },
+        'test-idempotency-key',
+      ),
     ).rejects.toThrow(BadRequestException);
 
     expect(ledger.creditWallet).toHaveBeenCalledWith(

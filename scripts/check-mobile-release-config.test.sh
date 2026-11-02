@@ -27,7 +27,7 @@ write_valid_config() {
 
   jq -n \
     --arg api 'https://api.trustpayhq.com' \
-    --arg website 'https://trustpay.xyz' \
+    --arg website 'https://www.trustpayhq.com' \
     --arg supabase 'https://trustpay-prod.supabase.co' \
     --arg publishable 'sb_publishable_public_test_value' \
     --arg sentry 'https://public@sentry.io/123456' \
@@ -77,6 +77,14 @@ valid_config="$test_root/valid.json"
 write_valid_config "$valid_config"
 expect_success "$valid_config"
 
+internal_config="$test_root/android-internal.json"
+jq 'del(.API_CERTIFICATE_SHA256_PINS) + {ANDROID_INTERNAL_SYSTEM_TLS: "true"}' "$valid_config" >"$internal_config"
+"$validator" --environment internal-android --config "$internal_config" >/dev/null 2>&1 ||
+  fail 'approved Android internal configuration must pass'
+if "$validator" --environment production --config "$internal_config" >/dev/null 2>&1; then
+  fail 'Android internal TLS exception must not pass production preflight'
+fi
+
 missing_sentry_config="$test_root/missing-sentry.json"
 jq 'del(.SENTRY_DSN)' "$valid_config" >"$missing_sentry_config"
 expect_success "$missing_sentry_config"
@@ -106,6 +114,14 @@ expect_failure_without_secret_echo \
   "$wrong_host_config" \
   'API_BASE_URL is not an allowlisted production host' \
   'https://staging.trustpayhq.com'
+
+parked_website_config="$test_root/parked-website.json"
+jq '.WEBSITE_BASE_URL = "https://trustpay.xyz"' \
+  "$valid_config" >"$parked_website_config"
+expect_failure_without_secret_echo \
+  "$parked_website_config" \
+  'WEBSITE_BASE_URL is not an allowlisted production host' \
+  'https://trustpay.xyz'
 
 secret_value='provider-secret-that-must-not-appear'
 private_field_config="$test_root/private-field.json"

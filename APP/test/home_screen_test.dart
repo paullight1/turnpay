@@ -18,6 +18,40 @@ void main() {
     setMockSecureStorage(refreshToken: 'refresh-token');
   });
 
+  testWidgets('submitted KYC shows progress instead of asking to start again',
+      (tester) async {
+    final bundle = buildTrustPayTestBundle(
+        kycStatus: 'SUBMITTED', includeVirtualAccounts: false);
+    await tester.pumpWidget(MaterialApp.router(
+      routerConfig: GoRouter(initialLocation: AppRoutes.home, routes: [
+        GoRoute(
+            path: AppRoutes.home,
+            builder: (context, state) =>
+                HomeScreen(homeDataService: bundle.homeDataService)),
+        GoRoute(
+            path: AppRoutes.kyc,
+            builder: (context, state) =>
+                const Scaffold(body: Text('Identity check progress'))),
+      ]),
+    ));
+    await tester.pumpAndSettle();
+    expect(
+        find.text(
+            'Your Paystack account is waiting for identity verification.'),
+        findsOneWidget);
+    expect(find.text('Request'), findsNothing);
+    final progress = find.text(
+        'Your identity checks are in progress. View your BVN and NIN status.');
+    await tester.scrollUntilVisible(progress, 180,
+        scrollable: find.byType(Scrollable).first);
+    expect(progress, findsOneWidget);
+    await tester.scrollUntilVisible(find.text('View status'), -180,
+        scrollable: find.byType(Scrollable).first);
+    await tester.tap(find.text('View status'));
+    await tester.pumpAndSettle();
+    expect(find.text('Identity check progress'), findsOneWidget);
+  });
+
   testWidgets('home screen shows balances and hides them on toggle',
       (tester) async {
     final bundle = buildTrustPayTestBundle();
@@ -62,12 +96,6 @@ void main() {
     );
     expect(find.text('Exchange NGN to GHS'), findsOneWidget);
 
-    await tester.scrollUntilVisible(
-      find.text('Other wallets'),
-      300,
-      scrollable: find.byType(Scrollable).first,
-    );
-    expect(find.text('Other wallets'), findsOneWidget);
     await tester.scrollUntilVisible(
       find.text('View more'),
       300,
@@ -117,27 +145,6 @@ void main() {
       tester.getSize(receiveAction.first).height,
       greaterThanOrEqualTo(48),
     );
-  });
-
-  testWidgets('other wallet cards use a compact footprint', (tester) async {
-    final bundle = buildTrustPayTestBundle();
-
-    await tester.pumpWidget(
-      MaterialApp(
-        home: HomeScreen(homeDataService: bundle.homeDataService),
-      ),
-    );
-    await tester.pumpAndSettle();
-
-    await tester.scrollUntilVisible(
-      find.text('Other wallets'),
-      300,
-      scrollable: find.byType(Scrollable).first,
-    );
-    final usdCard = find.byKey(const ValueKey('wallet-summary-USD'));
-    expect(usdCard, findsOneWidget);
-    expect(tester.getSize(usdCard).width, lessThanOrEqualTo(136));
-    expect(tester.getSize(usdCard).height, lessThanOrEqualTo(108));
   });
 
   testWidgets('only the Nigeria wallet offers account provisioning',
@@ -313,60 +320,6 @@ void main() {
     expect(find.textContaining('0123456789'), findsNothing);
     expect(find.byTooltip('Copy account number'), findsNothing);
     expect(find.text('Complete KYC'), findsOneWidget);
-  });
-
-  testWidgets(
-      'home screen manages wallet visibility and hides an empty section',
-      (tester) async {
-    final bundle = buildTrustPayTestBundle();
-
-    await tester.pumpWidget(
-      MaterialApp.router(
-        routerConfig: GoRouter(
-          initialLocation: AppRoutes.home,
-          routes: [
-            GoRoute(
-              path: AppRoutes.home,
-              builder: (context, state) =>
-                  HomeScreen(homeDataService: bundle.homeDataService),
-            ),
-            GoRoute(
-              path: AppRoutes.wallets,
-              builder: (context, state) => DashboardDetailScreen(
-                kind: DashboardDetailKind.wallets,
-                homeDataService: bundle.homeDataService,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-
-    await tester.pumpAndSettle();
-
-    await tester.scrollUntilVisible(
-      find.text('Manage'),
-      300,
-      scrollable: find.byType(Scrollable).first,
-    );
-    await tester.tap(find.text('Manage'));
-    await tester.pumpAndSettle();
-
-    expect(find.text('Manage wallets'), findsOneWidget);
-    expect(find.byType(SwitchListTile), findsNWidgets(4));
-    for (var index = 0; index < 4; index++) {
-      await tester.ensureVisible(find.byType(SwitchListTile).at(index));
-      await tester.pumpAndSettle();
-      await tester.tap(find.byType(SwitchListTile).at(index));
-      await tester.pumpAndSettle();
-    }
-    await tester.ensureVisible(find.text('Save'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Save'));
-    await tester.pumpAndSettle();
-    expect(find.text('Other wallets'), findsNothing);
-    expect(find.text('Manage'), findsNothing);
-    expect(find.byKey(const ValueKey('wallet-summary-USD')), findsNothing);
   });
 
   testWidgets('home screen opens notifications and dismisses them',

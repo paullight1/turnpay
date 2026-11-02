@@ -11,6 +11,7 @@ import {
 import { Observable, of } from 'rxjs';
 import { lastValueFrom } from 'rxjs';
 import { createHash } from 'crypto';
+import { businessRequestFingerprint } from '../utils/financial-request';
 import { RedisService } from '../../redis/redis.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { PinoLogger } from 'nestjs-pino';
@@ -106,23 +107,29 @@ export class IdempotencyInterceptor implements NestInterceptor {
 
     const userId = request.user?.userId || 'anonymous';
     const keyDigest = createHash('sha256').update(idempotencyKey).digest('hex');
-    const requestHash = this.hashRequestBody(request.body);
     const scope = `${userId}:${method}:${normalizedPath}`;
     const encryptionContext: IdempotencyEncryptionContext = {
       route: normalizedPath,
       scope,
       keyDigest,
     };
+    const requestHash =
+      authPolicy || /\/(?:authorize|resend-otp)$/.test(normalizedPath)
+        ? this.hashSensitiveRequest(request.body, encryptionContext)
+        : this.hashRequestBody(businessRequestFingerprint(request.body));
     const encryptResponse =
       authPolicy === 'ENCRYPTED' ||
       /^\/api\/admin\/exchange\/manual-orders\/[^/]+\/proof-url$/.test(
         normalizedPath,
       );
     const expiresAt = new Date(Date.now() + IDEMPOTENCY_TTL * 1000);
-    const cacheKey = `idempotency:${scope}:${keyDigest}`;
+    const cacheKey = `idempotency:v2:${scope}:${keyDigest}`;
     const lockKey = `${cacheKey}:lock`;
 
-    const existing = encryptResponse ? null : await this.redis.get(cacheKey);
+    // Redis is an optimization. Database uniqueness remains authoritative.
+    const existing = encryptResponse
+      ? null
+      : await this.redis.get(cacheKey).catch(() => null);
     if (existing) {
       const cached = this.parseJson(existing);
       if (this.isCachedIdempotencyResponse(cached)) {
@@ -198,7 +205,9 @@ export class IdempotencyInterceptor implements NestInterceptor {
     } else {
       useRedisLock = this.redis.isAvailable();
       const lock = useRedisLock
-        ? await this.redis.setIfNotExists(lockKey, '1', IDEMPOTENCY_LOCK_TTL)
+        ? await this.redis
+            .setIfNotExists(lockKey, '1', IDEMPOTENCY_LOCK_TTL)
+            .catch(() => true)
         : true;
 
       if (!lock) {
@@ -218,10 +227,13 @@ export class IdempotencyInterceptor implements NestInterceptor {
       recordId = record.id;
     }
 
+    let handlerCompleted = false;
     try {
       const response: unknown = await lastValueFrom(
         next.handle() as Observable<unknown>,
       );
+
+      handlerCompleted = true;
 
       // Always transition out of IN_PROGRESS on success — including when the
       // handler returns undefined. Otherwise the record is stranded until
@@ -254,14 +266,20 @@ export class IdempotencyInterceptor implements NestInterceptor {
         data: completionData,
       });
       if (!encryptResponse && this.redis.isAvailable()) {
-        await this.redis.set(
-          cacheKey,
-          JSON.stringify({
-            requestHash,
-            response: response === undefined ? null : responseJson,
-          }),
-          IDEMPOTENCY_TTL,
-        );
+        await this.redis
+          .set(
+            cacheKey,
+            JSON.stringify({
+              requestHash,
+              response: response === undefined ? null : responseJson,
+            }),
+            IDEMPOTENCY_TTL,
+          )
+          .catch(() =>
+            this.logger.warn(
+              'Idempotency cache write failed; durable replay retained',
+            ),
+          );
       }
 
       return of(response);
@@ -275,9 +293,15 @@ export class IdempotencyInterceptor implements NestInterceptor {
         !(error instanceof HttpException) || error.getStatus() >= 500;
 
       if (isTransient) {
-        await this.prisma.idempotencyRecord
-          .delete({ where: { id: recordId } })
-          .catch(() => undefined);
+        // A successful handler may have committed money. Never delete its
+        // reservation because serializing/persisting/caching the response failed.
+        // Financial services bind their own stable reference in the debit
+        // transaction, so a stale-lease retry recovers that same operation.
+        if (!handlerCompleted) {
+          await this.prisma.idempotencyRecord
+            .delete({ where: { id: recordId } })
+            .catch(() => undefined);
+        }
         throw error;
       }
 
@@ -300,21 +324,29 @@ export class IdempotencyInterceptor implements NestInterceptor {
         },
       });
       if (!encryptResponse && this.redis.isAvailable()) {
-        await this.redis.set(
-          cacheKey,
-          JSON.stringify({
-            requestHash,
-            status: 'FAILED_FINAL',
-            httpStatus,
-            errorResponse,
-          }),
-          IDEMPOTENCY_TTL,
-        );
+        await this.redis
+          .set(
+            cacheKey,
+            JSON.stringify({
+              requestHash,
+              status: 'FAILED_FINAL',
+              httpStatus,
+              errorResponse,
+            }),
+            IDEMPOTENCY_TTL,
+          )
+          .catch(() =>
+            this.logger.warn(
+              'Idempotency cache write failed; durable replay retained',
+            ),
+          );
       }
       throw error;
     } finally {
       if (useRedisLock) {
-        await this.redis.del(lockKey);
+        await this.redis
+          .del(lockKey)
+          .catch(() => this.logger.warn('Idempotency lock cleanup failed'));
       }
     }
   }
@@ -327,16 +359,27 @@ export class IdempotencyInterceptor implements NestInterceptor {
       path === '/api/transfers/internal' ||
       // These endpoints persist the upload intent themselves and regenerate
       // expiring credentials on replay. Never cache signed upload tokens.
-      /^\/api\/(?:admin\/)?exchange\/manual-orders\/[^/]+\/upload-url$/.test(
+      /^\/api\/(?:admin\/)?exchange\/manual-orders\/[^/]+\/(?:upload-url|handover-upload-url)$/.test(
         path,
       )
     );
   }
 
+  private hashSensitiveRequest(
+    body: unknown,
+    context: IdempotencyEncryptionContext,
+  ) {
+    if (!this.responseCrypto)
+      throw new InternalServerErrorException(
+        'Idempotency fingerprint service is unavailable',
+      );
+    return this.responseCrypto.fingerprintRequest(body, context);
+  }
+
   private hashRequestBody(body: unknown) {
-    return createHash('sha256')
+    return `business:v2:${createHash('sha256')
       .update(JSON.stringify(body ?? {}))
-      .digest('hex');
+      .digest('hex')}`;
   }
 
   private toJsonValue(value: unknown): Prisma.InputJsonValue {
@@ -383,6 +426,11 @@ export class IdempotencyInterceptor implements NestInterceptor {
     encrypted: boolean,
     encryptionContext: IdempotencyEncryptionContext,
   ): Observable<unknown> | null {
+    if (record.requestHash.startsWith('legacy-retired:')) {
+      throw new ConflictException(
+        'This older request needs a status check. Check your history or contact support before trying again.',
+      );
+    }
     if (record.requestHash !== requestHash) {
       throw new ConflictException(
         'Idempotency-Key was already used with a different request body',

@@ -1,9 +1,12 @@
+import 'dart:io' show Platform;
+
 import 'package:dio/dio.dart';
 import 'package:dio/io.dart';
 
 import 'secure_transport_policy.dart';
 
 const supportsNativeCertificatePinning = true;
+bool get isAndroid => Platform.isAndroid;
 
 HttpClientAdapter? createPlatformSecureAdapter({
   required SecureApiOrigin apiOrigin,

@@ -77,6 +77,35 @@ void main() {
     );
   });
 
+  test(
+      'approved Android internal test allows system TLS but rejects HTTP and malformed pins',
+      () {
+    SecureTransportConfiguration config(String url, String pins) =>
+        SecureTransportConfiguration.fromEnvironment(
+          baseUrl: url,
+          releaseMode: true,
+          rawPins: pins,
+        );
+    expect(
+        config('https://api.example.test', '').releaseValidationError(
+          nativePinningSupported: true,
+          androidInternalSystemTls: true,
+        ),
+        isNull);
+    expect(
+        config('http://api.example.test', '').releaseValidationError(
+          nativePinningSupported: true,
+          androidInternalSystemTls: true,
+        ),
+        isNotNull);
+    expect(
+        config('https://api.example.test', 'invalid').releaseValidationError(
+          nativePinningSupported: true,
+          androidInternalSystemTls: true,
+        ),
+        isNotNull);
+  });
+
   test('native adapter matches only the configured host and DER fingerprints',
       () {
     final firstDer = Uint8List.fromList([0, 1, 2, 3]);

@@ -90,6 +90,18 @@ Paystack BVN decisions remain read-only to administrators.
 
 ### Prove public webhook delivery
 
+Use an always-on backend for provider callbacks. Render Free spins down after
+15 minutes without incoming traffic and can take about a minute to wake up;
+an internal cron job does not remove this hosting limitation. Confirm the
+actual service compute plan in Render, rather than assuming that a successful
+deployment or a warm health check proves continuous availability.
+
+`GET` and `HEAD /api/webhooks/paystack` provide a read-only endpoint description
+with HTTP 200. They do not accept an event or prove delivery. Paystack event
+delivery uses `POST` with `x-paystack-signature`; unsigned POST requests must
+still fail. Before this endpoint-description change is deployed, GET/HEAD
+return 404 even though the signed POST route exists.
+
 1. Restore the existing deployed API and confirm its public HTTPS readiness
    endpoint. Do not register `localhost` or use an unverified development
    tunnel as a permanent merchant endpoint.
@@ -111,6 +123,34 @@ Paystack BVN decisions remain read-only to administrators.
 Changing the webhook URL cannot itself complete an identity check. A customer
 that Paystack still reports as unidentified, with no terminal provider event,
 remains pending and requires provider investigation if it persists.
+
+#### Investigation on 2 November 2026
+
+- Live custom-domain HTTPS requests reached NestJS. Unsigned POST returned
+  HTTP 400 `Invalid signature`; an HMAC-signed empty JSON object advanced to
+  DTO validation and returned HTTP 400 `event must be a string`. No event was
+  accepted or manufactured. This establishes raw-body/signature handling for
+  that diagnostic connection, not genuine Paystack delivery.
+- The live Render dashboard showed Free compute. Available logs showed
+  repeated hibernation starts, including 10:05 WAT today. This is a confirmed
+  availability risk; the precise cause of Paystack's reported failure is not
+  established without their delivery/probe details.
+- At 01:17:21 WAT, a Postman GET reached the exact webhook path and received
+  HTTP 404. Its sender cannot be identified from the available evidence.
+  Browser GET/HEAD checks have the same result on the current deployment.
+- Fresh official customer lookup returned HTTP 200, matching live customer,
+  `identified=false`, and `identifications=null`. Official webhook history
+  from 30 October returned zero events and no next cursor. Database inspection
+  found no Paystack webhook log/inbox records. The existing verification is
+  still PENDING with its accepted submission marker and recorded consent.
+- No account-provisioning request exists for the customer. The service creates
+  that request after genuine verified identification and account consent;
+  missing BVN completion therefore also prevents account provisioning.
+
+The GET/HEAD change addresses manual endpoint discoverability. Always-on
+hosting addresses idle wake-up delays. Neither change can create a missing
+provider decision. After deployment and hosting correction, verify a genuine
+terminal event through the signed POST/inbox/audit path described above.
 
 `GET /api/payments/capabilities` returns configuration and feature availability to authenticated clients. Configuration is distinct from confirmed merchant activation. Disabled or unconfigured features must remain unavailable in the clients.
 

@@ -4,6 +4,8 @@ import {
   Controller,
   Body,
   Headers,
+  Get,
+  Header,
   HttpCode,
   Post,
   Req,
@@ -21,6 +23,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import {
   MonnifyWebhookDto,
   PaystackWebhookDto,
+  PaystackWebhookEndpointDto,
   PaymentWebhookInboxDto,
 } from './dto/payment-webhook.dto';
 import { WebhookInboxService } from './webhook-inbox.service';
@@ -34,6 +37,19 @@ export class WebhookController {
     private readonly logger: PinoLogger,
     private readonly prisma: PrismaService,
   ) {}
+
+  // Browser/support probes use GET (or HEAD). They only describe the route;
+  // event acceptance remains exclusively on the signed POST handler below.
+  @Get('paystack')
+  @Header('Cache-Control', 'no-store')
+  @Throttle({ default: { limit: 100, ttl: 60000 } })
+  getPaystackWebhookInfo(): PaystackWebhookEndpointDto {
+    return {
+      provider: 'paystack',
+      deliveryMethod: 'POST',
+      signatureRequired: true,
+    };
+  }
 
   @Post('paystack')
   @HttpCode(200)
@@ -60,8 +76,24 @@ export class WebhookController {
       data.customer && typeof data.customer === 'object'
         ? (data.customer as Record<string, unknown>)
         : {};
+    const transaction =
+      data.transaction && typeof data.transaction === 'object'
+        ? (data.transaction as Record<string, unknown>)
+        : {};
+    const adverseReference = payload.event.startsWith('charge.dispute.')
+      ? (data.id ?? data.reference ?? transaction.reference)
+      : payload.event === 'refund.processed'
+        ? (data.refund_reference ??
+          data.id ??
+          // Paystack's documented refund webhook can omit refund_reference.
+          // Use the signed body digest in that case so two partial refunds
+          // for one funding reference cannot collapse into one case.
+          createHash('sha256').update(req.rawBody).digest('hex'))
+        : undefined;
     const reference =
+      adverseReference ??
       data.reference ??
+      data.transaction_reference ??
       data.customer_code ??
       customer.customer_code ??
       data.id ??

@@ -1,6 +1,7 @@
 export type MoneyAttemptScope =
   | "fund"
   | "withdraw"
+  | "adverse-funding"
   | "exchange"
   | "vtu"
   | "vtu-validate"

@@ -253,6 +253,10 @@ function VtuContent() {
         toast.error("VTU purchase failed. Reserved funds were reversed.");
         setTransactionPin("");
         resetAttempt();
+      } else if (order.actionRequired) {
+        toast.warning(
+          "Automatic checks are complete. Keep this reference and contact support; do not start a replacement purchase.",
+        );
       } else {
         toast.info("VTU purchase is still pending provider confirmation.");
       }
@@ -431,8 +435,9 @@ function VtuContent() {
                 <div>
                   <CardTitle className="text-base">Recent VTU order</CardTitle>
                   <CardDescription>
-                    Provider confirmation can take a few minutes for some
-                    networks.
+                    {trackedOrder?.actionRequired
+                      ? "Automatic checks have stopped. Support must supervise the next provider check."
+                      : "Provider confirmation can take a few minutes for some networks."}
                   </CardDescription>
                 </div>
                 <Badge
@@ -479,7 +484,9 @@ function VtuContent() {
                     <div>
                       <p className="text-muted-foreground">Next check</p>
                       <p className="font-medium">
-                        {terminalOrderStatuses.has(trackedOrder.orderStatus)
+                        {trackedOrder.actionRequired
+                          ? "Contact support"
+                          : terminalOrderStatuses.has(trackedOrder.orderStatus)
                           ? "Complete"
                           : formatDateTime(trackedOrder.nextRequeryAt)}
                       </p>
@@ -490,6 +497,18 @@ function VtuContent() {
                         {trackedOrder.requeryAttempts}
                       </p>
                     </div>
+                    {trackedOrder.actionRequired && (
+                      <div className="sm:col-span-2 rounded-md border border-amber-500/30 bg-amber-500/10 p-3">
+                        <p className="font-medium text-amber-100">
+                          Action required
+                        </p>
+                        <p className="mt-1 text-amber-100/80">
+                          Your funds remain reserved while the provider result
+                          is unresolved. Keep reference {trackedOrder.reference}
+                          and contact support. Do not pay again.
+                        </p>
+                      </div>
+                    )}
                   </>
                 )}
               </div>
@@ -501,7 +520,8 @@ function VtuContent() {
                   disabled={
                     isCheckingOrder ||
                     (trackedOrder
-                      ? terminalOrderStatuses.has(trackedOrder.orderStatus)
+                      ? terminalOrderStatuses.has(trackedOrder.orderStatus) ||
+                        trackedOrder.actionRequired
                       : false)
                   }
                 >

@@ -6,6 +6,7 @@ import 'secure_transport_policy.dart';
 // certificate callback. Keep standard browser TLS and report this limitation
 // explicitly; this factory makes no native pinning claim for web builds.
 const supportsNativeCertificatePinning = false;
+const isAndroid = false;
 
 HttpClientAdapter? createPlatformSecureAdapter({
   required SecureApiOrigin apiOrigin,

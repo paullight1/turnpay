@@ -421,6 +421,8 @@ class _ManualExchangeScreenState extends State<ManualExchangeScreen>
   @override
   Widget build(BuildContext context) {
     AppColors.watch(context);
+    final pageWidth = MediaQuery.sizeOf(context).width;
+    final contentInset = pageWidth > 592 ? (pageWidth - 560) / 2 : 16.0;
     return Scaffold(
       backgroundColor: AppColors.background,
       body: SafeArea(
@@ -451,20 +453,55 @@ class _ManualExchangeScreenState extends State<ManualExchangeScreen>
                   SliverToBoxAdapter(
                     child: TpPageHeader(
                       label: 'Exchange',
-                      showBackButton: widget.showBackButton,
+                      showBackButton: _step > 0
+                          ? !_isCreating && page.pendingCreate == null
+                          : widget.showBackButton,
+                      onBack: _step == 0
+                          ? null
+                          : () {
+                              if (_isCreating ||
+                                  page.pendingCreate != null ||
+                                  _step <= 0) {
+                                return;
+                              }
+                              setState(() => _step--);
+                              _centerStep();
+                            },
                     ),
                   ),
                   SliverPadding(
-                    padding: const EdgeInsets.fromLTRB(
-                      AppSpacing.md,
+                    padding: EdgeInsets.fromLTRB(
+                      contentInset,
                       AppSpacing.sm,
-                      AppSpacing.md,
-                      AppSpacing.xxl,
+                      contentInset,
+                      AppSpacing.xxl + 80,
                     ),
                     sliver: SliverList.list(
                       children: [
-                        Text(_step == 0 ? 'Choose your exchange' : 'Exchange',
-                            style: AppTextStyles.headingL),
+                        Text(
+                            _step == 0
+                                ? 'Choose your exchange'
+                                : _step == 1
+                                    ? (_sourceCurrency == 'GHS'
+                                        ? 'Cedis to naira'
+                                        : 'Naira to cedis')
+                                    : (_sourceCurrency == 'NGN'
+                                        ? 'Receive cedis'
+                                        : 'Receive naira'),
+                            style: AppTextStyles.headingXL),
+                        if (_step == 2) ...[
+                          const SizedBox(height: 6),
+                          Text(
+                              _sourceCurrency == 'NGN'
+                                  ? 'Choose where to receive your cedis.'
+                                  : 'Your naira goes to your TrustPay wallet.',
+                              style: AppTextStyles.bodyM),
+                        ],
+                        if (_step == 1) ...[
+                          const SizedBox(height: 6),
+                          Text('Enter the amount you want to change.',
+                              style: AppTextStyles.bodyM),
+                        ],
                         const SizedBox(height: AppSpacing.md),
                         if (page.pendingCreate != null) ...[
                           const _PendingExchangeCard(),
@@ -478,10 +515,8 @@ class _ManualExchangeScreenState extends State<ManualExchangeScreen>
                             for (final currency in const ['GHS', 'NGN'])
                               _DirectionChoice(
                                 currency: currency,
-                                enabled: page.config.supportedSourceCurrencies
-                                    .contains(currency),
-                                onTap: page.config.supportedSourceCurrencies
-                                        .contains(currency)
+                                enabled: page.config.canExchangeFrom(currency),
+                                onTap: page.config.canExchangeFrom(currency)
                                     ? () => setState(() {
                                           if (_sourceCurrency != currency) {
                                             _amountController.clear();
@@ -502,9 +537,8 @@ class _ManualExchangeScreenState extends State<ManualExchangeScreen>
                           ] else
                             _ExchangeForm(
                               service: _service,
-                              onSwap: page.config.supportedSourceCurrencies
-                                          .length <
-                                      2
+                              onSwap: !(page.config.canExchangeFrom('GHS') &&
+                                      page.config.canExchangeFrom('NGN'))
                                   ? null
                                   : () {
                                       setState(() {
@@ -524,10 +558,6 @@ class _ManualExchangeScreenState extends State<ManualExchangeScreen>
                                     },
                               sourceCurrency: _sourceCurrency,
                               step: _step,
-                              onBack: () {
-                                setState(() => _step--);
-                                _centerStep();
-                              },
                               formKey: _formKey,
                               amountController: _amountController,
                               institutionController: _institutionController,
@@ -673,7 +703,6 @@ class _ExchangeForm extends StatelessWidget {
   final VoidCallback? onSwap;
   final String sourceCurrency;
   final int step;
-  final VoidCallback onBack;
   final GlobalKey<FormState> formKey;
   final TextEditingController amountController;
   final TextEditingController institutionController;
@@ -692,7 +721,6 @@ class _ExchangeForm extends StatelessWidget {
     required this.onSwap,
     required this.sourceCurrency,
     required this.step,
-    required this.onBack,
     required this.formKey,
     required this.amountController,
     required this.institutionController,
@@ -714,7 +742,7 @@ class _ExchangeForm extends StatelessWidget {
     return Form(
       key: formKey,
       child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: AppSpacing.md),
+        padding: const EdgeInsets.only(bottom: AppSpacing.md),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -727,101 +755,143 @@ class _ExchangeForm extends StatelessWidget {
                   enabled: canEdit),
             ],
             if (step == 2) ...[
-              const SizedBox(height: AppSpacing.lg),
-              Text(
-                  hasPendingCreate &&
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: AppColors.surface,
+                  borderRadius: BorderRadius.circular(AppRadius.lg),
+                  border: Border.all(color: AppColors.border),
+                ),
+                child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      if (hasPendingCreate &&
                           ((sourceCurrency == 'GHS' &&
                                   settlementMode !=
                                       ManualSettlementMode.wallet) ||
                               (sourceCurrency == 'NGN' &&
                                   settlementMode ==
-                                      ManualSettlementMode.wallet))
-                      ? 'Recover your earlier request'
-                      : sourceCurrency == 'GHS'
-                          ? 'Naira goes to your TrustPay wallet'
-                          : 'Receive cedis',
-                  style: AppTextStyles.headingM),
-              const SizedBox(height: AppSpacing.sm),
-              ...receivingModes.map(
-                (mode) => Padding(
-                  padding: const EdgeInsets.only(bottom: AppSpacing.sm),
-                  child: _SettlementChoice(
-                    mode: mode,
-                    selected: settlementMode == mode,
-                    enabled: canEdit,
-                    onTap: () => onSettlementModeChanged(mode),
-                  ),
-                ),
+                                      ManualSettlementMode.wallet))) ...[
+                        Text('Recover your earlier request',
+                            style: AppTextStyles.headingM),
+                        const SizedBox(height: 16),
+                      ],
+                      if (receivingModes.length > 1) ...[
+                        LayoutBuilder(builder: (context, constraints) {
+                          final stack = constraints.maxWidth < 320 ||
+                              MediaQuery.textScalerOf(context).scale(1) > 1.3;
+                          final choices = receivingModes
+                              .map((mode) => _SettlementChoice(
+                                  mode: mode,
+                                  selected: settlementMode == mode,
+                                  enabled: canEdit,
+                                  onTap: () => onSettlementModeChanged(mode)))
+                              .toList();
+                          return stack
+                              ? Column(children: [
+                                  for (var i = 0; i < choices.length; i++) ...[
+                                    if (i > 0) const SizedBox(height: 8),
+                                    choices[i]
+                                  ]
+                                ])
+                              : Row(children: [
+                                  for (var i = 0; i < choices.length; i++) ...[
+                                    if (i > 0) const SizedBox(width: 8),
+                                    Expanded(child: choices[i])
+                                  ]
+                                ]);
+                        }),
+                        const SizedBox(height: 24),
+                      ],
+                      if (settlementMode == ManualSettlementMode.wallet) ...[
+                        Icon(Icons.account_balance_wallet_outlined,
+                            color: AppColors.primary, size: 28),
+                        const SizedBox(height: 12),
+                        Text(
+                            sourceCurrency == 'GHS'
+                                ? 'Naira goes to your TrustPay wallet'
+                                : 'Cedis go to your TrustPay wallet',
+                            style: AppTextStyles.labelL),
+                        const SizedBox(height: 8),
+                        Text(
+                            sourceCurrency == 'GHS'
+                                ? 'We add your naira after your cedi payment is confirmed.'
+                                : 'We add your cedis after your naira payment is confirmed.',
+                            style: AppTextStyles.bodyM),
+                      ] else ...[
+                        TextFormField(
+                          controller: institutionController,
+                          enabled: canEdit,
+                          textInputAction: TextInputAction.next,
+                          decoration: InputDecoration(
+                            floatingLabelBehavior: FloatingLabelBehavior.always,
+                            labelText:
+                                settlementMode == ManualSettlementMode.bank
+                                    ? 'Bank name'
+                                    : 'Provider',
+                            hintText:
+                                settlementMode == ManualSettlementMode.bank
+                                    ? (sourceCurrency == 'NGN'
+                                        ? 'e.g. GCB Bank'
+                                        : 'e.g. Zenith Bank')
+                                    : 'e.g. MTN MoMo',
+                          ),
+                          validator: (value) =>
+                              settlementMode == ManualSettlementMode.wallet ||
+                                      (value?.trim().isNotEmpty ?? false)
+                                  ? null
+                                  : 'Enter the institution name.',
+                        ),
+                        const SizedBox(height: AppSpacing.md),
+                        TextFormField(
+                          controller: accountController,
+                          enabled: canEdit,
+                          keyboardType: TextInputType.phone,
+                          textInputAction: TextInputAction.next,
+                          decoration: InputDecoration(
+                            floatingLabelBehavior: FloatingLabelBehavior.always,
+                            labelText:
+                                settlementMode == ManualSettlementMode.bank
+                                    ? 'Account number'
+                                    : 'MoMo number',
+                            hintText:
+                                settlementMode == ManualSettlementMode.bank
+                                    ? 'Enter account number'
+                                    : '+233 ...',
+                          ),
+                          validator: (value) =>
+                              settlementMode == ManualSettlementMode.wallet ||
+                                      (value?.trim().isNotEmpty ?? false)
+                                  ? null
+                                  : 'Enter the destination account.',
+                        ),
+                        const SizedBox(height: AppSpacing.md),
+                        TextFormField(
+                          controller: nameController,
+                          enabled: canEdit,
+                          textInputAction: TextInputAction.done,
+                          decoration: const InputDecoration(
+                            labelText: 'Recipient name',
+                            hintText: 'Full name',
+                            floatingLabelBehavior: FloatingLabelBehavior.always,
+                          ),
+                          validator: (value) =>
+                              settlementMode == ManualSettlementMode.wallet ||
+                                      (value?.trim().isNotEmpty ?? false)
+                                  ? null
+                                  : 'Enter the destination name.',
+                        ),
+                      ],
+                    ]),
               ),
-              if (sourceCurrency == 'GHS' &&
-                  settlementMode == ManualSettlementMode.wallet) ...[
-                const SizedBox(height: AppSpacing.sm),
-                const Text(
-                    'After your cedi payment is confirmed, we add the quoted naira to your TrustPay wallet.')
-              ],
-              if (sourceCurrency == 'NGN' &&
-                  settlementMode != ManualSettlementMode.wallet) ...[
-                const SizedBox(height: AppSpacing.sm),
-                const Text(
-                    'After your naira payment is confirmed, our team sends the quoted cedis to these details.')
-              ],
               if (settlementMode != ManualSettlementMode.wallet) ...[
-                const SizedBox(height: AppSpacing.sm),
-                TextFormField(
-                  controller: institutionController,
-                  enabled: canEdit,
-                  textInputAction: TextInputAction.next,
-                  decoration: InputDecoration(
-                    labelText: settlementMode == ManualSettlementMode.bank
-                        ? 'Bank name'
-                        : 'Mobile money provider',
-                    hintText: settlementMode == ManualSettlementMode.bank
-                        ? (sourceCurrency == 'NGN'
-                            ? 'e.g. GCB Bank'
-                            : 'e.g. Zenith Bank')
-                        : 'e.g. MTN MoMo',
-                  ),
-                  validator: (value) =>
-                      settlementMode == ManualSettlementMode.wallet ||
-                              (value?.trim().isNotEmpty ?? false)
-                          ? null
-                          : 'Enter the institution name.',
-                ),
-                const SizedBox(height: AppSpacing.md),
-                TextFormField(
-                  controller: accountController,
-                  enabled: canEdit,
-                  keyboardType: TextInputType.phone,
-                  textInputAction: TextInputAction.next,
-                  decoration: InputDecoration(
-                    labelText: settlementMode == ManualSettlementMode.bank
-                        ? 'Account number'
-                        : 'Mobile money number',
-                    hintText: settlementMode == ManualSettlementMode.bank
-                        ? 'Enter account number'
-                        : '+233 ...',
-                  ),
-                  validator: (value) =>
-                      settlementMode == ManualSettlementMode.wallet ||
-                              (value?.trim().isNotEmpty ?? false)
-                          ? null
-                          : 'Enter the destination account.',
-                ),
-                const SizedBox(height: AppSpacing.md),
-                TextFormField(
-                  controller: nameController,
-                  enabled: canEdit,
-                  textInputAction: TextInputAction.done,
-                  decoration: const InputDecoration(
-                    labelText: 'Account or wallet name',
-                    hintText: 'Enter the recipient name',
-                  ),
-                  validator: (value) =>
-                      settlementMode == ManualSettlementMode.wallet ||
-                              (value?.trim().isNotEmpty ?? false)
-                          ? null
-                          : 'Enter the destination name.',
-                ),
+                const SizedBox(height: 12),
+                Text(
+                    sourceCurrency == 'NGN'
+                        ? 'We send your cedis after your naira payment is confirmed.'
+                        : 'We send your naira after your cedi payment is confirmed.',
+                    style: AppTextStyles.bodyS),
               ],
             ],
             const SizedBox(height: AppSpacing.md),
@@ -833,7 +903,9 @@ class _ExchangeForm extends StatelessWidget {
                 const SizedBox(width: AppSpacing.sm),
                 Expanded(
                   child: Text(
-                    'The server confirms the rate, fee, receive amount, receiving account, and expiry before you transfer.',
+                    step == 1
+                        ? 'Your PIN protects this exchange.'
+                        : 'Check the receiving details before you continue.',
                     style: AppTextStyles.bodyS,
                   ),
                 ),
@@ -847,6 +919,11 @@ class _ExchangeForm extends StatelessWidget {
             SizedBox(
               width: double.infinity,
               child: FilledButton.icon(
+                style: FilledButton.styleFrom(
+                    minimumSize: const Size(double.infinity, 54),
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 20, vertical: 14),
+                    textStyle: AppTextStyles.labelL),
                 onPressed: isSubmitting ? null : onSubmit,
                 icon: isSubmitting
                     ? const SizedBox(
@@ -869,8 +946,6 @@ class _ExchangeForm extends StatelessWidget {
                 ),
               ),
             ),
-            TextButton(
-                onPressed: canEdit ? onBack : null, child: const Text('Back')),
           ],
         ),
       ),
@@ -985,39 +1060,38 @@ class _SettlementChoice extends StatelessWidget {
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 180),
           width: double.infinity,
+          constraints: const BoxConstraints(minHeight: 52),
           padding: const EdgeInsets.symmetric(
-            horizontal: AppSpacing.md,
-            vertical: AppSpacing.sm + 2,
+            horizontal: 12,
+            vertical: 12,
           ),
           decoration: BoxDecoration(
-            color: selected ? AppColors.primary : AppColors.inputFill,
+            color: selected
+                ? AppColors.primary.withValues(alpha: 0.07)
+                : AppColors.surface,
             borderRadius: BorderRadius.circular(AppRadius.sm),
             border: Border.all(color: color, width: selected ? 1.5 : 1),
           ),
           child: Row(
             children: [
               Icon(
-                selected
-                    ? Icons.radio_button_checked_rounded
-                    : Icons.radio_button_unchecked_rounded,
-                color: selected ? Colors.white : AppColors.textHint,
-              ),
+                  switch (mode) {
+                    ManualSettlementMode.wallet =>
+                      Icons.account_balance_wallet_outlined,
+                    ManualSettlementMode.bank => Icons.account_balance_outlined,
+                    ManualSettlementMode.momo => Icons.phone_iphone_rounded,
+                  },
+                  size: 20,
+                  color:
+                      selected ? AppColors.primary : AppColors.textSecondary),
               const SizedBox(width: AppSpacing.sm),
               Expanded(
                 child: Text(mode.label,
                     style: AppTextStyles.labelM.copyWith(
                       fontWeight: FontWeight.w700,
-                      color: selected ? Colors.white : AppColors.textPrimary,
+                      color:
+                          selected ? AppColors.primary : AppColors.textPrimary,
                     )),
-              ),
-              Icon(
-                switch (mode) {
-                  ManualSettlementMode.wallet =>
-                    Icons.account_balance_wallet_outlined,
-                  ManualSettlementMode.bank => Icons.account_balance_outlined,
-                  ManualSettlementMode.momo => Icons.phone_iphone_rounded,
-                },
-                color: selected ? Colors.white : AppColors.textSecondary,
               ),
             ],
           ),

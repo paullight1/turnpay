@@ -51,7 +51,7 @@ done
 
 [ -n "$environment" ] || fail '--environment is required'
 case "$environment" in
-  production|staging)
+  production|staging|internal-android)
     ;;
   *)
     fail '--environment must be production or staging'
@@ -77,6 +77,7 @@ allowed_fields='[
   "SUPABASE_PUBLISHABLE_KEY",
   "SENTRY_DSN",
   "SENTRY_ENVIRONMENT",
+  "ANDROID_INTERNAL_SYSTEM_TLS",
   "API_CERTIFICATE_SHA256_PINS"
 ]'
 
@@ -237,12 +238,19 @@ supabase_url="$(value_of SUPABASE_URL)"
 sentry_dsn="$(value_of SENTRY_DSN)"
 sentry_environment="$(value_of SENTRY_ENVIRONMENT)"
 certificate_pins="$(value_of API_CERTIFICATE_SHA256_PINS)"
+android_internal_system_tls="$(value_of ANDROID_INTERNAL_SYSTEM_TLS)"
 
 require_value API_BASE_URL
 require_value WEBSITE_BASE_URL
 require_value SUPABASE_URL
 require_value SUPABASE_PUBLISHABLE_KEY
-require_value API_CERTIFICATE_SHA256_PINS
+if [ "$environment" = 'internal-android' ]; then
+  [ "$android_internal_system_tls" = 'true' ] || fail 'Android internal system TLS must be explicitly enabled'
+  [ -z "$certificate_pins" ] || fail 'Android internal system TLS must not include certificate pins'
+else
+  [ -z "$android_internal_system_tls" ] || fail 'Android internal system TLS is restricted to internal testing'
+  require_value API_CERTIFICATE_SHA256_PINS
+fi
 
 require_https_url API_BASE_URL "$api_base_url"
 require_https_url WEBSITE_BASE_URL "$website_base_url"
@@ -251,13 +259,13 @@ if [ -n "$sentry_dsn" ]; then
   require_value SENTRY_ENVIRONMENT
   require_sentry_dsn "$sentry_dsn"
 fi
-require_pins "$certificate_pins"
+[ "$environment" = 'internal-android' ] || require_pins "$certificate_pins"
 
 case "$environment" in
-  production)
+  production|internal-android)
     [ "$api_base_url" = 'https://api.trustpayhq.com' ] ||
       fail 'API_BASE_URL is not an allowlisted production host'
-    [ "$website_base_url" = 'https://trustpay.xyz' ] ||
+    [ "$website_base_url" = 'https://www.trustpayhq.com' ] ||
       fail 'WEBSITE_BASE_URL is not an allowlisted production host'
     [ -z "$sentry_dsn" ] || [ "$sentry_environment" = 'production' ] ||
       fail 'SENTRY_ENVIRONMENT must be production for a production build'
@@ -273,7 +281,7 @@ case "$environment" in
       fail 'SENTRY_ENVIRONMENT must be staging for a staging build'
     [ "$api_base_url" != 'https://api.trustpayhq.com' ] ||
       fail 'API_BASE_URL must target the staging environment'
-    [ "$website_base_url" != 'https://trustpay.xyz' ] ||
+    [ "$website_base_url" != 'https://www.trustpayhq.com' ] ||
       fail 'WEBSITE_BASE_URL must target the staging environment'
     reject_local_host API_BASE_URL "$api_base_url"
     reject_local_host WEBSITE_BASE_URL "$website_base_url"

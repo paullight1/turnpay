@@ -54,10 +54,24 @@ export class LedgerService {
     return this.postWalletMovement('DEBIT', input, client);
   }
 
+  /**
+   * Explicit operator-approved recovery is the only debit allowed to proceed
+   * while an adverse-funding case is being resolved. The caller must already
+   * be inside the audited serializable case transaction; normal debit callers
+   * have no flag that can accidentally bypass the global hold.
+   */
+  debitWalletForAdverseFunding(
+    input: WalletMovementInput,
+    client: LedgerClient,
+  ) {
+    return this.postWalletMovement('DEBIT', input, client, true);
+  }
+
   private async postWalletMovement(
     direction: LedgerDirection,
     input: WalletMovementInput,
     client?: LedgerClient,
+    adverseFundingResolution = false,
   ) {
     this.assertPositiveAmount(input.amount);
 
@@ -66,8 +80,10 @@ export class LedgerService {
         await this.settlementHold.assertOutboundAllowed(
           {
             operation: settlementOperationForSource(input.source),
+            userId: input.userId,
             currency: input.currency,
             reference: input.reference,
+            skipAdverseFundingHold: adverseFundingResolution,
           },
           tx,
         );

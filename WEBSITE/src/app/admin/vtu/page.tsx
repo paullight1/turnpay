@@ -398,13 +398,16 @@ export default function AdminVtuPage() {
       (order) => order.status === "PROCESSING",
     ).length;
     const unknown = orders.filter((order) => order.status === "UNKNOWN").length;
+    const actionRequired =
+      staleOrdersQuery.data?.actionRequiredCount ??
+      orders.filter((order) => order.actionRequired).length;
     const maxAttempts = orders.reduce(
       (max, order) => Math.max(max, order.attempts),
       0,
     );
 
-    return { pending, processing, unknown, maxAttempts };
-  }, [orders]);
+    return { pending, processing, unknown, maxAttempts, actionRequired };
+  }, [orders, staleOrdersQuery.data?.actionRequiredCount]);
 
   const reconciliationExceptions = useMemo(
     () => buildExceptionRows(reconciliationQuery.data?.exceptions),
@@ -619,7 +622,7 @@ export default function AdminVtuPage() {
           </div>
         </div>
 
-        <div className="grid gap-3 md:grid-cols-4">
+        <div className="grid gap-3 md:grid-cols-5">
           <Card size="sm">
             <CardContent className="p-4">
               <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Stale orders</p>
@@ -648,6 +651,13 @@ export default function AdminVtuPage() {
               <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Max attempts</p>
               <p className="text-2xl font-semibold">{summary.maxAttempts}</p>
               <p className="text-xs text-muted-foreground">{summary.unknown} unknown status</p>
+            </CardContent>
+          </Card>
+          <Card size="sm" className={summary.actionRequired > 0 ? "border-destructive/50" : undefined}>
+            <CardContent className="p-4">
+              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Action required</p>
+              <p className="text-2xl font-semibold">{summary.actionRequired}</p>
+              <p className="text-xs text-muted-foreground">Retry limit reached; supervise recovery</p>
             </CardContent>
           </Card>
         </div>
@@ -1149,7 +1159,9 @@ export default function AdminVtuPage() {
           <CardHeader className="gap-1">
             <CardTitle>Delayed orders</CardTitle>
             <CardDescription>
-              Orders older than {olderThanMinutes} minutes that may need a requery.
+              Includes unresolved orders older than {olderThanMinutes} minutes and
+              every order that has exhausted automatic checks. Requery only the
+              original operation; this queue never refunds or resends silently.
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -1276,6 +1288,11 @@ export default function AdminVtuPage() {
                             <Badge variant={statusVariant(order.status)}>
                               {humanize(order.status)}
                             </Badge>
+                            {order.actionRequired && (
+                              <Badge variant="destructive">
+                                Manual recovery required
+                              </Badge>
+                            )}
                             <Badge
                               variant={statusVariant(order.transactionStatus)}
                             >
@@ -1298,7 +1315,7 @@ export default function AdminVtuPage() {
                             disabled={requeryMutation.isPending}
                             onClick={() => openRequeryDialog(order)}
                           >
-                            Requery
+                            {order.actionRequired ? "Manual requery" : "Requery"}
                           </Button>
                         </TableCell>
                       </TableRow>
@@ -1501,6 +1518,18 @@ export default function AdminVtuPage() {
                   {formatMoney(selectedOrder.amount, selectedOrder.currency)}
                 </p>
               </div>
+              {selectedOrder.actionRequired && (
+                <div className="sm:col-span-2 rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm">
+                  <p className="font-medium text-destructive">
+                    Automatic recovery has stopped after {selectedOrder.attempts} checks.
+                  </p>
+                  <p className="mt-1 text-muted-foreground">
+                    Requery the original provider operation with a reason. Do not
+                    create a replacement purchase, refund, or resend while the
+                    outcome is unresolved.
+                  </p>
+                </div>
+              )}
             </div>
           )}
 

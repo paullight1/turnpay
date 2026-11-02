@@ -9,10 +9,12 @@ class VtuPageHeader extends StatelessWidget {
       {super.key,
       required this.title,
       required this.onBack,
-      this.showBackButton = true});
+      this.showBackButton = true,
+      this.trailing});
   final String title;
   final VoidCallback onBack;
   final bool showBackButton;
+  final Widget? trailing;
   @override
   Widget build(BuildContext context) => Row(children: [
         if (showBackButton) ...[
@@ -25,8 +27,86 @@ class VtuPageHeader extends StatelessWidget {
               icon: const Icon(Icons.arrow_back_rounded)),
           const SizedBox(width: 14),
         ],
-        Expanded(child: Text(title, style: AppTextStyles.headingL)),
+        Expanded(
+            child: Text(title,
+                style: AppTextStyles.headingL,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis)),
+        if (trailing != null) ...[const SizedBox(width: 8), trailing!],
       ]);
+}
+
+/// Country availability comes from the service, never from the flag itself.
+class VtuCountryMenu {
+  const VtuCountryMenu(
+      {required this.countries,
+      required this.value,
+      required this.onChanged,
+      this.disabledCountries = const {},
+      this.enabled = true});
+  final Map<String, String> countries;
+  final String? value;
+  final ValueChanged<String> onChanged;
+  final Set<String> disabledCountries;
+  final bool enabled;
+}
+
+class VtuCountrySelector extends StatelessWidget {
+  const VtuCountrySelector(
+      {super.key, required this.menu, this.enabled = true});
+  final VtuCountryMenu menu;
+  final bool enabled;
+
+  static String flag(String code) {
+    if (!RegExp(r'^[A-Z]{2}$').hasMatch(code)) return '🌍';
+    return String.fromCharCodes(code.codeUnits.map((unit) => unit + 127397));
+  }
+
+  @override
+  Widget build(BuildContext context) => PopupMenuButton<String>(
+        tooltip: 'Service country',
+        enabled: enabled && menu.enabled && menu.countries.isNotEmpty,
+        onSelected: menu.onChanged,
+        itemBuilder: (_) => menu.countries.entries
+            .map((entry) => PopupMenuItem<String>(
+                  value: entry.key,
+                  enabled: !menu.disabledCountries.contains(entry.key),
+                  child: Row(children: [
+                    ExcludeSemantics(
+                        child: Text(flag(entry.key),
+                            style: const TextStyle(fontSize: 22))),
+                    const SizedBox(width: 12),
+                    Expanded(
+                        child: Text(
+                            '${entry.value}${menu.disabledCountries.contains(entry.key) ? ' (coming soon)' : ''}')),
+                    if (entry.key == menu.value)
+                      const Icon(Icons.check_rounded, size: 20),
+                  ]),
+                ))
+            .toList(),
+        child: Semantics(
+          label:
+              'Service country: ${menu.countries[menu.value] ?? 'Choose country'}',
+          button: true,
+          child: Container(
+            constraints: const BoxConstraints(minHeight: 48, minWidth: 88),
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            decoration: BoxDecoration(
+                color: AppColors.surface,
+                borderRadius: BorderRadius.circular(24),
+                border: Border.all(color: AppColors.border)),
+            child: ExcludeSemantics(
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+              Text(flag(menu.value ?? ''),
+                  style: const TextStyle(fontSize: 22)),
+              const SizedBox(width: 6),
+              Text(menu.value ?? 'Country', style: AppTextStyles.labelM),
+              const SizedBox(width: 4),
+              const Icon(Icons.keyboard_arrow_down_rounded, size: 20),
+            ])),
+          ),
+        ),
+      );
 }
 
 class VtuProviderLogo extends StatelessWidget {

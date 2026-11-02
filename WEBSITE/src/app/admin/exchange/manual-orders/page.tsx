@@ -11,7 +11,9 @@ import { createManualExchangeIdempotencyKey } from "@/lib/idempotency";
 import { maskAccountNumber } from "@/lib/privacy";
 import {
   adminManualExchangeApi,
+  adminUserApi,
   type AdminManualExchangeOrder,
+  type AdminManualExchangePayoutOutcome,
   type AdminManualExchangeReviewAction,
   type AdminManualExchangeReviewInput,
   type ManualExchangeProofKind,
@@ -122,6 +124,7 @@ type ActionPanel =
   | "REQUEST_INFO"
   | "REJECT"
   | "CLAIM_PAYOUT"
+  | "HANDOVER_PAYOUT"
   | "MARK_SENT"
   | "RECORD_CEDIS_SENT"
   | "COMPLETE";
@@ -238,6 +241,8 @@ function actionLabel(
       return order?.targetCurrency === "GHS"
         ? "Start cedi transfer"
         : "Claim payout";
+    case "HANDOVER_PAYOUT":
+      return "Handover payout under supervision";
     case "MARK_SENT":
       return "Mark payout as sent";
     case "RECORD_CEDIS_SENT":
@@ -259,12 +264,27 @@ function reviewSuccessMessage(action: AdminManualExchangeReviewAction) {
       return "Order rejected";
     case "CLAIM_PAYOUT":
       return "Payout claimed for this admin";
+    case "HANDOVER_PAYOUT":
+      return "Payout handover recorded; no automatic resend was made";
     case "MARK_SENT":
       return "Payout marked as sent";
     case "RECORD_CEDIS_SENT":
       return "Cedi transfer recorded and exchange completed";
     case "COMPLETE":
       return "Settlement completed";
+  }
+}
+
+function payoutOutcomeLabel(value: AdminManualExchangePayoutOutcome) {
+  switch (value) {
+    case "NOT_SENT":
+      return "Confirmed not sent — new owner may send";
+    case "CONFIRMED_FAILED":
+      return "Confirmed failed — new owner may retry";
+    case "ALREADY_SENT":
+      return "Already sent — record evidence only";
+    case "UNKNOWN":
+      return "Unknown — do not reassign or send";
   }
 }
 
@@ -334,6 +354,9 @@ export default function AdminManualExchangeOrdersPage() {
   const [acceptExpiredQuote, setAcceptExpiredQuote] = useState(false);
   const [payoutReference, setPayoutReference] = useState("");
   const [payoutAmount, setPayoutAmount] = useState("");
+  const [handoverToAdminId, setHandoverToAdminId] = useState("");
+  const [payoutOutcome, setPayoutOutcome] =
+    useState<AdminManualExchangePayoutOutcome | "">("");
   const [payoutProofFile, setPayoutProofFile] = useState<File | null>(null);
   const [payoutProofObjectKey, setPayoutProofObjectKey] = useState<
     string | null
@@ -448,6 +471,13 @@ export default function AdminManualExchangeOrdersPage() {
     refetchInterval: isForeground ? 60_000 : false,
   });
 
+  const adminDirectoryQuery = useQuery({
+    queryKey: ["manual-exchange-admin-directory", user?.id],
+    queryFn: async () => (await adminUserApi.getUsers("ADMIN")).data.users,
+    enabled: isAdmin,
+    staleTime: 60_000,
+  });
+
   const orders = useMemo(
     () => ordersQuery.data?.pages.flatMap((page) => page.items) ?? [],
     [ordersQuery.data],
@@ -455,6 +485,9 @@ export default function AdminManualExchangeOrdersPage() {
   const latestReconciliation = reconciliationQuery.data?.[0] ?? null;
   const selectedOrder =
     orders.find((order) => order.id === selectedOrderId) ?? null;
+  const handoverAdmins = (adminDirectoryQuery.data ?? []).filter(
+    (admin) => !admin.isSuspended && admin.id !== selectedOrder?.payoutClaimedBy,
+  );
 
   const queueCounts = useMemo(() => {
     const counts = ordersQuery.data?.pages[0]?.counts ?? {};
@@ -477,6 +510,8 @@ export default function AdminManualExchangeOrdersPage() {
     setAcceptExpiredQuote(false);
     setPayoutReference("");
     setPayoutAmount("");
+    setHandoverToAdminId("");
+    setPayoutOutcome("");
     setPayoutProofFile(null);
     setPayoutProofObjectKey(null);
     setFormError(null);
@@ -525,19 +560,30 @@ export default function AdminManualExchangeOrdersPage() {
 
   const uploadProofMutation = useMutation({
     mutationFn: async ({ orderId, file }: { orderId: string; file: File }) => {
+      const isHandover = actionPanel === "HANDOVER_PAYOUT";
+      const uploadAction = isHandover
+        ? "upload:handover-payout-proof"
+        : "upload:payout-proof";
       const idempotencyKey = getAttemptKey({
         orderId,
-        action: "upload:payout-proof",
+        action: uploadAction,
       });
-      const response = await adminManualExchangeApi.createUploadUrl(
-        orderId,
-        {
-          fileName: sanitizeFileName(file.name),
-          contentType: file.type,
-          fileSize: file.size,
-        },
-        idempotencyKey,
-      );
+      const uploadRequest = {
+        fileName: sanitizeFileName(file.name),
+        contentType: file.type,
+        fileSize: file.size,
+      };
+      const response = isHandover
+        ? await adminManualExchangeApi.createHandoverUploadUrl(
+            orderId,
+            uploadRequest,
+            idempotencyKey,
+          )
+        : await adminManualExchangeApi.createUploadUrl(
+            orderId,
+            uploadRequest,
+            idempotencyKey,
+          );
       const upload = response.data;
       const putResponse = await fetch(upload.signedUrl, {
         method: "PUT",
@@ -552,7 +598,7 @@ export default function AdminManualExchangeOrdersPage() {
         throw new Error("The proof upload was not accepted by storage.");
       }
 
-      clearAttemptKey({ orderId, action: "upload:payout-proof" });
+      clearAttemptKey({ orderId, action: uploadAction });
       return { objectKey: upload.objectKey };
     },
     onSuccess: ({ objectKey }) => {
@@ -648,6 +694,49 @@ export default function AdminManualExchangeOrdersPage() {
       input.payoutProofObjectKey = payoutProofObjectKey;
     }
 
+    if (actionPanel === "HANDOVER_PAYOUT") {
+      if (!handoverToAdminId) {
+        setFormError("Choose an active administrator to receive this payout claim");
+        return;
+      }
+      if (!payoutOutcome) {
+        setFormError("Classify the real bank or MoMo payout outcome first");
+        return;
+      }
+      if (payoutOutcome === "UNKNOWN") {
+        setFormError(
+          "An unknown outcome cannot be handed over. Reconcile the original payout before acting.",
+        );
+        return;
+      }
+      if (!payoutProofObjectKey) {
+        setFormError(
+          "Upload the protected evidence of the checked payout outcome before handing over",
+        );
+        return;
+      }
+      input.handoverToAdminId = handoverToAdminId;
+      input.payoutOutcome = payoutOutcome;
+      input.payoutProofObjectKey = payoutProofObjectKey;
+      if (payoutOutcome === "ALREADY_SENT") {
+        const payoutResult = referenceSchema.safeParse(payoutReference);
+        const amountResult = amountSchema.safeParse(payoutAmount);
+        if (!payoutResult.success) {
+          setFormError(
+            payoutResult.error.issues[0]?.message ??
+              "Enter the confirmed payout reference",
+          );
+          return;
+        }
+        if (!amountResult.success) {
+          setFormError("Enter the exact frozen payout amount already sent");
+          return;
+        }
+        input.payoutReference = payoutResult.data;
+        input.payoutAmount = amountResult.data;
+      }
+    }
+
     const idempotencyKey = getAttemptKey({
       orderId: selectedOrder.id,
       action: `review:${actionPanel}`,
@@ -729,6 +818,10 @@ export default function AdminManualExchangeOrdersPage() {
     Boolean(user.id) && selectedOrder?.payoutClaimedBy === user.id;
   const canMarkSent =
     selectedOrder?.status === "PAYOUT_PROCESSING" && ownsPayoutClaim;
+  const canHandoverPayout =
+    selectedOrder?.status === "PAYOUT_PROCESSING" &&
+    Boolean(selectedOrder.payoutClaimedBy) &&
+    !ownsPayoutClaim;
   const canComplete = selectedOrder?.status === "PAYOUT_SENT";
   const reviewDisabled =
     reviewMutation.isPending || uploadProofMutation.isPending;
@@ -1335,11 +1428,21 @@ export default function AdminManualExchangeOrdersPage() {
                             <CircleAlert className="mt-0.5 size-4 shrink-0" />
                             <span>
                               {selectedOrder.payoutClaimedBy
-                                ? "This payout is claimed by another admin. The owner must continue it."
+                                ? "This payout is claimed by another admin. Check the real bank/MoMo outcome before a supervised handover; an unknown outcome must not be reassigned."
                                 : "Claim ownership is required before sending evidence."}
                             </span>
                           </div>
                         )}
+                      {canHandoverPayout && (
+                        <Button
+                          variant="outline"
+                          onClick={() => openAction("HANDOVER_PAYOUT")}
+                          disabled={reviewDisabled}
+                        >
+                          <ShieldCheck className="size-4" />
+                          Supervised handover
+                        </Button>
+                      )}
                       {canMarkSent && (
                         <Button
                           onClick={() =>
@@ -1368,6 +1471,7 @@ export default function AdminManualExchangeOrdersPage() {
                       )}
                       {!canReviewDeposit &&
                         !canClaimPayout &&
+                        !canHandoverPayout &&
                         !canMarkSent &&
                         !canComplete &&
                         selectedOrder.status !== "PAYOUT_PROCESSING" && (
@@ -1463,8 +1567,80 @@ export default function AdminManualExchangeOrdersPage() {
                           </label>
                         )}
 
+                      {actionPanel === "HANDOVER_PAYOUT" && (
+                        <div className="space-y-4 rounded-lg border border-amber-500/25 bg-amber-500/10 p-3">
+                          <div className="space-y-2">
+                            <Label htmlFor="manual-handover-admin">
+                              Receiving administrator
+                            </Label>
+                            <Select
+                              value={handoverToAdminId}
+                              onValueChange={setHandoverToAdminId}
+                              disabled={reviewDisabled}
+                            >
+                              <SelectTrigger id="manual-handover-admin">
+                                <SelectValue placeholder="Choose an active admin" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {handoverAdmins.map((admin) => (
+                                  <SelectItem key={admin.id} value={admin.id}>
+                                    {admin.fullName?.trim() || admin.email}
+                                    {admin.fullName?.trim()
+                                      ? ` · ${admin.email}`
+                                      : ""}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                            {handoverAdmins.length === 0 && (
+                              <p className="text-xs text-amber-100/80">
+                                No other active administrator is available. Do
+                                not release this claim manually.
+                              </p>
+                            )}
+                          </div>
+                          <div className="space-y-2">
+                            <Label htmlFor="manual-payout-outcome">
+                              Real-world payout outcome
+                            </Label>
+                            <Select
+                              value={payoutOutcome}
+                              onValueChange={(value) =>
+                                setPayoutOutcome(
+                                  value as AdminManualExchangePayoutOutcome,
+                                )
+                              }
+                              disabled={reviewDisabled}
+                            >
+                              <SelectTrigger id="manual-payout-outcome">
+                                <SelectValue placeholder="Choose the checked outcome" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {(
+                                  [
+                                    "NOT_SENT",
+                                    "CONFIRMED_FAILED",
+                                    "ALREADY_SENT",
+                                  ] as const
+                                ).map((outcome) => (
+                                  <SelectItem key={outcome} value={outcome}>
+                                    {payoutOutcomeLabel(outcome)}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                            <p className="text-xs text-muted-foreground">
+                              An unknown or pending provider result cannot be
+                              handed over or resent. Reconcile the original
+                              claim first.
+                            </p>
+                          </div>
+                        </div>
+                      )}
+
                       {(actionPanel === "MARK_SENT" ||
-                        actionPanel === "RECORD_CEDIS_SENT") && (
+                        actionPanel === "RECORD_CEDIS_SENT" ||
+                        actionPanel === "HANDOVER_PAYOUT") && (
                         <div className="space-y-4">
                           {actionPanel === "RECORD_CEDIS_SENT" && (
                             <div className="space-y-2">
@@ -1488,24 +1664,52 @@ export default function AdminManualExchangeOrdersPage() {
                               />
                             </div>
                           )}
-                          <div className="space-y-2">
-                            <Label htmlFor="manual-payout-reference">
-                              Actual payout reference
-                            </Label>
-                            <Input
-                              id="manual-payout-reference"
-                              value={payoutReference}
-                              onChange={(event) =>
-                                setPayoutReference(event.target.value)
-                              }
-                              placeholder="Reference from the external transfer"
-                              maxLength={120}
-                              disabled={
-                                reviewMutation.isPending ||
-                                uploadProofMutation.isPending
-                              }
-                            />
-                          </div>
+                          {(actionPanel !== "HANDOVER_PAYOUT" ||
+                            payoutOutcome === "ALREADY_SENT") && (
+                            <div className="space-y-2">
+                              <Label htmlFor="manual-payout-reference">
+                                {actionPanel === "HANDOVER_PAYOUT"
+                                  ? "Confirmed payout reference"
+                                  : "Actual payout reference"}
+                              </Label>
+                              <Input
+                                id="manual-payout-reference"
+                                value={payoutReference}
+                                onChange={(event) =>
+                                  setPayoutReference(event.target.value)
+                                }
+                                placeholder={
+                                  actionPanel === "HANDOVER_PAYOUT"
+                                    ? "Reference from the settled transfer"
+                                    : "Reference from the external transfer"
+                                }
+                                maxLength={120}
+                                disabled={
+                                  reviewMutation.isPending ||
+                                  uploadProofMutation.isPending
+                                }
+                              />
+                            </div>
+                          )}
+                          {actionPanel === "HANDOVER_PAYOUT" &&
+                            payoutOutcome === "ALREADY_SENT" && (
+                              <div className="space-y-2">
+                                <Label htmlFor="manual-payout-amount">
+                                  Exact amount already sent
+                                </Label>
+                                <Input
+                                  id="manual-payout-amount"
+                                  value={payoutAmount}
+                                  onChange={(event) =>
+                                    setPayoutAmount(event.target.value)
+                                  }
+                                  inputMode="decimal"
+                                  maxLength={14}
+                                  placeholder={selectedOrder.targetAmount}
+                                  disabled={reviewDisabled}
+                                />
+                              </div>
+                            )}
                           <div className="space-y-2">
                             <Label htmlFor="manual-payout-proof">
                               Protected payout proof
@@ -1529,7 +1733,10 @@ export default function AdminManualExchangeOrdersPage() {
                                   ) {
                                     clearAttemptKey({
                                       orderId: selectedOrder.id,
-                                      action: "upload:payout-proof",
+                                      action:
+                                        actionPanel === "HANDOVER_PAYOUT"
+                                          ? "upload:handover-payout-proof"
+                                          : "upload:payout-proof",
                                     });
                                   }
                                   setPayoutProofFile(file);

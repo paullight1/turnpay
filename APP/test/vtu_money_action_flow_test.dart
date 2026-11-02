@@ -1,3 +1,4 @@
+import 'package:flutter/services.dart';
 import 'package:flutter/material.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -131,7 +132,8 @@ void main() {
     expect(find.text('Continue to bank details'), findsNothing);
   });
 
-  testWidgets('country switching preserves a ported number network override',
+  testWidgets(
+      'unavailable country selection preserves a ported number network override',
       (tester) async {
     await render(tester, MoneyActionKind.airtime, includeVtuProviders: true);
     final phone = find.byWidgetPredicate(
@@ -140,13 +142,11 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.bySemanticsLabel('Airtel network'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Nigeria').first);
+    await tester.tap(find.byTooltip('Service country').first);
     await tester.pumpAndSettle();
-    await tester.tap(find.text('International').last);
+    await tester.tap(find.text('Ghana (coming soon)'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('International').first);
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Nigeria').last);
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await tester.pumpAndSettle();
     expect(find.text('Airtel selected manually'), findsOneWidget);
     await tester.tap(find.text('Continue to amount'));
@@ -233,11 +233,11 @@ void main() {
         home: MoneyActionScreen(
             kind: MoneyActionKind.airtime, apiClient: bundle.apiClient)));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Nigeria').first);
+    await tester.tap(find.byTooltip('Service country').first);
     await tester.pumpAndSettle();
     await tester.tap(find.text('International').last);
     await tester.pumpAndSettle();
-    expect(find.text('Destination country'), findsOneWidget);
+    expect(find.byTooltip('Service country'), findsOneWidget);
     expect(find.text('Ghana (coming soon)'), findsNothing);
   });
 
@@ -246,12 +246,17 @@ void main() {
   ) async {
     final bundle = await render(tester, MoneyActionKind.airtime);
 
-    await tester.tap(find.text('Nigeria').first);
-    await tester.pump(const Duration(milliseconds: 300));
-    await tester.tap(find.text('International').last);
+    await tester.tap(find.byTooltip('Service country').first);
     await tester.pump(const Duration(milliseconds: 300));
 
     expect(find.text('Ghana (coming soon)'), findsOneWidget);
+    expect(
+        tester
+            .widget<PopupMenuItem<String>>(find.ancestor(
+                of: find.text('Ghana (coming soon)'),
+                matching: find.byType(PopupMenuItem<String>)))
+            .enabled,
+        isFalse);
     final providerRequests = bundle.adapter.requestedUris.where(
       (uri) => uri.path == '/api/vtu/providers',
     );
@@ -268,7 +273,7 @@ void main() {
   ) async {
     await render(tester, MoneyActionKind.data);
 
-    await tester.tap(find.text('Nigeria').first);
+    await tester.tap(find.byTooltip('Service country').first);
     await tester.pump(const Duration(milliseconds: 300));
 
     expect(find.text('Ghana (coming soon)'), findsOneWidget);
@@ -283,7 +288,7 @@ void main() {
   ) async {
     await render(tester, MoneyActionKind.electricity);
 
-    await tester.tap(find.text('Nigeria').first);
+    await tester.tap(find.byTooltip('Service country').first);
     await tester.pump(const Duration(milliseconds: 300));
 
     expect(find.text('Ghana (coming soon)'), findsOneWidget);

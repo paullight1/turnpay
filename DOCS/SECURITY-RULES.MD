@@ -412,7 +412,7 @@ async handleMonnifyWebhook(
 
 **13.1** Store JWT tokens in `flutter_secure_storage` — never in `SharedPreferences`.
 
-**13.2** Implement certificate pinning for production builds.
+**13.2** Implement certificate pinning for production builds. Owner-approved exception on 1 November 2026: the Android internal-testing build may use standard certificate and hostname validation against the production API while Render manages certificate rotation. This exception does not authorize a public production release; review the transport policy and rotation plan before production promotion.
 
 **13.3** Enable Android `android:usesCleartextTraffic="false"` — no HTTP traffic.
 
@@ -575,3 +575,110 @@ KYC review experience validation: all 400 Flutter tests passed, analyzer reporte
 ### 2026-10-31 email OTP and optional Sentry follow-up
 
 At the owner's explicit instruction, Sentry is optional in backend startup and mobile release builds; supplied DSNs retain HTTPS/host validation, and structured logging/audit remain enabled. Customer OTP delivery/verification uses Supabase email rather than Twilio. DTOs validate normalized email plus six digits; existing auth idempotency policies remain in force. Redis bounds each challenge to five minutes and three provider attempts, atomically consumes success and prevents late results from deleting a newer challenge. Provider tokens/sessions are not exposed by the OTP API; SDK clients have isolated state. Email verification grants no phone or KYC verification. Authenticated PIN reset binds its code to the saved email and preserves security holds. Live email acceptance still requires verified SMTP/template settings and genuine provider delivery; no live verification was fabricated.
+
+
+### Exchange functional QA and supported home currencies — 1 November 2026
+
+Exchange verification passed 88 focused unit/controller, 37 real-PostgreSQL financial and 29 HTTP contract tests using synthetic fixtures and faked external boundaries. Flutter exchange/home checks passed 43 tests; the final home cleanup rerun passed eight tests and analysis is clean. Browser checks exercised 26 desktop/mobile scenarios; the one initial mobile navigation failure was an assumption that the desktop sidebar was visible. The test now opens the phone menu, and targeted desktop/mobile reruns passed. A separate failing named-dialog assertion verified the missing menu accessibility title before adding a visually hidden title/description; the final two-browser-case run passed with web types and scoped lint clean.
+
+The requested unsupported-currency home section and its local preferences/unused cards were removed. NGN/GHS cards, balance privacy, account setup, transaction navigation and server balances remain intact. The UI change does not delete wallet/account records; no financial or authorization policy was relaxed, and no production flags or provider credentials were changed. The local manual exchange path is disabled with receiving details absent; the actual app correctly blocks new requests. Kora remains unactivated. One unrelated in-progress KYC recovery assertion failed in the broad backend run and is explicitly documented; the whole backend is not claimed green. No live transfer, genuine identity submission, deployment or push was performed. See `DOCS/EXCHANGE-FUNCTIONAL-QA-2026-11-01.md` for boundaries and evidence.
+
+
+### Manual exchange receiving-account activation — 1 November 2026
+
+At the owner's request, the supplied dedicated NGN and GHS merchant receiving details were configured only in the ignored mode-0600 local environment, after explicit confirmation of the MoMo recipient name. A read-only lookup found no overlap with a customer virtual account. The API now reports direction-specific receiving readiness without exposing the account data, and Flutter validates the capability before enabling a direction or swap. Existing create/replay guards, KYC/PIN, Decimal/fresh-rate checks, settlement holds, proof requirements, deposit allocation and financial audits remain authoritative. No wallet balance or live payment was changed.
+
+Readiness/direction regressions were observed failing and passing. Verification: 673 backend tests, 417 Flutter tests and 20 disposable-PostgreSQL financial tests passed; backend build, scoped ESLint and Flutter analysis passed. A separate whole-repository TypeScript check reports pre-existing KYC/OTP test-mock errors, documented in `DOCS/EXCHANGE-ACTIVATION-2026-11-01.md`. The actual preview now opens both directions. No live FX API is configured, so the stale fallback remains display-only and cannot authorize an order; approved rate/feed setup is pending the owner's answer. Kora and production deployment remain unchanged.
+
+
+### Admin-controlled exchange prices — 1 November 2026
+
+The owner selected admin-set rates. `FX_RATE_SOURCE=admin` is now the validated default; authoritative reads require an active positive admin rate for the exact direction and never substitute provider/cache/fallback data. Admin prices retain explicit expiry validation but are not subject to the API feed's 60-second freshness window. API mode remains explicit and preserves its existing safeguards. Startup/cron cannot overwrite rates in admin mode. Read-only missing-rate metadata contains null prices and enables honest customer/admin empty states; order creation still rejects absent rates.
+
+The existing rate-save endpoint retains JWT/ADMIN guards, DTOs, throttling, idempotency and transactional override audits. Decimal financial calculations, KYC/PIN, settlement holds, deposit/proof controls and frozen order amounts remain unchanged. No actual commercial price or live payment was submitted. A disposable-PostgreSQL lifecycle regression verifies that changing the admin price after order creation does not change the exact-once wallet credit.
+
+Validation: 683 backend tests, 419 Flutter tests and 26 disposable-PostgreSQL financial tests passed. The final mobile consumer rerun passed 16 tests; Flutter analysis, backend production build, final scoped backend/web ESLint and web TypeScript checks passed. Mocked desktop/mobile admin first-price setup passed two browser cases. Details and operator instructions are in `DOCS/ADMIN-EXCHANGE-RATES-2026-11-01.md`. Local private configuration uses admin mode; no production deployment or Git push occurred.
+
+
+### Exchange amount-page UI refactor — 1 November 2026
+
+The mobile amount screen now keeps NGN/GHS codes and full currency names visible, separates send/estimated receive amounts, names the direction, enlarges touch targets and uses plain payment-review copy. A read-only Check rate action reloads the preview while preserving the source draft; existing generation checks reject late results. It neither saves a commercial rate nor creates an order. Exact rational preview arithmetic, source validation, configured/stale metadata, server quote authority, KYC/PIN, durable idempotency and settlement controls remain intact. The old whole-unit amount-in-words captions were removed rather than suggesting fractional amounts were whole numbers.
+
+Verification: the new draft-preserving rate-retry regression failed before implementation and passed afterward. All 31 scoped exchange converter/screen/service tests passed, including 320px dark mode with 150% text, phone/desktop entry and existing recovery/receiving paths; Flutter analysis reported no issues. Initial form-navigation test taps were outside a 600px test viewport; the tests now scroll to the action before tapping. No live financial mutation, production deployment or Git push was performed.
+
+
+### Exchange header back navigation — 1 November 2026
+
+The footer Back button was moved to the existing arrow beside the Exchange header title. It returns one exchange step while preserving the draft; at the chooser, the existing route-level navigation policy remains. Step-back is unavailable during submission or unresolved create recovery, and a stale handler cannot decrement below the chooser. No shared header component, financial calculation, API, provider, KYC/PIN, idempotency or audit behavior changed.
+
+The header navigation regression was reproduced against the previous UI and passed with the change. All 17 scoped screen/converter tests passed; final scoped Flutter analysis reported no issues. No order, payment, commercial rate save, production deployment or Git push was submitted.
+
+
+### Admin exchange-rate navigation — 1 November 2026
+
+The Exchange rates menu destination now renders the existing audited editor above the exchange queues, as well as on Overview. Live admin inspection initially showed both directions unset; the old values matched the sample system rates in the seed file. No sample rate was promoted. The owner subsequently saved a price themselves. Existing DTO, JWT/ADMIN, idempotency, transactional audit and rate-source controls remain authoritative.
+
+Desktop regression reproduced the missing editor. The corrected browser run reported two passed desktop/mobile scenarios using synthetic prices; the runner was interrupted during stalled teardown (exit 130), so a clean overall runner exit is not claimed. Actual phone-size signed-in admin inspection confirmed the editor and empty state. Web TypeScript, scoped ESLint and whitespace checks passed. No agent-submitted live price, payment, order, production deployment or Git push occurred.
+
+
+### Independent exchange direction editors — 1 November 2026
+
+The admin now sees two fixed-direction price editors together, with full source-unit labels, explicit customer receive sentences, independent Saved/Not set status and direction-specific save buttons. Currency selectors were removed to reduce direction mistakes. Saving one editor cannot infer or populate the opposite price. Drafts and mutation attempts remain isolated per pair; existing JWT/ADMIN, DTO, idempotency, financial audit and Decimal server quote controls remain unchanged. No new monetary arithmetic, API, schema or financial mutation was introduced.
+
+The owner saved a live price while the agent was investigating; the agent has not submitted, inverted or replaced it. Its intended units and the opposite price are awaiting owner clarification, so neither sample rates nor an inferred reciprocal were activated.
+
+The direction-clarity regression failed before the UI change and passed afterward on separate desktop and Mobile Chrome runs (one test each, both exit 0). It verifies isolated pair payloads, zero additional markup, idempotency headers and that the opposite input stays unset after the first save. Web TypeScript and scoped ESLint passed. Actual phone/desktop admin inspection confirmed the source units, saved first direction and unset second direction; the viewport override was reset. No payment, order, production deployment or Git push was submitted.
+
+
+### Confirmed independent prices and comparison — 1 November 2026
+
+The owner clarified both direction units and an approximate reverse price. After the owner restored their admin session, the reverse rate was saved through the existing signed-in editor and protected idempotent endpoint, with its transactional FX override audit confirmed read-only. The already-saved forward price was preserved. Existing four-decimal storage and six-decimal/manual receive round-down policy were retained and their approximation was explained before submission. No direct database mutation, guard bypass, permission change, live order or fund transfer occurred.
+
+The reverse editor now calculates a display-only minimum send amount covering one naira. Parsing and rounding use bounded BigInt rational arithmetic, with source minor units rounded upward to agree with the server's receive round-down rule. It does not modify either price, determine a payable quote or replace the server's eligibility, PIN, idempotency, settlement or audit controls.
+
+The initial cold-route test failed before reaching the comparison; the test now waits explicitly for the editor. A subsequent replay against the previous component failed on the missing comparison. Final separate desktop and Mobile Chrome runs each passed with exit 0, as did web TypeScript, scoped ESLint and whitespace checks. Read-only production-service calculations and actual customer previews verified the saved rates in both directions. Customer swapping loaded the separate opposite price and the missing-rate message cleared. No production code deployment or Git push occurred.
+
+
+### Compact admin converter presentation — 1 November 2026
+
+At the owner's request, both independent rate editors now use the customer converter visual pattern: fixed one-unit Customer sends field, editable Customer gets field, currency badges, clear direction and a short Save rate button. Repeated explanatory paragraphs were removed. The source-unit contract, exact display comparison helper, price values, per-pair drafts/query keys, zero extra markup and idempotent API mutation remain intact. Buttons keep direction-specific accessible names, and editable amount panels have visible keyboard focus. No backend, authorization, money arithmetic or rate-storage policy changed.
+
+Existing browser regressions passed separately on desktop and Mobile Chrome (one case each, both exit 0), verifying isolated direction saves, exact pair payloads, idempotency and comparison boundaries. Web TypeScript, scoped ESLint and whitespace checks passed. Actual signed-in phone-size inspection confirmed both simplified forms and the existing Saved prices. No live Save, price change, payment, order, production deployment or Git push was submitted in this presentation phase.
+
+### Pending KYC explanation and VTU country headers — 2 November 2026
+
+Read-only account/provider diagnostics and the normal authenticated BVN reconciliation action confirmed the existing validation is pending: Paystack reports unidentified, provider event history is complete without a matching terminal result, and no identification callback exists in the customer's local inbox. The accepted request was not resubmitted or promoted to verified. NIN remains in the audited manual-review queue, with its nonempty PDF confirmed in a private bucket. No real reviewer decision, permission change, account opening or financial transaction was performed. Diagnostic output and the report omit identity numbers, bank numbers, document paths, signed URLs and credentials.
+
+Home now distinguishes submitted checks from checks not started. Account setup guidance opens verification status while identity is pending. Shared flag dropdowns replace inline country rows in the Airtime, Data, Electricity and Cable TV headers; specialist international airtime uses actual provider destinations. Unavailable markets remain disabled, country changes invalidate old operator/plan/quote state, and reselecting the current country preserves the draft. Country controls are disabled during submission and unresolved orders. Existing server validation, KYC/tier gates, PIN approval, idempotency, audited decisions, webhook signature checks and transactional balance logic remain unchanged.
+
+Home and same-country draft regressions were observed failing before their fixes. The final focused Flutter run passed 103 tests; full Flutter analysis reports no issues. The existing backend unit suite passed 686 tests across 94 suites. Nine isolated PostgreSQL KYC HTTP scenarios passed, covering signed callbacks/replays, concurrent recovery, private evidence, authorization, idempotent manual decisions, races and tier promotion. The first E2E database choice lacked Paystack tables; verification used the current disposable database afterward without changing production schema. Native customer inspection verified pending copy, the Airtime header and international destination selection. Whitespace checks passed. No production deployment or Git push occurred. Remaining live BVN and NIN decisions are documented in `DOCS/KYC-VTU-CHECK-2026-11-02.md`.
+
+
+### Exchange amounts and destination simplification — 2 November 2026
+
+The owner requested amount-in-words labels, automatic rate checks in the exchange boxes and a simpler receiving form. Both amount helpers now use the existing exact NGN/GHS word renderer; number grouping uses string operations. Exact BigInt preview arithmetic and directional rounding remain unchanged. A read-only rate lookup runs on entry/direction changes, with debounced background refresh after editing when the rate is missing, stale or older than 30 seconds. No request is sent for each keystroke and no idle polling was added. Refresh preserves the last edited receive draft, generation checks reject outdated responses, and timers are canceled on disposal. Missing-rate/error guidance stays inside the receive box. Estimates do not authorize a financial action; the existing server quote, KYC/PIN checks, protected idempotent order creation and settlement policy remain authoritative.
+
+Receiving details now share a single card with adaptive method choices, shorter persistent field labels and clear payment-confirmation copy. Existing validators, required destinations, disabled/pending recovery states and direction-specific settlement capabilities remain intact. No backend, schema, rate value, balance operation or account permission changed.
+
+Converter regressions were observed failing before implementation. The focused exchange/amount-word suite passed 46 tests. Three separate visual fixtures passed at phone, desktop and 320-pixel dark/large-text sizes, including bank-method switching; actual signed-in inspection confirmed the revised exchange text. A test falsely interpreted a random UUID containing the synthetic PIN digits as a PIN leak; its assertion now checks the exact persisted keys and fingerprint payload instead. No real exchange order, PIN, payment, production deployment or Git push was submitted. Phase evidence is in `.superpowers/sdd/2026-11-02-exchange-simplify/`.
+
+
+### Final money-flow audit — 2 November 2026
+
+The owner requested an end-to-end money-flow audit. This phase reviewed the current checkout and ran isolated tests; it did not modify application code, move funds, create provider payments, approve identities, change permissions or deploy/push. Read-only connected-database diagnostics recorded only aggregate counts and nonsecret feature/rate-source metadata. No PINs, account numbers, credentials or document URLs were extracted.
+
+Fresh verification passed: 686 backend unit tests, 65 isolated PostgreSQL/Redis financial tests, 426 Flutter tests, backend production-scope TypeScript and web TypeScript. The first financial run lacked the explicit dedicated Redis URL; rerunning with an isolated local Redis instance passed. An initial full Flutter attempt hit a no-space compiler error; its fresh full rerun passed. The isolated test Redis was stopped afterward. Existing shared source edits were preserved.
+
+The audit documented two high-priority and five medium-priority findings in `DOCS/MONEY-FLOW-AUDIT-2026-11-02.md`: post-commit idempotency loss affecting withdrawal/VTU replay; ignored Paystack refund/dispute events; a fast request-hash PIN oracle under digest disclosure; VTU terminal-state regression from late initial responses; missing manual payout handover; exhausted VTU recovery without explicit escalation; and a one-minor-unit reconciliation blind spot. Offline probes use synthetic data and fake financial dependencies. These are remaining findings, not claimed fixes. Passing existing tests does not override their evidence or prove live settlement readiness.
+
+### Money-flow audit remediation — 2 November 2026
+
+F1–F7 are addressed in [the remediation report](/Users/MAC/Desktop/Desktop/app-projects/TRUSTPAY/DOCS/MONEY-FLOW-FIXES-2026-11-02.md). Withdrawal and VTU reservation use stable user/operation/client-key references under the unique database index and the same balance transaction. A replay reads only the authenticated user's original operation before new-work PIN/config gates; new money movement still requires its existing PIN, tier, limits, holds and balance checks. Post-commit response/cache failures retain durable replay. Both idempotency header names are accepted at the HTTP boundary.
+
+Sensitive auth fingerprints use a domain-separated HMAC; financial business fingerprints exclude transaction PINs. Migration 048 retires legacy unkeyed digests while retaining replay rows, and a dry-run-default, explicit-Redis maintenance CLI retires only the old cache namespace. No secret or cache key is logged. Signed handover upload credentials use durable proof intents, never generic plaintext replay caching.
+
+Verified Paystack refund/dispute cases persist independent ownership, amount, currency, environment and economic-event correlation, global outbound holds and audits. Only an explicit admin decision can recover a verified processed refund; original funding must still be SUCCESS, duplicate/aggregate recovery is capped, and a serializable nonnegative ledger transaction records a dedicated FUNDING_RECOVERY debit. Existing reconciliation holds remain enforced during recovery. Provider recheck uses stored event evidence, cannot move money, and cannot reopen a resolved case. New table RLS/revoked Data API privileges and amount constraints protect the record. Checkout channels default to explicitly configured bank transfer and are frozen per attempt.
+
+VTU transient updates serialize with terminal finalization and preserve receipts. Exhaustion has a persisted marker, unique admin alert/audit and a fair bounded recovery queue; no threshold refund/resend occurs. Contradictory legacy success is held for review until provider success confirms repair. Manual external payout handover requires active admin, reason, private outcome evidence and optimistic version checks; UNKNOWN cannot be reassigned and already-sent exact proof cannot authorize another payout. Reconciliation flags every exact nonzero Decimal difference.
+
+Final verification: 745 backend tests/100 suites; 81 isolated PostgreSQL/Redis financial tests/12 suites; 426 Flutter tests; 32 relevant desktop/mobile browser cases; Flutter analysis; production web build; backend/web type checks; affected backend lint and complete website source/e2e/config lint; and diff whitespace checks passed. Independent follow-up review found no remaining P1/P2 blocker in the reviewed scope. Migrations 047–051 and Redis retirement were exercised only in disposable test infrastructure. No real customer/provider financial action, identity decision, production migration, deployment, commit or push was performed; live merchant/callback/liquidity/settlement acceptance remains required.

@@ -50,6 +50,11 @@ function maskTail(value?: string, visible = 4) {
   return `${"*".repeat(Math.max(4, value.length - visible))}${value.slice(-visible)}`;
 }
 
+function isDeletionRequest(ticket: SupportTicket) {
+  return ticket.type === "ACCOUNT_DELETION" ||
+    (ticket.type === "ACCOUNT" && ticket.description.toLowerCase().includes("account deletion"));
+}
+
 export default function AdminSupportPage() {
   const { user, profile, isLoading: authLoading } = useAuth();
   const router = useRouter();
@@ -196,7 +201,7 @@ export default function AdminSupportPage() {
                         </div>
                       </TableCell>
                       <TableCell>
-                        <p className="font-medium">{ticket.type}</p>
+                        <p className="font-medium">{isDeletionRequest(ticket) ? "Account deletion request" : ticket.type}</p>
                         <p className="max-w-xs truncate text-sm text-muted-foreground">
                           {ticket.description}
                         </p>
@@ -263,6 +268,12 @@ export default function AdminSupportPage() {
               <div className="rounded-lg border bg-muted/40 p-4 text-sm leading-6">
                 {selectedTicket.description}
               </div>
+
+              {isDeletionRequest(selectedTicket) && (
+                <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-4 text-sm leading-6">
+                  This is a request, not confirmation of deletion. Verify the requester, review balances and pending transactions, and follow the approved retention and provider procedures before telling the customer deletion is complete. Never request a password, PIN or one-time code.
+                </div>
+              )}
 
               <div className="grid gap-4 md:grid-cols-[220px_1fr]">
                 <div className="flex flex-col gap-2">

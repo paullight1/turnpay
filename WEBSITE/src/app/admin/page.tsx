@@ -1911,10 +1911,11 @@ function AdminPageContent() {
     queryFn: async () => {
       const res = await adminExchangeRateApi.getRate("NGN", "GHS");
       return res.data as {
-        baseRate: number | string;
-        markupPercent: number | string;
-        effectiveRate: number | string;
+        baseRate: number | string | null;
+        markupPercent: number | string | null;
+        effectiveRate: number | string | null;
         isStale: boolean;
+        configured?: boolean;
       };
     },
     enabled: isAdmin && isCurrenciesTab,
@@ -2417,7 +2418,7 @@ function AdminPageContent() {
           </section>
         )}
 
-        {adminTab === "ops" && (
+        {(adminTab === "ops" || adminTab === "exchange") && (
           <section aria-label="Exchange rate controls" className="max-w-4xl">
             <RateControlCard />
           </section>
@@ -4594,15 +4595,17 @@ function AdminPageContent() {
                 <div className="rounded-lg border border-border bg-muted/30 px-4 py-2 text-sm">
                   {currencyRateQuery.isLoading ? (
                     <span className="text-muted-foreground">
-                      Loading live NGN → GHS rate…
+                      Loading NGN → GHS rate…
                     </span>
+                  ) : currencyRateQuery.data?.configured === false ? (
+                    <span className="text-muted-foreground">NGN → GHS rate not set</span>
                   ) : currencyRateQuery.isError ? (
                     <span className="text-muted-foreground">
-                      Live NGN → GHS rate unavailable
+                      NGN → GHS rate unavailable
                     </span>
                   ) : (
                     <span className="flex items-center gap-2">
-                      <span className="text-muted-foreground">Live NGN → GHS</span>
+                      <span className="text-muted-foreground">NGN → GHS</span>
                       <span className="font-semibold">
                         {Number(
                           currencyRateQuery.data?.effectiveRate ?? 0,
@@ -4618,7 +4621,7 @@ function AdminPageContent() {
                             : "outline"
                         }
                       >
-                        {currencyRateQuery.data?.isStale ? "Stale" : "Live"}
+                        {currencyRateQuery.data?.isStale ? "Stale" : "Saved"}
                       </Badge>
                     </span>
                   )}

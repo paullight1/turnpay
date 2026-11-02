@@ -23,7 +23,10 @@ import {
   ValidateMeterDto,
   ValidateSmartCardDto,
 } from './dto/vtu.dto';
-import { v4 as uuidv4 } from 'uuid';
+import {
+  financialRequestIdentity,
+  assertFinancialRequestMatch,
+} from '../common/utils/financial-request';
 import { PinoLogger } from 'nestjs-pino';
 import { Decimal } from '@prisma/client/runtime/library';
 import { LedgerService } from '../wallets/ledger.service';
@@ -43,6 +46,9 @@ type VtuPricingContext = {
   provider: string;
   scope: 'LOCAL' | 'INTERNATIONAL';
 };
+
+export const VTU_REQUERY_MAX_ATTEMPTS = 12;
+export const VTU_ACTION_REQUIRED_CODE = 'VTU_MANUAL_RECOVERY_REQUIRED';
 
 @Injectable()
 export class VtuService {
@@ -283,7 +289,49 @@ export class VtuService {
     );
   }
 
-  async purchase(userId: string, dto: PurchaseVtuDto) {
+  private async replayPurchase(
+    userId: string,
+    reference: string,
+    fingerprint: string,
+  ) {
+    const existing = await this.prisma.transaction.findUnique({
+      where: { reference },
+      include: {
+        vtuOrders: { select: { id: true, purchasedCodeEncrypted: true } },
+      },
+    });
+    if (!existing) return null;
+    if (existing.userId !== userId || !existing.vtuOrders[0]) {
+      throw new BadRequestException('VTU request does not match');
+    }
+    assertFinancialRequestMatch(existing.metadata, fingerprint);
+    return {
+      ...this.receipt.toOwnerReceipt(
+        existing.vtuOrders[0].purchasedCodeEncrypted,
+      ),
+      reference: existing.reference,
+      orderId: existing.vtuOrders[0].id,
+      success: existing.status === 'SUCCESS',
+      status: existing.status,
+      amount: existing.amount.toString(),
+      fee: existing.fee.toString(),
+      totalDebit: existing.amount.plus(existing.fee).toString(),
+      message:
+        'Your original purchase is available. Check its status before paying again.',
+    };
+  }
+
+  async purchase(userId: string, dto: PurchaseVtuDto, idempotencyKey: string) {
+    const identity = financialRequestIdentity('VTU', userId, idempotencyKey, {
+      ...dto,
+      amount: new Decimal(dto.amount).toFixed(2),
+    });
+    const replay = await this.replayPurchase(
+      userId,
+      identity.reference,
+      identity.fingerprint,
+    );
+    if (replay) return replay;
     this.assertVtuEnabled();
     await this.transactionPin.verifyRequired(userId, dto.transactionPin);
     await this.assertUserCanPurchase(userId);
@@ -335,9 +383,10 @@ export class VtuService {
       throw new BadRequestException(
         'Total price changed. Review a fresh quote before paying.',
       );
-    const reference = `VTU-${Date.now()}-${uuidv4().slice(0, 8)}`;
+    const reference = identity.reference;
     const metadata = {
       ...this.buildSafeMetadata(dto),
+      requestFingerprint: identity.fingerprint,
       ...verification,
       pricingRuleId: pricing.ruleId,
       fixedMargin: pricing.fixedMargin.toString(),
@@ -348,65 +397,82 @@ export class VtuService {
     const provider = this.getOrderProvider();
     const providerRequestId = this.getProviderRequestId(reference);
 
-    const transactionRecord = await this.prisma.$transaction(async (tx) => {
-      const transaction = await tx.transaction.create({
-        data: {
-          userId,
-          type: this.mapVtuType(dto.type),
-          amount,
-          currency: 'NGN',
-          status: 'PENDING',
-          reference,
-          fee: pricing.fee,
-          walletId: wallet.id,
-          metadata,
-        },
-      });
+    let transactionRecord: {
+      id: string;
+      reference: string;
+      orderId: string;
+      currency: 'NGN' | 'GHS';
+    };
+    try {
+      transactionRecord = await this.prisma.$transaction(async (tx) => {
+        const transaction = await tx.transaction.create({
+          data: {
+            userId,
+            type: this.mapVtuType(dto.type),
+            amount,
+            currency: 'NGN',
+            status: 'PENDING',
+            reference,
+            fee: pricing.fee,
+            walletId: wallet.id,
+            metadata,
+          },
+        });
 
-      await this.ledger.debitWallet(
-        {
-          userId,
-          currency: 'NGN',
-          amount: debitAmount,
-          transactionId: transaction.id,
-          reference,
-          source: 'VTU_PURCHASE',
-          metadata,
-        },
-        tx,
+        await this.ledger.debitWallet(
+          {
+            userId,
+            currency: 'NGN',
+            amount: debitAmount,
+            transactionId: transaction.id,
+            reference,
+            source: 'VTU_PURCHASE',
+            metadata,
+          },
+          tx,
+        );
+
+        const order = await tx.vtuOrder.create({
+          data: {
+            transactionId: transaction.id,
+            provider,
+            scope:
+              dto.provider === 'foreign-airtime' ? 'INTERNATIONAL' : 'LOCAL',
+            serviceType: this.mapVtuType(dto.type),
+            countryCode:
+              dto.provider === 'foreign-airtime' ? dto.countryCode : 'NG',
+            operatorId:
+              dto.provider === 'foreign-airtime' ? dto.operatorId : undefined,
+            localProvider: this.getLocalProvider(dto),
+            providerRequestId,
+            status: 'PENDING',
+            amount,
+            currency: 'NGN',
+            costAmount: amount,
+            fee: pricing.fee,
+            margin: pricing.fee,
+            targetMasked: this.getTargetMasked(dto),
+            metadata,
+            nextRequeryAt: this.nextRequeryAt(),
+          },
+        });
+
+        return {
+          id: transaction.id,
+          reference: transaction.reference,
+          orderId: order.id,
+          currency: transaction.currency || 'NGN',
+        };
+      });
+    } catch (error) {
+      const replay = await this.replayPurchase(
+        userId,
+        reference,
+        identity.fingerprint,
       );
-
-      const order = await tx.vtuOrder.create({
-        data: {
-          transactionId: transaction.id,
-          provider,
-          scope: dto.provider === 'foreign-airtime' ? 'INTERNATIONAL' : 'LOCAL',
-          serviceType: this.mapVtuType(dto.type),
-          countryCode:
-            dto.provider === 'foreign-airtime' ? dto.countryCode : 'NG',
-          operatorId:
-            dto.provider === 'foreign-airtime' ? dto.operatorId : undefined,
-          localProvider: this.getLocalProvider(dto),
-          providerRequestId,
-          status: 'PENDING',
-          amount,
-          currency: 'NGN',
-          costAmount: amount,
-          fee: pricing.fee,
-          margin: pricing.fee,
-          targetMasked: this.getTargetMasked(dto),
-          metadata,
-          nextRequeryAt: this.nextRequeryAt(),
-        },
-      });
-
-      return {
-        id: transaction.id,
-        reference: transaction.reference,
-        orderId: order.id,
-        currency: transaction.currency || 'NGN',
-      };
-    });
+      if (replay) return replay;
+      throw error;
+    }
 
     try {
       await this.settlementHold.assertOutboundAllowed({
@@ -473,6 +539,12 @@ export class VtuService {
         'VTU provider result unknown, purchase left pending',
       );
 
+      const current = await this.replayPurchase(
+        userId,
+        reference,
+        identity.fingerprint,
+      );
+      if (current && current.status !== 'PENDING') return current;
       return {
         success: false,
         status: 'PENDING',
@@ -493,6 +565,12 @@ export class VtuService {
         metadata,
       );
 
+      const current = await this.replayPurchase(
+        userId,
+        reference,
+        identity.fingerprint,
+      );
+      if (current && current.status !== 'PENDING') return current;
       return {
         success: false,
         status: 'PENDING',
@@ -522,6 +600,13 @@ export class VtuService {
           ? 'REVERSED'
           : 'FAILED',
       );
+      const current = await this.replayPurchase(
+        userId,
+        reference,
+        identity.fingerprint,
+      );
+      if (current && ['SUCCESS', 'REVERSED'].includes(current.status))
+        return current;
       throw new BadRequestException(
         `VTU purchase failed: ${purchaseResult.message}`,
       );
@@ -534,6 +619,12 @@ export class VtuService {
         metadata,
       );
 
+      const current = await this.replayPurchase(
+        userId,
+        reference,
+        identity.fingerprint,
+      );
+      if (current && current.status !== 'PENDING') return current;
       return {
         success: false,
         status: 'PENDING',
@@ -565,6 +656,13 @@ export class VtuService {
       },
       result: purchaseResult,
     });
+
+    const current = await this.replayPurchase(
+      userId,
+      reference,
+      identity.fingerprint,
+    );
+    if (current) return current;
 
     this.logger.info(
       {
@@ -660,22 +758,51 @@ export class VtuService {
   }
 
   async requeryPendingOrders(limit = 25) {
-    const orders = await this.prisma.vtuOrder.findMany({
-      where: {
-        status: { in: ['PENDING', 'PROCESSING', 'UNKNOWN'] },
-        OR: [{ nextRequeryAt: null }, { nextRequeryAt: { lte: new Date() } }],
-        requeryAttempts: { lt: 12 },
-      },
-      orderBy: [{ nextRequeryAt: 'asc' }, { createdAt: 'asc' }],
-      take: limit,
-      // Only ids are used below; requeryOrder() re-fetches each order with the
-      // transaction relation, so joining it here is wasted work per cron cycle.
-      select: { id: true },
-    });
+    // Keep automatic checks and escalation backfill in separate bounded
+    // batches. Already-escalated rows can never occupy the due work queue.
+    const [orders, exhaustedOrders] = await Promise.all([
+      this.prisma.vtuOrder.findMany({
+        where: {
+          status: { in: ['PENDING', 'PROCESSING', 'UNKNOWN', 'SUCCESS'] },
+          transaction: { status: 'PENDING' },
+          requeryAttempts: { lt: VTU_REQUERY_MAX_ATTEMPTS },
+          OR: [{ nextRequeryAt: null }, { nextRequeryAt: { lte: new Date() } }],
+        },
+        orderBy: [{ nextRequeryAt: 'asc' }, { createdAt: 'asc' }],
+        take: limit,
+        select: { id: true, requeryAttempts: true },
+      }),
+      this.prisma.vtuOrder.findMany({
+        where: {
+          status: { in: ['PENDING', 'PROCESSING', 'UNKNOWN', 'SUCCESS'] },
+          transaction: { status: 'PENDING' },
+          requeryAttempts: { gte: VTU_REQUERY_MAX_ATTEMPTS },
+          actionRequiredAt: null,
+        },
+        orderBy: { createdAt: 'asc' },
+        take: limit,
+        select: { id: true, requeryAttempts: true },
+      }),
+    ]);
 
-    const results: Array<{ orderId: string; processed: boolean }> = [];
+    const results: Array<{
+      orderId: string;
+      processed: boolean;
+      actionRequired?: boolean;
+    }> = [];
 
-    for (const order of orders) {
+    for (const order of [...orders, ...exhaustedOrders]) {
+      if (order.requeryAttempts >= VTU_REQUERY_MAX_ATTEMPTS) {
+        await this.prisma.$transaction(async (tx) => {
+          await this.markVtuActionRequiredIfExhausted(tx, order.id);
+        });
+        results.push({
+          orderId: order.id,
+          processed: false,
+          actionRequired: true,
+        });
+        continue;
+      }
       try {
         await this.requeryOrder(order.id);
         results.push({ orderId: order.id, processed: true });
@@ -691,10 +818,10 @@ export class VtuService {
       }
     }
 
-    return { checked: orders.length, results };
+    return { checked: orders.length + exhaustedOrders.length, results };
   }
 
-  async requeryOrder(orderId: string) {
+  async requeryOrder(orderId: string, allowActionRequired = false) {
     const order = await this.prisma.vtuOrder.findUnique({
       where: { id: orderId },
       include: { transaction: true },
@@ -704,28 +831,89 @@ export class VtuService {
       throw new NotFoundException('VTU order not found');
     }
 
-    if (['FAILED', 'REVERSED'].includes(order.status)) {
+    if (['FAILED', 'REVERSED'].includes(order.transaction.status)) {
+      await this.prisma.$transaction(async (tx) => {
+        const terminal = await tx.transaction.updateMany({
+          where: { id: order.transactionId, status: order.transaction.status },
+          data: { status: order.transaction.status },
+        });
+        if (terminal.count === 1)
+          await tx.vtuOrder.updateMany({
+            where: {
+              id: order.id,
+              status: { in: ['PENDING', 'PROCESSING', 'UNKNOWN'] },
+            },
+            data: { status: order.transaction.status, nextRequeryAt: null },
+          });
+      });
       return { processed: false, terminal: true };
     }
 
-    const locallySuccessful =
-      order.status === 'SUCCESS' || order.transaction.status === 'SUCCESS';
+    if (
+      !allowActionRequired &&
+      this.isUnresolvedVtuStatus(order.status) &&
+      order.transaction.status === 'PENDING' &&
+      order.requeryAttempts >= VTU_REQUERY_MAX_ATTEMPTS
+    ) {
+      return {
+        processed: false,
+        actionRequired: true,
+        status: order.status,
+      };
+    }
+
+    const locallySuccessful = order.transaction.status === 'SUCCESS';
+    const legacySuccessUnconfirmed =
+      order.transaction.status === 'PENDING' &&
+      (order.status === 'SUCCESS' ||
+        this.asMetadata(order.transaction.metadata).legacySuccessUnconfirmed ===
+          true);
 
     let result: VtuProviderResult;
 
     try {
       result = await this.vtuApi.requery(order.providerRequestId);
     } catch (error) {
-      if (!locallySuccessful) {
+      if (legacySuccessUnconfirmed)
+        await this.holdLegacyVtuSuccessMismatch(order);
+      else if (!locallySuccessful) {
         await this.scheduleOrderRequery(
-          order.id,
+          order,
           error instanceof Error ? error.message : 'Unknown requery error',
         );
       }
       throw error;
     }
 
+    if (
+      legacySuccessUnconfirmed &&
+      !this.isSuccessfulProviderStatus(result.status)
+    ) {
+      await this.holdLegacyVtuSuccessMismatch(order);
+      return { processed: false, actionRequired: true, status: 'UNKNOWN' };
+    }
+
     if (locallySuccessful && result.status !== 'reversed') {
+      // Repair orders regressed by older application versions. Recheck and
+      // lock current transaction state; a verified reversal must still win.
+      await this.prisma.$transaction(async (tx) => {
+        const successful = await tx.transaction.updateMany({
+          where: { id: order.transactionId, status: 'SUCCESS' },
+          data: { status: 'SUCCESS' },
+        });
+        if (successful.count === 1)
+          await tx.vtuOrder.updateMany({
+            where: {
+              id: order.id,
+              status: { in: ['PENDING', 'PROCESSING', 'UNKNOWN'] },
+            },
+            data: {
+              status: 'SUCCESS',
+              nextRequeryAt: null,
+              completedAt: new Date(),
+            },
+          });
+      });
       return { processed: false, terminal: true };
     }
 
@@ -1039,28 +1227,155 @@ export class VtuService {
     return packagePrice;
   }
 
+  private isUnresolvedVtuStatus(status: string) {
+    return ['PENDING', 'PROCESSING', 'UNKNOWN'].includes(status);
+  }
+
+  /**
+   * Persist the exhausted-requery exception exactly once. The notification's
+   * unique event key is the durable idempotency boundary; no refund or retry
+   * is performed here because provider outcome is still unresolved.
+   */
+  private async markVtuActionRequiredIfExhausted(
+    tx: Prisma.TransactionClient,
+    orderId: string,
+  ) {
+    const order = await tx.vtuOrder.findUnique({
+      where: { id: orderId },
+      select: {
+        id: true,
+        status: true,
+        providerStatus: true,
+        requeryAttempts: true,
+        nextRequeryAt: true,
+        actionRequiredAt: true,
+        transaction: {
+          select: { reference: true, status: true, metadata: true },
+        },
+      },
+    });
+
+    const legacySuccess =
+      order?.status === 'SUCCESS' && order.transaction.status === 'PENDING';
+    if (
+      !order ||
+      order.actionRequiredAt ||
+      (!this.isUnresolvedVtuStatus(order.status) && !legacySuccess) ||
+      order.transaction.status !== 'PENDING' ||
+      order.requeryAttempts < VTU_REQUERY_MAX_ATTEMPTS
+    )
+      return false;
+
+    const pending = await tx.transaction.updateMany({
+      where: { reference: order.transaction.reference, status: 'PENDING' },
+      data: {
+        status: 'PENDING',
+        ...(legacySuccess
+          ? {
+              metadata: {
+                ...this.asMetadata(order.transaction.metadata),
+                legacySuccessUnconfirmed: true,
+              },
+            }
+          : {}),
+      },
+    });
+    if (pending.count !== 1) return false;
+    const marked = await tx.vtuOrder.updateMany({
+      where: {
+        id: order.id,
+        status: { in: ['PENDING', 'PROCESSING', 'UNKNOWN', 'SUCCESS'] },
+        requeryAttempts: { gte: VTU_REQUERY_MAX_ATTEMPTS },
+        actionRequiredAt: null,
+      },
+      data: {
+        nextRequeryAt: null,
+        actionRequiredAt: new Date(),
+        ...(legacySuccess
+          ? {
+              status: 'UNKNOWN',
+              providerStatus: 'LEGACY_SUCCESS_REQUIRES_VERIFICATION',
+            }
+          : {}),
+      },
+    });
+    if (marked.count !== 1) return false;
+
+    const notification = await tx.paymentNotification.createMany({
+      data: [
+        {
+          eventKey: `vtu:requery-exhausted:${order.id}`,
+          audience: 'ADMIN',
+          orderId: order.id,
+          title: `VTU order ${order.transaction.reference} requires manual recovery after ${VTU_REQUERY_MAX_ATTEMPTS} provider checks`,
+        },
+      ],
+      skipDuplicates: true,
+    });
+
+    if (notification.count === 1) {
+      await tx.auditLog.create({
+        data: {
+          action: 'VTU_REQUERY_EXHAUSTED',
+          targetType: 'VtuOrder',
+          targetId: order.id,
+          reference: order.transaction.reference,
+          reason:
+            'Automatic VTU requery limit reached; provider outcome remains unresolved and requires supervised manual recovery',
+          before: {
+            status: order.status,
+            requeryAttempts: Math.max(order.requeryAttempts - 1, 0),
+          },
+          after: {
+            status: order.status,
+            requeryAttempts: order.requeryAttempts,
+            actionRequired: true,
+          },
+          metadata: {
+            providerStatus: order.providerStatus,
+            actionRequiredCode: VTU_ACTION_REQUIRED_CODE,
+            automaticRecoveryStopped: true,
+            refundIssued: false,
+            resendIssued: false,
+          },
+        },
+      });
+    }
+
+    return true;
+  }
+
   private async markProviderResultUnknown(
     transaction: { reference: string; orderId: string },
     metadata: Record<string, unknown>,
   ) {
     await this.prisma.$transaction(async (tx) => {
-      await tx.transaction.update({
-        where: { reference: transaction.reference },
+      // Lock the shared transaction row before touching its order. Callback
+      // finalization takes the same lock, so a late response cannot regress it.
+      const pending = await tx.transaction.updateMany({
+        where: { reference: transaction.reference, status: 'PENDING' },
         data: {
           metadata: metadata as Prisma.InputJsonValue,
         },
       });
 
-      await tx.vtuOrder.update({
-        where: { id: transaction.orderId },
+      if (pending.count !== 1) return;
+      const updated = await tx.vtuOrder.updateMany({
+        where: {
+          id: transaction.orderId,
+          status: { in: ['PENDING', 'PROCESSING', 'UNKNOWN'] },
+        },
         data: {
           status: 'UNKNOWN',
           providerStatus: 'UNKNOWN',
           metadata: metadata as Prisma.InputJsonValue,
+          requeryAttempts: { increment: 1 },
           lastRequeryAt: new Date(),
           nextRequeryAt: this.nextRequeryAt(),
         },
       });
+      if (updated.count === 1)
+        await this.markVtuActionRequiredIfExhausted(tx, transaction.orderId);
     });
   }
 
@@ -1070,8 +1385,10 @@ export class VtuService {
     metadata: Record<string, unknown>,
   ) {
     await this.prisma.$transaction(async (tx) => {
-      await tx.transaction.update({
-        where: { reference: transaction.reference },
+      // Lock the shared transaction row before touching its order. Callback
+      // finalization takes the same lock, so a late response cannot regress it.
+      const pending = await tx.transaction.updateMany({
+        where: { reference: transaction.reference, status: 'PENDING' },
         data: {
           metadata: {
             ...metadata,
@@ -1081,8 +1398,12 @@ export class VtuService {
         },
       });
 
-      await tx.vtuOrder.update({
-        where: { id: transaction.orderId },
+      if (pending.count !== 1) return;
+      const updated = await tx.vtuOrder.updateMany({
+        where: {
+          id: transaction.orderId,
+          status: { in: ['PENDING', 'PROCESSING', 'UNKNOWN'] },
+        },
         data: {
           status: this.orderStatusFromProviderStatus(result.status),
           providerTransactionId:
@@ -1096,22 +1417,99 @@ export class VtuService {
           rawResponse: (result.safeResponse || result.rawResponse) as
             | Prisma.InputJsonValue
             | undefined,
+          requeryAttempts: { increment: 1 },
+          lastRequeryAt: new Date(),
           nextRequeryAt: this.nextRequeryAt(),
         },
       });
+      if (updated.count === 1)
+        await this.markVtuActionRequiredIfExhausted(tx, transaction.orderId);
     });
   }
 
-  private async scheduleOrderRequery(orderId: string, reason: string) {
-    await this.prisma.vtuOrder.update({
-      where: { id: orderId },
-      data: {
-        status: 'UNKNOWN',
-        providerStatus: reason,
-        requeryAttempts: { increment: 1 },
-        lastRequeryAt: new Date(),
-        nextRequeryAt: this.nextRequeryAt(),
-      },
+  private async scheduleOrderRequery(
+    order: {
+      id: string;
+      transactionId: string;
+      transaction: {
+        reference: string;
+        status: TransactionStatus;
+        metadata: Prisma.JsonValue | null;
+      };
+    },
+    reason: string,
+  ) {
+    await this.prisma.$transaction(async (tx) => {
+      // Take the same transaction-row lock used by terminal settlement before
+      // recording a retry. A late callback that already settled the purchase
+      // therefore turns this into a no-op instead of regressing its outcome.
+      const pending = await tx.transaction.updateMany({
+        where: { id: order.transactionId, status: 'PENDING' },
+        data: {
+          metadata: {
+            ...this.asMetadata(order.transaction.metadata),
+            providerStatus: 'UNKNOWN',
+            providerError: reason.slice(0, 500),
+          },
+        },
+      });
+
+      if (pending.count !== 1) return;
+
+      const updated = await tx.vtuOrder.updateMany({
+        where: {
+          id: order.id,
+          status: { in: ['PENDING', 'PROCESSING', 'UNKNOWN'] },
+          requeryAttempts: { lt: VTU_REQUERY_MAX_ATTEMPTS },
+          transaction: { status: 'PENDING' },
+        },
+        data: {
+          status: 'UNKNOWN',
+          providerStatus: reason.slice(0, 500),
+          requeryAttempts: { increment: 1 },
+          lastRequeryAt: new Date(),
+          nextRequeryAt: this.nextRequeryAt(),
+        },
+      });
+
+      if (updated.count === 1)
+        await this.markVtuActionRequiredIfExhausted(tx, order.id);
+    });
+  }
+
+  /** An old success marker alone cannot authorize a refund. Keep the original
+   * reservation under review unless an independent provider success repairs
+   * the transaction. Repeated callbacks cannot turn the mismatch into a credit. */
+  private async holdLegacyVtuSuccessMismatch(order: {
+    id: string;
+    transactionId: string;
+    transaction: { reference: string; metadata?: Prisma.JsonValue | null };
+  }) {
+    await this.prisma.$transaction(async (tx) => {
+      const pending = await tx.transaction.updateMany({
+        where: { id: order.transactionId, status: 'PENDING' },
+        data: {
+          metadata: {
+            ...this.asMetadata(order.transaction.metadata ?? undefined),
+            legacySuccessUnconfirmed: true,
+          },
+        },
+      });
+      if (pending.count !== 1) return;
+      const updated = await tx.vtuOrder.updateMany({
+        where: {
+          id: order.id,
+          status: { in: ['SUCCESS', 'PENDING', 'PROCESSING', 'UNKNOWN'] },
+        },
+        data: {
+          status: 'UNKNOWN',
+          providerStatus: 'LEGACY_SUCCESS_REQUIRES_VERIFICATION',
+          requeryAttempts: VTU_REQUERY_MAX_ATTEMPTS,
+          nextRequeryAt: null,
+        },
+      });
+      if (updated.count === 1)
+        await this.markVtuActionRequiredIfExhausted(tx, order.id);
     });
   }
 
@@ -1137,6 +1535,17 @@ export class VtuService {
     result: VtuProviderResult;
   }) {
     const orderStatus = this.orderStatusFromProviderStatus(input.result.status);
+    if (
+      input.order.transaction.status === 'PENDING' &&
+      (input.order.status === 'SUCCESS' ||
+        this.asMetadata(input.order.transaction.metadata)
+          .legacySuccessUnconfirmed === true) &&
+      orderStatus !== 'SUCCESS'
+    ) {
+      await this.holdLegacyVtuSuccessMismatch(input.order);
+      return;
+    }
+
     const isLateReversal =
       input.order.transaction.status === 'SUCCESS' &&
       orderStatus === 'REVERSED';
@@ -1225,30 +1634,36 @@ export class VtuService {
       return;
     }
 
-    await this.prisma.vtuOrder.updateMany({
-      where: {
-        id: input.order.id,
-        status: { in: ['PENDING', 'PROCESSING', 'UNKNOWN'] },
-      },
-      data: {
-        status: orderStatus,
-        providerTransactionId:
-          input.result.providerTransactionId || input.result.reference,
-        providerStatus: input.result.status,
-        costAmount: this.optionalDecimal(input.result.providerCost),
-        providerCommission: this.optionalDecimal(
-          input.result.providerCommission,
-        ),
-        purchasedCodeEncrypted: this.receipt.encryptPurchasedCode(
-          input.result.purchasedCode,
-        ),
-        rawResponse: (input.result.safeResponse || input.result.rawResponse) as
-          | Prisma.InputJsonValue
-          | undefined,
-        requeryAttempts: { increment: 1 },
-        lastRequeryAt: new Date(),
-        nextRequeryAt: this.nextRequeryAt(),
-      },
+    await this.prisma.$transaction(async (tx) => {
+      // The unresolved order predicate is guarded by the transaction status;
+      // a terminal transaction therefore makes this update a no-op.
+      const updated = await tx.vtuOrder.updateMany({
+        where: {
+          id: input.order.id,
+          status: { in: ['PENDING', 'PROCESSING', 'UNKNOWN'] },
+          transaction: { status: 'PENDING' },
+        },
+        data: {
+          status: orderStatus,
+          providerTransactionId:
+            input.result.providerTransactionId || input.result.reference,
+          providerStatus: input.result.status,
+          costAmount: this.optionalDecimal(input.result.providerCost),
+          providerCommission: this.optionalDecimal(
+            input.result.providerCommission,
+          ),
+          purchasedCodeEncrypted: this.receipt.encryptPurchasedCode(
+            input.result.purchasedCode,
+          ),
+          rawResponse: (input.result.safeResponse ||
+            input.result.rawResponse) as Prisma.InputJsonValue | undefined,
+          requeryAttempts: { increment: 1 },
+          lastRequeryAt: new Date(),
+          nextRequeryAt: this.nextRequeryAt(),
+        },
+      });
+      if (updated.count === 1)
+        await this.markVtuActionRequiredIfExhausted(tx, input.order.id);
     });
   }
 
@@ -1656,12 +2071,19 @@ export class VtuService {
     };
   }) {
     const fee = order.fee ? new Decimal(order.fee) : new Decimal(0);
+    const legacySuccess =
+      order.status === 'SUCCESS' && order.transaction.status === 'PENDING';
+    const actionRequired =
+      legacySuccess ||
+      (this.isUnresolvedVtuStatus(order.status) &&
+        order.transaction.status === 'PENDING' &&
+        order.requeryAttempts >= VTU_REQUERY_MAX_ATTEMPTS);
     return {
       orderId: order.id,
       transactionId: order.transaction.id,
       reference: order.transaction.reference,
       transactionStatus: order.transaction.status,
-      orderStatus: order.status,
+      orderStatus: legacySuccess ? 'UNKNOWN' : order.status,
       provider: order.provider,
       scope: order.scope,
       type: order.serviceType,
@@ -1679,6 +2101,11 @@ export class VtuService {
       requeryAttempts: order.requeryAttempts,
       lastRequeryAt: order.lastRequeryAt,
       nextRequeryAt: order.nextRequeryAt,
+      actionRequired,
+      actionRequiredCode: actionRequired ? VTU_ACTION_REQUIRED_CODE : null,
+      customerAction: actionRequired
+        ? 'Keep this reference and contact support. Do not start a replacement purchase while the provider result is unresolved.'
+        : null,
       completedAt: order.completedAt,
       failedAt: order.failedAt,
       createdAt: order.transaction.createdAt,

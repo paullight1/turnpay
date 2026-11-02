@@ -27,6 +27,12 @@ describe('IdempotencyInterceptor', () => {
     error: jest.fn(),
   };
   const responseCrypto = {
+    fingerprintRequest: jest.fn(
+      (body) =>
+        `hmac:test:${createHash('sha256')
+          .update(JSON.stringify(body ?? {}))
+          .digest('hex')}`,
+    ),
     encrypt: jest.fn(),
     decrypt: jest.fn(),
   };
@@ -72,9 +78,9 @@ describe('IdempotencyInterceptor', () => {
   });
 
   const hashBody = (body: unknown) =>
-    createHash('sha256')
+    `business:v2:${createHash('sha256')
       .update(JSON.stringify(body ?? {}))
-      .digest('hex');
+      .digest('hex')}`;
 
   it('rejects a warm Redis idempotency hit when the request body changed', async () => {
     const interceptor = new IdempotencyInterceptor(
@@ -82,7 +88,7 @@ describe('IdempotencyInterceptor', () => {
       prisma as any,
       logger as any,
     );
-    redis.get.mockReturnValue(
+    redis.get.mockResolvedValue(
       JSON.stringify({
         requestHash: 'different-hash',
         response: { reference: 'FUND-1' },
@@ -126,6 +132,59 @@ describe('IdempotencyInterceptor', () => {
     expect(serializedLogs).toContain(
       createHash('sha256').update(rawKey).digest('hex').slice(0, 12),
     );
+  });
+
+  it('replays financial business requests when only the already-verified PIN changed', async () => {
+    const interceptor = new IdempotencyInterceptor(
+      redis as any,
+      prisma as any,
+      logger as any,
+    );
+    let completed: any;
+    let requestHash: string;
+    prisma.idempotencyRecord.create.mockImplementationOnce(async ({ data }) => {
+      requestHash = data.requestHash;
+      return { id: 'idem-record-1' };
+    });
+    prisma.idempotencyRecord.update.mockImplementationOnce(async ({ data }) => {
+      completed = { ...data, requestHash };
+      return data;
+    });
+    const first = await interceptor.intercept(
+      makeContext({ amount: '100.00', transactionPin: '1234' }),
+      { handle: () => of({ reference: 'original' }) },
+    );
+    await lastValueFrom(first);
+    prisma.idempotencyRecord.findUnique.mockImplementationOnce(
+      async () => completed,
+    );
+    const retry = await interceptor.intercept(
+      makeContext({ amount: '100.00', transactionPin: '5678' }),
+      { handle: () => of({ reference: 'duplicate' }) },
+    );
+    await expect(lastValueFrom(retry)).resolves.toEqual({
+      reference: 'original',
+    });
+  });
+
+  it('keeps retired secret-bearing attempts blocked without redispatching the handler', async () => {
+    prisma.idempotencyRecord.findUnique.mockResolvedValueOnce({
+      status: 'COMPLETED',
+      requestHash: 'legacy-retired:old-row',
+      response: { reference: 'legacy-withdrawal' },
+    });
+    const interceptor = new IdempotencyInterceptor(
+      redis as any,
+      prisma as any,
+      logger as any,
+    );
+    const handler = jest.fn(() => of({ reference: 'duplicate' }));
+    await expect(
+      interceptor.intercept(makeContext({ amount: '100' }), {
+        handle: handler,
+      }),
+    ).rejects.toThrow('status');
+    expect(handler).not.toHaveBeenCalled();
   });
 
   it('requires idempotency key on protected mutation requests', async () => {
@@ -253,6 +312,28 @@ describe('IdempotencyInterceptor', () => {
     expect(prisma.idempotencyRecord.create).not.toHaveBeenCalled();
   });
 
+  it('delegates handover evidence upload replay without persisting signed credentials', async () => {
+    const interceptor = new IdempotencyInterceptor(
+      redis as any,
+      prisma as any,
+      logger as any,
+    );
+    const response = await interceptor.intercept(
+      makeContext(
+        {},
+        {
+          path: '/api/admin/exchange/manual-orders/order-1/handover-upload-url',
+        },
+      ),
+      { handle: () => of({ signedUrl: 'temporary-upload-credential' }) },
+    );
+    await expect(lastValueFrom(response)).resolves.toEqual({
+      signedUrl: 'temporary-upload-credential',
+    });
+    expect(prisma.idempotencyRecord.create).not.toHaveBeenCalled();
+    expect(redis.set).not.toHaveBeenCalled();
+  });
+
   it('decrypts a persisted token-bearing auth replay without invoking the handler', async () => {
     const interceptor = new IdempotencyInterceptor(
       redis as any,
@@ -261,7 +342,10 @@ describe('IdempotencyInterceptor', () => {
       responseCrypto as any,
     );
     prisma.idempotencyRecord.findUnique.mockResolvedValue({
-      requestHash: hashBody({ email: 'user@example.com', password: 'secret' }),
+      requestHash: responseCrypto.fingerprintRequest({
+        email: 'user@example.com',
+        password: 'secret',
+      }),
       status: 'COMPLETED',
       response: null,
       responseCiphertext: 'ciphertext',
@@ -431,6 +515,73 @@ describe('IdempotencyInterceptor', () => {
           message: 'Bad amount',
         }),
       }),
+    });
+  });
+
+  it('returns the committed result and replays it when the cache write fails', async () => {
+    redis.isAvailable.mockReturnValue(true);
+    redis.setIfNotExists.mockResolvedValue(true);
+    redis.set.mockRejectedValue(new Error('cache offline after commit'));
+    redis.del.mockResolvedValue(undefined);
+    const interceptor = new IdempotencyInterceptor(
+      redis as any,
+      prisma as any,
+      logger as any,
+    );
+    const handler = jest.fn(() => of({ reference: 'only-withdrawal' }));
+    const first = await interceptor.intercept(makeContext({ amount: 200 }), {
+      handle: handler,
+    });
+    await expect(lastValueFrom(first)).resolves.toEqual({
+      reference: 'only-withdrawal',
+    });
+    prisma.idempotencyRecord.findUnique.mockResolvedValue({
+      requestHash: hashBody({ amount: 200 }),
+      status: 'COMPLETED',
+      response: { reference: 'only-withdrawal' },
+    });
+    const second = await interceptor.intercept(makeContext({ amount: 200 }), {
+      handle: handler,
+    });
+    await expect(lastValueFrom(second)).resolves.toEqual({
+      reference: 'only-withdrawal',
+    });
+    expect(handler).toHaveBeenCalledTimes(1);
+    expect(prisma.idempotencyRecord.delete).not.toHaveBeenCalled();
+  });
+
+  it('retains the in-progress reservation when completion persistence fails', async () => {
+    prisma.idempotencyRecord.update.mockRejectedValueOnce(
+      new Error('lost completion write'),
+    );
+    const interceptor = new IdempotencyInterceptor(
+      redis as any,
+      prisma as any,
+      logger as any,
+    );
+    await expect(
+      interceptor.intercept(makeContext({ amount: 200 }), {
+        handle: () => of({ reference: 'committed' }),
+      }),
+    ).rejects.toThrow('lost completion write');
+    expect(prisma.idempotencyRecord.delete).not.toHaveBeenCalled();
+  });
+
+  it('does not let a lock cleanup failure erase a successful result', async () => {
+    redis.isAvailable.mockReturnValue(true);
+    redis.setIfNotExists.mockResolvedValue(true);
+    redis.set.mockResolvedValue(undefined);
+    redis.del.mockRejectedValueOnce(new Error('cleanup offline'));
+    const interceptor = new IdempotencyInterceptor(
+      redis as any,
+      prisma as any,
+      logger as any,
+    );
+    const stream = await interceptor.intercept(makeContext({ amount: 200 }), {
+      handle: () => of({ reference: 'committed' }),
+    });
+    await expect(lastValueFrom(stream)).resolves.toEqual({
+      reference: 'committed',
     });
   });
 

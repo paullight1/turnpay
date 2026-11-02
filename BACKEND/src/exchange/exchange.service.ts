@@ -16,7 +16,10 @@ import {
   Prisma,
 } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { RateService } from './providers/rate.service';
+import {
+  RateService,
+  AdminExchangeRateNotSetException,
+} from './providers/rate.service';
 import { RedisService } from '../redis/redis.service';
 import {
   AdminMarkPayoutSentDto,
@@ -103,15 +106,33 @@ export class ExchangeService {
   }
 
   async getRate(from: string, to: string) {
-    const { rate, markup, isStale } = await this.rateService.getRate(from, to);
-    return {
-      from,
-      to,
-      baseRate: rate,
-      markupPercent: markup,
-      effectiveRate: rate * (1 - markup / 100),
-      isStale,
-    };
+    try {
+      const { rate, markup, isStale } = await this.rateService.getRate(
+        from,
+        to,
+      );
+      return {
+        from,
+        to,
+        baseRate: rate,
+        markupPercent: markup,
+        effectiveRate: rate * (1 - markup / 100),
+        isStale,
+      };
+    } catch (error) {
+      if (!(error instanceof AdminExchangeRateNotSetException)) throw error;
+      // Read-only consumers can render an honest empty state, and admins can
+      // enter the first price. Financial creation still receives the error.
+      return {
+        from,
+        to,
+        configured: false,
+        baseRate: null,
+        markupPercent: null,
+        effectiveRate: null,
+        isStale: true,
+      };
+    }
   }
 
   async createQuote(userId: string, dto: CreateQuoteDto): Promise<QuoteData> {

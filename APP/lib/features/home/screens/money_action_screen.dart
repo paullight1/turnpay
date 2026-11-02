@@ -135,7 +135,6 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
     'US': 'United States',
     'GB': 'United Kingdom',
   };
-  static const _airtimeCountryOptions = ['GH', 'KE', 'ZA', 'US', 'GB'];
   static const _dataCountryOptions = ['NG', 'GH', 'KE', 'ZA', 'US', 'GB'];
   static const _electricityCountryOptions = ['NG', 'GH', 'KE', 'ZA'];
   static const _enabledAirtimeCountries = <String>{};
@@ -159,6 +158,7 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
   int _cablePackageRequestId = 0;
   String _airtimeScope = 'local';
   String _airtimeCountryCode = 'GH';
+  final _foreignCountryMenu = ValueNotifier<VtuCountryMenu?>(null);
   String _airtimeOperatorId = '';
   bool _isAirtimeAmountStep = false;
   bool _isDataPlanStep = false;
@@ -316,6 +316,7 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
 
   @override
   void dispose() {
+    _foreignCountryMenu.dispose();
     walletRefreshSignal.removeListener(_onTransferWalletRefresh);
     _withdrawalResolveDebounce?.cancel();
     _recipientResolveDebounce?.cancel();
@@ -1196,6 +1197,13 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
       if (!mounted || requestId != _exchangeRateRequestId) return;
 
       final data = Map<String, dynamic>.from(response.data as Map);
+      if (data['configured'] == false) {
+        setState(() {
+          _exchangeEffectiveRate = null;
+          _exchangeRateError = 'This exchange rate is not set yet.';
+        });
+        return;
+      }
       final baseRate = _readDouble(data['baseRate']) ?? 0;
       final markup = _readDouble(data['markupPercent']) ?? 0;
       final effectiveRate =
@@ -2219,6 +2227,7 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
       _returnCoreProvider = _vtuProvider;
       _returnCoreManual = _networkSelectedManually;
     }
+    _foreignCountryMenu.value = null;
     _dataPackageRequestId++;
     _cablePackageRequestId++;
     setState(() {
@@ -2305,17 +2314,6 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
       }
     });
     if (scope == 'local') _suggestMobileNetwork();
-  }
-
-  void _setAirtimeCountryCode(String countryCode) {
-    setState(() {
-      _airtimeCountryCode = countryCode;
-      _isAirtimeAmountStep = false;
-      _airtimeOperatorId = _firstProviderId(
-        _airtimeOperatorsForCountry(countryCode),
-        fallback: '',
-      );
-    });
   }
 
   void _setDataCountryCode(String countryCode) {
@@ -4208,6 +4206,22 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
       return Scaffold(
         backgroundColor: AppColors.background,
         appBar: AppBar(
+            actions: [
+              Padding(
+                  padding: const EdgeInsets.only(right: 16),
+                  child: _vtuProvider == 'foreign-airtime'
+                      ? ValueListenableBuilder<VtuCountryMenu?>(
+                          valueListenable: _foreignCountryMenu,
+                          builder: (context, menu, _) => VtuCountrySelector(
+                              enabled: !_isSubmitting &&
+                                  _pendingOrderReference == null,
+                              menu: menu ??
+                                  VtuCountryMenu(
+                                      countries: const {},
+                                      value: null,
+                                      onChanged: (_) {})))
+                      : _vtuCountrySelector())
+            ],
             title:
                 Text(_providerName(_providersForCurrentFlow(), _vtuProvider)),
             leading: IconButton(
@@ -4217,6 +4231,9 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
           ExtendedVtuForm(
               key: ValueKey(_vtuProvider),
               client: _apiClient.client,
+              onCountryMenuChanged: (menu) {
+                if (mounted) _foreignCountryMenu.value = menu;
+              },
               provider: _vtuProvider,
               type: widget.kind == MoneyActionKind.airtime
                   ? 'airtime'
@@ -4310,7 +4327,8 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
                     VtuPageHeader(
                         title: config.title,
                         onBack: _handlePageBack,
-                        showBackButton: widget.showBackButton)
+                        showBackButton: widget.showBackButton,
+                        trailing: _vtuCountrySelector())
                   else
                     TpPageHeader(
                       label: config.title,
@@ -4557,6 +4575,53 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
     });
   }
 
+  Widget _vtuCountrySelector() {
+    final airtime = widget.kind == MoneyActionKind.airtime;
+    final data = widget.kind == MoneyActionKind.data;
+    final electricity = widget.kind == MoneyActionKind.electricity;
+    final foreignAvailable =
+        airtime && _localAirtimeProviders.any((p) => p.id == 'foreign-airtime');
+    final countries = foreignAvailable
+        ? const {'NG': 'Nigeria', 'INT': 'International'}
+        : {
+            for (final code in electricity
+                ? _electricityCountryOptions
+                : _dataCountryOptions)
+              code: _countryLabels[code]!
+          };
+    final value = airtime
+        ? (_airtimeScope == 'local' ? 'NG' : _airtimeCountryCode)
+        : data
+            ? _dataCountryCode
+            : electricity
+                ? _electricityCountryCode
+                : 'NG';
+    return VtuCountrySelector(
+      enabled: !_isSubmitting && _pendingOrderReference == null,
+      menu: VtuCountryMenu(
+          countries: countries,
+          value: value,
+          disabledCountries: {
+            for (final code in countries.keys)
+              if (code != 'NG' && code != 'INT') code
+          },
+          onChanged: (code) {
+            if (_isSubmitting ||
+                _pendingOrderReference != null ||
+                code == value) {
+              return;
+            }
+            if (airtime) {
+              _setAirtimeScope(code == 'NG' ? 'local' : 'international');
+            } else if (data) {
+              _setDataCountryCode(code);
+            } else if (electricity) {
+              _setElectricityCountryCode(code);
+            }
+          }),
+    );
+  }
+
   Widget _buildMobileTopupScaffold(BuildContext context) {
     final data = widget.kind == MoneyActionKind.data;
     final step = data
@@ -4598,7 +4663,8 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
                             onBack: () {
                               if (!_isSubmitting) _handlePageBack();
                             },
-                            showBackButton: widget.showBackButton || step > 0),
+                            showBackButton: widget.showBackButton || step > 0,
+                            trailing: _vtuCountrySelector()),
                         const SizedBox(height: 20),
                         VtuProgress(
                             step: step,
@@ -5141,17 +5207,6 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
         final isLocalAirtime = _airtimeScope != 'international';
         return [
           const SizedBox(height: AppSpacing.md),
-          _ChoiceRow(
-            label: 'Top-up destination',
-            value: _airtimeScope,
-            values: const ['local', 'international'],
-            labels: const {
-              'local': 'Nigeria',
-              'international': 'International',
-            },
-            onChanged: _setAirtimeScope,
-          ),
-          const SizedBox(height: AppSpacing.md),
           if (isLocalAirtime) ...[
             VtuPhoneField(
                 controller: _recipientController, enabled: !_isSubmitting),
@@ -5163,17 +5218,6 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
                 label: 'Phone number',
                 keyboardType: TextInputType.phone),
           if (!isLocalAirtime) ...[
-            _ChoiceRow(
-              label: 'Service country',
-              value: _airtimeCountryCode,
-              values: _airtimeCountryOptions,
-              labels: _countryLabels,
-              disabledValues: _airtimeCountryOptions
-                  .where((code) => !_enabledAirtimeCountries.contains(code))
-                  .toSet(),
-              onChanged: _setAirtimeCountryCode,
-            ),
-            const SizedBox(height: AppSpacing.md),
             if (_isLoadingVtuCatalog && airtimeOperators.isEmpty) ...[
               const _InfoPanel(
                 text: 'Loading available operators...',
@@ -5275,17 +5319,6 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
         }
         final ghanaDataOperators = _dataOperatorsForCountry('GH');
         return [
-          const SizedBox(height: AppSpacing.md),
-          _ChoiceRow(
-            label: 'Service country',
-            value: _dataCountryCode,
-            values: _dataCountryOptions,
-            labels: _countryLabels,
-            disabledValues: _dataCountryOptions
-                .where((code) => !_enabledDataCountries.contains(code))
-                .toSet(),
-            onChanged: (value) => _setDataCountryCode(value),
-          ),
           const SizedBox(height: AppSpacing.md),
           if (_dataCountryCode == 'NG') ...[
             VtuPhoneField(
@@ -5539,21 +5572,8 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
           _FormStepSection(
             step: '1',
             title: 'Meter details',
-            subtitle: 'Choose the service country, provider, and meter.',
+            subtitle: 'Choose your provider and enter the meter details.',
             children: [
-              _ChoiceRow(
-                label: 'Service country',
-                value: _electricityCountryCode,
-                values: _electricityCountryOptions,
-                labels: _countryLabels,
-                disabledValues: _electricityCountryOptions
-                    .where(
-                      (code) => !_enabledElectricityCountries.contains(code),
-                    )
-                    .toSet(),
-                onChanged: _setElectricityCountryCode,
-              ),
-              const SizedBox(height: AppSpacing.md),
               _ChoiceRow(
                 label: 'Meter type',
                 value: _meterType,
@@ -6207,7 +6227,6 @@ class _ChoiceRow extends StatelessWidget {
   final String value;
   final List<String> values;
   final Map<String, String> labels;
-  final Set<String> disabledValues;
   final ValueChanged<String> onChanged;
 
   const _ChoiceRow({
@@ -6215,7 +6234,6 @@ class _ChoiceRow extends StatelessWidget {
     required this.value,
     required this.values,
     this.labels = const {},
-    this.disabledValues = const {},
     required this.onChanged,
   });
 
@@ -6226,18 +6244,13 @@ class _ChoiceRow extends StatelessWidget {
       isExpanded: true,
       initialValue: value,
       items: values.map((item) {
-        final isDisabled = disabledValues.contains(item);
         final displayLabel = labels[item] ?? item;
         return DropdownMenuItem(
           value: item,
-          enabled: !isDisabled,
           child: Text(
-            isDisabled ? '$displayLabel (coming soon)' : displayLabel,
+            displayLabel,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: isDisabled
-                ? AppTextStyles.bodyM.copyWith(color: AppColors.textSecondary)
-                : null,
           ),
         );
       }).toList(),
@@ -6245,18 +6258,7 @@ class _ChoiceRow extends StatelessWidget {
         if (next != null) onChanged(next);
       },
       dropdownColor: AppColors.surface,
-      decoration: label == 'Service country' || label == 'Top-up destination'
-          ? InputDecoration(
-              prefixIcon: const Icon(Icons.public_rounded, size: 18),
-              labelText: label,
-              filled: false,
-              isDense: true,
-              contentPadding:
-                  const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
-              border: InputBorder.none,
-              enabledBorder: InputBorder.none,
-              focusedBorder: InputBorder.none)
-          : _inputDecoration(label),
+      decoration: _inputDecoration(label),
       style: AppTextStyles.bodyM.copyWith(color: AppColors.textPrimary),
     );
   }

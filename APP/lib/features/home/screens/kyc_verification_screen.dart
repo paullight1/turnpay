@@ -18,6 +18,7 @@ import '../../../services/auth_service.dart';
 import '../../../services/kyc_service.dart';
 import '../widgets/kyc_status_presenter.dart';
 import '../widgets/kyc_status_widgets.dart';
+import '../widgets/kyc_evidence_preview.dart';
 
 class KycVerificationScreen extends StatefulWidget {
   final KycOverview? initialOverview;
@@ -231,7 +232,6 @@ class _KycVerificationScreenState extends State<KycVerificationScreen> {
                         TextField(
                           key: const ValueKey('kyc-nin-number'),
                           controller: _idNumberController,
-                          obscureText: true,
                           enableSuggestions: false,
                           autocorrect: false,
                           keyboardType: TextInputType.number,
@@ -276,21 +276,13 @@ class _KycVerificationScreenState extends State<KycVerificationScreen> {
                                 () => selectedFile = result.files.single);
                           },
                           icon: const Icon(Icons.upload_file_rounded),
-                          label: Text(selectedFile == null
-                              ? 'Choose NIN evidence'
-                              : 'Replace NIN evidence'),
+                          label: const Text('Upload NIN'),
                         ),
                         if (selectedFile != null) ...[
-                          const SizedBox(height: AppSpacing.xs),
-                          Semantics(
-                            liveRegion: true,
-                            label: 'Selected file ${selectedFile!.name}',
-                            child: Text(
-                              selectedFile!.name,
-                              style: AppTextStyles.caption,
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                            ),
+                          const SizedBox(height: AppSpacing.sm),
+                          KycEvidencePreview(
+                            key: ObjectKey(selectedFile),
+                            file: selectedFile!,
                           ),
                         ],
                       ],
@@ -298,16 +290,18 @@ class _KycVerificationScreenState extends State<KycVerificationScreen> {
                   ),
                   const SizedBox(height: AppSpacing.md),
                   _Panel(
-                    child: CheckboxListTile(
-                      key: const ValueKey('kyc-nin-consent'),
-                      contentPadding: EdgeInsets.zero,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: AppSpacing.sm,
+                      vertical: AppSpacing.xs,
+                    ),
+                    child: _KycConsentTile(
+                      tileKey: const ValueKey('kyc-nin-consent'),
                       value: consentAccepted,
-                      controlAffinity: ListTileControlAffinity.leading,
-                      title: const Text(
-                        'I consent to secure storage and manual review of this NIN evidence.',
-                      ),
-                      onChanged: (value) => setDialogState(
-                          () => consentAccepted = value ?? false),
+                      enabled: true,
+                      title:
+                          'I consent to secure storage and manual review of this NIN evidence.',
+                      onChanged: (value) =>
+                          setDialogState(() => consentAccepted = value),
                     ),
                   ),
                 ],
@@ -330,29 +324,42 @@ class _KycVerificationScreenState extends State<KycVerificationScreen> {
                     color: AppColors.surface,
                     border: Border(top: BorderSide(color: AppColors.border)),
                   ),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: OutlinedButton(
-                          onPressed: () =>
-                              Navigator.of(dialogContext).pop(false),
-                          child: const Text('Cancel'),
-                        ),
-                      ),
-                      const SizedBox(width: AppSpacing.sm),
-                      Expanded(
-                        flex: 2,
-                        child: FilledButton(
-                          onPressed: selectedFile != null &&
-                                  consentAccepted &&
-                                  RegExp(r'^\d{11}$')
-                                      .hasMatch(_idNumberController.text.trim())
-                              ? () => Navigator.of(dialogContext).pop(true)
-                              : null,
-                          child: const Text('Submit for review'),
-                        ),
-                      ),
-                    ],
+                  child: LayoutBuilder(
+                    builder: (context, constraints) {
+                      final cancelButton = OutlinedButton(
+                        onPressed: () => Navigator.of(dialogContext).pop(false),
+                        child: const Text('Cancel'),
+                      );
+                      final submitButton = ElevatedButton(
+                        onPressed: selectedFile != null &&
+                                consentAccepted &&
+                                RegExp(r'^\d{11}$')
+                                    .hasMatch(_idNumberController.text.trim())
+                            ? () => Navigator.of(dialogContext).pop(true)
+                            : null,
+                        child: const Text('Submit for review'),
+                      );
+                      final textScale =
+                          MediaQuery.textScalerOf(context).scale(18) / 18;
+                      if (constraints.maxWidth < 260 * textScale) {
+                        return Column(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            submitButton,
+                            const SizedBox(height: AppSpacing.sm),
+                            cancelButton,
+                          ],
+                        );
+                      }
+                      return Row(
+                        children: [
+                          Expanded(child: cancelButton),
+                          const SizedBox(width: AppSpacing.sm),
+                          Expanded(flex: 2, child: submitButton),
+                        ],
+                      );
+                    },
                   ),
                 ),
               ),
@@ -1683,7 +1690,6 @@ class _VerificationForm extends StatelessWidget {
                       key: const ValueKey('kyc-identity-number'),
                       controller: idNumberController,
                       enabled: !isSubmitting,
-                      obscureText: true,
                       enableSuggestions: false,
                       autocorrect: false,
                       keyboardType: TextInputType.number,
@@ -2013,8 +2019,12 @@ class _KycProgressIndicator extends StatelessWidget {
 
 class _Panel extends StatelessWidget {
   final Widget child;
+  final EdgeInsetsGeometry padding;
 
-  const _Panel({required this.child});
+  const _Panel({
+    required this.child,
+    this.padding = const EdgeInsets.all(AppSpacing.lg),
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -2027,8 +2037,7 @@ class _Panel extends StatelessWidget {
           shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(AppRadius.lg),
               side: BorderSide(color: AppColors.border)),
-          child: Padding(
-              padding: const EdgeInsets.all(AppSpacing.lg), child: child),
+          child: Padding(padding: padding, child: child),
         ));
   }
 }

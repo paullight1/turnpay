@@ -1362,6 +1362,70 @@ describe('AdminService banking operations', () => {
     );
   });
 
+  it('keeps exhausted unresolved VTU orders in a direct action-required queue', async () => {
+    const createdAt = new Date('2026-05-21T10:00:00.000Z');
+    const exhausted = {
+      id: 'order-exhausted',
+      provider: 'VTPASS',
+      providerRequestId: 'REQ-EXHAUSTED',
+      providerTransactionId: null,
+      providerStatus: 'pending',
+      status: 'UNKNOWN',
+      scope: 'LOCAL',
+      serviceType: 'AIRTIME',
+      countryCode: 'NG',
+      localProvider: 'mtn',
+      operatorId: null,
+      amount: new Decimal(500),
+      currency: 'NGN',
+      costAmount: new Decimal(500),
+      providerCommission: new Decimal(0),
+      fee: new Decimal(0),
+      margin: new Decimal(0),
+      targetMasked: '******1234',
+      requeryAttempts: 12,
+      lastRequeryAt: createdAt,
+      nextRequeryAt: null,
+      createdAt,
+      updatedAt: createdAt,
+      transaction: {
+        id: 'tx-exhausted',
+        reference: 'VTU-EXHAUSTED',
+        status: 'PENDING',
+        createdAt,
+        updatedAt: createdAt,
+      },
+    };
+    prisma.vtuOrder.findMany
+      .mockResolvedValueOnce([exhausted])
+      .mockResolvedValueOnce([]);
+
+    const result = await service.getStaleVtuOrders(10, 25);
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        count: 1,
+        actionRequiredCount: 1,
+        orders: [
+          expect.objectContaining({
+            orderId: 'order-exhausted',
+            actionRequired: true,
+            actionRequiredCode: 'VTU_MANUAL_RECOVERY_REQUIRED',
+            attempts: 12,
+          }),
+        ],
+      }),
+    );
+    expect(prisma.vtuOrder.findMany).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        where: expect.objectContaining({
+          requeryAttempts: { gte: 12 },
+        }),
+      }),
+    );
+  });
+
   it('returns VTU provider health from the VTU service', async () => {
     const health = {
       generatedAt: new Date('2026-05-22T10:00:00.000Z'),
@@ -1680,7 +1744,7 @@ describe('AdminService banking operations', () => {
       'admin-1',
     );
 
-    expect(vtuService.requeryOrder).toHaveBeenCalledWith('order-1');
+    expect(vtuService.requeryOrder).toHaveBeenCalledWith('order-1', true);
     expect(prisma.auditLog.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         adminId: 'admin-1',

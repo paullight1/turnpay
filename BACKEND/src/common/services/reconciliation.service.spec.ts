@@ -153,6 +153,39 @@ describe('ReconciliationService', () => {
     ]);
   });
 
+  it.each(['99.99', '100.01'])(
+    'flags exactly one minor unit of balance drift (%s)',
+    async (balance) => {
+      prisma.ledgerEntry.groupBy.mockResolvedValue([
+        {
+          walletId: 'wallet-1',
+          direction: 'CREDIT',
+          currency: 'NGN',
+          _sum: { amount: new Decimal('100.00') },
+        },
+      ]);
+      prisma.wallet.findMany.mockResolvedValue([
+        {
+          id: 'wallet-1',
+          userId: 'user-1',
+          currency: 'NGN',
+          balance: new Decimal(balance),
+        },
+      ]);
+      const result = await service.reconcileWallets();
+      expect(result.mismatches).toEqual([
+        {
+          walletId: 'wallet-1',
+          userId: 'user-1',
+          currency: 'NGN',
+          expectedBalance: '100.00',
+          actualBalance: balance,
+          difference: '0.01',
+        },
+      ]);
+    },
+  );
+
   it('treats a wallet with no ledger entries as expecting a zero balance', async () => {
     prisma.ledgerEntry.groupBy.mockResolvedValue([]);
     prisma.wallet.findMany.mockResolvedValue([

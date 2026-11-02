@@ -6,6 +6,7 @@ import {
   UseGuards,
   Query,
   Param,
+  Headers,
 } from '@nestjs/common';
 import { VtuService } from './vtu.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -79,8 +80,10 @@ export class VtuController {
   async purchase(
     @CurrentUser() user: { userId: string },
     @Body() dto: PurchaseVtuDto,
+    @Headers('idempotency-key') key?: string,
+    @Headers('x-idempotency-key') legacyKey?: string,
   ) {
-    return this.vtuService.purchase(user.userId, dto);
+    return this.vtuService.purchase(user.userId, dto, key ?? legacyKey ?? '');
   }
 
   @Get('orders/:reference')

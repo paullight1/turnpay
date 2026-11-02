@@ -72,7 +72,7 @@ void main() {
                       })))));
       await tester.pumpAndSettle();
       if (service == 'foreign-airtime') {
-        await tester.tap(find.text('Destination country').last);
+        await tester.tap(find.byTooltip('Service country').last);
         await tester.pumpAndSettle();
         await tester.tap(find.text('Ghana').last);
         await tester.pumpAndSettle();

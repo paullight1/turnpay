@@ -4,6 +4,8 @@ import { KoraWebhookController } from '../kora/kora-webhook.controller';
 import { PaystackModule } from '../paystack/paystack.module';
 import { KycModule } from '../kyc/kyc.module';
 import { PaystackFundingService } from './paystack-funding.service';
+import { PaystackAdverseFundingService } from './paystack-adverse-funding.service';
+import { PaystackAdverseFundingController } from './paystack-adverse-funding.controller';
 import { PaystackReadinessController } from './paystack-readiness.controller';
 import { Module } from '@nestjs/common';
 import { PaymentService } from './payment.service';
@@ -33,10 +35,12 @@ import { WebhookInboxService } from './webhooks/webhook-inbox.service';
     PaymentController,
     WebhookController,
     PaystackReadinessController,
+    PaystackAdverseFundingController,
   ],
   providers: [
     PaymentService,
     PaystackFundingService,
+    PaystackAdverseFundingService,
     WithdrawalReconcileService,
     WebhookInboxService,
     PaymentWebhookProcessorService,
@@ -44,6 +48,7 @@ import { WebhookInboxService } from './webhooks/webhook-inbox.service';
   exports: [
     PaymentService,
     PaystackFundingService,
+    PaystackAdverseFundingService,
     WebhookInboxService,
     PaymentWebhookProcessorService,
   ],

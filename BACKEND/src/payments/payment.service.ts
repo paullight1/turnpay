@@ -10,7 +10,10 @@ import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 import { WalletsService } from '../wallets/wallets.service';
 import { WithdrawDto, ResolveBankDto } from './dto/payment.dto';
-import { v4 as uuidv4 } from 'uuid';
+import {
+  financialRequestIdentity,
+  assertFinancialRequestMatch,
+} from '../common/utils/financial-request';
 import { PinoLogger } from 'nestjs-pino';
 import { Prisma, TransactionStatus } from '@prisma/client';
 import { Decimal } from '@prisma/client/runtime/library';
@@ -83,7 +86,50 @@ export class PaymentService {
     this.settlementHold = settlementHold ?? new SettlementHoldService(prisma);
   }
 
-  async withdraw(userId: string, dto: WithdrawDto) {
+  private async replayWithdrawal(
+    userId: string,
+    reference: string,
+    fingerprint: string,
+  ) {
+    const existing = await this.prisma.transaction.findUnique({
+      where: { reference },
+      select: {
+        userId: true,
+        type: true,
+        reference: true,
+        status: true,
+        metadata: true,
+      },
+    });
+    if (!existing) return null;
+    if (existing.userId !== userId || existing.type !== 'WITHDRAW') {
+      throw new BadRequestException('Withdrawal request does not match');
+    }
+    assertFinancialRequestMatch(existing.metadata, fingerprint);
+    return {
+      reference: existing.reference,
+      status: existing.status,
+      message:
+        'Your original withdrawal is available. Check its status before starting another.',
+    };
+  }
+
+  async withdraw(userId: string, dto: WithdrawDto, idempotencyKey: string) {
+    const identity = financialRequestIdentity(
+      'WITHDRAW',
+      userId,
+      idempotencyKey,
+      {
+        ...dto,
+        amount: new Decimal(dto.amount).toFixed(2),
+      },
+    );
+    const replay = await this.replayWithdrawal(
+      userId,
+      identity.reference,
+      identity.fingerprint,
+    );
+    if (replay) return replay;
     await this.transactionPin.verifyRequired(userId, dto.transactionPin);
 
     const wallet = await this.walletsService.getWallet(userId, dto.currency);
@@ -156,10 +202,7 @@ export class PaymentService {
             this.getBankAccountEncryptionKey(),
           )
         : undefined;
-    const reference =
-      provider === 'paystack'
-        ? `wd-${uuidv4()}`
-        : `WD-${Date.now()}-${uuidv4()}`;
+    const reference = identity.reference;
     let transferStatus = 'pending';
     let finalStatus: TransactionStatus = 'PENDING';
     let transferRequestSent = false;
@@ -169,176 +212,191 @@ export class PaymentService {
       transferAttemptId: string;
     } | null = null;
 
-    withdrawalRecord = await this.prisma.$transaction(async (tx) => {
-      const now = new Date();
-      const startOfUtcDay = new Date(
-        Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
-      );
-      const startOfNextUtcMonth = new Date(
-        Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1),
-      );
-
-      // Daily reset: dailyWithdrawn resets at the start of each UTC day.
-      await tx.user.updateMany({
-        where: {
-          id: userId,
-          OR: [
-            { dailyLimitResetDate: null },
-            { dailyLimitResetDate: { lt: startOfUtcDay } },
-          ],
-        },
-        data: {
-          dailyWithdrawn: new Decimal(0),
-          dailyLimitResetDate: startOfUtcDay,
-        },
-      });
-
-      // Monthly reset: monthlyWithdrawn resets at the start of each UTC month.
-      await tx.user.updateMany({
-        where: {
-          id: userId,
-          OR: [{ limitResetDate: null }, { limitResetDate: { lt: now } }],
-        },
-        data: {
-          monthlyWithdrawn: new Decimal(0),
-          limitResetDate: startOfNextUtcMonth,
-        },
-      });
-
-      const limitUser = await tx.user.findUnique({
-        where: { id: userId },
-        select: {
-          dailyWithdrawLimit: true,
-          monthlyWithdrawLimit: true,
-          dailyWithdrawn: true,
-          monthlyWithdrawn: true,
-          dailyLimitResetDate: true,
-          limitResetDate: true,
-        },
-      });
-
-      if (!limitUser) {
-        throw new BadRequestException('User not found');
-      }
-
-      const dailyWithdrawn = new Decimal(limitUser.dailyWithdrawn);
-      const monthlyWithdrawn = new Decimal(limitUser.monthlyWithdrawn);
-      const dailyWithdrawLimit = new Decimal(limitUser.dailyWithdrawLimit);
-      const monthlyWithdrawLimit = new Decimal(limitUser.monthlyWithdrawLimit);
-
-      if (dailyWithdrawn.plus(amount).greaterThan(dailyWithdrawLimit)) {
-        throw new BadRequestException(
-          `Daily withdrawal limit exceeded. Remaining: ${dailyWithdrawLimit
-            .minus(dailyWithdrawn)
-            .toFixed(2)}`,
+    try {
+      withdrawalRecord = await this.prisma.$transaction(async (tx) => {
+        const now = new Date();
+        const startOfUtcDay = new Date(
+          Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
         );
-      }
-
-      if (monthlyWithdrawn.plus(amount).greaterThan(monthlyWithdrawLimit)) {
-        throw new BadRequestException(
-          `Monthly withdrawal limit exceeded. Remaining: ${monthlyWithdrawLimit
-            .minus(monthlyWithdrawn)
-            .toFixed(2)}`,
+        const startOfNextUtcMonth = new Date(
+          Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1),
         );
-      }
 
-      const limitsUpdated = await tx.user.updateMany({
-        where: {
-          id: userId,
-          dailyLimitResetDate: limitUser.dailyLimitResetDate,
-          limitResetDate: limitUser.limitResetDate,
-          dailyWithdrawn: { lte: dailyWithdrawLimit.minus(amount) },
-          monthlyWithdrawn: { lte: monthlyWithdrawLimit.minus(amount) },
-        },
-        data: {
-          dailyWithdrawn: { increment: amount },
-          monthlyWithdrawn: { increment: amount },
-        },
-      });
-
-      if (limitsUpdated.count !== 1) {
-        throw new BadRequestException('Withdrawal limit exceeded');
-      }
-
-      const transaction = await tx.transaction.create({
-        data: {
-          userId,
-          type: 'WITHDRAW',
-          amount,
-          currency: dto.currency,
-          status: 'PENDING',
-          reference,
-          walletId: wallet.id,
-          metadata: {
-            provider,
-            beneficiaryId: destination.beneficiaryId,
-            bankCode: destination.bankCode,
-            bankName: destination.bankName,
-            accountName: destination.accountName,
-            accountNumberMasked: destination.accountNumberMasked,
+        // Daily reset: dailyWithdrawn resets at the start of each UTC day.
+        await tx.user.updateMany({
+          where: {
+            id: userId,
+            OR: [
+              { dailyLimitResetDate: null },
+              { dailyLimitResetDate: { lt: startOfUtcDay } },
+            ],
           },
-        },
-      });
-
-      await this.ledger.debitWallet(
-        {
-          userId,
-          currency: dto.currency,
-          amount,
-          transactionId: transaction.id,
-          reference,
-          source: 'WITHDRAWAL',
-          metadata: {
-            beneficiaryId: destination.beneficiaryId,
-            accountNumberMasked: destination.accountNumberMasked,
-          },
-        },
-        tx,
-      );
-
-      const transferAttempt = await tx.transferAttempt.create({
-        data: {
-          transactionId: transaction.id,
-          provider: provider.toUpperCase() as 'MONNIFY' | 'PAYSTACK',
-          providerReference: transaction.reference,
-          providerStatus: 'RESERVED',
-          status: 'PENDING',
-          metadata: {
-            ...(encryptedDestination
-              ? { accountNumberEncrypted: encryptedDestination }
-              : {}),
-            beneficiaryId: destination.beneficiaryId,
-            bankCode: destination.bankCode,
-            bankName: destination.bankName,
-            accountName: destination.accountName,
-            accountNumberMasked: destination.accountNumberMasked,
-          },
-        },
-        select: { id: true },
-      });
-
-      if (provider === 'paystack')
-        await tx.auditLog.create({
           data: {
-            action: 'PAYSTACK_WITHDRAWAL_RESERVED',
-            targetType: 'Transaction',
-            targetId: transaction.id,
-            reference: transaction.reference,
+            dailyWithdrawn: new Decimal(0),
+            dailyLimitResetDate: startOfUtcDay,
+          },
+        });
+
+        // Monthly reset: monthlyWithdrawn resets at the start of each UTC month.
+        await tx.user.updateMany({
+          where: {
+            id: userId,
+            OR: [{ limitResetDate: null }, { limitResetDate: { lt: now } }],
+          },
+          data: {
+            monthlyWithdrawn: new Decimal(0),
+            limitResetDate: startOfNextUtcMonth,
+          },
+        });
+
+        const limitUser = await tx.user.findUnique({
+          where: { id: userId },
+          select: {
+            dailyWithdrawLimit: true,
+            monthlyWithdrawLimit: true,
+            dailyWithdrawn: true,
+            monthlyWithdrawn: true,
+            dailyLimitResetDate: true,
+            limitResetDate: true,
+          },
+        });
+
+        if (!limitUser) {
+          throw new BadRequestException('User not found');
+        }
+
+        const dailyWithdrawn = new Decimal(limitUser.dailyWithdrawn);
+        const monthlyWithdrawn = new Decimal(limitUser.monthlyWithdrawn);
+        const dailyWithdrawLimit = new Decimal(limitUser.dailyWithdrawLimit);
+        const monthlyWithdrawLimit = new Decimal(
+          limitUser.monthlyWithdrawLimit,
+        );
+
+        if (dailyWithdrawn.plus(amount).greaterThan(dailyWithdrawLimit)) {
+          throw new BadRequestException(
+            `Daily withdrawal limit exceeded. Remaining: ${dailyWithdrawLimit
+              .minus(dailyWithdrawn)
+              .toFixed(2)}`,
+          );
+        }
+
+        if (monthlyWithdrawn.plus(amount).greaterThan(monthlyWithdrawLimit)) {
+          throw new BadRequestException(
+            `Monthly withdrawal limit exceeded. Remaining: ${monthlyWithdrawLimit
+              .minus(monthlyWithdrawn)
+              .toFixed(2)}`,
+          );
+        }
+
+        const limitsUpdated = await tx.user.updateMany({
+          where: {
+            id: userId,
+            dailyLimitResetDate: limitUser.dailyLimitResetDate,
+            limitResetDate: limitUser.limitResetDate,
+            dailyWithdrawn: { lte: dailyWithdrawLimit.minus(amount) },
+            monthlyWithdrawn: { lte: monthlyWithdrawLimit.minus(amount) },
+          },
+          data: {
+            dailyWithdrawn: { increment: amount },
+            monthlyWithdrawn: { increment: amount },
+          },
+        });
+
+        if (limitsUpdated.count !== 1) {
+          throw new BadRequestException('Withdrawal limit exceeded');
+        }
+
+        const transaction = await tx.transaction.create({
+          data: {
+            userId,
+            type: 'WITHDRAW',
+            amount,
+            currency: dto.currency,
+            status: 'PENDING',
+            reference,
+            walletId: wallet.id,
             metadata: {
-              userId,
-              amount: amount.toFixed(2),
-              currency: dto.currency,
+              requestFingerprint: identity.fingerprint,
+              provider,
+              beneficiaryId: destination.beneficiaryId,
+              bankCode: destination.bankCode,
+              bankName: destination.bankName,
+              accountName: destination.accountName,
               accountNumberMasked: destination.accountNumberMasked,
             },
           },
         });
 
-      return {
-        id: transaction.id,
-        reference: transaction.reference,
-        transferAttemptId: transferAttempt.id,
-      };
-    });
+        await this.ledger.debitWallet(
+          {
+            userId,
+            currency: dto.currency,
+            amount,
+            transactionId: transaction.id,
+            reference,
+            source: 'WITHDRAWAL',
+            metadata: {
+              beneficiaryId: destination.beneficiaryId,
+              accountNumberMasked: destination.accountNumberMasked,
+            },
+          },
+          tx,
+        );
+
+        const transferAttempt = await tx.transferAttempt.create({
+          data: {
+            transactionId: transaction.id,
+            provider: provider.toUpperCase() as 'MONNIFY' | 'PAYSTACK',
+            providerReference: transaction.reference,
+            providerStatus: 'RESERVED',
+            status: 'PENDING',
+            metadata: {
+              ...(encryptedDestination
+                ? { accountNumberEncrypted: encryptedDestination }
+                : {}),
+              beneficiaryId: destination.beneficiaryId,
+              bankCode: destination.bankCode,
+              bankName: destination.bankName,
+              accountName: destination.accountName,
+              accountNumberMasked: destination.accountNumberMasked,
+            },
+          },
+          select: { id: true },
+        });
+
+        if (provider === 'paystack')
+          await tx.auditLog.create({
+            data: {
+              action: 'PAYSTACK_WITHDRAWAL_RESERVED',
+              targetType: 'Transaction',
+              targetId: transaction.id,
+              reference: transaction.reference,
+              metadata: {
+                userId,
+                amount: amount.toFixed(2),
+                currency: dto.currency,
+                accountNumberMasked: destination.accountNumberMasked,
+              },
+            },
+          });
+
+        return {
+          id: transaction.id,
+          reference: transaction.reference,
+          transferAttemptId: transferAttempt.id,
+        };
+      });
+    } catch (error) {
+      // A concurrent identical reservation may have won. Its unique reference
+      // and debit committed together; never dispatch a second provider request.
+      const replay = await this.replayWithdrawal(
+        userId,
+        reference,
+        identity.fingerprint,
+      );
+      if (replay) return replay;
+      throw error;
+    }
 
     try {
       await this.assertSettlementAllowed(
@@ -1556,6 +1614,7 @@ export class PaymentService {
     }
 
     const safeMetadata = { ...(metadata as Record<string, unknown>) };
+    delete safeMetadata.requestFingerprint;
     delete safeMetadata.accountNumber;
     delete safeMetadata.account_number;
     delete safeMetadata.accountNumberEncrypted;

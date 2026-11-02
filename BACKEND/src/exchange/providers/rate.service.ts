@@ -1,4 +1,8 @@
-import { Injectable, OnModuleInit } from '@nestjs/common';
+import {
+  Injectable,
+  OnModuleInit,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -9,6 +13,12 @@ import { AxiosResponse } from 'axios';
 import { PinoLogger } from 'nestjs-pino';
 import { Prisma } from '@prisma/client';
 import { Decimal } from '@prisma/client/runtime/library';
+
+export class AdminExchangeRateNotSetException extends ServiceUnavailableException {
+  constructor() {
+    super('Admin has not set an active exchange rate for this direction.');
+  }
+}
 
 interface FxRateResponse {
   result?: string;
@@ -70,6 +80,7 @@ export class RateService implements OnModuleInit {
   ) {}
 
   async onModuleInit() {
+    if (this.usesAdminRates()) return;
     // Restore circuit breaker state from Redis if available
     await this.restoreCircuitState();
     // Warm the cache on startup
@@ -78,6 +89,7 @@ export class RateService implements OnModuleInit {
 
   @Cron(CronExpression.EVERY_MINUTE)
   async scheduledRateFetch() {
+    if (this.usesAdminRates()) return;
     this.logger.info({}, 'Running scheduled rate fetch (every 60s)');
     await this.fetchRates();
   }
@@ -88,6 +100,7 @@ export class RateService implements OnModuleInit {
    * window, while still retaining a bounded stale value for display.
    */
   async getRate(from: string, to: string): Promise<RateResult> {
+    if (this.usesAdminRates()) return this.getAdminRate(from, to);
     const key = `${from}_${to}`;
 
     // Check in-memory cache first (fast path)
@@ -177,6 +190,37 @@ export class RateService implements OnModuleInit {
     }
 
     throw new Error(`Rate not available for ${from} to ${to}`);
+  }
+
+  private usesAdminRates(): boolean {
+    return (
+      (this.configService.get<string>('FX_RATE_SOURCE') ?? 'admin') !== 'api'
+    );
+  }
+
+  private async getAdminRate(from: string, to: string): Promise<RateResult> {
+    // The database is authoritative: another admin/process may have changed
+    // the price. Do not substitute an API value or an old Redis/memory entry.
+    const stored = await this.prisma.rate.findUnique({
+      where: { from_to: { from, to } },
+    });
+    const rate = stored?.rate.toNumber();
+    const markup = stored?.markup.toNumber();
+    const expiry = stored?.validUntil?.getTime();
+    if (
+      stored?.source !== 'admin' ||
+      !this.isFinitePositiveRate(rate) ||
+      markup === undefined ||
+      !Number.isFinite(markup) ||
+      markup < 0 ||
+      markup >= 100 ||
+      (expiry !== undefined &&
+        (!Number.isFinite(expiry) || expiry <= Date.now()))
+    )
+      throw new AdminExchangeRateNotSetException();
+    // Admin prices stay active until replaced or explicitly expired. The
+    // short market-feed freshness window applies only to API mode.
+    return { rate: rate, markup, isStale: false };
   }
 
   /**
@@ -360,6 +404,7 @@ export class RateService implements OnModuleInit {
   // ─── Private: Rate Fetching ───────────────────────────────────────
 
   private async fetchRates(): Promise<void> {
+    if (this.usesAdminRates()) return;
     // Circuit breaker check
     if (this.circuitState === 'OPEN') {
       if (Date.now() - this.circuitOpenedAt >= CIRCUIT_RECOVERY_MS) {

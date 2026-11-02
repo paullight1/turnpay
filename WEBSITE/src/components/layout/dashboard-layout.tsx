@@ -17,7 +17,13 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetTitle,
+  SheetTrigger,
+} from "@/components/ui/sheet";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
 import { maskEmail } from "@/lib/privacy";
@@ -32,6 +38,7 @@ import {
   LifeBuoy,
   Menu,
   ScrollText,
+  ShieldAlert,
   ShieldCheck,
   LogOut,
   Smartphone,
@@ -65,6 +72,11 @@ const navItems: NavItem[] = [
 
 const adminItems: NavItem[] = [
   { label: "Overview", href: "/admin", icon: ShieldCheck },
+  {
+    label: "Funding review",
+    href: "/admin/payments/adverse-funding",
+    icon: ShieldAlert,
+  },
   { label: "Transactions", href: "/admin?tab=finance", icon: BarChart3 },
   { label: "Customers", href: "/admin?tab=users", icon: UserRound },
   {
@@ -263,6 +275,10 @@ export default function DashboardLayout({
                 side="left"
                 className="dark w-72 border-white/10 bg-[#050505] p-0 text-white"
               >
+                <SheetTitle className="sr-only">Navigation menu</SheetTitle>
+                <SheetDescription className="sr-only">
+                  Choose where to go in TrustPay.
+                </SheetDescription>
                 <div className="border-b border-white/10 px-4 py-4">
                   <TrustPayLogo
                     imageClassName="size-10"

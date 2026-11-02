@@ -79,6 +79,7 @@ describe('PaymentService withdrawals', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    prisma.transaction.findUnique.mockResolvedValue(null);
     service = new PaymentService(
       prisma,
       wallets as any,
@@ -140,12 +141,16 @@ describe('PaymentService withdrawals', () => {
       id: 'attempt-1',
     });
 
-    const result = await service.withdraw('user-1', {
-      amount: '1000',
-      currency: 'NGN',
-      beneficiaryId: 'beneficiary-1',
-      provider: 'monnify',
-    } as any);
+    const result = await service.withdraw(
+      'user-1',
+      {
+        amount: '1000',
+        currency: 'NGN',
+        beneficiaryId: 'beneficiary-1',
+        provider: 'monnify',
+      } as any,
+      'test-idempotency-key',
+    );
 
     expect(ledger.debitWallet).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -241,12 +246,16 @@ describe('PaymentService withdrawals', () => {
     });
 
     await expect(
-      service.withdraw('user-1', {
-        amount: '1000',
-        currency: 'NGN',
-        beneficiaryId: 'beneficiary-1',
-        provider: 'monnify',
-      } as any),
+      service.withdraw(
+        'user-1',
+        {
+          amount: '1000',
+          currency: 'NGN',
+          beneficiaryId: 'beneficiary-1',
+          provider: 'monnify',
+        } as any,
+        'test-idempotency-key',
+      ),
     ).rejects.toBeInstanceOf(BadRequestException);
 
     expect(ledger.creditWallet).toHaveBeenCalledWith(
@@ -324,12 +333,16 @@ describe('PaymentService withdrawals', () => {
       id: 'attempt-1',
     });
 
-    const result = await service.withdraw('user-1', {
-      amount: '1000',
-      currency: 'NGN',
-      beneficiaryId: 'beneficiary-1',
-      provider: 'monnify',
-    } as any);
+    const result = await service.withdraw(
+      'user-1',
+      {
+        amount: '1000',
+        currency: 'NGN',
+        beneficiaryId: 'beneficiary-1',
+        provider: 'monnify',
+      } as any,
+      'test-idempotency-key',
+    );
 
     expect(monnifyBanks.getTransferStatus).toHaveBeenCalledWith('WD-1');
     expect(prisma.transferAttempt.update).toHaveBeenCalledWith({
@@ -576,12 +589,16 @@ describe('PaymentService withdrawals', () => {
       id: 'attempt-1',
     });
 
-    const result = await service.withdraw('user-1', {
-      amount: '1000',
-      currency: 'NGN',
-      beneficiaryId: 'beneficiary-1',
-      provider: 'monnify',
-    } as any);
+    const result = await service.withdraw(
+      'user-1',
+      {
+        amount: '1000',
+        currency: 'NGN',
+        beneficiaryId: 'beneficiary-1',
+        provider: 'monnify',
+      } as any,
+      'test-idempotency-key',
+    );
 
     // First reset call clears the stale daily counter for a new UTC day.
     expect(prisma.user.updateMany).toHaveBeenNthCalledWith(

@@ -211,4 +211,38 @@ describe('WebhookController', () => {
     ).rejects.toThrow('Monnify provider reference is required');
     expect(webhookInbox.accept).not.toHaveBeenCalled();
   });
+
+  it('uses a signed-body identity for refund events without a refund reference', async () => {
+    const refundBody = {
+      event: 'refund.processed',
+      data: {
+        transaction_reference: 'fund-reference-1',
+        refund_reference: null,
+        amount: '10000',
+        currency: 'NGN',
+        domain: 'test',
+      },
+    };
+    const refundRawBody = JSON.stringify(refundBody);
+    const refundSignature = createHmac('sha512', 'configured-secret')
+      .update(refundRawBody)
+      .digest('hex');
+
+    await controller.handlePaystackWebhook(
+      refundSignature,
+      { rawBody: Buffer.from(refundRawBody) } as any,
+      refundBody,
+    );
+
+    expect(webhookInbox.accept).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: 'PAYSTACK',
+        eventType: 'refund.processed',
+        providerReference: expect.stringMatching(/^[a-f0-9]{64}$/),
+      }),
+    );
+    expect(webhookInbox.accept.mock.calls[0][0].providerReference).not.toBe(
+      'fund-reference-1',
+    );
+  });
 });

@@ -23,10 +23,12 @@ class ExtendedVtuForm extends StatefulWidget {
       required this.provider,
       required this.type,
       required this.onReady,
-      required this.disabled});
+      required this.disabled,
+      this.onCountryMenuChanged});
   final Dio client;
   final String provider, type;
   final bool disabled;
+  final ValueChanged<VtuCountryMenu>? onCountryMenuChanged;
   final Future<void> Function(
       Map<String, dynamic> payload, Map<String, String> review) onReady;
   @override
@@ -80,6 +82,7 @@ class _ExtendedVtuFormState extends State<ExtendedVtuForm> {
       _busy = true;
       _error = null;
     });
+    _publishCountryMenu();
     try {
       await task();
     } catch (error) {
@@ -88,7 +91,10 @@ class _ExtendedVtuFormState extends State<ExtendedVtuForm> {
             error, 'Could not load service details. Try again.'));
       }
     } finally {
-      if (mounted) setState(() => _busy = false);
+      if (mounted) {
+        setState(() => _busy = false);
+        _publishCountryMenu();
+      }
     }
   }
 
@@ -100,6 +106,39 @@ class _ExtendedVtuFormState extends State<ExtendedVtuForm> {
           await _loadPlans();
         }
       });
+  VtuCountryMenu get _countryMenu => VtuCountryMenu(
+          countries: {
+            for (final row in _countries) '${row['code']}': '${row['name']}'
+          },
+          value: _country,
+          enabled: !_busy && !widget.disabled,
+          onChanged: _changeCountry);
+
+  void _publishCountryMenu() {
+    if (_foreign && mounted) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) widget.onCountryMenuChanged?.call(_countryMenu);
+      });
+    }
+  }
+
+  void _changeCountry(String value) {
+    if (_busy || widget.disabled || !mounted) return;
+    setState(() {
+      _country = value;
+      _operator = null;
+      _plan = null;
+      _operators = [];
+      _plans = [];
+      _quote = null;
+    });
+    _run(() async {
+      final rows =
+          _rows(await _get('international/operators', {'countryCode': value}));
+      if (mounted) setState(() => _operators = rows);
+    });
+  }
+
   Future<void> _loadPlans() async {
     final rows = _rows(await _get('packages', {
       'provider': widget.provider,
@@ -212,6 +251,11 @@ class _ExtendedVtuFormState extends State<ExtendedVtuForm> {
   @override
   Widget build(BuildContext context) =>
       Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        if (_foreign && widget.onCountryMenuChanged == null)
+          Align(
+              alignment: Alignment.centerRight,
+              child: VtuCountrySelector(menu: _countryMenu)),
+        const SizedBox(height: 12),
         Container(
           padding: const EdgeInsets.all(20),
           decoration: BoxDecoration(
@@ -236,27 +280,6 @@ class _ExtendedVtuFormState extends State<ExtendedVtuForm> {
         ),
         const VtuSectionLabel('Recipient details'),
         if (_foreign) ...[
-          _select(
-              'Destination country',
-              _country,
-              _countries
-                  .map((item) => DropdownMenuItem(
-                      value: '${item['code']}', child: Text('${item['name']}')))
-                  .toList(), (value) {
-            setState(() {
-              _country = value;
-              _operator = null;
-              _plan = null;
-              _operators = [];
-              _plans = [];
-              _quote = null;
-            });
-            _run(() async {
-              final rows = _rows(await _get(
-                  'international/operators', {'countryCode': value}));
-              if (mounted) setState(() => _operators = rows);
-            });
-          }),
           _select(
               'Operator',
               _operator,

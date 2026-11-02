@@ -21,6 +21,7 @@ describe('manual exchange HTTP authorization and validation', () => {
       .mockResolvedValue({ items: [], nextCursor: null, counts: {} }),
     create: jest.fn().mockResolvedValue({ id: 'order' }),
     review: jest.fn(),
+    uploadHandoverUrl: jest.fn(),
   };
   beforeAll(async () => {
     const module = await Test.createTestingModule({
@@ -147,6 +148,21 @@ describe('manual exchange HTTP authorization and validation', () => {
         action: 'CREDIT_WALLET',
         reason: 'Verified bank inflow',
         acceptExpiredQuote: 'true',
+      })
+      .expect(400);
+    expect(service.review).not.toHaveBeenCalled();
+  });
+  it('requires a target administrator and an outcome classification for payout handover', async () => {
+    role = 'ADMIN';
+    await request(app.getHttpServer())
+      .post(
+        '/api/admin/exchange/manual-orders/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/review',
+      )
+      .set('Authorization', 'Bearer synthetic')
+      .set('Idempotency-Key', 'synthetic-handover-key')
+      .send({
+        action: 'HANDOVER_PAYOUT',
+        reason: 'Supervisor checked the external payout outcome',
       })
       .expect(400);
     expect(service.review).not.toHaveBeenCalled();

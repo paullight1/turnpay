@@ -39,6 +39,7 @@ dependencies:
   # Crash reporting (enabled only when SENTRY_DSN dart-define is provided)
   sentry_flutter: ^8.14.2
   flutter_svg: ^2.3.0
+  pdfrx: 2.4.8
 
 dev_dependencies:
   flutter_test:

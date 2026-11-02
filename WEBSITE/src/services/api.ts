@@ -210,8 +210,13 @@ apiClient.interceptors.response.use(
 );
 
 export const authApi = {
-  registerStaff: (data: { email: string; password: string; fullName?: string }, idempotencyKey: string) =>
-    apiClient.post("/api/auth/staff/register", data, { headers: { "Idempotency-Key": idempotencyKey } }),
+  registerStaff: (
+    data: { email: string; password: string; fullName?: string },
+    idempotencyKey: string,
+  ) =>
+    apiClient.post("/api/auth/staff/register", data, {
+      headers: { "Idempotency-Key": idempotencyKey },
+    }),
   resendConfirmation: (email: string) =>
     apiClient.post("/api/auth/resend-confirmation", { email }),
   bootstrap: (accessToken?: string) =>
@@ -517,7 +522,11 @@ export type AdminManualExchangeOrder = {
   events: ManualExchangeOrderEvent[];
 };
 
-export type AdminManualExchangeQueue = {items:AdminManualExchangeOrder[];nextCursor:string|null;counts:Record<string,number>};
+export type AdminManualExchangeQueue = {
+  items: AdminManualExchangeOrder[];
+  nextCursor: string | null;
+  counts: Record<string, number>;
+};
 
 export type AdminManualExchangeReviewAction =
   | "CREDIT_WALLET"
@@ -525,9 +534,13 @@ export type AdminManualExchangeReviewAction =
   | "REQUEST_INFO"
   | "REJECT"
   | "CLAIM_PAYOUT"
+  | "HANDOVER_PAYOUT"
   | "MARK_SENT"
   | "RECORD_CEDIS_SENT"
   | "COMPLETE";
+
+export type AdminManualExchangePayoutOutcome =
+  "NOT_SENT" | "CONFIRMED_FAILED" | "ALREADY_SENT" | "UNKNOWN";
 
 export type AdminManualExchangeReviewInput = {
   action: AdminManualExchangeReviewAction;
@@ -538,6 +551,8 @@ export type AdminManualExchangeReviewInput = {
   payoutReference?: string;
   payoutAmount?: string;
   payoutProofObjectKey?: string;
+  handoverToAdminId?: string;
+  payoutOutcome?: AdminManualExchangePayoutOutcome;
 };
 
 export type AdminManualExchangeReconciliationRun = {
@@ -565,9 +580,14 @@ export type ManualExchangeUploadResponse = {
 export type ManualExchangeProofKind = "DEPOSIT" | "PAYOUT";
 
 export const adminManualExchangeApi = {
-  queue:(status?:string,cursor?:string)=>{
-    const params=new URLSearchParams();if(status&&status!=='ALL')params.set('status',status);if(cursor)params.set('cursor',cursor);
-    const query=params.toString();return apiClient.get<AdminManualExchangeQueue>(`/api/admin/exchange/manual-orders/queue${query?`?${query}`:''}`);
+  queue: (status?: string, cursor?: string) => {
+    const params = new URLSearchParams();
+    if (status && status !== "ALL") params.set("status", status);
+    if (cursor) params.set("cursor", cursor);
+    const query = params.toString();
+    return apiClient.get<AdminManualExchangeQueue>(
+      `/api/admin/exchange/manual-orders/queue${query ? `?${query}` : ""}`,
+    );
   },
   list: (status?: string) => {
     const params = new URLSearchParams();
@@ -598,6 +618,16 @@ export const adminManualExchangeApi = {
   ) =>
     apiClient.post<ManualExchangeUploadResponse>(
       `/api/admin/exchange/manual-orders/${encodeURIComponent(orderId)}/upload-url`,
+      data,
+      withIdempotencyKey(idempotencyKey),
+    ),
+  createHandoverUploadUrl: (
+    orderId: string,
+    data: ManualExchangeUploadRequest,
+    idempotencyKey: string,
+  ) =>
+    apiClient.post<ManualExchangeUploadResponse>(
+      `/api/admin/exchange/manual-orders/${encodeURIComponent(orderId)}/handover-upload-url`,
       data,
       withIdempotencyKey(idempotencyKey),
     ),
@@ -673,6 +703,19 @@ export const adminAuditApi = {
 };
 
 export const adminUserApi = {
+  getUsers: (role?: "USER" | "ADMIN") => {
+    const params = new URLSearchParams({ page: "1", limit: "25" });
+    if (role) params.set("role", role);
+    return apiClient.get<{
+      users: Array<{
+        id: string;
+        email: string;
+        fullName: string | null;
+        role: "USER" | "ADMIN";
+        isSuspended: boolean;
+      }>;
+    }>(`/api/admin/users?${params.toString()}`);
+  },
   updateUser: (
     userId: string,
     data: {
@@ -733,6 +776,84 @@ export type AdminInternalTransferReversal = {
   requestedAt: string;
   completedAt?: string | null;
   blockedAt?: string | null;
+};
+
+export type PaystackAdverseFundingCase = {
+  id: string;
+  provider: string;
+  eventType: string;
+  providerReference: string;
+  economicReference?: string | null;
+  fundingReference?: string | null;
+  transactionId?: string | null;
+  userId?: string | null;
+  currency?: string | null;
+  exposureAmount?: number | string | null;
+  recoveredAmount: number | string;
+  status: "OPEN" | "UNDER_REVIEW" | "RESOLVED" | "CLOSED" | string;
+  verificationStatus: "PENDING" | "VERIFIED" | "UNMATCHED" | string;
+  holdRequired: boolean;
+  providerStatus?: string | null;
+  resolution?: string | null;
+  resolvedBy?: string | null;
+  resolvedAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type PaystackAdverseFundingResolution = {
+  action: "RELEASE_HOLD" | "COLLECT";
+  reason: string;
+  amount?: string;
+};
+
+export type PaystackAdverseFundingRecheck = {
+  reason: string;
+};
+
+export const adminAdverseFundingApi = {
+  listCases: (status?: PaystackAdverseFundingCase["status"]) => {
+    const params = new URLSearchParams();
+    if (status) params.set("status", status);
+    const query = params.toString();
+    return apiClient.get<PaystackAdverseFundingCase[]>(
+      `/api/admin/payments/adverse-funding/cases${query ? `?${query}` : ""}`,
+    );
+  },
+  resolveCase: (
+    caseId: string,
+    data: PaystackAdverseFundingResolution,
+    idempotencyKey: string,
+  ) =>
+    apiClient.post<{
+      caseId: string;
+      status: string;
+      holdRequired: boolean;
+      recoveredAmount: string;
+      reference?: string;
+      idempotent?: boolean;
+    }>(
+      `/api/admin/payments/adverse-funding/cases/${encodeURIComponent(caseId)}/resolve`,
+      data,
+      withIdempotencyKey(idempotencyKey),
+    ),
+  recheckCase: (
+    caseId: string,
+    data: PaystackAdverseFundingRecheck,
+    idempotencyKey: string,
+  ) =>
+    apiClient.post<{
+      caseId: string;
+      status: string;
+      holdRequired: boolean;
+      exposureAmount?: string;
+      reviewRequired?: boolean;
+      rechecked?: boolean;
+    }>(
+      `/api/admin/payments/adverse-funding/cases/${encodeURIComponent(caseId)}/recheck`,
+      data,
+      withIdempotencyKey(idempotencyKey),
+    ),
 };
 
 export const adminInternalTransferReversalApi = {

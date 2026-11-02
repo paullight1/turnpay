@@ -24,7 +24,7 @@ Console.
 The release owner must provision all of the following separately for staging
 and production:
 
-1. Register the exact package `com.trustpay.app` in the corresponding Play
+1. Register the exact package `app.trustpay.com` in the corresponding Play
    Console application. Record the Play app identifier, package name, and the
    Google Play app-signing SHA-256 certificate fingerprint. The upload key and
    Play app-signing key are different; the server policy must be based on the

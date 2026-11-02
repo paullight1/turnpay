@@ -53,6 +53,43 @@ void main() {
             }),
         throwsFormatException);
   });
+  test(
+      'receiving readiness is per direction, backward compatible and fails closed',
+      () {
+    final base = <String, dynamic>{
+      'enabled': true,
+      'sourceCurrency': 'GHS',
+      'targetCurrency': 'NGN',
+      'supportedSourceCurrencies': ['GHS', 'NGN'],
+    };
+    final configured = ManualExchangeConfig.fromJson({
+      ...base,
+      'availableSourceCurrencies': ['NGN'],
+    });
+    expect(configured.canExchangeFrom('NGN'), isTrue);
+    expect(configured.canExchangeFrom('GHS'), isFalse);
+    expect(ManualExchangeConfig.fromJson(base).canExchangeFrom('GHS'), isTrue);
+    expect(
+        ManualExchangeConfig.fromJson({
+          ...base,
+          'enabled': false,
+          'availableSourceCurrencies': ['GHS'],
+        }).canExchangeFrom('GHS'),
+        isFalse);
+    for (final value in [
+      null,
+      'NGN',
+      ['USD']
+    ]) {
+      expect(
+          () => ManualExchangeConfig.fromJson({
+                ...base,
+                'availableSourceCurrencies': value,
+              }),
+          throwsFormatException);
+    }
+  });
+
   test('retries an unknown create outcome with the same account-scoped key',
       () async {
     final adapter = _ManualExchangeAdapter(failFirstCreate: true);
@@ -77,7 +114,12 @@ void main() {
     final pending = await store.readAttempts();
     expect(pending, hasLength(1));
     expect(pending.single.action, 'create');
-    expect(jsonEncode(pending), isNot(contains('2468')));
+    // A random UUID may coincidentally contain the PIN's four digits. Check
+    // the persisted structure and payload instead of arbitrary substrings.
+    expect(pending.single.toJson().keys,
+        unorderedEquals(['action', 'fingerprint', 'key']));
+    expect(jsonDecode(pending.single.fingerprint),
+        {'amount': '100.00', 'settlementMode': 'WALLET'});
 
     final order = await create();
     expect(order.id, 'order-1');

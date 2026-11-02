@@ -1,12 +1,76 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:trustpay_app/core/theme/app_theme.dart';
 
 import 'package:trustpay_app/features/exchange/screens/manual_exchange_screen.dart';
 import 'package:trustpay_app/features/exchange/services/manual_exchange_service.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+
+  testWidgets('header back returns through exchange steps and keeps the amount',
+      (tester) async {
+    await tester.pumpWidget(MaterialApp(
+        home: ManualExchangeScreen(
+            showBackButton: false,
+            service: _FakeManualExchangeService(enabled: true))));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Cedis to naira'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextFormField).first, '100');
+    await tester.ensureVisible(find.text('Continue'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Continue'));
+    await tester.pumpAndSettle();
+    await tester.drag(find.byType(CustomScrollView), const Offset(0, 1000));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Back'));
+    await tester.pumpAndSettle();
+    expect(find.text('100'), findsOneWidget);
+    expect(find.text('Back'), findsNothing);
+    await tester.drag(find.byType(CustomScrollView), const Offset(0, 1000));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Back'));
+    await tester.pumpAndSettle();
+    expect(find.text('Choose your exchange'), findsOneWidget);
+    expect(find.byTooltip('Back'), findsNothing);
+  });
+
+  for (final variant in [
+    (size: const Size(320, 740), scale: 1.5, dark: true),
+    (size: const Size(430, 932), scale: 1.0, dark: false),
+    (size: const Size(1024, 900), scale: 1.0, dark: false),
+  ]) {
+    testWidgets('amount entry fits ${variant.size} at ${variant.scale} text',
+        (tester) async {
+      tester.view.physicalSize = variant.size;
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      await tester.pumpWidget(MaterialApp(
+          theme: variant.dark ? AppTheme.dark : AppTheme.light,
+          builder: (context, child) => MediaQuery(
+              data: MediaQuery.of(context)
+                  .copyWith(textScaler: TextScaler.linear(variant.scale)),
+              child: child!),
+          home: ManualExchangeScreen(
+              service: _FakeManualExchangeService(enabled: true))));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Cedis to naira'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextFormField).first, '9999999.99');
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      await tester.ensureVisible(find.text('Continue'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Continue'));
+      await tester.pumpAndSettle();
+      expect(find.text('Naira goes to your TrustPay wallet'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+    });
+  }
 
   testWidgets('slow history does not block exchange direction selection',
       (tester) async {
@@ -40,6 +104,8 @@ void main() {
     await tester.tap(find.text('Naira to cedis'));
     await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextFormField).first, '1000');
+    await tester.ensureVisible(find.text('Continue'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Continue'));
     await tester.pumpAndSettle();
     expect(find.text('Receive cedis'), findsOneWidget);
@@ -47,6 +113,31 @@ void main() {
     expect(find.text('Bank account'), findsOneWidget);
     expect(find.text('Mobile money'), findsOneWidget);
     expect(find.text('View transfer account'), findsOneWidget);
+  });
+
+  testWidgets(
+      'only offers a ready direction and prevents swapping into an unconfigured one',
+      (tester) async {
+    final service = _FakeManualExchangeService(
+        enabled: true, availableSourceCurrencies: const ['NGN']);
+    await tester
+        .pumpWidget(MaterialApp(home: ManualExchangeScreen(service: service)));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Cedis to naira'));
+    await tester.pumpAndSettle();
+    expect(find.byType(TextFormField), findsNothing);
+    await tester.tap(find.text('Naira to cedis'));
+    await tester.pumpAndSettle();
+    expect(find.byType(TextFormField), findsWidgets);
+    await tester.enterText(find.byType(TextFormField).first, '1000');
+    await tester.tap(find.byTooltip('Swap currencies'));
+    await tester.pumpAndSettle();
+    expect(
+        tester
+            .widget<TextFormField>(find.byType(TextFormField).first)
+            .controller!
+            .text,
+        '1,000');
   });
 
   testWidgets('cedis exchange advances to a naira payout step', (tester) async {
@@ -57,8 +148,10 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('Cedis to naira'));
     await tester.pumpAndSettle();
-    expect(find.text('GHS '), findsOneWidget);
+    expect(find.text('GHS'), findsOneWidget);
     await tester.enterText(find.byType(TextFormField).first, '100');
+    await tester.ensureVisible(find.text('Continue'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Continue'));
     await tester.pumpAndSettle();
     expect(find.text('Naira goes to your TrustPay wallet'), findsOneWidget);
@@ -176,20 +269,26 @@ class _FakeManualExchangeService extends ManualExchangeService {
       };
   bool enabled;
   int configReads = 0;
+  final List<String>? availableSourceCurrencies;
   final ManualExchangeAttempt? pendingCreate;
 
-  _FakeManualExchangeService({required this.enabled, this.pendingCreate})
+  _FakeManualExchangeService(
+      {required this.enabled,
+      this.pendingCreate,
+      this.availableSourceCurrencies})
       : super();
 
   @override
   Future<ManualExchangeConfig> fetchConfig() async {
     configReads++;
-    return ManualExchangeConfig(
-      enabled: enabled,
-      sourceCurrency: 'NGN',
-      targetCurrency: 'GHS',
-      supportedSourceCurrencies: const ['NGN', 'GHS'],
-    );
+    return ManualExchangeConfig.fromJson({
+      'enabled': enabled,
+      'sourceCurrency': 'NGN',
+      'targetCurrency': 'GHS',
+      'supportedSourceCurrencies': ['NGN', 'GHS'],
+      if (availableSourceCurrencies != null)
+        'availableSourceCurrencies': availableSourceCurrencies,
+    });
   }
 
   @override

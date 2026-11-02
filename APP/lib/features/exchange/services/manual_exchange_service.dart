@@ -156,6 +156,7 @@ class ManualExchangeConfig {
   final String sourceCurrency;
   final String targetCurrency;
   final List<String> supportedSourceCurrencies;
+  final List<String>? availableSourceCurrencies;
   final Map<String, List<ManualSettlementMode>> settlementOptions;
 
   const ManualExchangeConfig({
@@ -163,11 +164,17 @@ class ManualExchangeConfig {
     required this.sourceCurrency,
     required this.targetCurrency,
     this.supportedSourceCurrencies = const ['NGN'],
+    this.availableSourceCurrencies,
     this.settlementOptions = const {
       'GHS': [ManualSettlementMode.wallet],
       'NGN': [ManualSettlementMode.momo, ManualSettlementMode.bank]
     },
   });
+
+  bool canExchangeFrom(String currency) =>
+      enabled &&
+      supportedSourceCurrencies.contains(currency) &&
+      (availableSourceCurrencies?.contains(currency) ?? true);
 
   List<ManualSettlementMode> deliveryModesFor(String currency) =>
       List.unmodifiable(
@@ -194,7 +201,28 @@ class ManualExchangeConfig {
                 _requiredString(item, 'receiving option'))));
       }
     }
+    final supported = (json['supportedSourceCurrencies'] as List?)
+            ?.map((value) =>
+                _currencyValue(value, fieldName: 'supported source currency'))
+            .toList() ??
+        const ['NGN'];
+    final rawAvailable = json['availableSourceCurrencies'];
+    List<String>? available;
+    if (json.containsKey('availableSourceCurrencies')) {
+      if (rawAvailable is! List) {
+        throw const FormatException('Exchange availability could not be read.');
+      }
+      available = rawAvailable
+          .map((value) =>
+              _currencyValue(value, fieldName: 'available source currency'))
+          .toList();
+      if (available.any((currency) => !supported.contains(currency))) {
+        throw const FormatException('Exchange availability could not be read.');
+      }
+    }
     return ManualExchangeConfig(
+      availableSourceCurrencies:
+          available == null ? null : List.unmodifiable(available),
       enabled: _requiredBool(json['enabled'], 'exchange availability'),
       settlementOptions: options == null
           ? const {
@@ -202,11 +230,7 @@ class ManualExchangeConfig {
               'NGN': [ManualSettlementMode.momo, ManualSettlementMode.bank]
             }
           : Map.unmodifiable(options),
-      supportedSourceCurrencies: (json['supportedSourceCurrencies'] as List?)
-              ?.map((value) =>
-                  _currencyValue(value, fieldName: 'supported source currency'))
-              .toList() ??
-          const ['NGN'],
+      supportedSourceCurrencies: List.unmodifiable(supported),
       sourceCurrency: _currencyValue(
         json['sourceCurrency'],
         fieldName: 'source currency',

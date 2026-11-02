@@ -197,9 +197,24 @@ async function installAdminManualExchangeMocks(page: Page) {
       version: "ghs-v1",
     },
   });
+  const handoverOrder = buildOrder({
+    id: "manual-payout-handover-001",
+    reference: "MX-PAYOUT-HANDOVER-001",
+    status: "PAYOUT_PROCESSING",
+    settlementMode: "BANK",
+    amount: "100000.00",
+    targetAmount: "2000.00",
+    destinationInstitution: "Ghana Commercial Bank",
+    destinationAccountMasked: "******4455",
+    destinationAccount: "0241234455",
+    destinationName: "Unavailable Operator Fixture",
+    hasProof: true,
+    payoutClaimedBy: "operator-unavailable",
+  });
   const orders = [
     walletOrder,
     payoutOrder,
+    handoverOrder,
     expiredWalletOrder,
     cediWalletOrder,
   ];
@@ -224,6 +239,35 @@ async function installAdminManualExchangeMocks(page: Page) {
 
   await page.route("**/api/auth/refresh", async (route) => {
     await route.fulfill({ status: 200, json: { session } });
+  });
+
+  await page.route("**/api/admin/users**", async (route) => {
+    const url = new URL(route.request().url());
+    if (route.request().method() !== "GET" || url.searchParams.get("role") !== "ADMIN") {
+      await route.fallback();
+      return;
+    }
+    await route.fulfill({
+      status: 200,
+      json: {
+        users: [
+          {
+            id: "user-123",
+            email,
+            fullName: "TrustPay Admin",
+            role: "ADMIN",
+            isSuspended: false,
+          },
+          {
+            id: "user-456",
+            email: "second-admin@trustpay.app",
+            fullName: "Second TrustPay Admin",
+            role: "ADMIN",
+            isSuspended: false,
+          },
+        ],
+      },
+    });
   });
 
   await page.route("**/api/admin/exchange/manual-orders**", async (route) => {
@@ -283,7 +327,7 @@ async function installAdminManualExchangeMocks(page: Page) {
       return;
     }
 
-    if (url.pathname.endsWith("/upload-url")) {
+    if (/(?:\/upload-url|\/handover-upload-url)$/.test(url.pathname)) {
       expect(body.contentType).toBe("application/pdf");
       expect(body.fileName).toBe("payout-proof.pdf");
       await route.fulfill({
@@ -337,6 +381,10 @@ async function installAdminManualExchangeMocks(page: Page) {
         ? "CREDITED"
         : body.action === "CLAIM_PAYOUT"
           ? "PAYOUT_PROCESSING"
+          : body.action === "HANDOVER_PAYOUT"
+            ? body.payoutOutcome === "ALREADY_SENT"
+              ? "PAYOUT_SENT"
+              : "PAYOUT_PROCESSING"
           : body.action === "MARK_SENT"
             ? "PAYOUT_SENT"
             : body.action === "COMPLETE" || body.action === "RECORD_CEDIS_SENT"
@@ -353,9 +401,15 @@ async function installAdminManualExchangeMocks(page: Page) {
       depositReference: body.depositReference ?? order.depositReference,
       payoutReference: body.payoutReference ?? order.payoutReference,
       payoutClaimedBy:
-        body.action === "CLAIM_PAYOUT" ? "user-123" : order.payoutClaimedBy,
+        body.action === "CLAIM_PAYOUT"
+          ? "user-123"
+          : body.action === "HANDOVER_PAYOUT"
+            ? body.handoverToAdminId
+            : order.payoutClaimedBy,
       hasPayoutProof:
-        body.action === "MARK_SENT" || body.action === "RECORD_CEDIS_SENT"
+        body.action === "MARK_SENT" ||
+        body.action === "RECORD_CEDIS_SENT" ||
+        body.action === "HANDOVER_PAYOUT"
           ? true
           : order.hasPayoutProof,
       events: [
@@ -430,6 +484,57 @@ test.describe("Admin manual exchange queue", () => {
     await expect(
       page.getByRole("heading", { name: "Exchange requests" }),
     ).toBeVisible({ timeout: 15000 });
+  });
+
+  test("admin sets each direction from an empty rate without an API feed", async ({ page }) => {
+    const saved = new Map<string, number>();
+    const writes: Record<string, unknown>[] = [];
+    await page.route("**/api/exchange/rate?*", (route) => {
+      const q = new URL(route.request().url()).searchParams;
+      const from = q.get("from")!, to = q.get("to")!;
+      const rate = saved.get(`${from}:${to}`);
+      return route.fulfill({ json: {
+        from, to, configured: rate !== undefined,
+        baseRate: rate ?? null, effectiveRate: rate ?? null,
+        markupPercent: rate === undefined ? null : 0,
+        isStale: rate === undefined,
+      } });
+    });
+    await page.route("**/api/exchange/rates", (route) => {
+      const body = route.request().postDataJSON();
+      expect(route.request().headers()["idempotency-key"]).toBeTruthy();
+      expect(body.markup).toBe(0);
+      saved.set(`${body.from}:${body.to}`, body.rate);
+      writes.push(body);
+      return route.fulfill({ json: { success: true, ...body, effectiveRate: body.rate } });
+    });
+    const menu = page.getByRole("button", { name: "Open menu", exact: true });
+    if (await menu.isVisible()) await menu.click();
+    await page.getByRole("navigation", { name: "Admin navigation" })
+      .getByRole("link", { name: "Exchange rates", exact: true }).click();
+    const rates = page.getByRole("region", { name: "Exchange rate controls" });
+    await expect(rates).toBeVisible({ timeout: 30000 });
+    const naira = rates.getByRole("region", { name: "Naira to cedis", exact: true });
+    const cedis = rates.getByRole("region", { name: "Cedis to naira", exact: true });
+    await expect(naira.getByRole("status")).toHaveText("Not set");
+    await expect(cedis.getByRole("status")).toHaveText("Not set");
+    await naira.getByLabel("Cedis for 1 naira").fill("0.0086");
+    await expect(naira.getByText("1 NGN = 0.0086 GHS", { exact: true })).toBeVisible();
+    await naira.getByRole("button", { name: "Save naira to cedis", exact: true }).click();
+    await expect(naira.getByRole("status")).toHaveText("Saved");
+    await expect(cedis.getByLabel("Naira for 1 cedi")).toHaveValue("");
+    await expect(cedis.getByRole("status")).toHaveText("Not set");
+    await cedis.getByLabel("Naira for 1 cedi").fill("0.03");
+    await expect(cedis.getByText("To receive at least 1 NGN, send 33.34 GHS.", { exact: true })).toBeVisible();
+    await cedis.getByLabel("Naira for 1 cedi").fill("125.50");
+    await expect(cedis.getByText("1 GHS = 125.50 NGN", { exact: true })).toBeVisible();
+    await expect(cedis.getByText("To receive at least 1 NGN, send 0.01 GHS.", { exact: true })).toBeVisible();
+    await cedis.getByRole("button", { name: "Save cedis to naira", exact: true }).click();
+    await expect(cedis.getByRole("status")).toHaveText("Saved");
+    expect(writes).toEqual([
+      { from: "NGN", to: "GHS", rate: 0.0086, markup: 0 },
+      { from: "GHS", to: "NGN", rate: 125.5, markup: 0 },
+    ]);
   });
 
   test("lets an admin correct a rejected receipt with a new attempt key", async ({
@@ -665,6 +770,13 @@ test.describe("Admin manual exchange queue", () => {
   test("overview tabs remain above content and follow sidebar navigation", async ({
     page,
   }) => {
+    const openNavigation = async () => {
+      const menu = page.getByRole("button", { name: "Open menu", exact: true });
+      if (await menu.isVisible()) {
+        await menu.click();
+        await expect(page.getByRole("dialog", { name: "Navigation menu", exact: true })).toBeVisible();
+      }
+    };
     await page.goto("/admin");
     await expect(
       page.getByRole("heading", { name: "Admin overview" }),
@@ -677,6 +789,7 @@ test.describe("Admin manual exchange queue", () => {
         .locator('[data-slot="tabs"]')
         .evaluate((el) => getComputedStyle(el).flexDirection),
     ).toBe("column");
+    await openNavigation();
     await page
       .getByRole("navigation", { name: "Admin navigation" })
       .getByRole("link", { name: "Transactions", exact: true })
@@ -684,7 +797,11 @@ test.describe("Admin manual exchange queue", () => {
     await expect(
       page.getByRole("heading", { name: "Finance", exact: true }),
     ).toBeVisible();
-    await page.getByRole("link", { name: "Overview", exact: true }).click();
+    await openNavigation();
+    await page
+      .getByRole("navigation", { name: "Admin navigation" })
+      .getByRole("link", { name: "Overview", exact: true })
+      .click();
     await expect(
       page.getByRole("heading", { name: "Admin overview" }),
     ).toBeVisible();
@@ -802,6 +919,60 @@ test.describe("Admin manual exchange queue", () => {
     await expect(
       page.getByRole("button", { name: "I sent the cedis", exact: true }),
     ).toHaveCount(0);
+  });
+  test("hands over a claimed payout only after an outcome check and protected evidence", async ({
+    page,
+  }) => {
+    const row = page
+      .getByRole("row")
+      .filter({ hasText: "MX-PAYOUT-HANDOVER-001" });
+    await row
+      .getByRole("button", { name: /Review MX-PAYOUT-HANDOVER-001/ })
+      .click();
+    await page
+      .getByRole("button", { name: "Supervised handover", exact: true })
+      .click();
+    const form = page.locator("form");
+    await form
+      .getByLabel("Receiving administrator")
+      .click();
+    await page
+      .getByRole("option", { name: /Second TrustPay Admin/ })
+      .click();
+    await form.getByLabel("Real-world payout outcome").click();
+    await page
+      .getByRole("option", { name: /Confirmed not sent/ })
+      .click();
+    await form.locator("#manual-payout-proof").setInputFiles({
+      name: "payout-proof.pdf",
+      mimeType: "application/pdf",
+      buffer: Buffer.from("external outcome evidence"),
+    });
+    await form
+      .getByRole("button", { name: "Upload proof", exact: true })
+      .click();
+    await expect(
+      form.getByText("Proof uploaded and ready to attach"),
+    ).toBeVisible();
+    await form
+      .getByLabel("Reason")
+      .fill(
+        "Supervisor checked the bank statement and confirmed no payout was sent.",
+      );
+    await form
+      .getByRole("button", {
+        name: "Handover payout under supervision",
+        exact: true,
+      })
+      .click();
+    await expect(page.getByRole("table").getByText("Payout Being Processed")).toBeVisible();
+    const request = getTestState(page).manualExchangeTestState.reviewRequests.at(-1);
+    expect(request?.body).toMatchObject({
+      action: "HANDOVER_PAYOUT",
+      handoverToAdminId: "user-456",
+      payoutOutcome: "NOT_SENT",
+      payoutProofObjectKey: "manual-exchange/payout-proof-001.pdf",
+    });
   });
   test("confirms received cedis and credits the frozen naira wallet amount", async ({
     page,
