@@ -67,7 +67,7 @@ export class PaystackVirtualAccountProvider {
       );
     const request = await this.prisma.paystackAccountRequest.upsert({
       where: { userId: input.userId },
-      update: {},
+      update: { customerCode: binding.customerCode },
       create: {
         userId: input.userId,
         customerCode: binding.customerCode,

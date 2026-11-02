@@ -177,9 +177,12 @@ class _ReceiveMoneyScreenState extends State<ReceiveMoneyScreen> {
                   final actionRequired = provisioning?.isActionRequired == true;
                   if (hasPendingAccount ||
                       provisioning?.isPending == true ||
+                      provisioning?.isWaitingForKyc == true ||
                       actionRequired) {
                     return _ReceiveMoneyStateScroll(
+                      centered: true,
                       child: _PaystackProvisioningCard(
+                        waitingForKyc: provisioning?.isWaitingForKyc == true,
                         message: provisioning?.message,
                         actionRequired: actionRequired,
                         onRefresh: _refresh,
@@ -188,6 +191,7 @@ class _ReceiveMoneyScreenState extends State<ReceiveMoneyScreen> {
                     );
                   }
                   return _ReceiveMoneyStateScroll(
+                    centered: true,
                     child: _NoVirtualAccountCard(
                       isRequesting: false,
                       onRequest: _openAccountSetup,
@@ -714,117 +718,82 @@ class _NoVirtualAccountCard extends StatelessWidget {
   final bool isRequesting;
   final VoidCallback onRequest;
 
-  const _NoVirtualAccountCard({
-    required this.isRequesting,
-    required this.onRequest,
-  });
+  const _NoVirtualAccountCard(
+      {required this.isRequesting, required this.onRequest});
 
   @override
   Widget build(BuildContext context) {
     AppColors.watch(context);
-    final isCompact = MediaQuery.sizeOf(context).width < 440;
     return ConstrainedBox(
       constraints: const BoxConstraints(maxWidth: 560),
-      child: Container(
+      child: SizedBox(
         width: double.infinity,
-        padding: EdgeInsets.all(isCompact ? AppSpacing.md : AppSpacing.lg),
-        decoration: BoxDecoration(
-          color: AppColors.surface,
-          borderRadius: BorderRadius.circular(AppRadius.md),
-          border: Border.all(color: AppColors.border),
-        ),
-        child: LayoutBuilder(
-          builder: (context, constraints) {
-            final horizontal = constraints.maxWidth >= 420;
-            final icon = Container(
-              width: 56,
-              height: 56,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Center(
+                child: Container(
+              width: 104,
+              height: 104,
               decoration: BoxDecoration(
-                color: AppColors.primary.withValues(alpha: 0.1),
-                borderRadius: BorderRadius.circular(AppRadius.sm),
-              ),
-              child: Icon(
-                Icons.account_balance_rounded,
-                color: AppColors.primary,
-                size: 28,
-              ),
-            );
-            final copy = Column(
-              crossAxisAlignment: horizontal
-                  ? CrossAxisAlignment.start
-                  : CrossAxisAlignment.center,
-              children: [
-                Text(
-                  'No TrustPay account yet',
-                  style: AppTextStyles.headingM,
-                  textAlign: horizontal ? TextAlign.start : TextAlign.center,
-                ),
-                const SizedBox(height: AppSpacing.xs),
-                Text(
-                  'Create a TrustPay NGN account to receive bank transfers directly in your wallet.',
-                  style: AppTextStyles.bodyM,
-                  textAlign: horizontal ? TextAlign.start : TextAlign.center,
-                ),
-                const SizedBox(height: AppSpacing.md),
-                SizedBox(
-                  width: horizontal ? null : double.infinity,
-                  child: FilledButton.icon(
-                    onPressed: isRequesting
-                        ? null
-                        : () {
-                            Haptics.medium();
-                            onRequest();
-                          },
-                    icon: isRequesting
-                        ? const SizedBox(
-                            width: 18,
-                            height: 18,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Icon(Icons.add_rounded, size: 18),
-                    label: Text(
-                      isRequesting
-                          ? 'Creating account…'
-                          : 'Create TrustPay account',
-                    ),
-                  ),
-                ),
-              ],
-            );
-
-            if (!horizontal) {
-              return Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Align(alignment: Alignment.center, child: icon),
-                  const SizedBox(height: AppSpacing.md),
-                  copy,
-                ],
-              );
-            }
-
-            return Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                icon,
-                const SizedBox(width: AppSpacing.md),
-                Expanded(child: copy),
-              ],
-            );
-          },
+                  color: AppColors.primary.withValues(alpha: .10),
+                  shape: BoxShape.circle),
+              child: Icon(Icons.account_balance_rounded,
+                  color: AppColors.primary, size: 52),
+            )),
+            const SizedBox(height: 32),
+            Text('Your money,\nyour TrustPay account',
+                textAlign: TextAlign.center,
+                style: AppTextStyles.headingL.copyWith(
+                    fontSize: 32, fontWeight: FontWeight.w800, height: 1.15)),
+            const SizedBox(height: 16),
+            Text(
+                'Receive bank transfers straight into your wallet with a personal NGN account.',
+                textAlign: TextAlign.center,
+                style: AppTextStyles.bodyL),
+            const SizedBox(height: 32),
+            FilledButton.icon(
+              style: FilledButton.styleFrom(
+                  minimumSize: const Size(double.infinity, 56)),
+              onPressed: isRequesting
+                  ? null
+                  : () {
+                      Haptics.medium();
+                      onRequest();
+                    },
+              icon: isRequesting
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2))
+                  : const Icon(Icons.add_rounded, size: 22),
+              label: Text(
+                  isRequesting
+                      ? 'Creating account…'
+                      : 'Create TrustPay account',
+                  style: const TextStyle(
+                      fontSize: 17, fontWeight: FontWeight.w700)),
+            ),
+            const SizedBox(height: 16),
+            Text(
+                'Start setup now. Your account activates after identity verification.',
+                textAlign: TextAlign.center,
+                style: AppTextStyles.bodyS),
+          ],
         ),
       ),
     );
   }
 }
 
-/// Keeps empty and provisioning states near the page header instead of
-/// centering a short message in a large viewport. The bounded content remains
-/// readable on tablets while the scroll physics preserve pull-to-refresh.
+/// Empty states fill the available viewport and remain scrollable on small
+/// screens or with larger text. Progress panels retain their natural height.
 class _ReceiveMoneyStateScroll extends StatelessWidget {
   final Widget child;
+  final bool centered;
 
-  const _ReceiveMoneyStateScroll({required this.child});
+  const _ReceiveMoneyStateScroll({required this.child, this.centered = false});
 
   @override
   Widget build(BuildContext context) {
@@ -840,12 +809,11 @@ class _ReceiveMoneyStateScroll extends StatelessWidget {
             AppSpacing.lg,
             AppSpacing.xxl,
           ),
-          sliver: SliverToBoxAdapter(
-            child: Align(
-              alignment: Alignment.topCenter,
-              child: child,
-            ),
-          ),
+          sliver: centered
+              ? SliverFillRemaining(
+                  hasScrollBody: false, child: Center(child: child))
+              : SliverToBoxAdapter(
+                  child: Align(alignment: Alignment.topCenter, child: child)),
         ),
       ],
     );
@@ -855,12 +823,14 @@ class _ReceiveMoneyStateScroll extends StatelessWidget {
 class _PaystackProvisioningCard extends StatelessWidget {
   final String? message;
   final bool actionRequired;
+  final bool waitingForKyc;
   final VoidCallback onRefresh;
   final VoidCallback onRetry;
 
   const _PaystackProvisioningCard({
     required this.message,
     required this.actionRequired,
+    this.waitingForKyc = false,
     required this.onRefresh,
     required this.onRetry,
   });
@@ -869,7 +839,7 @@ class _PaystackProvisioningCard extends StatelessWidget {
   Widget build(BuildContext context) {
     AppColors.watch(context);
     return ConstrainedBox(
-      constraints: const BoxConstraints(maxWidth: 380),
+      constraints: const BoxConstraints(maxWidth: 560),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
         child: Column(
@@ -885,17 +855,21 @@ class _PaystackProvisioningCard extends StatelessWidget {
             Text(
               actionRequired
                   ? 'TrustPay account setup needs attention'
-                  : 'TrustPay is preparing your NGN account',
-              style: AppTextStyles.labelM,
+                  : waitingForKyc
+                      ? 'Account request saved'
+                      : 'TrustPay is preparing your NGN account',
+              style: AppTextStyles.headingL,
               textAlign: TextAlign.center,
             ),
-            const SizedBox(height: AppSpacing.xs),
+            const SizedBox(height: AppSpacing.md),
             Text(
               message?.trim().isNotEmpty == true
                   ? message!
                   : actionRequired
                       ? 'Review your verification details or contact support, then retry account setup.'
-                      : 'Your request was accepted. Refresh shortly; the account number will appear after server confirmation.',
+                      : waitingForKyc
+                          ? 'Your setup request is saved. We’ll create your NGN account after your identity is verified.'
+                          : 'Your request was accepted. Refresh shortly; the account number will appear after server confirmation.',
               style: AppTextStyles.bodyS,
               textAlign: TextAlign.center,
             ),
@@ -910,6 +884,12 @@ class _PaystackProvisioningCard extends StatelessWidget {
                   icon: const Icon(Icons.refresh_rounded),
                   label: const Text('Refresh status'),
                 ),
+                if (waitingForKyc)
+                  FilledButton.icon(
+                    onPressed: onRetry,
+                    icon: const Icon(Icons.arrow_forward_rounded),
+                    label: const Text('View account setup'),
+                  ),
                 if (actionRequired)
                   FilledButton.icon(
                     onPressed: onRetry,

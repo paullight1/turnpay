@@ -128,7 +128,7 @@ describe('Paystack banking adapter', () => {
     };
   };
   it('recovers an already assigned account without making another creation request', async () => {
-    const { banking } = accountFixture();
+    const { banking, prisma } = accountFixture();
     request.mockResolvedValue({
       customer_code: 'CUS_owner',
       dedicated_account: {
@@ -150,6 +150,9 @@ describe('Paystack banking adapter', () => {
     });
     expect(request).toHaveBeenCalledTimes(1);
     expect(request).toHaveBeenCalledWith('GET', '/customer/CUS_owner');
+    expect(prisma.paystackAccountRequest.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({ update: { customerCode: 'CUS_owner' } }),
+    );
   });
   it('does not dispatch account creation when another worker owns the request', async () => {
     const { banking, prisma } = accountFixture();

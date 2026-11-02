@@ -21,7 +21,11 @@ import {
   redactProviderPayload,
 } from '../common/utils/masking';
 import { decryptSensitiveValue } from '../common/utils/encryption';
-import { ProvisionVirtualAccountDto } from './dto/banking.dto';
+import {
+  ProvisionVirtualAccountDto,
+  RequestAccountSetupDto,
+  AccountSetupResponseDto,
+} from './dto/banking.dto';
 import { MonnifyVirtualAccountProvider } from './providers/monnify-virtual-account.provider';
 import {
   BankingProviderName,
@@ -93,6 +97,75 @@ export class BankingService {
       message: request?.lastError ?? undefined,
       updatedAt: request?.updatedAt,
     };
+  }
+
+  async requestAccountSetup(
+    userId: string,
+    dto: RequestAccountSetupDto,
+  ): Promise<AccountSetupResponseDto> {
+    this.assertVirtualAccountsEnabled();
+    if (
+      this.defaultVirtualAccountProvider !== 'paystack' ||
+      !this.paystack?.configured
+    )
+      throw new ServiceUnavailableException(
+        'Receiving account setup is unavailable',
+      );
+    if (dto.consentAccepted !== true)
+      throw new BadRequestException('Account setup consent is required');
+    // This is consent to future setup, never an issued or usable account.
+    // Serialize requests with identity finalization using the same user lock.
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM users WHERE id = ${userId} FOR UPDATE`;
+      const user = await tx.user.findUnique({
+        where: { id: userId },
+        select: { id: true, isSuspended: true },
+      });
+      if (!user) throw new NotFoundException('User not found');
+      if (user.isSuspended) throw new ForbiddenException('User is suspended');
+      let request = await tx.paystackAccountRequest.findUnique({
+        where: { userId },
+      });
+      if (!request) {
+        const binding = await tx.paystackCustomer.findUnique({
+          where: { userId },
+        });
+        const created = await tx.paystackAccountRequest.createMany({
+          skipDuplicates: true,
+          data: [
+            {
+              userId,
+              // No provider customer exists before BVN onboarding. Bind the real
+              // code when the verified provider begins preparation.
+              customerCode: binding?.customerCode ?? '',
+              status: 'WAITING_FOR_KYC',
+              consentRecordedAt: new Date(),
+            },
+          ],
+        });
+        request = await tx.paystackAccountRequest.findUniqueOrThrow({
+          where: { userId },
+        });
+        if (created.count === 1)
+          await tx.auditLog.create({
+            data: {
+              action: 'RECEIVING_ACCOUNT_SETUP_REQUESTED',
+              targetType: 'PaystackAccountRequest',
+              targetId: request.id,
+              metadata: {
+                actorUserId: userId,
+                consentVersion: 'receiving-account-v1',
+                status: request.status,
+              },
+            },
+          });
+      }
+      return {
+        provider: 'PAYSTACK',
+        status: request.status,
+        updatedAt: request.updatedAt,
+      };
+    });
   }
 
   async getTransferStatus(reference: string) {
@@ -202,6 +275,17 @@ export class BankingService {
         'Reusing existing virtual account',
       );
 
+      if (provider === 'paystack' && existingAccount.status === 'ACTIVE') {
+        await this.prisma.paystackAccountRequest.updateMany({
+          where: { userId, status: { not: 'ACTIVE' } },
+          data: {
+            status: 'ACTIVE',
+            claimedAt: null,
+            nextAttemptAt: null,
+            lastError: null,
+          },
+        });
+      }
       return existingAccount;
     }
 
@@ -234,6 +318,16 @@ export class BankingService {
           where: { userId },
           data: { accountSetupConsentAt: new Date() },
         });
+      else if (!binding.accountSetupConsentAt) {
+        const request = await this.prisma.paystackAccountRequest.findUnique({
+          where: { userId },
+        });
+        if (request?.consentRecordedAt)
+          await this.prisma.paystackCustomer.update({
+            where: { userId },
+            data: { accountSetupConsentAt: request.consentRecordedAt },
+          });
+      }
     }
     const verifiedIdentifiers: { bvn?: string; nin?: string } =
       provider === 'paystack'
@@ -416,7 +510,15 @@ export class BankingService {
     if (this.defaultVirtualAccountProvider !== 'paystack') return;
     const due = await this.prisma.paystackAccountRequest.findMany({
       where: {
-        status: 'PENDING',
+        status: { in: ['PENDING', 'WAITING_FOR_KYC'] },
+        user: {
+          is: {
+            isSuspended: false,
+            kycStatus: 'VERIFIED',
+            kycTier: { in: ['TIER_1', 'TIER_2'] },
+            paystackCustomer: { is: { validationStatus: 'VERIFIED' } },
+          },
+        },
         OR: [{ nextAttemptAt: null }, { nextAttemptAt: { lte: new Date() } }],
       },
       orderBy: { updatedAt: 'asc' },
@@ -428,7 +530,30 @@ export class BankingService {
           currency: 'NGN',
           provider: 'paystack',
         });
-      } catch {
+      } catch (error: unknown) {
+        const actionRequired =
+          error instanceof BadRequestException ||
+          error instanceof ForbiddenException ||
+          error instanceof NotFoundException;
+        // Do not overwrite a lease or outcome written by the provider or a
+        // concurrent worker after this request was selected.
+        await this.prisma.paystackAccountRequest.updateMany({
+          where: {
+            id: request.id,
+            updatedAt: request.updatedAt,
+            claimedAt: null,
+            status: { in: ['PENDING', 'WAITING_FOR_KYC'] },
+          },
+          data: {
+            ...(actionRequired ? { status: 'ACTION_REQUIRED' } : {}),
+            lastError: actionRequired
+              ? 'Account setup needs attention. Review your identity details or contact support.'
+              : 'Account setup is temporarily unavailable. We’ll retry shortly.',
+            nextAttemptAt: actionRequired
+              ? null
+              : new Date(Date.now() + 300000),
+          },
+        });
         this.logger.warn(
           { requestId: request.id },
           'Paystack account retry needs confirmation',

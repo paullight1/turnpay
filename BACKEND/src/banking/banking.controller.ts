@@ -16,6 +16,8 @@ import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { BankingService } from './banking.service';
 import {
   CreateBeneficiaryDto,
+  RequestAccountSetupDto,
+  AccountSetupResponseDto,
   ProvisionVirtualAccountDto,
   ResolveBankAccountDto,
 } from './dto/banking.dto';
@@ -54,6 +56,15 @@ export class BankingController {
     );
     response?.status(account.status === 'PENDING' ? 202 : 201);
     return account;
+  }
+
+  @Post('accounts/setup-request')
+  @Throttle({ default: { limit: 3, ttl: 60000 } })
+  requestAccountSetup(
+    @CurrentUser() user: { userId: string },
+    @Body() dto: RequestAccountSetupDto,
+  ): Promise<AccountSetupResponseDto> {
+    return this.bankingService.requestAccountSetup(user.userId, dto);
   }
 
   @Get('banks')

@@ -183,7 +183,8 @@ void main() {
     expect(find.text('Copy account number'), findsOneWidget);
   });
 
-  testWidgets('unverified users get a KYC action instead of account creation',
+  testWidgets(
+      'unverified users can request setup while identity verification waits',
       (tester) async {
     final bundle = buildTrustPayTestBundle(
       includeVirtualAccounts: false,
@@ -197,6 +198,59 @@ void main() {
     ));
     await tester.pumpAndSettle();
     expect(find.text('Verify identity'), findsOneWidget);
-    expect(find.text('Create receiving account'), findsNothing);
+    expect(find.text('Request receiving account'), findsOneWidget);
+    await tester.ensureVisible(find.text('Request receiving account'));
+    await tester.tap(find.text('Request receiving account'));
+    await tester.pumpAndSettle();
+    expect(find.text('Authorize setup'), findsOneWidget);
+    await tester.tap(find.text('Authorize setup'));
+    await tester.pumpAndSettle();
+    expect(find.text('Account request saved'), findsOneWidget);
+    expect(find.text('Verify identity'), findsOneWidget);
+    expect(
+        bundle.adapter.requestedUris
+            .where((u) => u.path == '/api/banking/accounts/provision'),
+        isEmpty);
+    expect(find.text('Copy account number'), findsNothing);
+  });
+  testWidgets('pending BVN still offers a separate account setup request',
+      (tester) async {
+    final bundle = buildTrustPayTestBundle(
+        includeVirtualAccounts: false, kycStatus: 'SUBMITTED');
+    await tester.pumpWidget(MaterialApp(
+        home: DashboardDetailScreen(
+            kind: DashboardDetailKind.virtualAccount,
+            homeDataService: bundle.homeDataService)));
+    await tester.pumpAndSettle();
+    expect(find.text('Your identity check is under review'), findsOneWidget);
+    expect(find.text('Request receiving account'), findsOneWidget);
+    expect(find.text('Request received. Checking for your account details.'),
+        findsNothing);
+    await tester.ensureVisible(find.text('Request receiving account'));
+    await tester.tap(find.text('Request receiving account'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Not now'));
+    await tester.pumpAndSettle();
+    expect(
+        bundle.adapter.requestedUris
+            .where((u) => u.path == '/api/banking/accounts/setup-request'),
+        isEmpty);
+  });
+
+  testWidgets('receive money restores a saved pre-KYC setup request',
+      (tester) async {
+    final bundle = buildTrustPayTestBundle(
+        includeVirtualAccounts: false, kycStatus: 'PENDING');
+    await tester.runAsync(() => bundle.homeDataService
+        .requestAccountSetup(idempotencyKey: 'test-request-1'));
+    await tester.pumpWidget(MaterialApp(
+        home: ReceiveMoneyScreen(
+            walletService: bundle.walletService,
+            homeDataService: bundle.homeDataService)));
+    await tester.pumpAndSettle();
+    expect(find.text('Account request saved'), findsOneWidget);
+    expect(find.text('Create TrustPay account'), findsNothing);
+    expect(find.text('View account setup'), findsOneWidget);
+    expect(find.text('Copy account number'), findsNothing);
   });
 }

@@ -277,7 +277,7 @@ class _HomeScreenState extends State<HomeScreen>
                           data.user.kycStatus.toUpperCase() == 'SUBMITTED',
                       onRequest: () => context.push(
                           data.user.kycStatus.toUpperCase() == 'SUBMITTED'
-                              ? AppRoutes.kyc
+                              ? AppRoutes.virtualAccount
                               : AppRoutes.receiveMoney),
                     ),
                   ],
@@ -692,12 +692,12 @@ class _AccountSetupBanner extends StatelessWidget {
         Expanded(
             child: Text(
                 awaitingVerification
-                    ? 'Your TrustPay account is waiting for identity verification.'
+                    ? 'Your identity check is in progress. You can request your account now.'
                     : 'Create a TrustPay NGN account to fund your wallet and start transacting.',
                 style: AppTextStyles.bodyS)),
         TextButton(
             onPressed: onRequest,
-            child: Text(awaitingVerification ? 'View status' : 'Request')),
+            child: Text(awaitingVerification ? 'Manage setup' : 'Request')),
       ]),
     );
   }
@@ -721,10 +721,8 @@ class _CurrencyBalanceCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     AppColors.watch(context);
-    final hasAccount = data.account != null;
-    final visibleAmount = hasAccount && showBalances
-        ? _walletCardAmount(data.balanceDecimalString)
-        : '******';
+    final visibleAmount =
+        showBalances ? _walletCardAmount(data.balanceDecimalString) : '******';
     final accountNumber = data.account?.accountNumber.trim() ?? '';
     final canRequestAccount = data.currency == 'NGN' && accountNumber.isEmpty;
     final showAccountChip =
@@ -2286,7 +2284,7 @@ HomeVirtualAccount? _accountForCurrency(
   final targetCurrency = currency.toUpperCase();
   for (final account in accounts) {
     // A masked placeholder is useful for status messaging, but it must not
-    // unlock balances or account actions. Only a generated account number is
+    // unlock account actions. Only a generated account number is
     // considered usable here.
     final hasNumber = account.accountNumber.trim().isNotEmpty;
     final isUsable = !{'FAILED', 'REJECTED', 'CANCELLED'}.contains(

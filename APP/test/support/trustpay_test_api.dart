@@ -88,6 +88,7 @@ class FakeTrustPayApiAdapter implements HttpClientAdapter {
   final bool includeDeposits;
   final bool includeVirtualAccounts;
   bool _accountProvisioned = false;
+  bool _accountSetupRequested = false;
   bool revealAccountNumbers = true;
   final bool includeReferralRewards;
   final bool includeVtuProviders;
@@ -208,7 +209,9 @@ class FakeTrustPayApiAdapter implements HttpClientAdapter {
         'provider': 'PAYSTACK',
         'status': (_accountProvisioned || includeVirtualAccounts)
             ? 'ACTIVE'
-            : 'NOT_REQUESTED',
+            : _accountSetupRequested
+                ? 'WAITING_FOR_KYC'
+                : 'NOT_REQUESTED',
         'updatedAt': _accountProvisioned ? '2026-10-30T10:00:00.000Z' : null,
       });
     }
@@ -273,7 +276,11 @@ class FakeTrustPayApiAdapter implements HttpClientAdapter {
       final verified = kycStatus.toUpperCase() == 'VERIFIED';
       return _jsonResponse({
         'provider': 'PAYSTACK',
-        'providerValidationStatus': verified ? 'VERIFIED' : 'UNVERIFIED',
+        'providerValidationStatus': verified
+            ? 'VERIFIED'
+            : kycStatus == 'SUBMITTED'
+                ? 'PENDING'
+                : 'UNVERIFIED',
         'kycStatus': kycStatus,
         'kycTier': verified ? 'TIER_2' : 'TIER_0',
         'documents': verified
@@ -302,6 +309,12 @@ class FakeTrustPayApiAdapter implements HttpClientAdapter {
 
     if (method == 'GET' && path == '/api/wallets/GHS') {
       return _jsonResponse(_wallet('GHS', 3300.75));
+    }
+
+    if (method == 'POST' && path == '/api/banking/accounts/setup-request') {
+      _accountSetupRequested = true;
+      return _jsonResponse(
+          {'provider': 'PAYSTACK', 'status': 'WAITING_FOR_KYC'});
     }
 
     if (method == 'POST' && path == '/api/banking/accounts/provision') {

@@ -114,7 +114,7 @@ class _VirtualAccountScreenState extends State<VirtualAccountScreen>
     if (mounted) await _refresh();
   }
 
-  Future<void> _create() async {
+  Future<void> _create({bool awaitVerification = false}) async {
     if (_submitting || _consentOpen) return;
     // Lock before opening consent as well as during the request.
     _consentOpen = true;
@@ -124,7 +124,7 @@ class _VirtualAccountScreenState extends State<VirtualAccountScreen>
         builder: (context) => AlertDialog(
           title: const Text('Create your receiving account'),
           content: const Text(
-            'I authorize TRUSTPAY to create a dedicated NGN receiving account with Paystack using my verified identity. Incoming transfers are credited after confirmation.',
+            'I authorize TrustPay to create a dedicated NGN receiving account with Paystack once my identity is verified. Until verification succeeds, this saves my setup request only. Incoming transfers are credited after confirmation.',
           ),
           actions: [
             TextButton(
@@ -141,6 +141,14 @@ class _VirtualAccountScreenState extends State<VirtualAccountScreen>
         _submitting = true;
         _error = null;
       });
+      if (awaitVerification) {
+        await widget.service.requestAccountSetup(
+          idempotencyKey: _attempt.keyFor('receiving-account-request|NGN'),
+        );
+        _attempt.markFinalOutcome();
+        if (mounted) setState(() => _future = _load());
+        return;
+      }
       final account = await widget.service.provisionVirtualAccount(
         consentAccepted: true,
         idempotencyKey: _attempt.keyFor('paystack-receiving-account|NGN'),
@@ -250,15 +258,19 @@ class _VirtualAccountScreenState extends State<VirtualAccountScreen>
         state.identity?.providerValidationStatus == 'PENDING';
     final identityVerified =
         state.identity?.providerValidationStatus == 'VERIFIED';
-    final pending = state.pending;
+    final pending =
+        state.accountPending || state.provisioning?.isPending == true;
+    final requestSaved = state.provisioning?.isWaitingForKyc == true;
     final needsReview = state.provisioning?.isActionRequired == true;
     final title = ready
         ? 'Your NGN account is ready'
-        : pending
-            ? 'We’re preparing your account'
-            : identityVerified
-                ? 'Receive money into your wallet'
-                : 'Your account starts with verification';
+        : requestSaved
+            ? 'Account request saved'
+            : pending
+                ? 'We’re preparing your account'
+                : identityVerified
+                    ? 'Receive money into your wallet'
+                    : 'Your TrustPay account starts here';
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       Container(
         padding: const EdgeInsets.all(24),
@@ -326,7 +338,9 @@ class _VirtualAccountScreenState extends State<VirtualAccountScreen>
               'Create your receiving account',
               pending
                   ? 'Request received. Checking for your account details.'
-                  : 'Authorize setup after your identity is confirmed',
+                  : requestSaved
+                      ? 'Request saved. Setup continues automatically after verification.'
+                      : 'Request now. We’ll create it after identity verification.',
               false),
           const SizedBox(height: 20),
           _step('3', 'Add money by bank transfer',
@@ -340,17 +354,37 @@ class _VirtualAccountScreenState extends State<VirtualAccountScreen>
                 style: AppTextStyles.bodyM),
             const SizedBox(height: 16),
           ],
-          if (pending || identityPending)
-            OutlinedButton.icon(
-                onPressed: _refresh,
-                icon: const Icon(Icons.refresh_rounded),
-                label: const Text('Check status'))
-          else if (!identityVerified)
+          if (!pending && !identityVerified && !requestSaved) ...[
             FilledButton.icon(
-                onPressed: _verifyIdentity,
+              style: FilledButton.styleFrom(
+                  minimumSize: const Size(double.infinity, 56)),
+              onPressed:
+                  _submitting ? null : () => _create(awaitVerification: true),
+              icon: _submitting
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2))
+                  : const Icon(Icons.add_rounded),
+              label: Text(_submitting
+                  ? 'Saving request…'
+                  : 'Request receiving account'),
+            ),
+            const SizedBox(height: 12),
+          ],
+          if (pending || identityPending || requestSaved)
+            OutlinedButton.icon(
+                onPressed: _submitting ? null : _refresh,
+                icon: const Icon(Icons.refresh_rounded),
+                label: const Text('Check status')),
+          if (!identityVerified && !identityPending) ...[
+            if (pending || requestSaved) const SizedBox(height: 12),
+            OutlinedButton.icon(
+                onPressed: _submitting ? null : _verifyIdentity,
                 icon: const Icon(Icons.verified_user_outlined),
-                label: const Text('Verify identity'))
-          else
+                label: const Text('Verify identity')),
+          ],
+          if (identityVerified && !pending)
             FilledButton.icon(
                 onPressed: _submitting ? null : _create,
                 icon: _submitting
@@ -435,5 +469,6 @@ class _AccountState {
   bool get pending =>
       accountPending ||
       provisioning?.isPending == true ||
+      provisioning?.isWaitingForKyc == true ||
       identity?.providerValidationStatus == 'PENDING';
 }

@@ -227,6 +227,17 @@ class HomeDataService {
     return HomeVirtualAccount.fromJson(_asMap(response.data));
   }
 
+  Future<HomeVirtualAccountProvisioning> requestAccountSetup({
+    required String idempotencyKey,
+  }) async {
+    final response = await _apiClient.client.post(
+      '/api/banking/accounts/setup-request',
+      options: Options(headers: {'Idempotency-Key': idempotencyKey}),
+      data: {'consentAccepted': true},
+    );
+    return HomeVirtualAccountProvisioning.fromJson(_asMap(response.data));
+  }
+
   Future<HomeUser> updateProfile({
     required String fullName,
     required String phone,
@@ -808,6 +819,7 @@ class HomeVirtualAccountProvisioning {
     );
   }
 
+  bool get isWaitingForKyc => status == 'WAITING_FOR_KYC';
   bool get isPending => status == 'PENDING';
   bool get isActive => status == 'ACTIVE';
   bool get isActionRequired => status == 'ACTION_REQUIRED';

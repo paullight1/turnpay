@@ -13,6 +13,18 @@ const VIRTUAL_ACCOUNT_CURRENCIES = ['NGN', 'GHS'] as const;
 const VIRTUAL_ACCOUNT_PROVIDERS = ['monnify', 'paystack', 'kora'] as const;
 const BANK_RESOLVE_PROVIDERS = ['monnify', 'paystack'] as const;
 
+export class RequestAccountSetupDto {
+  @IsBoolean()
+  @Equals(true)
+  consentAccepted: true;
+}
+
+export class AccountSetupResponseDto {
+  provider: 'PAYSTACK';
+  status: string;
+  updatedAt: Date;
+}
+
 export class ProvisionVirtualAccountDto {
   @IsOptional()
   @IsBoolean()

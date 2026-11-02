@@ -19,7 +19,8 @@ void main() {
     setMockSecureStorage(refreshToken: 'refresh-token');
   });
 
-  testWidgets('submitted KYC shows progress instead of asking to start again',
+  testWidgets(
+      'submitted KYC keeps account setup accessible alongside verification',
       (tester) async {
     final bundle = buildTrustPayTestBundle(
         kycStatus: 'SUBMITTED', includeVirtualAccounts: false);
@@ -30,15 +31,15 @@ void main() {
             builder: (context, state) =>
                 HomeScreen(homeDataService: bundle.homeDataService)),
         GoRoute(
-            path: AppRoutes.kyc,
+            path: AppRoutes.virtualAccount,
             builder: (context, state) =>
-                const Scaffold(body: Text('Identity check progress'))),
+                const Scaffold(body: Text('Account setup progress'))),
       ]),
     ));
     await tester.pumpAndSettle();
     expect(
         find.text(
-            'Your TrustPay account is waiting for identity verification.'),
+            'Your identity check is in progress. You can request your account now.'),
         findsOneWidget);
     expect(find.text('Request'), findsNothing);
     final progress =
@@ -46,11 +47,11 @@ void main() {
     await tester.scrollUntilVisible(progress, 180,
         scrollable: find.byType(Scrollable).first);
     expect(progress, findsOneWidget);
-    await tester.scrollUntilVisible(find.text('View status'), -180,
+    await tester.scrollUntilVisible(find.text('Manage setup'), -180,
         scrollable: find.byType(Scrollable).first);
-    await tester.tap(find.text('View status'));
+    await tester.tap(find.text('Manage setup'));
     await tester.pumpAndSettle();
-    expect(find.text('Identity check progress'), findsOneWidget);
+    expect(find.text('Account setup progress'), findsOneWidget);
   });
 
   testWidgets('home screen shows balances and hides them on toggle',
@@ -109,6 +110,27 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('History'), findsOneWidget);
+  });
+
+  testWidgets('balance visibility works before a receiving account exists',
+      (tester) async {
+    final bundle = buildTrustPayTestBundle(includeVirtualAccounts: false);
+    await tester.pumpWidget(MaterialApp.router(
+      routerConfig: GoRouter(initialLocation: AppRoutes.home, routes: [
+        GoRoute(
+            path: AppRoutes.home,
+            builder: (_, __) =>
+                HomeScreen(homeDataService: bundle.homeDataService)),
+      ]),
+    ));
+    await tester.pumpAndSettle();
+    expect(find.text('125,000.50'), findsOneWidget);
+    await tester.tap(find.byIcon(Icons.visibility_outlined).first);
+    await tester.pumpAndSettle();
+    expect(find.text('125,000.50'), findsNothing);
+    await tester.tap(find.byIcon(Icons.visibility_off_outlined).first);
+    await tester.pumpAndSettle();
+    expect(find.text('125,000.50'), findsOneWidget);
   });
 
   testWidgets('wallet calls to action provide 48-pixel tap targets',
