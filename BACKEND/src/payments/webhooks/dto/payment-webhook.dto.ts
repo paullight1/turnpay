@@ -141,3 +141,9 @@ export class PaystackWebhookDto {
   @IsObject()
   data!: Record<string, unknown>;
 }
+
+export class PaystackWebhookEndpointDto {
+  provider!: 'paystack';
+  deliveryMethod!: 'POST';
+  signatureRequired!: true;
+}
