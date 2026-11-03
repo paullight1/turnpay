@@ -24,3 +24,12 @@ Dokploy deployed `41f2bd976552cedd0613edcfad485243f665a6d9` successfully. A synt
 Migration 053 is atomic and marks only the exact legacy admin entries NGN/GHS 87 and GHS/NGN 0.0111 as divisors. It adds two system unit-correction audits and does not rewrite historical quotes/orders. A disposable PostgreSQL database verified migration 000–053, unchanged numeric prices/history, two audits and repeat-deploy idempotence. The production database target was matched to the running Dokploy container using a credential-free database-identity hash. Only migrations through 053 were deployed from an isolated release directory. Read-back confirms both raw values unchanged, both explicit divisor units, and two audit rows.
 
 Dokploy currently uses Railpack with `sh scripts/validate-production-config.sh node dist/src/main.js`; this bypasses the Docker migration startup wrapper even though `RUN_MIGRATIONS_ON_STARTUP=true`. Migration 053 was therefore explicitly deployed before the application release. Future schema releases must run `prisma migrate deploy` explicitly until the Railpack startup command is aligned.
+
+
+## Rate release verification
+
+Dokploy deployed `577bda01ea40546c9ce152ecaa3addfdbae13f92` successfully, and the Vercel production website is READY on the same commit. The live signed-in Flutter app shows NGN 10,000 → GHS 114.94 and GHS 100 → NGN 9,009.00, using the retained administrator divisors. Both rate reads and manual-order configuration/history reads returned HTTP 200. The two admin Chromium browser scenarios passed, including divisor 115 showing canonical 0.008695 before/after save; TypeScript and scoped ESLint passed. No genuine exchange/payment was executed.
+
+The two existing prices imply a crossed spread (87 NGN per GHS in one direction versus about 90.09 NGN per GHS in the other). The owner was notified to review these business prices before accepting live exchanges. No replacement price or market feed was substituted.
+
+The restarted preview exposed a separate bootstrap routing warning when opening directly at `/#/home`. A widget regression reproduced it. The temporary startup shell now uses MaterialApp's builder instead of owning a Navigator, leaving deep links to the application router. Both startup tests pass, including initialization failure/retry. This does not change authentication or transaction authorization.

@@ -64,7 +64,9 @@ class _StartupGateState extends State<StartupGate> with WidgetsBindingObserver {
   Widget build(BuildContext context) {
     if (_ready) return widget.builder(context);
     return MaterialApp(
-        home: Scaffold(
+        // This loading shell does not own deep links. The application router
+        // reads the requested location after initialization completes.
+        builder: (context, _) => Scaffold(
             body: SafeArea(
                 child: Center(
                     child: Padding(
