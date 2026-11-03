@@ -8,6 +8,20 @@ import 'package:trustpay_app/services/transaction_security_service.dart';
 
 import '../test/support/trustpay_test_api.dart';
 
+Future<void> openTransferRecipient(WidgetTester tester) async {
+  await tester.pump();
+  final next = find.text('Continue to recipient');
+  if (next.evaluate().isEmpty) return;
+  final amount = find.byWidgetPredicate(
+      (w) => w is TextField && w.decoration?.labelText == 'Amount');
+  if (tester.widget<TextField>(amount).controller!.text.isEmpty) {
+    await tester.enterText(amount, '20');
+    await tester.pump();
+  }
+  await tester.tap(next);
+  await tester.pumpAndSettle();
+}
+
 void main() => registerInternalTransferFlowTests();
 
 void registerInternalTransferFlowTests({bool useIntegrationBinding = true}) {
@@ -40,6 +54,7 @@ void registerInternalTransferFlowTests({bool useIntegrationBinding = true}) {
               widget is TextField && widget.decoration?.labelText == label,
         );
     await tester.enterText(field('Amount'), amount);
+    await openTransferRecipient(tester);
     await tester.enterText(field('Recipient email'), 'tolu@example.com');
     await tester.enterText(field('Note optional'), 'Integration certification');
     await tester.pump(const Duration(milliseconds: 700));
@@ -100,7 +115,10 @@ void registerInternalTransferFlowTests({bool useIntegrationBinding = true}) {
     await openReview(tester);
 
     expect(find.text('Review send money'), findsOneWidget);
-    expect(find.text('₦25.50'), findsOneWidget);
+    expect(
+        find.descendant(
+            of: find.byType(BottomSheet), matching: find.text('₦25.50')),
+        findsOneWidget);
     expect(find.text('25.50 NGN'), findsOneWidget);
     expect(find.text('0.00 NGN'), findsOneWidget);
     expect(find.text('Total debit'), findsOneWidget);

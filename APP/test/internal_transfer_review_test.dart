@@ -5,6 +5,7 @@ import 'package:trustpay_app/features/home/screens/money_action_screen.dart';
 import 'support/trustpay_test_api.dart';
 
 void main() {
+  setUp(() => setMockSecureStorage());
   test('review contract always presents amount, zero fee, and total debit', () {
     expect(
       InternalTransferReviewContract.financialRows(
@@ -42,11 +43,18 @@ void main() {
     );
     await tester.pumpAndSettle();
 
+    final amount = tester.widget<TextField>(find.byWidgetPredicate(
+        (w) => w is TextField && w.decoration?.labelText == 'Amount'));
+    expect(
+        find.byWidgetPredicate((w) =>
+            w is TextField && w.decoration?.labelText == 'Recipient email'),
+        findsNothing);
+    amount.focusNode!.requestFocus();
+    await tester.enterText(find.byType(TextField), '20');
+    await tester.testTextInput.receiveAction(TextInputAction.next);
+    await tester.pumpAndSettle();
     final fields =
         tester.widgetList<TextField>(find.byType(TextField)).toList();
-    final amount = fields.singleWhere(
-      (field) => field.decoration?.labelText == 'Amount',
-    );
     final recipient = fields.singleWhere(
       (field) => field.decoration?.labelText == 'Recipient email',
     );
@@ -54,14 +62,8 @@ void main() {
       (field) => field.decoration?.labelText == 'Note optional',
     );
 
-    amount.focusNode!.requestFocus();
+    recipient.focusNode!.requestFocus();
     await tester.pump();
-    expect(amount.focusNode!.hasFocus, isTrue);
-
-    await tester.testTextInput.receiveAction(TextInputAction.next);
-    await tester.pump();
-    expect(recipient.focusNode!.hasFocus, isTrue);
-
     await tester.testTextInput.receiveAction(TextInputAction.next);
     await tester.pump();
     expect(note.focusNode!.hasFocus, isTrue);

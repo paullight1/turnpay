@@ -10,7 +10,22 @@ import 'package:trustpay_app/core/theme/app_theme.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:trustpay_app/features/home/screens/money_action_screen.dart';
 import 'support/trustpay_test_api.dart';
+import 'package:trustpay_app/features/home/screens/send_money_entry_screen.dart';
 import 'package:trustpay_app/services/transaction_security_service.dart';
+
+Future<void> openTransferRecipient(WidgetTester tester) async {
+  await tester.pump();
+  final next = find.text('Continue to recipient');
+  if (next.evaluate().isEmpty) return;
+  final amount = find.byWidgetPredicate(
+      (w) => w is TextField && w.decoration?.labelText == 'Amount');
+  if (tester.widget<TextField>(amount).controller!.text.isEmpty) {
+    await tester.enterText(amount, '20');
+    await tester.pump();
+  }
+  await tester.tap(next);
+  await tester.pumpAndSettle();
+}
 
 Finder field(String label) => find.byWidgetPredicate(
     (w) => w is TextField && w.decoration?.labelText == label);
@@ -123,10 +138,12 @@ void main() {
         home: MoneyActionScreen(
             kind: MoneyActionKind.send, apiClient: bundle.apiClient)));
     await tester.pumpAndSettle();
+    await openTransferRecipient(tester);
     await tester.enterText(field('Recipient email'), 'old@example.com');
     await tester.pump(const Duration(milliseconds: 700));
     await tester.pump();
     expect(resolve, isNotNull);
+    await openTransferRecipient(tester);
     await tester.enterText(field('Recipient email'), 'invalid');
     resolve!.resolve(Response(requestOptions: pending!, data: {
       'found': true,
@@ -298,7 +315,7 @@ void main() {
       (tester) async {
     var unavailable = true;
     await renderTransfer(tester, intercept: (options, handler) {
-      if (options.path.startsWith('/api/wallets/') && unavailable) {
+      if (options.path == '/api/wallets' && unavailable) {
         handler.reject(DioException(
             requestOptions: options,
             type: DioExceptionType.badResponse,
@@ -355,30 +372,25 @@ void main() {
     expect(find.text('GTBank'), findsOneWidget);
   });
 
-  testWidgets('switching transfer type opens the functional bank route',
+  testWidgets('destination choice opens the bank form without destination tabs',
       (tester) async {
     setMockSecureStorage();
     final bundle = buildTrustPayTestBundle();
-    final router = GoRouter(initialLocation: '/send', routes: [
-      GoRoute(
-          path: '/send',
-          builder: (_, __) => MoneyActionScreen(
-              kind: MoneyActionKind.send, apiClient: bundle.apiClient)),
-      GoRoute(
-          path: '/withdraw',
-          builder: (_, __) => MoneyActionScreen(
-              kind: MoneyActionKind.withdraw, apiClient: bundle.apiClient)),
-    ]);
-    addTearDown(router.dispose);
-    await tester.pumpWidget(MaterialApp.router(routerConfig: router));
+    await tester.pumpWidget(
+        MaterialApp(home: SendMoneyEntryScreen(apiClient: bundle.apiClient)));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Bank account'));
     await tester.pumpAndSettle();
     expect(find.text('Bank transfer'), findsOneWidget);
     expect(find.text('Continue to bank details'), findsOneWidget);
+    expect(find.text('TrustPay'), findsNothing);
+    await tester.tap(find.byTooltip('Back'));
+    await tester.pumpAndSettle();
+    expect(find.text('Where are you sending money?'), findsOneWidget);
     await tester.tap(find.text('TrustPay'));
     await tester.pumpAndSettle();
-    expect(field('Recipient email'), findsOneWidget);
+    expect(field('Amount'), findsOneWidget);
+    expect(field('Recipient email'), findsNothing);
   });
 
   testWidgets('a failed security check unlocks the form without sending money',
@@ -395,6 +407,7 @@ void main() {
       }
     });
     await tester.enterText(field('Amount'), '1000');
+    await openTransferRecipient(tester);
     await tester.enterText(field('Recipient email'), 'tolu@example.com');
     await tester.pump(const Duration(milliseconds: 600));
     await tester.pumpAndSettle();
@@ -494,6 +507,7 @@ void main() {
         }
       });
       await tester.enterText(field('Amount'), '1000');
+      await openTransferRecipient(tester);
       await tester.enterText(field('Recipient email'), 'tolu@example.com');
       await tester.pump(const Duration(milliseconds: 600));
       await tester.pumpAndSettle();
@@ -602,6 +616,7 @@ void main() {
             size: small ? const Size(320, 740) : const Size(390, 844),
             scale: small ? 1.5 : 1);
         await tester.enterText(field('Amount'), '1250.50');
+        await openTransferRecipient(tester);
         await tester.enterText(field('Recipient email'), 'tolu@example.com');
         await tester.pump(const Duration(milliseconds: 600));
         await tester.pumpAndSettle();

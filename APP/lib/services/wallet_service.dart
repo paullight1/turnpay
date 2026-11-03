@@ -13,7 +13,8 @@ class WalletService {
   Future<List<WalletData>> fetchWallets() async {
     late final dynamic data;
     try {
-      final response = await _apiClient.client.get('/api/wallets');
+      final response = await _apiClient.client
+          .get('/api/wallets', options: _freshRequestOptions());
       data = response.data;
     } on DioException catch (error) {
       // A missing wallet collection means there are no provisioned wallets.

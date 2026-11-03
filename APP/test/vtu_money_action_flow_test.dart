@@ -125,7 +125,7 @@ void main() {
     await tester.tap(find.text('Continue to bank details'));
     await tester.pumpAndSettle();
 
-    expect(find.text('Step 2 of 2 · Enter the bank details.'), findsOneWidget);
+    expect(find.text('Step 2 of 2 · Confirm the recipient.'), findsOneWidget);
     expect(find.text('Choose bank'), findsOneWidget);
     expect(find.text('Account number'), findsOneWidget);
     expect(find.text('Review transfer'), findsOneWidget);
@@ -170,7 +170,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('Continue to bank details'));
     await tester.pumpAndSettle();
-    expect(find.text('Step 2 of 2 · Enter the bank details.'), findsOneWidget);
+    expect(find.text('Step 2 of 2 · Confirm the recipient.'), findsOneWidget);
   });
 
   testWidgets('cable TV stages provider selection before card details', (

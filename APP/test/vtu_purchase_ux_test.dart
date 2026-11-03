@@ -11,6 +11,7 @@ import 'package:trustpay_app/features/home/screens/money_action_screen.dart';
 import 'package:trustpay_app/features/home/widgets/vtu_phone.dart';
 import 'package:trustpay_app/features/home/widgets/vtu_purchase_widgets.dart';
 import 'package:trustpay_app/services/vtu_service.dart';
+import 'package:trustpay_app/services/payment_attempt_store.dart';
 import 'package:trustpay_app/services/transaction_security_service.dart';
 import 'support/trustpay_test_api.dart';
 
@@ -76,6 +77,7 @@ Future<TrustPayTestBundle> _render(WidgetTester tester, MoneyActionKind kind,
     double textScale = 1,
     GlobalKey? capture,
     TransactionSecurityService? security,
+    PaymentAttemptStore? paymentStore,
     void Function(RequestOptions, RequestInterceptorHandler)? requests,
     void Function(RequestOptions, RequestInterceptorHandler)? packages}) async {
   tester.view.physicalSize = size;
@@ -137,7 +139,9 @@ Future<TrustPayTestBundle> _render(WidgetTester tester, MoneyActionKind kind,
           home: MoneyActionScreen(
               kind: kind,
               apiClient: bundle.apiClient,
-              transactionSecurityService: security))));
+              transactionSecurityService: security,
+              paymentAttemptStore: paymentStore,
+              paymentRecoveryUserId: paymentStore == null ? null : 'user-1'))));
   if (packages == null) {
     await tester.pumpAndSettle();
   } else {
@@ -280,6 +284,142 @@ void main() {
     expect(keys.toSet(), hasLength(2));
     await tester.pumpWidget(const SizedBox.shrink());
   });
+
+  testWidgets(
+      'pending airtime has one status screen and no purchase form or raw reference',
+      (tester) async {
+    await _render(tester, MoneyActionKind.airtime, security: _VtuTestSecurity(),
+        requests: (options, handler) {
+      if (options.path == '/api/vtu/purchase') {
+        handler.resolve(Response(requestOptions: options, data: {
+          'status': 'PENDING',
+          'reference': 'VTU-FOCUSED',
+          'orderId': 'focused-order',
+          'amount': '500.00',
+          'currency': 'NGN'
+        }));
+      } else {
+        handler.next(options);
+      }
+    });
+    await tester.enterText(_phone(), '08031234567');
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Continue to amount'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('₦500'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Buy airtime'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Continue'));
+    await tester.pumpAndSettle();
+    for (final digit in ['2', '4', '6', '8']) {
+      await tester.tap(find.text(digit));
+      await tester.pump();
+    }
+    await tester.pumpAndSettle();
+    expect(find.text('Confirming your top-up'), findsOneWidget);
+    expect(find.text('08031234567'), findsNothing);
+    expect(find.text('Recent VTU order'), findsNothing);
+    expect(find.text('Payment recovery'), findsNothing);
+    expect(find.textContaining('VTU-FOCUSED'), findsNothing);
+    expect(find.byType(TextField), findsNothing);
+    expect(find.text('Check status'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets(
+      'restored pending top-up is a compact notice that opens status without resending',
+      (tester) async {
+    final store = PaymentAttemptStore(
+        storage: MemoryPaymentAttemptStorage(),
+        keyGenerator: () => 'restored-key');
+    final key =
+        await store.prepare('user-1', PaymentAttemptOperation.vtuPurchase, {
+      'type': 'airtime',
+      'provider': 'mtn',
+      'amount': '500.00',
+      'currency': 'NGN',
+      'recipientNumber': '08031234567'
+    });
+    await store.markSubmitted('user-1', key);
+    var purchases = 0;
+    await _render(tester, MoneyActionKind.airtime, paymentStore: store,
+        requests: (options, handler) {
+      if (options.path == '/api/payment-attempts/resolve') {
+        handler.resolve(Response(
+            requestOptions: options,
+            data: {'state': 'PENDING', 'reference': 'VTU-RESTORED'}));
+      } else if (options.path == '/api/vtu/orders/VTU-RESTORED') {
+        handler.resolve(Response(requestOptions: options, data: {
+          'orderId': 'restored-order',
+          'reference': 'VTU-RESTORED',
+          'orderStatus': 'UNKNOWN',
+          'transactionStatus': 'PENDING',
+          'provider': 'VTPASS',
+          'amount': '500.00',
+          'currency': 'NGN'
+        }));
+      } else {
+        if (options.path == '/api/vtu/purchase') purchases++;
+        handler.next(options);
+      }
+    });
+    expect(_phone(), findsOneWidget);
+    expect(find.text('Previous top-up needs checking'), findsOneWidget);
+    expect(find.text('Payment recovery'), findsNothing);
+    expect(find.textContaining('VTU-RESTORED'), findsNothing);
+    await tester.tap(find.text('View status'));
+    await tester.pumpAndSettle();
+    expect(find.text('Confirming your top-up'), findsOneWidget);
+    expect(find.byType(TextField), findsNothing);
+    expect(purchases, 0);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  for (final outcome in ['SUCCESS', 'FAILED', 'REVERSED']) {
+    testWidgets(
+        'terminal $outcome recovery permits another top-up when details fail',
+        (tester) async {
+      final store = PaymentAttemptStore(storage: MemoryPaymentAttemptStorage());
+      final key =
+          await store.prepare('user-1', PaymentAttemptOperation.vtuPurchase, {
+        'type': 'airtime',
+        'provider': 'mtn',
+        'amount': '500.00',
+        'currency': 'NGN',
+        'recipientNumber': '08031234567'
+      });
+      await store.markSubmitted('user-1', key);
+      var checks = 0;
+      var purchases = 0;
+      await _render(tester, MoneyActionKind.airtime, paymentStore: store,
+          requests: (options, handler) {
+        if (options.path == '/api/payment-attempts/resolve') {
+          checks++;
+          handler.resolve(Response(requestOptions: options, data: {
+            'state': checks == 1 ? 'PENDING' : outcome,
+            'reference': 'VTU-RECOVERY'
+          }));
+        } else if (options.path == '/api/vtu/orders/VTU-RECOVERY') {
+          handler.reject(DioException(
+              requestOptions: options,
+              type: DioExceptionType.badResponse,
+              response: Response(requestOptions: options, statusCode: 503)));
+        } else {
+          if (options.path == '/api/vtu/purchase') purchases++;
+          handler.next(options);
+        }
+      });
+      await tester.tap(find.text('View status'));
+      await tester.pumpAndSettle();
+      expect(find.text('Start another top-up'), findsOneWidget);
+      await tester.ensureVisible(find.text('Start another top-up'));
+      await tester.tap(find.text('Start another top-up'));
+      await tester.pumpAndSettle();
+      expect(_phone(), findsOneWidget);
+      expect(purchases, 0);
+    });
+  }
 
   setUpAll(() async {
     GoogleFonts.config.allowRuntimeFetching = false;
@@ -465,7 +605,7 @@ void main() {
         if (options.path == '/api/vtu/purchase') {
           purchases++;
           handler.resolve(Response(requestOptions: options, data: {
-            'status': 'SUCCESS',
+            'status': 'PENDING',
             'reference': 'VTU-TEST',
             'orderId': 'order-test',
             'amount': '500.00',
@@ -501,12 +641,8 @@ void main() {
       }
       await tester.pumpAndSettle();
       expect(purchases, 1);
-      expect(
-          tester
-              .widget<FilledButton>(
-                  find.widgetWithText(FilledButton, 'Buy airtime'))
-              .onPressed,
-          isNull);
+      expect(find.text('Buy airtime'), findsNothing);
+      expect(find.text('Confirming your top-up'), findsOneWidget);
       await tester.pump(const Duration(seconds: 4));
       await tester.pumpAndSettle();
       if (status == 'PENDING') {

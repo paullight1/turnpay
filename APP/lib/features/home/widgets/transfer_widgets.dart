@@ -19,69 +19,25 @@ class TransferHeader extends StatelessWidget {
       {super.key,
       required this.bank,
       required this.onBack,
-      required this.onSwitch,
       required this.locked,
       this.showBack = true});
   final bool bank, locked, showBack;
-  final VoidCallback onBack, onSwitch;
+  final VoidCallback onBack;
   @override
-  Widget build(BuildContext context) => Column(children: [
-        Row(children: [
-          if (showBack) ...[
-            IconButton(
-                onPressed: locked ? null : onBack,
-                tooltip: 'Back',
-                style: IconButton.styleFrom(
-                    backgroundColor: AppColors.surface,
-                    minimumSize: const Size(48, 48)),
-                icon: const Icon(Icons.arrow_back_rounded)),
-            const SizedBox(width: 14),
-          ],
-          Expanded(
-              child: Text(bank ? 'Bank transfer' : 'Send money',
-                  style: AppTextStyles.headingL)),
-        ]),
-        const SizedBox(height: 24),
-        Row(children: [
-          for (final isBank in [false, true])
-            Expanded(
-                child: Padding(
-              padding: EdgeInsets.only(right: isBank ? 0 : 8),
-              child: Semantics(
-                  selected: bank == isBank,
-                  child: OutlinedButton(
-                    onPressed: locked
-                        ? null
-                        : bank == isBank
-                            ? () {}
-                            : onSwitch,
-                    style: OutlinedButton.styleFrom(
-                        minimumSize: const Size(48, 50),
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 10, vertical: 12),
-                        backgroundColor: bank == isBank
-                            ? AppColors.surface
-                            : Colors.transparent,
-                        side: BorderSide(
-                            color: bank == isBank
-                                ? AppColors.primary
-                                : AppColors.border),
-                        shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(14))),
-                    child: Column(mainAxisSize: MainAxisSize.min, children: [
-                      Icon(
-                          isBank
-                              ? Icons.account_balance_outlined
-                              : Icons.people_outline_rounded,
-                          size: 18),
-                      const SizedBox(height: 4),
-                      Text(isBank ? 'Bank account' : 'TrustPay',
-                          textAlign: TextAlign.center,
-                          style: AppTextStyles.labelM),
-                    ]),
-                  )),
-            ))
-        ]),
+  Widget build(BuildContext context) => Row(children: [
+        if (showBack) ...[
+          IconButton(
+              onPressed: locked ? null : onBack,
+              tooltip: 'Back',
+              style: IconButton.styleFrom(
+                  backgroundColor: AppColors.surface,
+                  minimumSize: const Size(48, 48)),
+              icon: const Icon(Icons.arrow_back_rounded)),
+          const SizedBox(width: 14),
+        ],
+        Expanded(
+            child: Text(bank ? 'Bank transfer' : 'Send money',
+                style: AppTextStyles.headingL)),
       ]);
 }
 

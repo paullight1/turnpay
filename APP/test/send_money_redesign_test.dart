@@ -10,6 +10,20 @@ import 'package:trustpay_app/services/payment_attempt_store.dart';
 import 'package:trustpay_app/services/transaction_security_service.dart';
 import 'support/trustpay_test_api.dart';
 
+Future<void> openTransferRecipient(WidgetTester tester) async {
+  await tester.pump();
+  final next = find.text('Continue to recipient');
+  if (next.evaluate().isEmpty) return;
+  final amount = find.byWidgetPredicate(
+      (w) => w is TextField && w.decoration?.labelText == 'Amount');
+  if (tester.widget<TextField>(amount).controller!.text.isEmpty) {
+    await tester.enterText(amount, '20');
+    await tester.pump();
+  }
+  await tester.tap(next);
+  await tester.pumpAndSettle();
+}
+
 Finder input(String label) => find.byWidgetPredicate(
     (widget) => widget is TextField && widget.decoration?.labelText == label);
 
@@ -137,11 +151,6 @@ void main() {
             paymentRecoveryUserId: 'user-1')));
     await tester.pump();
     await tester.enterText(input('Amount'), '25.50');
-    await tester.enterText(input('Recipient email'), 'tolu@example.com');
-    await tester.pump(const Duration(milliseconds: 700));
-    for (var i = 0; i < 10; i++) {
-      await tester.pump(const Duration(milliseconds: 50));
-    }
     final button =
         find.widgetWithText(FilledButton, 'Checking previous payments…');
     expect(button, findsOneWidget);
@@ -149,6 +158,10 @@ void main() {
     resolver.complete();
     await tester.pumpAndSettle();
     expect(find.text('Payment recovery'), findsOneWidget);
+    await openTransferRecipient(tester);
+    await tester.enterText(input('Recipient email'), 'tolu@example.com');
+    await tester.pump(const Duration(milliseconds: 700));
+    await tester.pumpAndSettle();
     expect(
         tester
             .widget<FilledButton>(
@@ -188,6 +201,7 @@ void main() {
             paymentAttemptStore: store)));
     await tester.pumpAndSettle();
     await tester.enterText(input('Amount'), '25.50');
+    await openTransferRecipient(tester);
     await tester.enterText(input('Recipient email'), 'tolu@example.com');
     await tester.pump(const Duration(milliseconds: 700));
     await tester.pumpAndSettle();
@@ -248,6 +262,42 @@ void main() {
             .where((uri) => uri.path == '/api/vtu/purchase'),
         isEmpty);
   });
+  testWidgets(
+      'transfer reads the collection endpoint and separates amount from recipient',
+      (tester) async {
+    final bundle = buildTrustPayTestBundle();
+    bundle.dio.interceptors
+        .add(InterceptorsWrapper(onRequest: (options, handler) {
+      if (options.path == '/api/wallets') {
+        handler
+            .resolve(Response(requestOptions: options, statusCode: 200, data: [
+          {'id': 'ngn', 'currency': 'NGN', 'balance': '450.00'},
+          {'id': 'ghs', 'currency': 'GHS', 'balance': '0.00'}
+        ]));
+      } else if (options.path.startsWith('/api/wallets/')) {
+        handler.reject(DioException(
+            requestOptions: options,
+            response: Response(requestOptions: options, statusCode: 404),
+            type: DioExceptionType.badResponse));
+      } else {
+        handler.next(options);
+      }
+    }));
+    await tester.pumpWidget(MaterialApp(
+        home: MoneyActionScreen(
+            kind: MoneyActionKind.send, apiClient: bundle.apiClient)));
+    await tester.pumpAndSettle();
+    expect(find.text('Available ₦450.00'), findsOneWidget);
+    expect(input('Amount'), findsOneWidget);
+    expect(input('Recipient email'), findsNothing);
+    await tester.enterText(input('Amount'), '20');
+    await tester.pump();
+    await tester.tap(find.text('Continue to recipient'));
+    await tester.pumpAndSettle();
+    expect(input('Amount'), findsNothing);
+    expect(input('Recipient email'), findsOneWidget);
+    expect(bundle.adapter.internalTransferMutationCount, 0);
+  });
   testWidgets('send amount updates naira and kobo words while typing',
       (tester) async {
     final bundle = buildTrustPayTestBundle();
@@ -304,6 +354,7 @@ void main() {
             paymentAttemptStore: _BrokenLookupStore())));
     await tester.pumpAndSettle();
     await tester.enterText(input('Amount'), '25.50');
+    await openTransferRecipient(tester);
     await tester.enterText(input('Recipient email'), 'tolu@example.com');
     await tester.pump(const Duration(milliseconds: 700));
     await tester.pumpAndSettle();
@@ -339,6 +390,7 @@ void main() {
             transactionSecurityService: _Security())));
     await tester.pumpAndSettle();
     await tester.enterText(input('Amount'), '25.50');
+    await openTransferRecipient(tester);
     await tester.enterText(input('Recipient email'), 'tolu@example.com');
     await tester.pump(const Duration(milliseconds: 700));
     await tester.pumpAndSettle();
@@ -391,6 +443,7 @@ void main() {
             paymentAttemptStore: _BrokenPrepareStore())));
     await tester.pumpAndSettle();
     await tester.enterText(input('Amount'), '25.50');
+    await openTransferRecipient(tester);
     await tester.enterText(input('Recipient email'), 'tolu@example.com');
     await tester.pump(const Duration(milliseconds: 700));
     await tester.pumpAndSettle();

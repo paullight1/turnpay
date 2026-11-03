@@ -10,6 +10,20 @@ import 'package:trustpay_app/features/home/screens/money_action_screen.dart';
 import 'package:trustpay_app/services/transaction_security_service.dart';
 import 'support/trustpay_test_api.dart';
 
+Future<void> openTransferRecipient(WidgetTester tester) async {
+  await tester.pump();
+  final next = find.text('Continue to recipient');
+  if (next.evaluate().isEmpty) return;
+  final amount = find.byWidgetPredicate(
+      (w) => w is TextField && w.decoration?.labelText == 'Amount');
+  if (tester.widget<TextField>(amount).controller!.text.isEmpty) {
+    await tester.enterText(amount, '20');
+    await tester.pump();
+  }
+  await tester.tap(next);
+  await tester.pumpAndSettle();
+}
+
 class _Security extends TransactionSecurityService {
   @override
   Future<TransactionSecurityConfig> getConfig() async =>
@@ -84,7 +98,9 @@ void main() {
       await tester.enterText(_field('Amount'), '12500.50');
       await tester.pump();
       await _capture(tester, capture, 'amount-${dark ? 'dark' : 'light'}');
+      await openTransferRecipient(tester);
       await tester.ensureVisible(_field('Recipient email'));
+      await openTransferRecipient(tester);
       await tester.enterText(_field('Recipient email'), 'tolu@example.com');
       await tester.pump(const Duration(milliseconds: 700));
       await tester.pumpAndSettle();

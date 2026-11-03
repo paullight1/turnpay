@@ -35,6 +35,7 @@ import '../widgets/vtu_phone.dart';
 import '../widgets/transfer_widgets.dart';
 import '../widgets/transfer_review_dialog.dart';
 import '../widgets/payment_review_sheet.dart';
+import '../widgets/vtu_purchase_status_view.dart';
 import '../widgets/vtu_purchase_widgets.dart';
 import 'extended_vtu_form.dart';
 import 'transfer_receipt_screen.dart';
@@ -128,6 +129,8 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
   final _submissionGate = MoneySubmissionGate();
   late final VtuService _vtuService;
   late final WalletService _walletService;
+  PaymentAttempt? _activeVtuRecoveryAttempt;
+  String? _vtuStatusError;
   String? _paymentRecoveryUser;
   List<PaymentAttempt> _unresolvedPaymentAttempts = const [];
   bool _isLoadingPaymentRecovery = false;
@@ -253,6 +256,7 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
   String? _verifiedRecipientInput;
   List<WalletData> _transferWallets = const [];
   bool _isLoadingTransferWallets = false;
+  bool _isSendRecipientStep = false;
   int _transferWalletRequestId = 0;
   bool _isResolvingRecipient = false;
   String? _recipientResolveError;
@@ -786,13 +790,9 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
     final requestId = ++_transferWalletRequestId;
     setState(() => _isLoadingTransferWallets = true);
     try {
-      final wallets = await Future.wait([
-        _walletService.fetchWallet('NGN').catchError((Object _) => null),
-        _walletService.fetchWallet('GHS').catchError((Object _) => null),
-      ]);
+      final wallets = await _walletService.fetchWallets();
       if (!mounted || requestId != _transferWalletRequestId) return;
-      setState(
-          () => _transferWallets = wallets.whereType<WalletData>().toList());
+      setState(() => _transferWallets = wallets);
     } catch (_) {
       if (!mounted || requestId != _transferWalletRequestId) return;
       setState(() => _transferWallets = const []);
@@ -841,7 +841,7 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
                 : TextInputAction.done,
             onSubmitted: (_) {
               if (widget.kind == MoneyActionKind.send) {
-                _sendRecipientFocusNode.requestFocus();
+                _continueToSendRecipient();
               } else if (_transferAmountError == null) {
                 _continueToWithdrawalDetails();
               }
@@ -906,19 +906,18 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
 
   Widget _buildTransferScaffold(BuildContext context) {
     final bank = widget.kind == MoneyActionKind.withdraw;
-    final details = bank && _isWithdrawalDetailsStep;
+    final details = bank ? _isWithdrawalDetailsStep : _isSendRecipientStep;
     final validAmount = _amountController.text.trim().isNotEmpty &&
         _transferAmountError == null;
     final ready = !_transferLocked &&
-        !_isLoadingPaymentRecovery &&
-        _paymentRecoveryError == null &&
         validAmount &&
-        (bank
-            ? _paymentCapabilities?.withdrawals == true
-            : _paymentCapabilities?.internalTransfers == true) &&
-        (!bank
-            ? _trustpayRecipientVerified
-            : !details || _bankRecipientVerified);
+        (!details ||
+            (!_isLoadingPaymentRecovery &&
+                _paymentRecoveryError == null &&
+                (bank
+                    ? _paymentCapabilities?.withdrawals == true
+                    : _paymentCapabilities?.internalTransfers == true) &&
+                (bank ? _bankRecipientVerified : _trustpayRecipientVerified)));
     final beneficiary = _activeBeneficiary;
     final horizontal = MediaQuery.sizeOf(context).width > 600
         ? (MediaQuery.sizeOf(context).width - 552) / 2
@@ -938,8 +937,10 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
               child: FilledButton(
                 onPressed: !ready
                     ? null
-                    : bank && !details
-                        ? _continueToWithdrawalDetails
+                    : !details
+                        ? (bank
+                            ? _continueToWithdrawalDetails
+                            : _continueToSendRecipient)
                         : _submit,
                 style: FilledButton.styleFrom(
                     backgroundColor: AppColors.primaryDark,
@@ -955,8 +956,10 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
                         ? 'Checking previous payments…'
                         : _transferLocked
                             ? 'Awaiting approval…'
-                            : bank && !details
-                                ? 'Continue to bank details'
+                            : !details
+                                ? (bank
+                                    ? 'Continue to bank details'
+                                    : 'Continue to recipient')
                                 : 'Review transfer'),
               )),
         ),
@@ -971,16 +974,12 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
               bank: bank,
               locked: _transferLocked,
               showBack: widget.showBackButton,
-              onBack: _handlePageBack,
-              onSwitch: () => context
-                  .pushReplacement(bank ? AppRoutes.send : AppRoutes.withdraw)),
+              onBack: _handlePageBack),
           const SizedBox(height: 20),
           Text(
-              bank
-                  ? (details
-                      ? 'Step 2 of 2 · Enter the bank details.'
-                      : 'Step 1 of 2 · Choose an amount to send.')
-                  : 'Send to another TrustPay user by email.',
+              details
+                  ? 'Step 2 of 2 · Confirm the recipient.'
+                  : 'Step 1 of 2 · Choose an amount to send.',
               style: AppTextStyles.bodyS),
           const SizedBox(height: 16),
           if (_relevantUnresolvedPaymentAttempts.isNotEmpty) ...[
@@ -1009,7 +1008,13 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
                 currency: _currency,
                 onEdit: () {
                   if (!_transferLocked) {
-                    setState(() => _isWithdrawalDetailsStep = false);
+                    setState(() {
+                      if (bank) {
+                        _isWithdrawalDetailsStep = false;
+                      } else {
+                        _isSendRecipientStep = false;
+                      }
+                    });
                   }
                 }),
             const SizedBox(height: 16),
@@ -1074,7 +1079,7 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
                           _selectedWithdrawalBank != null,
                       onRetry: _resolveWithdrawalAccount),
                 ])
-          else if (!bank) ...[
+          else if (!bank && details) ...[
             const SizedBox(height: 16),
             TransferSection(title: 'Who are you sending to?', children: [
               _InputField(
@@ -2365,6 +2370,13 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
 
   void _handlePageBack() {
     FocusScope.of(context).unfocus();
+    if (widget.kind == MoneyActionKind.send && _isSendRecipientStep) {
+      setState(() {
+        _isSendRecipientStep = false;
+        _setMessageState(null);
+      });
+      return;
+    }
     if (widget.kind == MoneyActionKind.withdraw && _isWithdrawalDetailsStep) {
       setState(() {
         _isWithdrawalDetailsStep = false;
@@ -2419,8 +2431,8 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
       return;
     }
 
-    if (context.canPop()) {
-      context.pop();
+    if (Navigator.of(context).canPop()) {
+      Navigator.of(context).pop();
     } else {
       context.go(AppRoutes.home);
     }
@@ -2469,6 +2481,19 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
     FocusScope.of(context).unfocus();
     setState(() {
       _isAirtimeAmountStep = true;
+      _setMessageState(null);
+    });
+  }
+
+  void _continueToSendRecipient() {
+    if (_transferLocked ||
+        _amountController.text.trim().isEmpty ||
+        _transferAmountError != null) {
+      return;
+    }
+    FocusScope.of(context).unfocus();
+    setState(() {
+      _isSendRecipientStep = true;
       _setMessageState(null);
     });
   }
@@ -3336,6 +3361,33 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
       _pendingOrderReference = reference;
       _trackedOrder = null;
     }
+    if (_pendingOrderReference != null) {
+      final state = _responseString(data['orderStatus'] ?? data['status'],
+          fallback: 'PENDING');
+      final known = {
+        'SUCCESS',
+        'FAILED',
+        'REVERSED',
+        'PENDING',
+        'PROCESSING',
+        'UNKNOWN'
+      }.contains(state)
+          ? state
+          : 'PENDING';
+      _trackedOrder = VtuOrderStatus(
+          orderId: _pendingOrderReference!,
+          reference:
+              _responseString(reference, fallback: _pendingOrderReference!),
+          orderStatus: known,
+          transactionStatus: known,
+          provider: _vtuProvider,
+          amount:
+              _responseString(data['amount'], fallback: _amountController.text),
+          currency: _currency,
+          targetMasked: null,
+          nextRequeryAt: null,
+          purchasedCode: null);
+    }
   }
 
   Map<String, dynamic> _asResponseMap(dynamic data) {
@@ -3395,6 +3447,7 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
 
     setState(() {
       _isCheckingOrder = true;
+      _vtuStatusError = null;
       _setMessageState(null);
     });
 
@@ -3417,6 +3470,8 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
     } catch (error) {
       if (!mounted) return;
       setState(() {
+        _vtuStatusError =
+            'We could not update the status. Your payment is still being checked.';
         _setMessageState(
           authErrorMessage(error, 'Unable to refresh VTU order status'),
           type: MoneyActionFeedbackType.error,
@@ -4258,7 +4313,18 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
     if (widget.kind == MoneyActionKind.exchange) {
       return _buildExchangeScaffold(context);
     }
-    if (_isTransferAction) return _buildTransferScaffold(context);
+    if (_isTransferAction) {
+      final details = widget.kind == MoneyActionKind.send
+          ? _isSendRecipientStep
+          : _isWithdrawalDetailsStep;
+      return PopScope(
+        canPop: !_transferLocked && !details,
+        onPopInvokedWithResult: (didPop, _) {
+          if (!didPop && !_transferLocked && details) _handlePageBack();
+        },
+        child: _buildTransferScaffold(context),
+      );
+    }
     if (_isLocalMobileTopup) return _buildMobileTopupScaffold(context);
 
     final config = _configFor(widget.kind);
@@ -4529,12 +4595,17 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
     );
   }
 
-  void _startAnotherMobileTopup() {
+  bool get _mobileTopupConfirmedTerminal {
     final order = _trackedOrder;
-    if (_isSubmitting ||
-        _isCheckingOrder ||
-        order == null ||
-        !_terminalOrderStatuses.contains(order.orderStatus)) {
+    if (order != null) {
+      return _terminalOrderStatuses.contains(order.orderStatus) &&
+          _terminalOrderStatuses.contains(order.transactionStatus);
+    }
+    return _activeVtuRecoveryAttempt?.state.isTerminal == true;
+  }
+
+  void _startAnotherMobileTopup() {
+    if (_isSubmitting || _isCheckingOrder || !_mobileTopupConfirmedTerminal) {
       return;
     }
     FocusScope.of(context).unfocus();
@@ -4543,6 +4614,8 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
     setState(() {
       _pendingOrderReference = null;
       _trackedOrder = null;
+      _activeVtuRecoveryAttempt = null;
+      _vtuStatusError = null;
       _orderPollAttempts = 0;
       _isAirtimeAmountStep = false;
       _isDataPaymentStep = false;
@@ -4614,7 +4687,89 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
     );
   }
 
+  void _leaveMobileTopupStatus() {
+    if (Navigator.of(context).canPop()) {
+      Navigator.of(context).pop();
+    } else {
+      context.go(AppRoutes.home);
+    }
+  }
+
+  Future<void> _viewRecoveredTopup(PaymentAttempt attempt) async {
+    final userId = _paymentRecoveryUser;
+    if (userId == null || _isCheckingOrder) return;
+    setState(() {
+      _activeVtuRecoveryAttempt = attempt;
+      _isCheckingOrder = true;
+      _vtuStatusError = null;
+    });
+    try {
+      final resolved = await _paymentRecoveryService.resolveAttempt(
+          userId: userId, attempt: attempt);
+      if (!mounted) return;
+      _replacePaymentAttempt(resolved);
+      setState(() => _activeVtuRecoveryAttempt = resolved);
+      if (resolved.reference?.isNotEmpty == true) {
+        final order = await _vtuService.getOrderStatus(resolved.reference!);
+        if (!mounted) return;
+        setState(() {
+          _pendingOrderReference = order.orderId;
+          _trackedOrder = order;
+        });
+        _orderPollAttempts = 0;
+        _scheduleVtuOrderAutoCheck();
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() => _vtuStatusError = _activeVtuRecoveryAttempt
+                    ?.state.isTerminal ==
+                true
+            ? 'Your payment result is confirmed. Additional details are temporarily unavailable.'
+            : 'We could not update the status. Your original payment has been kept.');
+      }
+    } finally {
+      if (mounted) setState(() => _isCheckingOrder = false);
+    }
+  }
+
+  Widget _mobileTopupStatus() {
+    final order = _trackedOrder;
+    final attempt = _activeVtuRecoveryAttempt;
+    final status =
+        order?.transactionStatus ?? attempt?.state.wireName ?? 'PENDING';
+    final terminal = _mobileTopupConfirmedTerminal;
+    return VtuPurchaseStatusView(
+      status: status,
+      amount: order?.amount ??
+          '${attempt?.canonicalPayload['amount'] ?? _amountController.text}',
+      currency: order?.currency ?? _currency,
+      title: widget.kind == MoneyActionKind.data
+          ? 'Data top-up'
+          : 'Airtime top-up',
+      reference: order?.reference ?? attempt?.reference,
+      recipient: order?.targetMasked ??
+          (attempt == null ? _maskIdentifier(_recipientController.text) : null),
+      network: order == null || order.provider == 'VTPASS'
+          ? null
+          : _providerName(_providersForCurrentFlow(), order.provider),
+      message: _vtuStatusError,
+      isChecking: _isCheckingOrder,
+      onCheck: _pendingOrderReference != null
+          ? _checkVtuOrderStatus
+          : () {
+              if (attempt != null) _viewRecoveredTopup(attempt);
+            },
+      onDone: _leaveMobileTopupStatus,
+      onSupport: () => context.push(AppRoutes.profileSupport),
+      onStartAnother:
+          terminal && !_isCheckingOrder ? _startAnotherMobileTopup : null,
+    );
+  }
+
   Widget _buildMobileTopupScaffold(BuildContext context) {
+    if (_pendingOrderReference != null || _activeVtuRecoveryAttempt != null) {
+      return _mobileTopupStatus();
+    }
     final data = widget.kind == MoneyActionKind.data;
     final step = data
         ? (_isDataPaymentStep
@@ -4692,12 +4847,20 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
                               text: 'Checking unresolved payment status...',
                               isLoading: true),
                         if (_relevantUnresolvedPaymentAttempts.isNotEmpty)
-                          _PaymentRecoveryPanel(
-                              attempts: _relevantUnresolvedPaymentAttempts,
-                              isChecking: _isLoadingPaymentRecovery,
-                              onCheckStatus: _checkPaymentAttempt,
-                              onSupport: () =>
-                                  context.push(AppRoutes.profileSupport)),
+                          Padding(
+                              padding: const EdgeInsets.only(bottom: 16),
+                              child: ListTile(
+                                contentPadding: EdgeInsets.zero,
+                                leading: Icon(Icons.schedule_rounded,
+                                    color: AppColors.primary),
+                                title: Text('Previous top-up needs checking',
+                                    style: AppTextStyles.labelM),
+                                trailing: TextButton(
+                                    onPressed: () => _viewRecoveredTopup(
+                                        _relevantUnresolvedPaymentAttempts
+                                            .first),
+                                    child: const Text('View status')),
+                              )),
                         if (_paymentRecoveryError != null)
                           _MessagePanel(
                               message: _paymentRecoveryError!,
@@ -4711,14 +4874,6 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
                               message: _vtuCatalogMessage!,
                               type: MoneyActionFeedbackType.warning,
                               onRetry: _loadVtuCatalogs),
-                        ],
-                        if (_pendingOrderReference != null) ...[
-                          const SizedBox(height: 16),
-                          _VtuOrderStatusPanel(
-                              reference: _pendingOrderReference!,
-                              order: _trackedOrder,
-                              isChecking: _isCheckingOrder,
-                              onCheckStatus: _checkVtuOrderStatus),
                         ],
                         if (_message != null) ...[
                           const SizedBox(height: 16),

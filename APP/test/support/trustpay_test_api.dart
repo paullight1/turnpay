@@ -313,6 +313,17 @@ class FakeTrustPayApiAdapter implements HttpClientAdapter {
       return _jsonResponse(_referralDashboard(includeReferralRewards));
     }
 
+    if (method == 'GET' && path == '/api/wallets') {
+      return _jsonResponse([
+        _wallet('NGN', 125000.5),
+        _wallet('GHS', 3300.75),
+        _wallet('USD', 0),
+        _wallet('EUR', 0),
+        _wallet('GBP', 0),
+        _wallet('ZAR', 0)
+      ]);
+    }
+
     if (method == 'GET' && path == '/api/wallets/NGN') {
       return _jsonResponse(_wallet('NGN', 125000.5));
     }
