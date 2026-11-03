@@ -135,6 +135,74 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
+  testWidgets(
+      'first app PIN activates inactivity locking without a lifecycle change',
+      (tester) async {
+    _usePhoneSurface(tester);
+    setMockSecureStorage(refreshToken: 'refresh-token');
+    var config = const TransactionSecurityConfig(
+        hasPin: false,
+        pinLength: 4,
+        biometricEnabled: false,
+        canUseBiometrics: false,
+        hasBiometric: false,
+        biometricLabel: 'Phone security');
+    final service = _FakeAppLockSecurityService(
+        config: config, approvedPin: '2468', configLoader: () async => config);
+    var now = DateTime.utc(2026, 11, 3, 12);
+    await tester.pumpWidget(ProviderScope(
+        child: MaterialApp(
+            home: AppLockGate(
+                securityService: service,
+                clock: () => now,
+                inactivityTimeout: const Duration(minutes: 1),
+                child: const Scaffold(body: Text('Protected content'))))));
+    await tester.pumpAndSettle();
+    expect(find.text('Unlock TrustPay'), findsNothing);
+    config = const TransactionSecurityConfig(
+        hasPin: true,
+        pinLength: 4,
+        biometricEnabled: false,
+        canUseBiometrics: false,
+        hasBiometric: false,
+        biometricLabel: 'Phone security');
+    TransactionSecurityService.changes.value++;
+    await tester.pumpAndSettle();
+    now = now.add(const Duration(minutes: 2));
+    await tester.pump(const Duration(minutes: 1));
+    await tester.pumpAndSettle();
+    expect(find.text('Unlock TrustPay'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets(
+      'PIN approval started before background cannot unlock a newer resume lock',
+      (tester) async {
+    _usePhoneSurface(tester);
+    setMockSecureStorage(refreshToken: 'refresh-token');
+    final proof = Completer<PinVerificationResult>();
+    final service = _HeldPinService(proof);
+    await tester.pumpWidget(ProviderScope(
+        child: MaterialApp(
+            home: AppLockGate(
+                securityService: service,
+                child: const Scaffold(body: Text('Protected content'))))));
+    await tester.pumpAndSettle();
+    for (final digit in ['2', '4', '6', '8']) {
+      await tester.tap(find.text(digit));
+      await tester.pump();
+    }
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+    await tester.pump();
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    proof.complete(const PinVerificationResult.approved());
+    await tester.pumpAndSettle();
+    expect(find.text('Unlock TrustPay'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
   testWidgets('app lock gate stays open when no pin is saved', (tester) async {
     _usePhoneSurface(tester);
     FlutterSecureStorage.setMockInitialValues({});
@@ -670,4 +738,21 @@ class _ThrowingLogoutAuthService extends AuthService {
   Future<void> logout() async {
     throw StateError('secure storage unavailable');
   }
+}
+
+class _HeldPinService extends _FakeAppLockSecurityService {
+  final Completer<PinVerificationResult> proof;
+  _HeldPinService(this.proof)
+      : super(
+            config: const TransactionSecurityConfig(
+                hasPin: true,
+                pinLength: 4,
+                biometricEnabled: false,
+                canUseBiometrics: false,
+                hasBiometric: false,
+                biometricLabel: 'Phone security'),
+            approvedPin: '2468');
+  @override
+  Future<PinVerificationResult> verifyPinWithLockout(String pin) =>
+      proof.future;
 }

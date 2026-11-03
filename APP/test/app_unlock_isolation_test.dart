@@ -55,4 +55,19 @@ void main() {
     expect(await deriveAppPinHashYielding('2468', List.generate(16, (i) => i)),
         'gC1BmzAsNUYZ6viKxnxXeZiDc59GN1m9VfaxZi4k1l0=');
   });
+  test('saving a new app PIN publishes device security changes', () async {
+    final security = TransactionSecurityService();
+    var notifications = 0;
+    void changed() {
+      notifications++;
+    }
+
+    TransactionSecurityService.changes.addListener(changed);
+    try {
+      await security.savePin('2468', pinLength: 4);
+      expect(notifications, 1);
+    } finally {
+      TransactionSecurityService.changes.removeListener(changed);
+    }
+  });
 }

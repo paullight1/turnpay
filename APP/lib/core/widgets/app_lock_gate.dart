@@ -53,6 +53,7 @@ class _AppLockGateState extends ConsumerState<AppLockGate>
   static const _privacyChannel = MethodChannel('trustpay/app_privacy');
 
   final _apiClient = ApiClient();
+  int _approvalGeneration = 0;
   bool _locked = false;
   bool _ready = false;
   bool _checkingLock = false;
@@ -74,6 +75,8 @@ class _AppLockGateState extends ConsumerState<AppLockGate>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     authStateNotifier.addListener(_handleAuthStateChanged);
+    TransactionSecurityService.changes
+        .addListener(_handleDeviceSecurityChanged);
     widget.activitySignal.addListener(_handleActivitySignal);
     SemanticsBinding.instance
         .addSemanticsActionListener(_handleSemanticsActivity);
@@ -87,6 +90,8 @@ class _AppLockGateState extends ConsumerState<AppLockGate>
   @override
   void dispose() {
     authStateNotifier.removeListener(_handleAuthStateChanged);
+    TransactionSecurityService.changes
+        .removeListener(_handleDeviceSecurityChanged);
     widget.activitySignal.removeListener(_handleActivitySignal);
     SemanticsBinding.instance
         .removeSemanticsActionListener(_handleSemanticsActivity);
@@ -102,6 +107,7 @@ class _AppLockGateState extends ConsumerState<AppLockGate>
         state == AppLifecycleState.inactive ||
         state == AppLifecycleState.hidden ||
         state == AppLifecycleState.detached) {
+      _approvalGeneration++;
       _isForeground = false;
       _inactivityTimer?.cancel();
       unawaited(_clearLegacyTransactionMaterialSafely());
@@ -113,6 +119,7 @@ class _AppLockGateState extends ConsumerState<AppLockGate>
         setState(() {
           _ready = false;
           if (!promptInProgress) {
+            _verifying = false;
             _locked = true;
             _pin = '';
             _accountPassword = '';
@@ -173,8 +180,36 @@ class _AppLockGateState extends ConsumerState<AppLockGate>
     unawaited(_maybeLock());
   }
 
+  void _handleDeviceSecurityChanged() {
+    final generation = ++_approvalGeneration;
+    unawaited(_refreshDeviceSecurity(generation));
+  }
+
+  Future<void> _refreshDeviceSecurity(int generation) async {
+    try {
+      final config = await widget.securityService.getConfig();
+      if (!mounted || generation != _approvalGeneration) return;
+      setState(() {
+        _config = config;
+        _verifying = false;
+        _pin = '';
+      });
+      // A new app PIN activates the foreground timer immediately without
+      // forcing the user out of the settings flow they just completed.
+      _scheduleInactivityCheck();
+    } catch (_) {
+      if (!mounted || generation != _approvalGeneration) return;
+      setState(() {
+        _locked = true;
+        _verifying = false;
+      });
+      _requestLockCheck();
+    }
+  }
+
   void _handleAuthStateChanged() {
     if (!mounted || !authStateNotifier.sessionExpired) return;
+    _approvalGeneration++;
 
     _inactivityTimer?.cancel();
     _inactivityTimer = null;
@@ -468,10 +503,13 @@ class _AppLockGateState extends ConsumerState<AppLockGate>
       return;
     }
 
+    final generation = _approvalGeneration;
     setState(() => _verifying = true);
     try {
       final result = await widget.securityService.verifyPinWithLockout(_pin);
-      if (!mounted) return;
+      if (!mounted || !_isForeground || generation != _approvalGeneration) {
+        return;
+      }
       if (authStateNotifier.sessionExpired) {
         _handleAuthStateChanged();
         return;
@@ -497,7 +535,9 @@ class _AppLockGateState extends ConsumerState<AppLockGate>
         _error = lockoutMessage ?? 'Incorrect PIN. Try again.';
       });
     } catch (_) {
-      if (!mounted) return;
+      if (!mounted || !_isForeground || generation != _approvalGeneration) {
+        return;
+      }
       setState(() {
         _locked = true;
         _pin = '';

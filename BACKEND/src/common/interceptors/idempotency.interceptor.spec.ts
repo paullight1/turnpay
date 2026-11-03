@@ -1,4 +1,8 @@
-import { BadRequestException, ConflictException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+} from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { createHash } from 'crypto';
 import { lastValueFrom, of, throwError } from 'rxjs';
@@ -492,6 +496,72 @@ describe('IdempotencyInterceptor', () => {
       }),
     });
   });
+
+  it.each(['/api/vtu/purchase', '/api/payments/withdraw'])(
+    'requires a fresh attempt after a definite PIN rejection on %s',
+    async (path) => {
+      const records = new Map<string, any>();
+      prisma.idempotencyRecord.findUnique.mockImplementation(
+        async ({ where }) => records.get(where.scope_key.key) ?? null,
+      );
+      prisma.idempotencyRecord.create.mockImplementation(async ({ data }) => {
+        const record = { ...data, id: data.key };
+        records.set(data.key, record);
+        return record;
+      });
+      prisma.idempotencyRecord.update.mockImplementation(
+        async ({ where, data }) => {
+          const updated = { ...records.get(where.id), ...data };
+          records.set(where.id, updated);
+          return updated;
+        },
+      );
+      const interceptor = new IdempotencyInterceptor(
+        redis as any,
+        prisma as any,
+        logger as any,
+      );
+      let mutations = 0;
+      const request = (pin: string, key: string) =>
+        makeContext(
+          { amount: '500.00', transactionPin: pin },
+          { path, headers: { 'idempotency-key': key } },
+        );
+      const rejected = {
+        handle: jest.fn(() =>
+          throwError(() => new ForbiddenException('Invalid transaction PIN')),
+        ),
+      };
+      await expect(
+        interceptor.intercept(request('1357', 'rejected-attempt'), rejected),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      const accepted = {
+        handle: jest.fn(() => {
+          mutations++;
+          return of({ reference: 'PAY-PIN-RETRY' });
+        }),
+      };
+      await expect(
+        interceptor.intercept(request('2468', 'rejected-attempt'), accepted),
+      ).rejects.toThrow('Invalid transaction PIN');
+      expect(accepted.handle).not.toHaveBeenCalled();
+      const result = await interceptor.intercept(
+        request('2468', 'corrected-attempt'),
+        accepted,
+      );
+      expect(await lastValueFrom(result)).toEqual({
+        reference: 'PAY-PIN-RETRY',
+      });
+      const replay = await interceptor.intercept(
+        request('2468', 'corrected-attempt'),
+        accepted,
+      );
+      expect(await lastValueFrom(replay)).toEqual({
+        reference: 'PAY-PIN-RETRY',
+      });
+      expect(mutations).toBe(1);
+    },
+  );
 
   it('persists structured failed responses for handler errors', async () => {
     const interceptor = new IdempotencyInterceptor(

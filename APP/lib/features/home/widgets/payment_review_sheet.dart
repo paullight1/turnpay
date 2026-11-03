@@ -74,7 +74,7 @@ Future<bool> showPaymentReviewSheet(
                                 minimumSize: const Size.fromHeight(60),
                                 backgroundColor: AppColors.primary,
                                 foregroundColor: Colors.white,
-                                textStyle: const TextStyle(
+                                textStyle: AppTextStyles.labelM.copyWith(
                                     fontSize: 18, fontWeight: FontWeight.w700)),
                             child: const Text('Continue')),
                         const SizedBox(height: 12),
@@ -83,7 +83,7 @@ Future<bool> showPaymentReviewSheet(
                                 Navigator.of(sheetContext).pop(false),
                             style: OutlinedButton.styleFrom(
                                 minimumSize: const Size.fromHeight(56),
-                                textStyle: const TextStyle(
+                                textStyle: AppTextStyles.labelM.copyWith(
                                     fontSize: 18, fontWeight: FontWeight.w700)),
                             child: const Text('Edit')),
                       ])),

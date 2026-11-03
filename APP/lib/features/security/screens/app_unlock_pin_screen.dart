@@ -94,112 +94,149 @@ class _AppUnlockPinScreenState extends State<AppUnlockPinScreen> {
               title: const Text('App unlock'),
               automaticallyImplyLeading: !_busy),
           body: SafeArea(
-              child: SingleChildScrollView(
-                  child: Center(
+              child: LayoutBuilder(
+                  builder: (context, viewport) => SingleChildScrollView(
                       child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 480),
-            child: Padding(
-                padding: const EdgeInsets.all(24),
-                child: Column(children: [
-                  const Icon(Icons.phonelink_lock_rounded, size: 48),
-                  const SizedBox(height: 24),
-                  Text(
-                      _needsProof
-                          ? 'Confirm app unlock'
-                          : _replacement == null
-                              ? 'Create app-unlock PIN'
-                              : 'Confirm app-unlock PIN',
-                      textAlign: TextAlign.center,
-                      style: AppTextStyles.headingL),
-                  const SizedBox(height: 12),
-                  Text(
-                      _needsProof
-                          ? 'Use your current app-unlock method to continue.'
-                          : 'A 6-digit code for unlocking TrustPay on this device. Your transaction PIN stays separate.',
-                      textAlign: TextAlign.center,
-                      style: AppTextStyles.bodyM),
-                  const SizedBox(height: 32),
-                  if (!osProof)
-                    Semantics(
-                        label: '${_digits.length} of $_length digits entered',
-                        child: Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: List.generate(
-                                _length,
-                                (i) => Container(
-                                    margin: const EdgeInsets.all(6),
-                                    width: 16,
-                                    height: 16,
-                                    decoration: BoxDecoration(
-                                        shape: BoxShape.circle,
-                                        color: i < _digits.length
-                                            ? AppColors.primary
-                                            : AppColors.border))))),
-                  if (_error != null)
-                    Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 16),
-                        child: Semantics(
-                            liveRegion: true,
-                            child: Text(_error!,
-                                textAlign: TextAlign.center,
-                                style: TextStyle(color: AppColors.error)))),
-                  if (_busy)
-                    const Padding(
-                        padding: EdgeInsets.all(16),
-                        child: LinearProgressIndicator()),
-                  if (osProof)
-                    FilledButton.icon(
-                        onPressed: _busy ? null : _phoneProof,
-                        style: FilledButton.styleFrom(
-                            minimumSize: const Size.fromHeight(56)),
-                        icon: const Icon(Icons.verified_user_outlined),
-                        label: const Text('Use phone security'))
-                  else
-                    Padding(
-                        padding: const EdgeInsets.only(top: 24),
-                        child: GridView.count(
-                            crossAxisCount: 3,
-                            shrinkWrap: true,
-                            mainAxisSpacing: 12,
-                            crossAxisSpacing: 12,
-                            childAspectRatio: 1.5,
-                            physics: const NeverScrollableScrollPhysics(),
-                            children: [
-                              for (final digit in [
-                                '1',
-                                '2',
-                                '3',
-                                '4',
-                                '5',
-                                '6',
-                                '7',
-                                '8',
-                                '9'
-                              ])
-                                TextButton(
-                                    onPressed: _busy
-                                        ? null
-                                        : () {
-                                            HapticFeedback.selectionClick();
-                                            _digit(digit);
-                                          },
-                                    child: Text(digit,
-                                        style: AppTextStyles.headingL)),
-                              const SizedBox.shrink(),
-                              TextButton(
-                                  onPressed: _busy ? null : () => _digit('0'),
-                                  child:
-                                      Text('0', style: AppTextStyles.headingL)),
-                              IconButton(
-                                  tooltip: 'Delete digit',
-                                  onPressed: _busy || _digits.isEmpty
-                                      ? null
-                                      : () => setState(() => _digits = _digits
-                                          .substring(0, _digits.length - 1)),
-                                  icon: const Icon(Icons.backspace_outlined)),
-                            ])),
-                ])),
-          )))),
+                          constraints:
+                              BoxConstraints(minHeight: viewport.maxHeight),
+                          child: Center(
+                              child: ConstrainedBox(
+                            constraints: const BoxConstraints(maxWidth: 400),
+                            child: Padding(
+                                padding: const EdgeInsets.all(24),
+                                child: Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(Icons.phonelink_lock_outlined,
+                                          size: 44, color: AppColors.primary),
+                                      const SizedBox(height: 24),
+                                      Text(
+                                          _needsProof
+                                              ? 'Confirm app unlock'
+                                              : _replacement == null
+                                                  ? 'Create app-unlock PIN'
+                                                  : 'Confirm app-unlock PIN',
+                                          textAlign: TextAlign.center,
+                                          style: AppTextStyles.headingL),
+                                      const SizedBox(height: 12),
+                                      Text(
+                                          _needsProof
+                                              ? 'Use your current app-unlock method to continue.'
+                                              : 'A 6-digit code for unlocking TrustPay on this device. Your transaction PIN stays separate.',
+                                          textAlign: TextAlign.center,
+                                          style: AppTextStyles.bodyM),
+                                      const SizedBox(height: 32),
+                                      if (!osProof)
+                                        Semantics(
+                                            label:
+                                                '${_digits.length} of $_length digits entered',
+                                            child: Row(
+                                                mainAxisAlignment:
+                                                    MainAxisAlignment.center,
+                                                children: List.generate(
+                                                    _length,
+                                                    (i) => Container(
+                                                        margin: const EdgeInsets
+                                                            .all(6),
+                                                        width: 16,
+                                                        height: 16,
+                                                        decoration: BoxDecoration(
+                                                            shape:
+                                                                BoxShape.circle,
+                                                            color: i <
+                                                                    _digits
+                                                                        .length
+                                                                ? AppColors
+                                                                    .primary
+                                                                : AppColors
+                                                                    .border))))),
+                                      if (_error != null)
+                                        Padding(
+                                            padding: const EdgeInsets.symmetric(
+                                                vertical: 16),
+                                            child: Semantics(
+                                                liveRegion: true,
+                                                child: Text(_error!,
+                                                    textAlign: TextAlign.center,
+                                                    style: TextStyle(
+                                                        color:
+                                                            AppColors.error)))),
+                                      if (_busy)
+                                        const Padding(
+                                            padding: EdgeInsets.all(16),
+                                            child: LinearProgressIndicator()),
+                                      if (osProof)
+                                        FilledButton.icon(
+                                            onPressed:
+                                                _busy ? null : _phoneProof,
+                                            style: FilledButton.styleFrom(
+                                                minimumSize:
+                                                    const Size.fromHeight(56)),
+                                            icon: const Icon(
+                                                Icons.verified_user_outlined),
+                                            label: const Text(
+                                                'Use phone security'))
+                                      else
+                                        Padding(
+                                            padding:
+                                                const EdgeInsets.only(top: 24),
+                                            child: GridView(
+                                                gridDelegate:
+                                                    const SliverGridDelegateWithFixedCrossAxisCount(
+                                                        crossAxisCount: 3,
+                                                        mainAxisExtent: 64,
+                                                        mainAxisSpacing: 12,
+                                                        crossAxisSpacing: 12),
+                                                shrinkWrap: true,
+                                                physics:
+                                                    const NeverScrollableScrollPhysics(),
+                                                children: [
+                                                  for (final digit in [
+                                                    '1',
+                                                    '2',
+                                                    '3',
+                                                    '4',
+                                                    '5',
+                                                    '6',
+                                                    '7',
+                                                    '8',
+                                                    '9'
+                                                  ])
+                                                    TextButton(
+                                                        onPressed: _busy
+                                                            ? null
+                                                            : () {
+                                                                HapticFeedback
+                                                                    .selectionClick();
+                                                                _digit(digit);
+                                                              },
+                                                        child: Text(digit,
+                                                            style: AppTextStyles
+                                                                .headingL)),
+                                                  const SizedBox.shrink(),
+                                                  TextButton(
+                                                      onPressed: _busy
+                                                          ? null
+                                                          : () => _digit('0'),
+                                                      child: Text('0',
+                                                          style: AppTextStyles
+                                                              .headingL)),
+                                                  IconButton(
+                                                      tooltip: 'Delete digit',
+                                                      onPressed: _busy ||
+                                                              _digits.isEmpty
+                                                          ? null
+                                                          : () => setState(() =>
+                                                              _digits = _digits
+                                                                  .substring(
+                                                                      0,
+                                                                      _digits.length -
+                                                                          1)),
+                                                      icon: const Icon(Icons
+                                                          .backspace_outlined)),
+                                                ])),
+                                    ])),
+                          )))))),
         ));
   }
 }

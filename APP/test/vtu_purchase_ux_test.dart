@@ -214,6 +214,73 @@ void main() {
     expect(security.saves, 0);
     await tester.pumpWidget(const SizedBox());
   });
+  testWidgets(
+      'corrected airtime PIN starts a new attempt after a cached pre-mutation rejection',
+      (tester) async {
+    final rejectedKeys = <String>{};
+    final keys = <String>[];
+    var purchases = 0;
+    await _render(tester, MoneyActionKind.airtime, security: _VtuTestSecurity(),
+        requests: (options, handler) {
+      if (options.path != '/api/vtu/purchase') {
+        handler.next(options);
+        return;
+      }
+      final key = '${options.headers['Idempotency-Key']}';
+      keys.add(key);
+      if (rejectedKeys.contains(key) ||
+          options.data['transactionPin'] != '2468') {
+        rejectedKeys.add(key);
+        handler.reject(DioException(
+            requestOptions: options,
+            type: DioExceptionType.badResponse,
+            response: Response(
+                requestOptions: options,
+                statusCode: 403,
+                data: {'message': 'Invalid transaction PIN'})));
+        return;
+      }
+      purchases++;
+      handler.resolve(Response(requestOptions: options, data: {
+        'status': 'SUCCESS',
+        'reference': 'VTU-CORRECTED',
+        'orderId': 'corrected-order',
+        'amount': '500.00',
+        'currency': 'NGN'
+      }));
+    });
+    await tester.enterText(_phone(), '08031234567');
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Continue to amount'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('₦500'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Buy airtime'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Continue'));
+    await tester.pumpAndSettle();
+    for (final digit in ['1', '3', '5', '7']) {
+      await tester.tap(find.text(digit));
+      await tester.pump();
+    }
+    await tester.pumpAndSettle();
+    expect(purchases, 0);
+    final retry = find.widgetWithText(OutlinedButton, 'Retry');
+    await tester.ensureVisible(retry);
+    await tester.tap(retry);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Continue'));
+    await tester.pumpAndSettle();
+    for (final digit in ['2', '4', '6', '8']) {
+      await tester.tap(find.text(digit));
+      await tester.pump();
+    }
+    await tester.pumpAndSettle();
+    expect(purchases, 1);
+    expect(keys.toSet(), hasLength(2));
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
   setUpAll(() async {
     GoogleFonts.config.allowRuntimeFetching = false;
     if (!const bool.fromEnvironment('VTU_CAPTURE')) return;

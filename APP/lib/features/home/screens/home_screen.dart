@@ -1408,9 +1408,9 @@ class _PromoBanner extends StatelessWidget {
               begin: Alignment.centerLeft,
               end: Alignment.centerRight,
               colors: [
-                AppColors.background.withValues(alpha: 0.90),
-                AppColors.background.withValues(alpha: 0.56),
-                AppColors.background.withValues(alpha: 0.18),
+                Colors.black.withValues(alpha: 0.84),
+                Colors.black.withValues(alpha: 0.54),
+                Colors.black.withValues(alpha: 0.16),
               ],
             ),
           ),

@@ -3256,7 +3256,13 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
           final unresolved = await _paymentAttemptStore.recordServerState(
             userId: paymentUserId,
             attemptKey: paymentAttemptKey,
-            state: PaymentAttemptState.unknown,
+            // These exact 403 messages come from the server PIN guard before
+            // any money mutation. Its idempotency layer caches that rejection
+            // as final; corrected credentials require a new attempt. Transport
+            // errors and all other failures remain unresolved on the same key.
+            state: pinRejection != null
+                ? PaymentAttemptState.failed
+                : PaymentAttemptState.unknown,
           );
           _replacePaymentAttempt(unresolved);
         } catch (_) {

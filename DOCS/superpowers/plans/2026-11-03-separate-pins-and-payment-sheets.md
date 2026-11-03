@@ -1,6 +1,6 @@
 # Separate PINs and Payment Sheets Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Separate transaction authorization from device unlock and make payment review/PIN interaction fast and clear.
 
@@ -32,9 +32,9 @@
 
 **Interfaces:** Add `TransactionPinScreen.collect(...)` for fresh PIN collection without standalone server verification or local storage. Existing verify/create/reset remain server operations and must not mutate device PIN state. Transaction status, including reset hold, remains sourced from `AuthService.getTransactionPinStatus()`.
 
-- [ ] Write a regression that payment PIN collection returns the entered value without invoking verify/save, and transaction creation/reset leaves an existing app PIN unchanged; run and observe failures.
-- [ ] Add collection mode, remove local writes from server-PIN modes, eliminate device-config checks from money approval, and prefetch per-screen status where safe. Keep errors/cancellation mounted-safe.
-- [ ] Run focused PIN/payment tests and inspect rejected PIN handling against the unchanged backend guards.
+- [x] Write a regression that payment PIN collection returns the entered value without invoking verify/save, and transaction creation/reset leaves an existing app PIN unchanged; run and observe failures.
+- [x] Add collection mode, remove local writes from server-PIN modes, eliminate device-config checks from money approval, and prefetch per-screen status where safe. Keep errors/cancellation mounted-safe.
+- [x] Run focused PIN/payment tests and inspect rejected PIN handling against the unchanged backend guards.
 
 ### Task 2: Independent app unlock and responsive cryptography
 
@@ -42,9 +42,9 @@
 
 **Interfaces:** Device service gains capability for OS authentication without enrolled biometrics; existing local hash remains exclusively the app-unlock credential. New app-PIN create/change screen calls only device service, verifying the old app PIN before replacement. `deriveAppPinHash(pin, salt)` returns the existing Base64 PBKDF2 digest asynchronously (native isolate / browser Web Crypto with safe compatible fallback).
 
-- [ ] Write regressions for independent PIN changes, device-auth-only locking, OS cancellation, legacy hash compatibility, and failure lockouts; observe failures.
-- [ ] Implement independent create/change flow, plain app-unlock copy, supported OS screen-lock fallback, and asynchronous KDF. Preserve account binding and recovery.
-- [ ] Run gate/service/crypto tests and analysis; validate browser capability reporting and event-loop responsiveness.
+- [x] Write regressions for independent PIN changes, device-auth-only locking, OS cancellation, legacy hash compatibility, and failure lockouts; observe failures.
+- [x] Implement independent create/change flow, plain app-unlock copy, supported OS screen-lock fallback, and asynchronous KDF. Preserve account binding and recovery.
+- [x] Run gate/service/crypto tests and analysis; validate browser capability reporting and event-loop responsiveness.
 
 ### Task 3: Security settings and large payment review sheets
 
@@ -52,6 +52,6 @@
 
 **Interfaces:** Review sheet accepts title, amount/currency, detail rows, and edit/continue callbacks. Minimum primary action height 56 px, large secondary action, scrolling/safe-area behavior. Security settings present separate Transaction PIN and App unlock sections with hold status and platform-specific device unlock.
 
-- [ ] Write layout/cancel/edit regressions for 360/430 px widths, short screens and 2x text; observe failures.
-- [ ] Replace cramped AlertDialog reviews with bottom sheets; remove implementation jargon and shared-PIN device-verification copy.
-- [ ] Run full Flutter tests and analysis, inspect Chrome security/review states without submitting real transactions, perform an independent scoped review, document evidence and security checks, and push reviewed changes to main under existing authorization.
+- [x] Write layout/cancel/edit regressions for 360/430 px widths, short screens and 2x text; observe failures.
+- [x] Replace cramped AlertDialog reviews with bottom sheets; remove implementation jargon and shared-PIN device-verification copy.
+- [x] Run full Flutter tests and analysis, inspect Chrome security/review states without submitting real transactions, perform an independent scoped review, document evidence and security checks, and push reviewed changes to main under existing authorization.

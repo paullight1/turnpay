@@ -32,6 +32,7 @@ class TransactionSecurityConfig {
 /// Device-local app unlock only. Server transaction PINs are never saved here.
 /// Legacy storage keys are retained so existing app locks continue to work.
 class TransactionSecurityService {
+  static final ValueNotifier<int> changes = ValueNotifier<int>(0);
   static const _storage = FlutterSecureStorage();
   static const _pinHashKey = 'trustpay_tx_pin_hash';
   static const _pinSaltKey = 'trustpay_tx_pin_salt';
@@ -129,6 +130,7 @@ class TransactionSecurityService {
     await _storage.write(key: _pinHashKey, value: digest);
     await _storage.write(key: _pinLengthKey, value: '$pinLength');
     await _clearPinFailures();
+    changes.value++;
   }
 
   Future<void> saveVerifiedDevicePin(String pin) {
@@ -150,6 +152,7 @@ class TransactionSecurityService {
       await _clearPersistedPinState();
     }
     await _storage.write(key: _activeUserKey, value: normalized);
+    if (current != normalized) changes.value++;
   }
 
   Future<void> clearAllDevicePinState() => _serialize(_clearAllDevicePinState);
@@ -157,6 +160,7 @@ class TransactionSecurityService {
   Future<void> _clearAllDevicePinState() async {
     await _clearPersistedPinState();
     await _storage.delete(key: _activeUserKey);
+    changes.value++;
   }
 
   Future<bool> verifyPin(String pin) async {
@@ -208,11 +212,15 @@ class TransactionSecurityService {
     );
   }
 
-  Future<void> setBiometricEnabled(bool enabled) async {
+  Future<void> setBiometricEnabled(bool enabled) =>
+      _serialize(() => _setDeviceAuthentication(enabled));
+
+  Future<void> _setDeviceAuthentication(bool enabled) async {
     await _storage.write(key: _biometricKey, value: '$enabled');
     await markBiometricPromptSeen();
     await _storage.delete(key: _faceIdKey);
     await _storage.delete(key: _fingerprintKey);
+    changes.value++;
   }
 
   /// Returns whether the one-time biometric setup prompt has already been
