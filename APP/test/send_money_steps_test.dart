@@ -7,6 +7,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:trustpay_app/core/theme/app_theme.dart';
 import 'package:trustpay_app/features/home/screens/send_money_entry_screen.dart';
+import 'package:trustpay_app/features/home/widgets/transfer_widgets.dart';
 import 'support/trustpay_test_api.dart';
 
 Finder field(String label) => find.byWidgetPredicate(
@@ -100,6 +101,62 @@ void main() {
       expect(find.text('Where are you sending money?'), findsOneWidget);
       expect(bundle.adapter.internalTransferMutationCount, 0);
       expect(tester.takeException(), isNull);
+    });
+  }
+  for (final state in ['disabled', 'failed', 'loading', 'large-text']) {
+    testWidgets('bank availability $state has clear reachable actions',
+        (tester) async {
+      final large = state == 'large-text';
+      tester.view.physicalSize = Size(large ? 360 : 430, large ? 800 : 932);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final key = GlobalKey();
+      final loading = state == 'loading';
+      final failed = state == 'failed';
+      await tester.pumpWidget(RepaintBoundary(
+          key: key,
+          child: MaterialApp(
+              debugShowCheckedModeBanner: false,
+              theme: large ? AppTheme.dark : AppTheme.light,
+              builder: (context, child) => MediaQuery(
+                  data: MediaQuery.of(context)
+                      .copyWith(textScaler: TextScaler.linear(large ? 2 : 1)),
+                  child: child!),
+              home: TransferAvailabilityView(
+                  bank: true,
+                  loading: loading,
+                  failed: failed,
+                  title: loading
+                      ? 'Checking transfer availability'
+                      : failed
+                          ? 'Couldn’t load bank transfers'
+                          : 'Bank transfers are unavailable',
+                  message: loading
+                      ? 'This will only take a moment.'
+                      : failed
+                          ? 'Check your connection and try again.'
+                          : 'This service isn’t available right now. Contact TrustPay support for help.',
+                  onBack: () {},
+                  onRetry: () {},
+                  onSupport: () {}))));
+      if (loading) {
+        await tester.pump(const Duration(milliseconds: 100));
+      } else {
+        await tester.pumpAndSettle();
+      }
+      expect(tester.takeException(), isNull);
+      expect(tester.widget<Text>(find.text('Bank transfer')).style?.color,
+          AppColors.textPrimary);
+      expect(field('Amount'), findsNothing);
+      expect(find.text('Retry'), failed ? findsOneWidget : findsNothing);
+      expect(find.text('Contact support'),
+          !loading && !failed ? findsOneWidget : findsNothing);
+      if (!loading) {
+        await tester.ensureVisible(find.text('Go back'));
+      }
+      await tester.runAsync(() => capture(key, 'bank-$state'));
+      await tester.pumpWidget(const SizedBox.shrink());
     });
   }
 }

@@ -300,3 +300,114 @@ class _BankSheetState extends State<_BankSheet> {
             )));
   }
 }
+
+/// Availability is checked before asking the customer for transfer details.
+/// An explicitly disabled service is different from a failed network read.
+class TransferAvailabilityView extends StatelessWidget {
+  const TransferAvailabilityView(
+      {super.key,
+      required this.bank,
+      required this.loading,
+      required this.failed,
+      required this.title,
+      required this.message,
+      required this.onBack,
+      required this.onRetry,
+      required this.onSupport,
+      this.recovery,
+      this.outcome});
+  final bool bank, loading, failed;
+  final String title, message;
+  final VoidCallback onBack, onRetry, onSupport;
+  final Widget? recovery, outcome;
+  @override
+  Widget build(BuildContext context) {
+    AppColors.watch(context);
+    return Scaffold(
+      backgroundColor: AppColors.background,
+      appBar: AppBar(
+          title: Text(bank ? 'Bank transfer' : 'Send money',
+              style: AppTextStyles.headingM),
+          automaticallyImplyLeading: false,
+          leading: IconButton(
+              tooltip: 'Back',
+              onPressed: onBack,
+              icon: const Icon(Icons.arrow_back_rounded))),
+      body: SafeArea(
+          child: LayoutBuilder(
+              builder: (context, viewport) => SingleChildScrollView(
+                  child: Center(
+                      child: ConstrainedBox(
+                          constraints: BoxConstraints(
+                              maxWidth: 552, minHeight: viewport.maxHeight),
+                          child: Padding(
+                              padding: const EdgeInsets.all(24),
+                              child: Column(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.stretch,
+                                  children: [
+                                    Center(
+                                        child: Container(
+                                            width: 88,
+                                            height: 88,
+                                            decoration: BoxDecoration(
+                                                color: AppColors.primary
+                                                    .withValues(alpha: .09),
+                                                shape: BoxShape.circle),
+                                            child: loading
+                                                ? const Padding(
+                                                    padding: EdgeInsets.all(28),
+                                                    child:
+                                                        CircularProgressIndicator())
+                                                : Icon(
+                                                    failed
+                                                        ? Icons.wifi_off_rounded
+                                                        : Icons
+                                                            .account_balance_outlined,
+                                                    color: AppColors.primary,
+                                                    size: 38))),
+                                    const SizedBox(height: 28),
+                                    Semantics(
+                                        liveRegion: true,
+                                        child: Text(title,
+                                            textAlign: TextAlign.center,
+                                            style: AppTextStyles.headingL)),
+                                    const SizedBox(height: 12),
+                                    Text(message,
+                                        textAlign: TextAlign.center,
+                                        style: AppTextStyles.bodyM),
+                                    const SizedBox(height: 32),
+                                    if (!loading) ...[
+                                      FilledButton.icon(
+                                          onPressed:
+                                              failed ? onRetry : onSupport,
+                                          style: FilledButton.styleFrom(
+                                              minimumSize:
+                                                  const Size.fromHeight(56)),
+                                          icon: Icon(failed
+                                              ? Icons.refresh_rounded
+                                              : Icons.support_agent_rounded),
+                                          label: Text(failed
+                                              ? 'Retry'
+                                              : 'Contact support')),
+                                      const SizedBox(height: 12),
+                                      OutlinedButton(
+                                          onPressed: onBack,
+                                          style: OutlinedButton.styleFrom(
+                                              minimumSize:
+                                                  const Size.fromHeight(56)),
+                                          child: const Text('Go back')),
+                                    ],
+                                    if (recovery != null) ...[
+                                      const SizedBox(height: 24),
+                                      recovery!
+                                    ],
+                                    if (outcome != null) ...[
+                                      const SizedBox(height: 16),
+                                      outcome!
+                                    ],
+                                  ]))))))),
+    );
+  }
+}

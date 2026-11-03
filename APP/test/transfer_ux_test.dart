@@ -493,33 +493,57 @@ void main() {
     expect(find.text('Bank receipt BANK-TEST-001'), findsOneWidget);
   });
 
-  for (final enabled in [false, true]) {
-    testWidgets('TrustPay sending respects backend availability=$enabled',
+  for (final kind in [MoneyActionKind.send, MoneyActionKind.withdraw]) {
+    testWidgets(
+        '$kind disabled feature shows one explanation without a retry loop or amount form',
         (tester) async {
-      await renderTransfer(tester, kind: MoneyActionKind.send,
+      final bundle = await renderTransfer(tester, kind: kind,
           intercept: (options, handler) {
         if (options.path == '/api/payments/capabilities') {
-          handler.resolve(Response(requestOptions: options, data: {
-            'internalTransfers': enabled,
-          }));
+          handler.resolve(Response(
+              requestOptions: options,
+              data: {'internalTransfers': false, 'withdrawals': false}));
         } else {
           handler.next(options);
         }
       });
-      await tester.enterText(field('Amount'), '1000');
-      await openTransferRecipient(tester);
-      await tester.enterText(field('Recipient email'), 'tolu@example.com');
-      await tester.pump(const Duration(milliseconds: 600));
-      await tester.pumpAndSettle();
-      final submit = tester.widget<FilledButton>(
-          find.widgetWithText(FilledButton, 'Review transfer'));
-      expect(submit.onPressed != null, enabled);
       expect(
-          find.text(
-              'TrustPay transfers are temporarily unavailable. Try again.'),
-          enabled ? findsNothing : findsOneWidget);
+          find.text(kind == MoneyActionKind.send
+              ? 'TrustPay transfers are unavailable'
+              : 'Bank transfers are unavailable'),
+          findsOneWidget);
+      expect(field('Amount'), findsNothing);
+      expect(find.text('Retry'), findsNothing);
+      expect(find.text('Contact support'), findsOneWidget);
+      expect(bundle.adapter.internalTransferMutationCount, 0);
+      expect(
+          bundle.adapter.requestedUris
+              .where((u) => u.path == '/api/payments/withdraw'),
+          isEmpty);
     });
   }
+  testWidgets(
+      'a capability loading failure offers retry and restores the bank form after recovery',
+      (tester) async {
+    var failing = true;
+    await renderTransfer(tester, intercept: (options, handler) {
+      if (options.path == '/api/payments/capabilities' && failing) {
+        handler.reject(DioException(
+            requestOptions: options,
+            type: DioExceptionType.badResponse,
+            response: Response(requestOptions: options, statusCode: 503)));
+      } else {
+        handler.next(options);
+      }
+    });
+    expect(find.text('Couldn’t load bank transfers'), findsOneWidget);
+    expect(field('Amount'), findsNothing);
+    failing = false;
+    await tester.tap(find.text('Retry'));
+    await tester.pumpAndSettle();
+    expect(field('Amount'), findsOneWidget);
+    expect(find.text('Available ₦125,000.50'), findsOneWidget);
+  });
 
   testWidgets('saved beneficiaries still collect an amount before payment',
       (tester) async {

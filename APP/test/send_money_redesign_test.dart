@@ -150,6 +150,9 @@ void main() {
             paymentAttemptStore: store,
             paymentRecoveryUserId: 'user-1')));
     await tester.pump();
+    for (var i = 0; i < 20 && input('Amount').evaluate().isEmpty; i++) {
+      await tester.pump(const Duration(milliseconds: 50));
+    }
     await tester.enterText(input('Amount'), '25.50');
     final button =
         find.widgetWithText(FilledButton, 'Checking previous payments…');
@@ -262,6 +265,52 @@ void main() {
             .where((uri) => uri.path == '/api/vtu/purchase'),
         isEmpty);
   });
+  testWidgets(
+      'disabled transfers keep original payment recovery reachable without another send',
+      (tester) async {
+    final bundle = buildTrustPayTestBundle();
+    final store = PaymentAttemptStore(storage: MemoryPaymentAttemptStorage());
+    final key = await store.prepare(
+        'user-1', PaymentAttemptOperation.internalTransfer, {
+      'amount': '20.00',
+      'currency': 'NGN',
+      'recipientEmail': 'tolu@example.com'
+    });
+    await store.markSubmitted('user-1', key);
+    var statusChecks = 0;
+    bundle.dio.interceptors
+        .add(InterceptorsWrapper(onRequest: (options, handler) {
+      if (options.path == '/api/payments/capabilities') {
+        handler.resolve(Response(
+            requestOptions: options, data: {'internalTransfers': false}));
+      } else if (options.path == '/api/payment-attempts/resolve') {
+        statusChecks++;
+        handler.resolve(Response(
+            requestOptions: options,
+            data: {'state': 'PENDING', 'reference': 'IT-ORIGINAL'}));
+      } else {
+        handler.next(options);
+      }
+    }));
+    await tester.pumpWidget(MaterialApp(
+        home: MoneyActionScreen(
+            kind: MoneyActionKind.send,
+            apiClient: bundle.apiClient,
+            paymentAttemptStore: store,
+            paymentRecoveryUserId: 'user-1')));
+    await tester.pumpAndSettle();
+    expect(input('Amount'), findsNothing);
+    expect(find.textContaining('IT-ORIGINAL'), findsNothing);
+    await tester.ensureVisible(find.text('Check a previous payment'));
+    await tester.tap(find.text('Check a previous payment'));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Check status'));
+    await tester.tap(find.text('Check status'));
+    await tester.pumpAndSettle();
+    expect(statusChecks, 2);
+    expect(bundle.adapter.internalTransferMutationCount, 0);
+  });
+
   testWidgets(
       'transfer reads the collection endpoint and separates amount from recipient',
       (tester) async {

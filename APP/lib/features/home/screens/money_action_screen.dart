@@ -220,6 +220,7 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
   String? _checkoutRecoveryUser;
   PaystackCheckoutAttempt? _checkoutAttempt;
   PaystackCapabilities? _paymentCapabilities;
+  bool _paymentCapabilitiesFailed = false;
   String? _vtuCatalogMessage;
   String? _fundingAccountMessage;
   String? _withdrawalBankMessage;
@@ -904,8 +905,71 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
         ],
       );
 
+  Widget _buildTransferAvailability({required bool bank}) {
+    final loading = _isLoadingPaymentCapabilities;
+    final failed = !loading &&
+        (_paymentCapabilitiesFailed || _paymentCapabilities == null);
+    final name = bank ? 'Bank transfers' : 'TrustPay transfers';
+    return TransferAvailabilityView(
+      bank: bank,
+      loading: loading,
+      failed: failed,
+      title: loading
+          ? 'Checking transfer availability'
+          : failed
+              ? 'Couldn’t load ${name.toLowerCase()}'
+              : '$name are unavailable',
+      message: loading
+          ? 'This will only take a moment.'
+          : failed
+              ? 'Check your connection and try again.'
+              : 'This service isn’t available right now. Contact TrustPay support for help.',
+      onBack: _handlePageBack,
+      onRetry: _loadPaymentCapabilities,
+      onSupport: () => context.push(AppRoutes.profileSupport),
+      recovery: _relevantUnresolvedPaymentAttempts.isEmpty
+          ? null
+          : ExpansionTile(
+              title: const Text('Check a previous payment'),
+              children: [
+                _PaymentRecoveryPanel(
+                  attempts: _relevantUnresolvedPaymentAttempts,
+                  isChecking: _isLoadingPaymentRecovery,
+                  onCheckStatus: _checkPaymentAttempt,
+                  onSupport: () => context.push(AppRoutes.profileSupport),
+                )
+              ],
+            ),
+      outcome: _message == null && _paymentRecoveryError == null
+          ? null
+          : Column(children: [
+              if (_paymentRecoveryError != null)
+                _MessagePanel(
+                    message: _paymentRecoveryError!,
+                    type: MoneyActionFeedbackType.warning,
+                    onRetry: _refreshPaymentRecovery),
+              if (_message != null)
+                _MessagePanel(message: _message!, type: _messageType),
+              if (!bank && _lastInternalTransferReference != null)
+                TextButton.icon(
+                    onPressed: () => _showInternalTransferReceipt(
+                        _lastInternalTransferReference!),
+                    icon: const Icon(Icons.receipt_long_outlined),
+                    label: const Text('View transfer receipt')),
+            ]),
+    );
+  }
+
   Widget _buildTransferScaffold(BuildContext context) {
     final bank = widget.kind == MoneyActionKind.withdraw;
+    final available = bank
+        ? _paymentCapabilities?.withdrawals
+        : _paymentCapabilities?.internalTransfers;
+    if (_isLoadingPaymentCapabilities ||
+        _paymentCapabilities == null ||
+        available != true) {
+      return _buildTransferAvailability(bank: bank);
+    }
     final details = bank ? _isWithdrawalDetailsStep : _isSendRecipientStep;
     final validAmount = _amountController.text.trim().isNotEmpty &&
         _transferAmountError == null;
@@ -1115,26 +1179,6 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
                   onSubmitted: (_) => FocusScope.of(context).unfocus(),
                   onChanged: (_) => setState(() {})),
             ]),
-          ],
-          if (!bank &&
-              !_isLoadingPaymentCapabilities &&
-              _paymentCapabilities?.internalTransfers != true) ...[
-            const SizedBox(height: 16),
-            _MessagePanel(
-                message:
-                    'TrustPay transfers are temporarily unavailable. Try again.',
-                type: MoneyActionFeedbackType.warning,
-                onRetry: _loadPaymentCapabilities),
-          ],
-          if (bank &&
-              !_isLoadingPaymentCapabilities &&
-              _paymentCapabilities?.withdrawals != true) ...[
-            const SizedBox(height: 16),
-            _MessagePanel(
-                message:
-                    'Bank transfers are temporarily unavailable. Try again.',
-                type: MoneyActionFeedbackType.warning,
-                onRetry: _loadPaymentCapabilities),
           ],
           if (bank &&
               details &&
@@ -1393,7 +1437,10 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
         widget.kind != MoneyActionKind.send) {
       return;
     }
-    setState(() => _isLoadingPaymentCapabilities = true);
+    setState(() {
+      _isLoadingPaymentCapabilities = true;
+      _paymentCapabilitiesFailed = false;
+    });
     try {
       final capabilities = await _walletService.fetchPaystackCapabilities();
       if (!mounted) return;
@@ -1402,6 +1449,7 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
       if (!mounted) return;
       setState(() {
         _paymentCapabilities = null;
+        _paymentCapabilitiesFailed = true;
         _checkoutMessage = authErrorMessage(
           error,
           'Funding options are temporarily unavailable.',
