@@ -1,4 +1,5 @@
 import { KoraModule } from '../kora/kora.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 import { PaystackModule } from '../paystack/paystack.module';
 import { PaystackVirtualAccountProvider } from './providers/paystack-virtual-account.provider';
 import { Module } from '@nestjs/common';
@@ -12,6 +13,7 @@ import { WalletsModule } from '../wallets/wallets.module';
 
 @Module({
   imports: [
+    NotificationsModule,
     HttpModule.register({
       timeout: 15000,
       maxRedirects: 5,

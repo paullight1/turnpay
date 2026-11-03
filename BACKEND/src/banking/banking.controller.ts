@@ -1,6 +1,7 @@
 import type { Response } from 'express';
 import {
   Body,
+  BadRequestException,
   Headers,
   Res,
   Controller,
@@ -48,11 +49,13 @@ export class BankingController {
     @Body() dto: ProvisionVirtualAccountDto,
     @Res({ passthrough: true }) response?: Response,
     @Headers('idempotency-key') key?: string,
+    @Headers('x-idempotency-key') legacyKey?: string,
   ) {
+    const attemptKey = this.accountAttemptKey(key, legacyKey);
     const account = await this.bankingService.provisionVirtualAccount(
       user.userId,
       dto,
-      key,
+      attemptKey,
     );
     response?.status(account.status === 'PENDING' ? 202 : 201);
     return account;
@@ -63,8 +66,19 @@ export class BankingController {
   requestAccountSetup(
     @CurrentUser() user: { userId: string },
     @Body() dto: RequestAccountSetupDto,
+    @Headers('idempotency-key') key?: string,
+    @Headers('x-idempotency-key') legacyKey?: string,
   ): Promise<AccountSetupResponseDto> {
+    this.accountAttemptKey(key, legacyKey);
     return this.bankingService.requestAccountSetup(user.userId, dto);
+  }
+
+  private accountAttemptKey(key?: string, legacyKey?: string): string {
+    const value = key ?? legacyKey ?? '';
+    if (!/^[A-Za-z0-9:_-]{16,128}$/.test(value)) {
+      throw new BadRequestException('A valid Idempotency-Key is required');
+    }
+    return value;
   }
 
   @Get('banks')

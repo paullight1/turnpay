@@ -10,10 +10,10 @@ import '../../../core/state/wallet_refresh_signal.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/widgets/tp_page_header.dart';
 import '../../../services/api_client.dart';
-import '../../../services/auth_service.dart';
 import '../../../services/home_data_service.dart';
 import '../../../services/kyc_service.dart';
 import '../../home/screens/kyc_verification_screen.dart';
+import '../widgets/account_setup_presenter.dart';
 
 /// The account request entry point. Issued accounts and provisioning requests
 /// are separate server-owned states; neither is inferred from a button click.
@@ -114,7 +114,10 @@ class _VirtualAccountScreenState extends State<VirtualAccountScreen>
     if (mounted) await _refresh();
   }
 
-  Future<void> _create({bool awaitVerification = false}) async {
+  Future<void> _create({
+    bool awaitVerification = false,
+    bool bvnVerified = false,
+  }) async {
     if (_submitting || _consentOpen) return;
     // Lock before opening consent as well as during the request.
     _consentOpen = true;
@@ -123,8 +126,10 @@ class _VirtualAccountScreenState extends State<VirtualAccountScreen>
         context: context,
         builder: (context) => AlertDialog(
           title: const Text('Create your receiving account'),
-          content: const Text(
-            'I authorize TrustPay to create a dedicated NGN receiving account with Paystack once my identity is verified. Until verification succeeds, this saves my setup request only. Incoming transfers are credited after confirmation.',
+          content: Text(
+            bvnVerified
+                ? 'I authorize TrustPay to create a dedicated NGN receiving account with Paystack. Incoming transfers are credited after confirmation.'
+                : 'I authorize TrustPay to create a dedicated NGN receiving account with Paystack once my identity is verified. Until verification succeeds, this saves my setup request only. Incoming transfers are credited after confirmation.',
           ),
           actions: [
             TextButton(
@@ -167,8 +172,8 @@ class _VirtualAccountScreenState extends State<VirtualAccountScreen>
         if (status >= 400 && status < 500) _attempt.markFinalOutcome();
       }
       if (mounted) {
-        setState(() => _error = authErrorMessage(error,
-            'Could not create your receiving account. Check status before retrying.'));
+        setState(() => _error =
+            AccountSetupCopy.actionRequiredBody(bvnVerified: bvnVerified));
       }
     } finally {
       _consentOpen = false;
@@ -232,8 +237,7 @@ class _VirtualAccountScreenState extends State<VirtualAccountScreen>
                         style: AppTextStyles.headingM),
                     const SizedBox(height: 12),
                     Text(
-                        authErrorMessage(snapshot.error ?? 'Status unavailable',
-                            'Check your connection and try again.'),
+                        'We couldn’t load your account status. Check your connection and try again.',
                         style: AppTextStyles.bodyM),
                     const SizedBox(height: 20),
                     OutlinedButton.icon(
@@ -254,23 +258,28 @@ class _VirtualAccountScreenState extends State<VirtualAccountScreen>
   Widget _content(_AccountState state) {
     final account = state.account;
     final ready = account != null;
-    final identityPending =
-        state.identity?.providerValidationStatus == 'PENDING';
-    final identityVerified =
-        state.identity?.providerValidationStatus == 'VERIFIED';
-    final pending =
+    final identityStatus =
+        state.identity?.providerValidationStatus?.toUpperCase();
+    final identityPending = identityStatus == 'PENDING';
+    final identityVerified = identityStatus == 'VERIFIED';
+    final accountPending =
         state.accountPending || state.provisioning?.isPending == true;
     final requestSaved = state.provisioning?.isWaitingForKyc == true;
     final needsReview = state.provisioning?.isActionRequired == true;
+    // A pending identity check does not prevent saving a setup request. The
+    // account itself remains pending only while the server owns a request.
+    final pending = accountPending || requestSaved;
     final title = ready
         ? 'Your NGN account is ready'
         : requestSaved
             ? 'Account request saved'
             : pending
                 ? 'We’re preparing your account'
-                : identityVerified
-                    ? 'Receive money into your wallet'
-                    : 'Your TrustPay account starts here';
+                : needsReview
+                    ? AccountSetupCopy.actionRequiredTitle
+                    : identityVerified
+                        ? 'Receive money into your wallet'
+                        : 'Your TrustPay account starts here';
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       Container(
         padding: const EdgeInsets.all(24),
@@ -295,7 +304,12 @@ class _VirtualAccountScreenState extends State<VirtualAccountScreen>
           Text(
               ready
                   ? 'Transfer naira to these details from any Nigerian bank.'
-                  : 'A personal account number for adding naira to your TRUSTPAY wallet.',
+                  : needsReview
+                      ? AccountSetupCopy.actionRequiredBody(
+                          bvnVerified: identityVerified)
+                      : requestSaved
+                          ? AccountSetupCopy.pendingBody
+                          : 'A personal account number for adding naira to your TRUSTPAY wallet.',
               style: AppTextStyles.bodyM),
           if (ready) ...[
             const SizedBox(height: 24),
@@ -336,25 +350,22 @@ class _VirtualAccountScreenState extends State<VirtualAccountScreen>
           _step(
               '2',
               'Create your receiving account',
-              pending
-                  ? 'Request received. Checking for your account details.'
-                  : requestSaved
-                      ? 'Request saved. Setup continues automatically after verification.'
-                      : 'Request now. We’ll create it after identity verification.',
+              AccountSetupCopy.stepTwoDetail(
+                identityVerified: identityVerified,
+                identityPending: identityPending,
+                requestSaved: requestSaved,
+                accountPending: accountPending,
+                actionRequired: needsReview,
+              ),
               false),
           const SizedBox(height: 20),
           _step('3', 'Add money by bank transfer',
               'Your balance updates after the transfer is confirmed', false),
           const SizedBox(height: 24),
-          if (needsReview) ...[
-            Text(
-                state.provisioning!.message.isEmpty
-                    ? 'Account setup needs attention. Retry or contact support.'
-                    : state.provisioning!.message,
-                style: AppTextStyles.bodyM),
-            const SizedBox(height: 16),
-          ],
-          if (!pending && !identityVerified && !requestSaved) ...[
+          if (!pending &&
+              !identityVerified &&
+              !requestSaved &&
+              !needsReview) ...[
             FilledButton.icon(
               style: FilledButton.styleFrom(
                   minimumSize: const Size(double.infinity, 56)),
@@ -384,9 +395,11 @@ class _VirtualAccountScreenState extends State<VirtualAccountScreen>
                 icon: const Icon(Icons.verified_user_outlined),
                 label: const Text('Verify identity')),
           ],
-          if (identityVerified && !pending)
+          if (identityVerified && (!pending || requestSaved))
             FilledButton.icon(
-                onPressed: _submitting ? null : _create,
+                onPressed: _submitting
+                    ? null
+                    : () => _create(bvnVerified: identityVerified),
                 icon: _submitting
                     ? const SizedBox(
                         width: 18,
@@ -395,9 +408,11 @@ class _VirtualAccountScreenState extends State<VirtualAccountScreen>
                     : const Icon(Icons.add_rounded),
                 label: Text(_submitting
                     ? 'Creating account…'
-                    : needsReview
-                        ? 'Retry account setup'
-                        : 'Create receiving account')),
+                    : requestSaved
+                        ? 'Continue setup'
+                        : needsReview
+                            ? 'Retry account setup'
+                            : 'Create receiving account')),
         ]),
       if (_error != null) ...[
         const SizedBox(height: 16),

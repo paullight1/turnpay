@@ -96,9 +96,9 @@ export class PaystackVirtualAccountProvider {
         `/customer/${binding.customerCode}`,
       );
       let account = customer.dedicated_account as Data | null;
-      if (!account?.account_number) {
+      if (account == null) {
         const providers = await this.client.request<
-          Array<{ bank_slug: string; slug?: string }>
+          Array<{ provider_slug?: string; bank_slug?: string; slug?: string }>
         >('GET', '/dedicated_account/available_providers');
         const configured = this.config
           .get<string>('PAYSTACK_DVA_PREFERRED_BANK')
@@ -110,16 +110,20 @@ export class PaystackVirtualAccountProvider {
           configured ||
           (testMode
             ? 'test-bank'
-            : providers[0]?.bank_slug || providers[0]?.slug);
+            : providers[0]?.provider_slug ||
+              providers[0]?.bank_slug ||
+              providers[0]?.slug);
         if (
           !preferred ||
           (!testMode &&
             !providers.some(
-              (bank) => (bank.bank_slug || bank.slug) === preferred,
+              (bank) =>
+                (bank.provider_slug || bank.bank_slug || bank.slug) ===
+                preferred,
             ))
         )
           throw new BadRequestException(
-            'Dedicated accounts are not available for this Paystack business. Contact support',
+            'Receiving accounts are unavailable right now. Please try again later or contact support.',
           );
         account = await this.client.request<Data>(
           'POST',
@@ -162,8 +166,8 @@ export class PaystackVirtualAccountProvider {
               : 'PENDING',
           lastError:
             error instanceof BadRequestException
-              ? 'Paystack account setup needs attention. Contact support before retrying.'
-              : 'Provider account preparation requires confirmation',
+              ? 'We couldn’t finish creating your receiving account. Please try again. If this continues, contact support.'
+              : 'Your receiving account is being prepared. We’ll keep checking for your account details.',
           nextAttemptAt:
             error instanceof BadRequestException
               ? null

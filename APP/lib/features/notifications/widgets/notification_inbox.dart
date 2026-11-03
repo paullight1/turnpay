@@ -341,7 +341,8 @@ class _NotificationInboxState extends State<NotificationInbox>
             child: const TpEmptyState(
               variant: TpIllustrationVariant.emptyNotifications,
               title: 'No notifications',
-              message: 'Exchange updates will appear here when they are ready.',
+              message:
+                  'Account and payment updates will appear here when they are ready.',
               illustrationSize: 190,
             ),
           ),
@@ -641,6 +642,13 @@ _NotificationTone _notificationTone(TrustPayNotification notification) {
 /// [AppRoutes.exchangeOrderFor] and additionally restricted to a path-safe
 /// character set; malformed or generic activity falls back to Exchange.
 String notificationRouteFor(TrustPayNotification notification) {
+  if (_hasSafeEventId(notification.eventKey, 'kyc:bvn-verified')) {
+    return AppRoutes.kyc;
+  }
+  if (_hasSafeEventId(notification.eventKey, 'banking:account-ready')) {
+    return AppRoutes.receiveMoney;
+  }
+
   final orderId = notification.orderId;
   if (notification.isExchangeUpdate &&
       orderId != null &&
@@ -648,4 +656,14 @@ String notificationRouteFor(TrustPayNotification notification) {
     return AppRoutes.exchangeOrderFor(orderId);
   }
   return AppRoutes.exchange;
+}
+
+bool _hasSafeEventId(String eventKey, String prefix) {
+  final value = eventKey.trim();
+  final normalizedPrefix = prefix.toUpperCase();
+  final normalizedValue = value.toUpperCase();
+  final marker = '$normalizedPrefix:';
+  if (!normalizedValue.startsWith(marker)) return false;
+  final id = value.substring(marker.length);
+  return RegExp(r'^[A-Za-z0-9_-]{1,128}$').hasMatch(id);
 }

@@ -6,6 +6,7 @@ import 'package:trustpay_app/core/router/app_router.dart';
 import 'package:trustpay_app/core/state/wallet_refresh_signal.dart';
 import 'package:trustpay_app/features/home/screens/dashboard_detail_screen.dart';
 import 'package:trustpay_app/features/wallet/screens/receive_money_screen.dart';
+import 'package:trustpay_app/features/wallet/screens/virtual_account_screen.dart';
 import 'package:trustpay_app/features/wallet/screens/wallet_detail_screen.dart';
 
 import 'support/trustpay_test_api.dart';
@@ -85,6 +86,75 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(find.text('Recent Deposits'), findsOneWidget);
+  });
+
+  testWidgets('verified account setup failure has one safe retry path',
+      (tester) async {
+    final bundle = buildTrustPayTestBundle(
+      includeVirtualAccounts: false,
+      virtualAccountProvisioningStatus: 'ACTION_REQUIRED',
+      virtualAccountProvisioningMessage:
+          'Paystack account setup needs attention. Contact support before retrying.',
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ReceiveMoneyScreen(
+          walletService: bundle.walletService,
+          homeDataService: bundle.homeDataService,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text("We couldn't finish setting up your account"),
+        findsOneWidget);
+    expect(
+      find.text(
+          'Your BVN is verified. Try account setup again. If it still doesn’t work, contact support.'),
+      findsOneWidget,
+    );
+    expect(
+      find.text(
+          'Paystack account setup needs attention. Contact support before retrying.'),
+      findsNothing,
+    );
+    expect(find.text('Verify identity'), findsNothing);
+    expect(find.text('Try account setup again'), findsOneWidget);
+
+    final setupBundle = buildTrustPayTestBundle(
+      includeVirtualAccounts: false,
+      virtualAccountProvisioningStatus: 'ACTION_REQUIRED',
+      virtualAccountProvisioningMessage:
+          'Paystack account setup needs attention. Contact support before retrying.',
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ProfileActionScreen(
+          kind: ProfileActionKind.account,
+          homeDataService: setupBundle.homeDataService,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text("We couldn't finish setting up your account"),
+        findsOneWidget);
+    expect(
+      find.text(
+          'Try account setup again. If it still doesn’t work, contact support.'),
+      findsOneWidget,
+    );
+    expect(
+      find.text(
+          'Paystack account setup needs attention. Contact support before retrying.'),
+      findsNothing,
+    );
+    expect(
+        find.text('Request now. We’ll create it after identity verification.'),
+        findsNothing);
+    expect(find.text('Verify identity'), findsNothing);
+    expect(find.text('Retry account setup'), findsOneWidget);
   });
 
   testWidgets('receive money focuses on account request before provisioning',
@@ -252,5 +322,52 @@ void main() {
     expect(find.text('Create TrustPay account'), findsNothing);
     expect(find.text('View account setup'), findsOneWidget);
     expect(find.text('Copy account number'), findsNothing);
+  });
+
+  testWidgets(
+      'verified saved setup offers continuation without re-verification',
+      (tester) async {
+    final bundle = buildTrustPayTestBundle(
+      includeVirtualAccounts: false,
+      kycStatus: 'VERIFIED',
+      virtualAccountProvisioningStatus: 'WAITING_FOR_KYC',
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ReceiveMoneyScreen(
+          walletService: bundle.walletService,
+          homeDataService: bundle.homeDataService,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Continue setup'), findsOneWidget);
+    expect(
+      find.text(
+          'Request saved. Continue setup to finish creating your account.'),
+      findsOneWidget,
+    );
+    expect(
+      find.text(
+          'Your setup request is saved. We’ll create your NGN account after your identity is verified.'),
+      findsNothing,
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: VirtualAccountScreen(service: bundle.homeDataService),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Account request saved'), findsOneWidget);
+    expect(
+      find.text(
+          'Request saved. Continue setup to finish creating your account.'),
+      findsOneWidget,
+    );
+    expect(find.text('Continue setup'), findsOneWidget);
+    expect(find.text('Verify identity'), findsNothing);
   });
 }

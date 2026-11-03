@@ -154,6 +154,82 @@ describe('Paystack banking adapter', () => {
       expect.objectContaining({ update: { customerCode: 'CUS_owner' } }),
     );
   });
+  it('creates an account using the official provider_slug response after verified BVN', async () => {
+    const { banking } = accountFixture();
+    request
+      .mockResolvedValueOnce({ dedicated_account: null })
+      .mockResolvedValueOnce([
+        {
+          provider_slug: 'titan-paystack',
+          bank_id: 629,
+          bank_name: 'Paystack-Titan',
+          id: 9,
+        },
+      ])
+      .mockResolvedValueOnce({
+        id: 1,
+        account_number: '0123456789',
+        account_name: 'TRUSTPAY/Test Customer',
+        active: true,
+        assigned: true,
+        currency: 'NGN',
+        bank: { name: 'Paystack-Titan' },
+      });
+    await expect(
+      banking.provisionVirtualAccount(accountInput),
+    ).resolves.toMatchObject({ status: 'ACTIVE' });
+    expect(request).toHaveBeenLastCalledWith('POST', '/dedicated_account', {
+      customer: 'CUS_owner',
+      preferred_bank: 'titan-paystack',
+    });
+  });
+  it('validates a configured preferred bank against provider_slug', async () => {
+    const { prisma } = accountFixture();
+    const banking = new PaystackVirtualAccountProvider(
+      { configured: true, request } as never,
+      new ConfigService({ PAYSTACK_DVA_PREFERRED_BANK: 'wema-bank' }),
+      prisma as never,
+    );
+    request
+      .mockResolvedValueOnce({ dedicated_account: null })
+      .mockResolvedValueOnce([
+        {
+          provider_slug: 'wema-bank',
+          bank_id: 20,
+          bank_name: 'Wema Bank',
+          id: 5,
+        },
+      ])
+      .mockResolvedValueOnce({
+        id: 1,
+        account_number: '0123456789',
+        account_name: 'TRUSTPAY/Test Customer',
+        active: true,
+        assigned: true,
+        currency: 'NGN',
+        bank: { name: 'Wema Bank' },
+      });
+    await banking.provisionVirtualAccount(accountInput);
+    expect(request).toHaveBeenLastCalledWith('POST', '/dedicated_account', {
+      customer: 'CUS_owner',
+      preferred_bank: 'wema-bank',
+    });
+  });
+  it('does not create another account when an assignment response is partial', async () => {
+    const { banking, prisma } = accountFixture();
+    request.mockResolvedValue({
+      dedicated_account: { assigned: false, active: false },
+    });
+    await expect(banking.provisionVirtualAccount(accountInput)).rejects.toThrow(
+      'not active',
+    );
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(prisma.paystackAccountRequest.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ status: 'PENDING' }),
+      }),
+    );
+  });
   it('does not dispatch account creation when another worker owns the request', async () => {
     const { banking, prisma } = accountFixture();
     prisma.paystackAccountRequest.updateMany.mockResolvedValue({ count: 0 });

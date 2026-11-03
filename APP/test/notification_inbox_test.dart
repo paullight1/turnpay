@@ -154,6 +154,11 @@ void main() {
     await tester.pump(const Duration(milliseconds: 500));
 
     expect(find.text('No notifications'), findsOneWidget);
+    expect(
+      find.text(
+          'Account and payment updates will appear here when they are ready.'),
+      findsOneWidget,
+    );
     expect(find.text('No recent activity'), findsNothing);
     expect(find.text('Fund success'), findsNothing);
   });
@@ -190,6 +195,42 @@ void main() {
     expect(notificationRouteFor(exchange), '/exchange/orders/order-1');
     expect(notificationRouteFor(generic), '/exchange');
     expect(notificationRouteFor(unsafe), '/exchange');
+  });
+
+  test('deep links BVN and receiving-account events to their owned screens',
+      () {
+    final bvnVerified = TrustPayNotification.fromJson({
+      'id': 'n-4',
+      'eventKey': 'kyc:bvn-verified:verification-1',
+      'audience': 'USER:user-1',
+      'title': 'BVN verified',
+      'createdAt': '2026-10-02T10:00:00.000Z',
+      'readAt': null,
+    });
+    final accountReady = TrustPayNotification.fromJson({
+      'id': 'n-5',
+      'eventKey': 'banking:account-ready:account-1',
+      'audience': 'USER:user-1',
+      'title': 'Receiving account ready',
+      'createdAt': '2026-10-02T10:00:00.000Z',
+      'readAt': null,
+    });
+
+    expect(notificationRouteFor(bvnVerified), AppRoutes.kyc);
+    expect(notificationRouteFor(accountReady), AppRoutes.receiveMoney);
+  });
+
+  test('keeps malformed account event ids on the safe fallback route', () {
+    final malformed = TrustPayNotification.fromJson({
+      'id': 'n-6',
+      'eventKey': 'banking:account-ready:../admin',
+      'audience': 'USER:user-1',
+      'title': 'Receiving account ready',
+      'createdAt': '2026-10-02T10:00:00.000Z',
+      'readAt': null,
+    });
+
+    expect(notificationRouteFor(malformed), AppRoutes.exchange);
   });
 }
 

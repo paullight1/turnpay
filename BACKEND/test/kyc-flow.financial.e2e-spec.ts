@@ -7,6 +7,12 @@ import { PinoLogger } from 'nestjs-pino';
 import request from 'supertest';
 import { PaystackKycRecoveryService } from '../src/kyc/paystack-kyc-recovery.service';
 import { KycService } from '../src/kyc/kyc.service';
+import { BankingService } from '../src/banking/banking.service';
+import { AccountNotificationsService } from '../src/notifications/account-notifications.service';
+import {
+  TransactionalEmailOutboxService,
+  EmailOutboxSettings,
+} from '../src/notifications/email-outbox.service';
 import { AdminKycController, KycController } from '../src/kyc/kyc.controller';
 import { WebhookController } from '../src/payments/webhooks/payment-webhook.controller';
 import { WebhookInboxService } from '../src/payments/webhooks/webhook-inbox.service';
@@ -138,6 +144,8 @@ describe('KYC HTTP flow (isolated PostgreSQL)', () => {
       storage as never,
       { provider: 'PAYSTACK' } as never,
       {} as never,
+      undefined,
+      new AccountNotificationsService(),
     );
     const inbox = new WebhookInboxService(prisma as never, logger as never);
     processor = new PaymentWebhookProcessorService(
@@ -203,6 +211,9 @@ describe('KYC HTTP flow (isolated PostgreSQL)', () => {
       where: { providerReference: customerCode },
     });
     await prisma.webhookLog.deleteMany({ where: { reference: customerCode } });
+    await prisma.paymentNotification.deleteMany({
+      where: { audience: `USER:${userId}` },
+    });
     await prisma.auditLog.deleteMany({
       where: {
         OR: [
@@ -424,6 +435,217 @@ describe('KYC HTTP flow (isolated PostgreSQL)', () => {
       (await service.getUserKycStatus(userId)).providerValidationStatus,
     ).toBe('VERIFIED');
     expect((await review(bvnId, 'VERIFIED')).status).toBe(400);
+    expect(
+      await prisma.emailOutbox.count({
+        where: { userId, eventType: 'BVN_VERIFIED' },
+      }),
+    ).toBe(1);
+    expect(
+      await prisma.paymentNotification.count({
+        where: { audience: `USER:${userId}` },
+      }),
+    ).toBe(1);
+  });
+
+  it('rolls back verification with a failed outbox write, then confirms and queues once on retry', async () => {
+    const failing = prisma.$extends({
+      query: {
+        emailOutbox: {
+          createMany: async () => {
+            throw new Error('Synthetic mail persistence failure');
+          },
+        },
+      },
+    });
+    const failedService = new KycService(
+      failing as never,
+      config as never,
+      logger as never,
+      storage as never,
+      { provider: 'PAYSTACK' } as never,
+      {} as never,
+      undefined,
+      new AccountNotificationsService(),
+    );
+    const data = { customer_code: customerCode, customer_id: 1234 };
+    await expect(
+      failedService.processPaystackIdentification(
+        'customeridentification.success',
+        data,
+      ),
+    ).rejects.toThrow('Synthetic mail persistence failure');
+    expect(
+      (await prisma.user.findUniqueOrThrow({ where: { id: userId } })).kycTier,
+    ).toBe('TIER_0');
+    expect(
+      (await prisma.kycDocument.findUniqueOrThrow({ where: { id: bvnId } }))
+        .status,
+    ).toBe('SUBMITTED');
+    expect(
+      await prisma.paymentNotification.count({
+        where: { audience: `USER:${userId}` },
+      }),
+    ).toBe(0);
+    await service.processPaystackIdentification(
+      'customeridentification.success',
+      data,
+    );
+    await service.processPaystackIdentification(
+      'customeridentification.success',
+      data,
+    );
+    expect(await prisma.emailOutbox.count({ where: { userId } })).toBe(1);
+  });
+
+  it('lets concurrent mail workers claim a confirmed BVN event only once', async () => {
+    await service.processPaystackIdentification(
+      'customeridentification.success',
+      { customer_code: customerCode, customer_id: 1234 },
+    );
+    const send = jest.fn().mockResolvedValue({
+      status: 'SENT',
+      providerMessageId: 'synthetic-delivery',
+    });
+    const settings: EmailOutboxSettings = {
+      provider: 'resend',
+      enabled: true,
+      from: 'Sender <sender@example.com>',
+      batchSize: 2,
+      leaseSeconds: 300,
+      retryBaseSeconds: 1,
+      maxAttempts: 3,
+    };
+    const worker = () =>
+      new TransactionalEmailOutboxService(
+        prisma as never,
+        settings,
+        { send },
+        logger as never,
+      );
+    await Promise.all([
+      worker().dispatchPendingEmails(),
+      worker().dispatchPendingEmails(),
+    ]);
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(
+      await prisma.emailOutbox.count({ where: { userId, status: 'SENT' } }),
+    ).toBe(1);
+    await worker().dispatchPendingEmails();
+    expect(send).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps transactional mail events private even if a Data API role gains a table grant', async () => {
+    await service.processPaystackIdentification(
+      'customeridentification.success',
+      { customer_code: customerCode, customer_id: 1234 },
+    );
+    const flags = await prisma.$queryRaw<
+      Array<{ relrowsecurity: boolean }>
+    >`SELECT relrowsecurity FROM pg_class WHERE oid = 'public.email_outbox'::regclass`;
+    expect(flags).toEqual([{ relrowsecurity: true }]);
+    const rollback = new Error('Rollback test-only grant');
+    await expect(
+      prisma.$transaction(async (tx) => {
+        await tx.$executeRawUnsafe('GRANT SELECT ON email_outbox TO anon');
+        await tx.$executeRawUnsafe('SET LOCAL ROLE anon');
+        expect(await tx.emailOutbox.findMany()).toEqual([]);
+        await tx.$executeRawUnsafe('RESET ROLE');
+        throw rollback;
+      }),
+    ).rejects.toBe(rollback);
+  });
+
+  it('persists a ready account and its notice together, then reuses it without another provider request', async () => {
+    await service.processPaystackIdentification(
+      'customeridentification.success',
+      { customer_code: customerCode, customer_id: 1234 },
+    );
+    await prisma.user.update({
+      where: { id: userId },
+      data: { fullName: 'Test Customer' },
+    });
+    await prisma.paystackAccountRequest.create({
+      data: {
+        userId,
+        customerCode,
+        status: 'PENDING',
+        consentRecordedAt: new Date(),
+      },
+    });
+    const provider = {
+      configured: true,
+      provisionVirtualAccount: jest.fn().mockResolvedValue({
+        provider: 'paystack',
+        providerAccountId: fixture,
+        providerCustomerId: customerCode,
+        accountNumber: fixture.replace(/\D/g, '').padEnd(10, '0').slice(0, 10),
+        accountName: 'Test Customer',
+        bankName: 'Synthetic Bank',
+        currency: 'NGN',
+        status: 'ACTIVE',
+      }),
+    };
+    const bankingConfig = new ConfigService({
+      BANKING_ENABLED: true,
+      VIRTUAL_ACCOUNTS_ENABLED: true,
+      BANKING_PROVIDER_PRIMARY: 'paystack',
+    });
+    const failing = prisma.$extends({
+      query: {
+        emailOutbox: {
+          async createMany({ args, query }) {
+            const rows = Array.isArray(args.data) ? args.data : [args.data];
+            if (rows.some((r) => r.eventType === 'ACCOUNT_READY'))
+              throw new Error('Synthetic account notice failure');
+            return query(args);
+          },
+        },
+      },
+    });
+    const bank = (db: unknown) =>
+      new BankingService(
+        db as never,
+        {} as never,
+        {} as never,
+        bankingConfig,
+        logger as never,
+        provider as never,
+        undefined,
+        new AccountNotificationsService(),
+      );
+    const input = {
+      currency: 'NGN' as const,
+      provider: 'paystack' as const,
+      consentAccepted: true as const,
+    };
+    await expect(
+      bank(failing).provisionVirtualAccount(userId, input),
+    ).rejects.toThrow('Synthetic account notice failure');
+    expect(await prisma.virtualAccount.count({ where: { userId } })).toBe(0);
+    expect(
+      (
+        await prisma.paystackAccountRequest.findUniqueOrThrow({
+          where: { userId },
+        })
+      ).status,
+    ).toBe('PENDING');
+    const account = await bank(prisma).provisionVirtualAccount(userId, input);
+    const calls = provider.provisionVirtualAccount.mock.calls.length;
+    const replay = await bank(prisma).provisionVirtualAccount(userId, input);
+    if (!('id' in account) || !('id' in replay))
+      throw new Error('Expected an active account');
+    expect(replay.id).toBe(account.id);
+    expect(provider.provisionVirtualAccount).toHaveBeenCalledTimes(calls);
+    expect(
+      await prisma.emailOutbox.count({
+        where: { userId, eventType: 'ACCOUNT_READY' },
+      }),
+    ).toBe(1);
+    expect(
+      await prisma.paymentNotification.count({
+        where: { eventKey: `banking:account-ready:${account.id}` },
+      }),
+    ).toBe(1);
   });
 
   it('submits NIN while BVN is pending, enforces admin access, and reaches tier 2 only after both checks', async () => {

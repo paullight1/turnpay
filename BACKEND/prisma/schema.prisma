@@ -132,6 +132,15 @@ enum ProviderEventStatus {
   IGNORED
 }
 
+enum EmailOutboxStatus {
+  PENDING
+  IN_FLIGHT
+  SENT
+  FAILED
+  EXHAUSTED
+  UNKNOWN
+}
+
 enum FundingAdverseCaseStatus {
   OPEN
   UNDER_REVIEW
@@ -260,6 +269,7 @@ model User {
   paystackCustomer           PaystackCustomer?
   paystackAccountRequest     PaystackAccountRequest?
   fundingAdverseCases        FundingAdverseCase[]
+  emailOutbox                EmailOutbox[]
 
   @@index([referredById])
   @@index([createdAt(sort: Desc)])
@@ -1356,6 +1366,32 @@ model PaymentNotification {
 
   @@index([audience, createdAt])
   @@map("payment_notifications")
+}
+
+model EmailOutbox {
+  id                String            @id @default(uuid())
+  userId            String
+  eventKey          String            @unique
+  eventType         String
+  orderId           String
+  status            EmailOutboxStatus @default(PENDING)
+  attemptCount      Int               @default(0)
+  nextAttemptAt     DateTime          @default(now())
+  claimedAt         DateTime?
+  claimToken        String?
+  sentAt            DateTime?
+  unknownAt         DateTime?
+  exhaustedAt       DateTime?
+  lastErrorCode     String?
+  providerMessageId String?
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([status, nextAttemptAt], map: "email_outbox_due_idx")
+  @@index([userId, createdAt(sort: Desc)])
+  @@map("email_outbox")
 }
 
 // GHS cash-out usage cannot increment the existing NGN counters.

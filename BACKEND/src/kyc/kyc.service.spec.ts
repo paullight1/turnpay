@@ -47,6 +47,7 @@ describe('KycService', () => {
       update: jest.fn(),
       updateMany: jest.fn(),
     },
+    paystackAccountRequest: { findUnique: jest.fn().mockResolvedValue(null) },
     paystackCustomer: {
       findUnique: jest.fn(),
       update: jest.fn(),
@@ -94,6 +95,9 @@ describe('KycService', () => {
   };
   const bankingService = {
     provisionVirtualAccount: jest.fn(),
+  };
+  const accountNotifications = {
+    bvnVerified: jest.fn().mockResolvedValue(undefined),
   };
 
   let service: KycService;
@@ -153,6 +157,8 @@ describe('KycService', () => {
       supabase as any,
       kycProviderGateway as any,
       bankingService as any,
+      undefined,
+      accountNotifications as never,
     );
   });
 
@@ -1009,6 +1015,82 @@ describe('KycService', () => {
       status: 'ACTIVE',
     });
 
+    const result = await service.processPaystackIdentification(
+      'customeridentification.success',
+      { customer_code: 'CUS_fixture123', customer_id: 1234 },
+    );
+
+    expect(result).toEqual(
+      expect.objectContaining({ processed: true, status: 'VERIFIED' }),
+    );
+    expect(prisma.kycVerification.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'verification-1', status: 'PENDING' },
+        data: expect.objectContaining({ status: 'VERIFIED' }),
+      }),
+    );
+    expect(bankingService.provisionVirtualAccount).toHaveBeenCalledWith(
+      'user-1',
+      { currency: 'NGN', provider: 'paystack' },
+    );
+    expect(accountNotifications.bvnVerified).toHaveBeenCalledWith(
+      prisma,
+      'user-1',
+      'verification-1',
+    );
+  });
+
+  it('uses account consent saved after BVN submission without waiting for the scheduled retry', async () => {
+    prisma.paystackCustomer.findUnique.mockResolvedValue({
+      userId: 'user-1',
+      customerCode: 'CUS_fixture123',
+      customerId: '1234',
+      validationFingerprint: 'fingerprint-1',
+      validationStatus: 'PENDING',
+    });
+    prisma.kycVerification.findMany.mockResolvedValue([
+      {
+        id: 'verification-1',
+        documentId: 'document-1',
+        reference: 'paystack:customer:CUS_fixture123:verification:document-1',
+        status: 'PENDING',
+        checks: {
+          customerCode: 'CUS_fixture123',
+          validationFingerprint: 'fingerprint-1',
+          accountSetupConsent: false,
+        },
+        document: { id: 'document-1', status: 'SUBMITTED' },
+      },
+    ]);
+    prisma.kycVerification.findUnique.mockResolvedValue({
+      status: 'PENDING',
+      reference: 'paystack:customer:CUS_fixture123:verification:document-1',
+      checks: {
+        customerCode: 'CUS_fixture123',
+        customerId: '1234',
+        validationFingerprint: 'fingerprint-1',
+        accountSetupConsent: false,
+      },
+    });
+    prisma.kycVerification.updateMany.mockResolvedValue({ count: 1 });
+    prisma.kycDocument.updateMany.mockResolvedValue({ count: 1 });
+    prisma.kycDocument.findMany.mockResolvedValue([{ type: 'BVN' }]);
+    prisma.user.findUnique.mockResolvedValue({
+      kycStatus: 'SUBMITTED',
+      kycTier: 'TIER_0',
+    });
+    prisma.user.update.mockResolvedValue({});
+    prisma.paystackCustomer.updateMany.mockResolvedValue({ count: 1 });
+    prisma.auditLog.create.mockResolvedValue({});
+    bankingService.provisionVirtualAccount.mockResolvedValue({
+      accountNumberMasked: '******1234',
+      bankName: 'Paystack-Titan',
+      status: 'ACTIVE',
+    });
+
+    prisma.paystackAccountRequest.findUnique.mockResolvedValue({
+      consentRecordedAt: new Date(),
+    });
     const result = await service.processPaystackIdentification(
       'customeridentification.success',
       { customer_code: 'CUS_fixture123', customer_id: 1234 },

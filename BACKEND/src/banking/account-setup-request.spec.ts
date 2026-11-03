@@ -6,6 +6,9 @@ describe('Receiving account setup intent', () => {
   let saved: any;
   let prisma: any;
   const provider = { configured: true, provisionVirtualAccount: jest.fn() };
+  const notifications = {
+    accountReady: jest.fn().mockResolvedValue(undefined),
+  };
   beforeEach(() => {
     saved = null;
     prisma = {
@@ -43,8 +46,11 @@ describe('Receiving account setup intent', () => {
       } as any,
       { warn: jest.fn(), info: jest.fn() } as any,
       provider as any,
+      undefined,
+      notifications as never,
     );
     provider.provisionVirtualAccount.mockClear();
+    notifications.accountReady.mockClear();
   });
   it('saves consent before KYC without creating or exposing a bank account', async () => {
     const result = await service.requestAccountSetup('u1', {
@@ -58,7 +64,7 @@ describe('Receiving account setup intent', () => {
       userId: 'u1',
       consentRecordedAt: expect.any(Date),
     });
-    expect(result.accountNumber).toBeUndefined();
+    expect('accountNumber' in result).toBe(false);
     expect(provider.provisionVirtualAccount).not.toHaveBeenCalled();
     expect(prisma.auditLog.create).toHaveBeenCalledTimes(1);
   });
@@ -101,6 +107,50 @@ describe('Receiving account setup intent', () => {
     ).rejects.toBeInstanceOf(BadRequestException);
     expect(prisma.paystackAccountRequest.createMany).not.toHaveBeenCalled();
   });
+  it('starts a consented request immediately when BVN and Tier 1 are already verified', async () => {
+    prisma.user.findUnique.mockResolvedValue({
+      id: 'u1',
+      isSuspended: false,
+      kycStatus: 'VERIFIED',
+      kycTier: 'TIER_1',
+    });
+    prisma.paystackCustomer.findUnique.mockResolvedValue({
+      customerCode: 'CUS_owner',
+      validationStatus: 'VERIFIED',
+    });
+    const prepare = jest
+      .spyOn(service, 'provisionVirtualAccount')
+      .mockImplementation(async () => {
+        saved.status = 'ACTIVE';
+        return { status: 'ACTIVE' } as never;
+      });
+    await expect(
+      service.requestAccountSetup('u1', { consentAccepted: true }),
+    ).resolves.toMatchObject({ status: 'ACTIVE' });
+    expect(prepare).toHaveBeenCalledWith('u1', {
+      currency: 'NGN',
+      provider: 'paystack',
+    });
+    expect(saved.consentRecordedAt).toEqual(expect.any(Date));
+  });
+  it('does not restart an in-flight request when a verified customer repeats consent', async () => {
+    await service.requestAccountSetup('u1', { consentAccepted: true });
+    saved.status = 'PENDING';
+    prisma.user.findUnique.mockResolvedValue({
+      id: 'u1',
+      isSuspended: false,
+      kycStatus: 'VERIFIED',
+      kycTier: 'TIER_1',
+    });
+    prisma.paystackCustomer.findUnique.mockResolvedValue({
+      validationStatus: 'VERIFIED',
+    });
+    const prepare = jest.spyOn(service, 'provisionVirtualAccount');
+    await expect(
+      service.requestAccountSetup('u1', { consentAccepted: true }),
+    ).resolves.toMatchObject({ status: 'PENDING' });
+    expect(prepare).not.toHaveBeenCalled();
+  });
   it('does not accept requests from suspended users', async () => {
     prisma.user.findUnique.mockResolvedValue({ id: 'u1', isSuspended: true });
     await expect(
@@ -139,6 +189,30 @@ describe('Receiving account setup intent', () => {
       }),
     );
   });
+  it('does not expose or reactivate a disabled receiving account', async () => {
+    prisma.user.findUnique.mockResolvedValue({
+      id: 'u1',
+      isSuspended: false,
+      kycStatus: 'VERIFIED',
+      kycTier: 'TIER_1',
+    });
+    prisma.virtualAccount = {
+      findUnique: jest.fn().mockResolvedValue({
+        id: 'disabled',
+        status: 'DISABLED',
+        accountNumber: '0123456789',
+        accountName: 'Test Customer',
+        bankName: 'Synthetic Bank',
+      }),
+    };
+    await expect(
+      service.provisionVirtualAccount('u1', {
+        currency: 'NGN',
+        provider: 'paystack',
+      }),
+    ).rejects.toThrow('disabled');
+    expect(provider.provisionVirtualAccount).not.toHaveBeenCalled();
+  });
 
   it('uses saved pre-KYC consent when verified account preparation starts', async () => {
     await service.requestAccountSetup('u1', { consentAccepted: true });
@@ -158,6 +232,7 @@ describe('Receiving account setup intent', () => {
     });
     prisma.paystackCustomer.update = jest.fn().mockResolvedValue({});
     const account = {
+      id: 'account-1',
       accountNumber: '0123456789',
       accountName: 'Test Customer',
       bankName: 'Test Bank',
@@ -184,6 +259,11 @@ describe('Receiving account setup intent', () => {
       expect.objectContaining({
         data: expect.objectContaining({ status: 'ACTIVE' }),
       }),
+    );
+    expect(notifications.accountReady).toHaveBeenCalledWith(
+      prisma,
+      'u1',
+      'account-1',
     );
   });
   it('marks deterministic worker failures as action required instead of retrying forever', async () => {

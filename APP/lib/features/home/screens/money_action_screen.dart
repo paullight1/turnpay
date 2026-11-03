@@ -23,6 +23,7 @@ import '../../../services/api_client.dart';
 import '../../../services/home_data_service.dart';
 import '../../../services/kyc_service.dart';
 import '../widgets/kyc_status_presenter.dart';
+import '../../wallet/widgets/account_setup_presenter.dart';
 import '../../../services/payment_attempt_store.dart';
 import '../../../services/payment_recovery_service.dart';
 import '../../../services/paystack_checkout_recovery.dart';
@@ -1351,13 +1352,9 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
         _fundingProvisioning = provisioning;
         if (_preferredFundingAccount() == null) {
           _fundingAccountMessage = provisioning?.isActionRequired == true
-              ? (provisioning?.message.isNotEmpty == true
-                  ? provisioning!.message
-                  : 'TrustPay account setup needs attention. Review your details or contact support, then retry.')
+              ? AccountSetupCopy.actionRequiredBody(bvnVerified: null)
               : provisioning?.isPending == true
-                  ? (provisioning?.message.isNotEmpty == true
-                      ? provisioning!.message
-                      : 'TrustPay is preparing your NGN receiving account. Refresh shortly.')
+                  ? AccountSetupCopy.pendingBody
                   : _canRevealFundingAccount
                       ? 'Request your NGN funding account before making a bank transfer.'
                       : 'Complete BVN and bank verification before requesting a funding account.';
@@ -1983,9 +1980,7 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
 
     if (_fundingProvisioning?.isPending == true) {
       _showMessage(
-        _fundingProvisioning?.message.isNotEmpty == true
-            ? _fundingProvisioning!.message
-            : 'TrustPay is already preparing your NGN receiving account. Refresh shortly.',
+        AccountSetupCopy.pendingBody,
         type: MoneyActionFeedbackType.info,
       );
       await _loadFundingAccounts();
@@ -2044,9 +2039,9 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
             {'ACTION_REQUIRED', 'FAILED', 'REJECTED'}.contains(status);
         _setMessageState(
           isPending
-              ? 'TrustPay is preparing your NGN receiving account. Refresh shortly; the account number appears after server confirmation.'
+              ? AccountSetupCopy.pendingBody
               : isActionRequired
-                  ? 'TrustPay account setup needs attention. Review your details or contact support, then retry.'
+                  ? AccountSetupCopy.actionRequiredBody(bvnVerified: null)
                   : 'Funding account is ready. Transfer NGN to this account and your wallet will update after payment confirmation.',
           type: isPending
               ? MoneyActionFeedbackType.info
@@ -6652,6 +6647,11 @@ class _FundingAccountPanel extends StatelessWidget {
         (fundingAccount != null &&
             displayNumber.isEmpty &&
             fundingAccount.status.toUpperCase() == 'PENDING');
+    final accountStateMessage = provisioningActionRequired
+        ? AccountSetupCopy.actionRequiredBody(bvnVerified: null)
+        : accountPending
+            ? AccountSetupCopy.pendingBody
+            : message ?? 'Request your NGN account to fund by transfer.';
 
     return StaggeredEntrance(
       child: _Panel(
@@ -6672,7 +6672,7 @@ class _FundingAccountPanel extends StatelessWidget {
                     ),
                     const SizedBox(height: AppSpacing.xs),
                     Text(
-                      'Your request was accepted. Refresh shortly; the account number appears only after server confirmation.',
+                      AccountSetupCopy.pendingBody,
                       style: AppTextStyles.bodyS,
                     ),
                     const SizedBox(height: AppSpacing.md),
@@ -6697,7 +6697,7 @@ class _FundingAccountPanel extends StatelessWidget {
                               const SizedBox(width: AppSpacing.sm),
                               Expanded(
                                 child: Text(
-                                  'TrustPay account setup needs attention',
+                                  AccountSetupCopy.actionRequiredTitle,
                                   style: AppTextStyles.labelM,
                                 ),
                               ),
@@ -6706,8 +6706,7 @@ class _FundingAccountPanel extends StatelessWidget {
                           const SizedBox(height: AppSpacing.sm),
                         ],
                         Text(
-                          message ??
-                              'Request your NGN account to fund by transfer.',
+                          accountStateMessage,
                           style: AppTextStyles.bodyS.copyWith(
                             color: AppColors.textPrimary,
                           ),

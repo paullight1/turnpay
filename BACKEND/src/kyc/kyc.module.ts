@@ -1,4 +1,5 @@
 import { NinjaProvider } from './providers/ninja.provider';
+import { NotificationsModule } from '../notifications/notifications.module';
 import { Module } from '@nestjs/common';
 import { HttpModule } from '@nestjs/axios';
 import { ConfigService } from '@nestjs/config';
@@ -14,6 +15,7 @@ import { selectKycProvider } from './providers/kyc-provider.selector';
 
 @Module({
   imports: [
+    NotificationsModule,
     BankingModule,
     PaystackModule,
     HttpModule.register({

@@ -1,4 +1,5 @@
 import { NinjaProvider } from './providers/ninja.provider';
+import { AccountNotificationsService } from '../notifications/account-notifications.service';
 import { TierOneLimitsService } from '../common/services/tier-one-limits.service';
 import {
   Injectable,
@@ -78,6 +79,8 @@ export class KycService {
     private readonly kycProviderGateway: KycProviderGateway,
     private readonly bankingService: BankingService,
     @Optional() private readonly ninjaProvider?: NinjaProvider,
+    @Optional()
+    private readonly accountNotifications?: AccountNotificationsService,
   ) {}
 
   async createDocumentUploadUrl(userId: string, dto: CreateKycUploadDto) {
@@ -642,6 +645,13 @@ export class KycService {
         },
       });
 
+      if (providerResult.status === 'VERIFIED' && dto.type === 'BVN') {
+        await this.accountNotifications?.bvnVerified(
+          tx,
+          userId,
+          verificationId,
+        );
+      }
       return {
         document: {
           ...reservation.document,
@@ -898,13 +908,27 @@ export class KycService {
         },
       });
 
+      if (succeeded) {
+        await this.accountNotifications?.bvnVerified(
+          tx,
+          customer.userId,
+          verification.id,
+        );
+      }
       return {
         received: true,
         processed: true,
         status: nextStatus,
         userId: customer.userId,
         accountSetupConsent:
-          this.asJsonRecord(current.checks).accountSetupConsent === true,
+          succeeded &&
+          (this.asJsonRecord(current.checks).accountSetupConsent === true ||
+            !!(
+              await tx.paystackAccountRequest.findUnique({
+                where: { userId: customer.userId },
+                select: { consentRecordedAt: true },
+              })
+            )?.consentRecordedAt),
       };
     });
 

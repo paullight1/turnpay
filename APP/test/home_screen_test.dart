@@ -345,6 +345,45 @@ void main() {
     expect(find.text('Verify BVN'), findsOneWidget);
   });
 
+  testWidgets('funding hides provider diagnostics for account setup recovery',
+      (tester) async {
+    final bundle = buildTrustPayTestBundle(
+      kycStatus: 'PENDING',
+      includeVirtualAccounts: false,
+      virtualAccountProvisioningStatus: 'ACTION_REQUIRED',
+      virtualAccountProvisioningMessage:
+          'Paystack account setup needs attention. Contact support before retrying.',
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: MoneyActionScreen(
+          kind: MoneyActionKind.fund,
+          apiClient: bundle.apiClient,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text("We couldn't finish setting up your account"),
+        findsOneWidget);
+    expect(
+      find.text(
+          'Try account setup again. If it still doesn’t work, contact support.'),
+      findsOneWidget,
+    );
+    expect(
+      find.text(
+          'Paystack account setup needs attention. Contact support before retrying.'),
+      findsNothing,
+    );
+    expect(
+      find.text(
+          'Your BVN is verified. Try account setup again. If it still doesn’t work, contact support.'),
+      findsNothing,
+    );
+  });
+
   testWidgets('home screen opens durable notifications and marks them read',
       (tester) async {
     final bundle = buildTrustPayTestBundle(

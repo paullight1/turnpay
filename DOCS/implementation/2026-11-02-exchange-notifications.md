@@ -44,3 +44,21 @@ The final targeted Flutter run passed 29 notification/service/home/shell/account
 Backend production-scope TypeScript and affected ESLint checks passed. Web TypeScript and affected ESLint checks passed. All six final desktop/mobile browser regressions passed. They exercise durable read retries, list deduplication, full unread counts, filtered-order deep links, count outages, and reconciliation after a read commits but its response is lost. One initial browser rerun timed out waiting five seconds for a cold local route; its failure snapshot already showed the expected page after hydration. The readiness assertion now waits for the page before testing notification behavior. Evidence is under `.superpowers/sdd/2026-11-02-exchange-notifications/`.
 
 No live transfer, customer payment, production notification send, production migration, commit or deployment is needed to exercise these tests. Provider/auth/storage boundaries use controlled fixtures. The money flow remains manual external collection, administrator-confirmed wallet credit for GHS→NGN, and manually executed cedi payout for NGN→GHS.
+
+
+## Activation follow-up — 2 November 2026
+
+The configured Supabase database now reports migration `052_private_payment_notifications` complete, with a checksum matching the checked-in SQL. There are no pending Prisma migrations. Both notification tables have RLS enabled and no direct PUBLIC/anon/authenticated grants. This was a read-only verification: the migration was already applied before this follow-up and was not applied again.
+
+The current backend was rebuilt successfully and started on local port 3001. Its readiness endpoint returned HTTP 200. Customer and admin notification-count routes returned HTTP 401 without a session, as expected; the public customer notification-count route also returned HTTP 401. This establishes route presence and authentication enforcement, rather than a live delivery acceptance test. All four focused notification API tests passed again.
+
+No real payment, payout, admin approval, customer notification fixture, identity decision or production configuration change was submitted during activation checks. Local background scheduled jobs are disabled for this development preview. Existing unrelated receiving-account and exchange-form work in the shared checkout was preserved.
+
+
+The Flutter preview finished compiling after a slow startup under heavy machine memory pressure. The signed-in customer home and Notifications screen were verified in the in-app browser. The real customer count and inbox API calls returned HTTP 200; the inbox displayed its genuine empty state, with no fabricated payment or notification added. The admin development server was restarted after the Flutter build to reduce concurrent compiler pressure. Local previews are the app on port 8080, admin on port 3000 and API on port 3001.
+
+
+Local admin preview limitation: repeated cold `/staff` page requests timed out under severe shared-machine memory/swap pressure. Available disk space fell below 400 MB. The task-owned admin dev process was stopped after attempts with Webpack and the installed Next.js default Turbopack compiler. The API and signed-in Flutter inbox remain running. The admin notification source and earlier browser regressions are unchanged; a fresh interactive admin preview remains blocked until local machine capacity is restored. No unrelated files were deleted or other development processes stopped.
+
+
+During the resource incident, one API readiness check returned 503 and one inbox poll returned 500. Subsequent readiness and authenticated inbox checks returned 200; the readiness response reported both database and Redis connected. No health threshold, guard or financial control was relaxed to obtain recovery.

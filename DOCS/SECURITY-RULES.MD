@@ -731,9 +731,25 @@ Admin rate reads and writes now reject reversed NGN/GHS rate units under the cur
 The deployment manifest gate now recognises the owner-approved Ninja NIN adapter while requiring the pinned live endpoint, explicit boolean enable flag and one server-only sync:false secret slot without inline values. Legacy key naming and all other provider/OTP/financial deployment restrictions remain checked. Two simulated e2e fixtures were updated to the current canonical business:v2 request hash; no production idempotency logic or stored replay record was changed. Manifest portability/negative fixtures and both 16-test replay suites passed.
 
 
+### Exchange notification activation verification — 2 November 2026
+
+Read-only checks confirmed migration 052 is already complete on the configured Supabase database, its SQL checksum matches source, no Prisma migrations are pending, RLS is enabled on both notification tables, and direct PUBLIC/anon/authenticated grants are absent. No migration or permission update was repeated. The backend build and four focused notification API tests passed; local readiness returned 200 and anonymous customer/admin inbox-count requests returned 401. The public customer count route also returned 401. Actual signed-in customer inbox/count requests returned 200, and the Flutter preview displayed the genuine empty inbox. No real payment, payout, admin confirmation, customer notification fixture, identity decision or production configuration update was performed. Local development scheduled jobs are disabled, and unrelated shared checkout changes were preserved.
+
+
+The local admin preview could not complete a cold page compile under severe machine resource pressure, with free disk falling below 400 MB. The task-owned admin compiler was stopped. No fresh interactive admin success is claimed; the implemented source, prior browser regression evidence, active API and signed-in customer inbox are recorded separately in the notification report.
+
+
 ### 2026-11-03 Dokploy expired-token recovery
 
 A synthetic expired JWT reproduced HTTP500 on the active Dokploy backend. The Supabase SDK throws ordinary Errors for expired/missing expiry claims; known claim rejections now return401 so the client can refresh normally. Malformed token envelopes are rejected before SDK parsing; decoded claims never grant authentication. Signature and provider-session verification, account-state checks and all financial gates remain intact. Unexpected runtime failures retain their original classification. Twenty-three focused authentication tests, scoped lint and an isolated reviewed-release backend build passed. CI browser configuration now exercises the retained QA-only customer surface in development mode while the separate production build remains required. No market rate, secret, customer identity outcome or financial record was changed.
+
+### 2026-11-03 BVN and receiving-account status delivery
+
+Receiving-account setup accepts Paystack's official provider_slug field while preserving verified BVN, Tier 1 eligibility, explicit saved consent, disabled-account restrictions, provider leases and recovery-before-create. Protected setup/provision routes validate both supported idempotency headers. A verified saved request can continue immediately; a signed successful BVN callback recognises consent saved after submission. Pending responses never imply confirmed identity or a usable account.
+
+Confirmed BVN and confirmed account readiness save unique customer inbox and email-outbox events inside the corresponding Prisma transaction. Provider calls remain outside transactions. RLS/revoked direct Data API grants protect the new outbox; no identity document, bank number, recipient address or provider payload is stored in its content. Resend uses a stable outbox UUID, SMTP requires TLS, and conditional claims prevent concurrent duplicate sends. Explicit temporary rejections retry within a finite budget; ambiguous network/SMTP/provider-5xx outcomes and stale leases become UNKNOWN without automatic resend. Missing credentials leave work queued. Credentials remain backend-only and logs contain safe IDs/codes.
+
+Customer screens separate confirmed BVN from account setup errors, hide raw provider diagnostics, preserve consent and attempt locks, and route notifications to the appropriate account/verification page. Verification passed 836 backend unit tests before final presentation cleanup, 93 isolated PostgreSQL/Redis financial tests and 30 focused Flutter tests; final lint/type/analysis details and known baseline test-type errors are recorded in DOCS/implementation/2026-11-03-bvn-account-recovery-and-email.md. Migration 054 was exercised only in a disposable test database. No real account issuance, identity decision, payment, external email, production DDL, DNS change, deployment, commit or push was performed. Sender-domain verification and secure deployment credentials remain required for live delivery from the requested support address.
 
 
 ### 2026-11-03 administrator FX pair safety

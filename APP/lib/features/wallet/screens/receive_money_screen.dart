@@ -13,7 +13,9 @@ import '../../../core/widgets/tp_empty_state.dart';
 import '../../../core/widgets/tp_page_header.dart';
 import '../../../core/widgets/tp_snackbar.dart';
 import '../../../services/home_data_service.dart';
+import '../../../services/kyc_service.dart';
 import '../../../services/wallet_service.dart';
+import '../widgets/account_setup_presenter.dart';
 import '../../home/screens/dashboard_detail_screen.dart';
 
 class ReceiveMoneyScreen extends StatefulWidget {
@@ -34,6 +36,7 @@ class ReceiveMoneyScreen extends StatefulWidget {
 class _ReceiveMoneyScreenState extends State<ReceiveMoneyScreen> {
   late Future<List<VirtualAccountData>> _accountsFuture;
   late Future<HomeVirtualAccountProvisioning> _provisioningFuture;
+  late Future<KycOverview?> _kycFuture;
   late Future<List<DepositRecord>> _depositsFuture;
 
   @override
@@ -46,6 +49,7 @@ class _ReceiveMoneyScreenState extends State<ReceiveMoneyScreen> {
     _accountsFuture = widget.walletService.fetchVirtualAccounts();
     _provisioningFuture =
         widget.homeDataService.fetchVirtualAccountProvisioning();
+    _kycFuture = _fetchKycOverview();
     _depositsFuture = widget.walletService.fetchRecentDeposits(limit: 20);
     // Provisioning status is supplementary when an active account is already
     // available. Observe a fast failure so legacy/default test doubles and
@@ -62,6 +66,16 @@ class _ReceiveMoneyScreenState extends State<ReceiveMoneyScreen> {
     _depositsFuture.catchError((Object _, StackTrace __) {
       return <DepositRecord>[];
     });
+  }
+
+  Future<KycOverview?> _fetchKycOverview() async {
+    try {
+      return await widget.homeDataService.fetchKycOverview();
+    } catch (_) {
+      // KYC is supplementary here. The account/provisioning state remains
+      // authoritative if this optional status read is unavailable.
+      return null;
+    }
   }
 
   Future<void> _openAccountSetup() async {
@@ -179,23 +193,50 @@ class _ReceiveMoneyScreenState extends State<ReceiveMoneyScreen> {
                       provisioning?.isPending == true ||
                       provisioning?.isWaitingForKyc == true ||
                       actionRequired) {
-                    return _ReceiveMoneyStateScroll(
-                      centered: true,
-                      child: _PaystackProvisioningCard(
-                        waitingForKyc: provisioning?.isWaitingForKyc == true,
-                        message: provisioning?.message,
-                        actionRequired: actionRequired,
-                        onRefresh: _refresh,
-                        onRetry: _openAccountSetup,
-                      ),
+                    return FutureBuilder<KycOverview?>(
+                      future: _kycFuture,
+                      builder: (context, kycSnapshot) {
+                        final overview = kycSnapshot.data;
+                        final providerStatus = overview
+                            ?.providerValidationStatus
+                            ?.trim()
+                            .toUpperCase();
+                        final bvnVerified = providerStatus == 'VERIFIED' ||
+                            (providerStatus == null &&
+                                overview?.status.toUpperCase() == 'VERIFIED');
+                        return _ReceiveMoneyStateScroll(
+                          centered: true,
+                          child: _PaystackProvisioningCard(
+                            waitingForKyc:
+                                provisioning?.isWaitingForKyc == true,
+                            bvnVerified: bvnVerified,
+                            actionRequired: actionRequired,
+                            onRefresh: _refresh,
+                            onRetry: _openAccountSetup,
+                          ),
+                        );
+                      },
                     );
                   }
-                  return _ReceiveMoneyStateScroll(
-                    centered: true,
-                    child: _NoVirtualAccountCard(
-                      isRequesting: false,
-                      onRequest: _openAccountSetup,
-                    ),
+                  return FutureBuilder<KycOverview?>(
+                    future: _kycFuture,
+                    builder: (context, kycSnapshot) {
+                      final overview = kycSnapshot.data;
+                      final providerStatus = overview?.providerValidationStatus
+                          ?.trim()
+                          .toUpperCase();
+                      final bvnVerified = providerStatus == 'VERIFIED' ||
+                          (providerStatus == null &&
+                              overview?.status.toUpperCase() == 'VERIFIED');
+                      return _ReceiveMoneyStateScroll(
+                        centered: true,
+                        child: _NoVirtualAccountCard(
+                          isRequesting: false,
+                          bvnVerified: bvnVerified,
+                          onRequest: _openAccountSetup,
+                        ),
+                      );
+                    },
                   );
                 },
               );
@@ -251,6 +292,7 @@ class _ReceiveMoneyScreenState extends State<ReceiveMoneyScreen> {
                           else
                             _NoVirtualAccountCard(
                               isRequesting: false,
+                              bvnVerified: null,
                               onRequest: _openAccountSetup,
                             ),
 
@@ -716,10 +758,13 @@ class _AccountDetailRow extends StatelessWidget {
 
 class _NoVirtualAccountCard extends StatelessWidget {
   final bool isRequesting;
+  final bool? bvnVerified;
   final VoidCallback onRequest;
 
   const _NoVirtualAccountCard(
-      {required this.isRequesting, required this.onRequest});
+      {required this.isRequesting,
+      required this.bvnVerified,
+      required this.onRequest});
 
   @override
   Widget build(BuildContext context) {
@@ -777,7 +822,9 @@ class _NoVirtualAccountCard extends StatelessWidget {
             ),
             const SizedBox(height: 16),
             Text(
-                'Start setup now. Your account activates after identity verification.',
+                bvnVerified == true
+                    ? 'Authorize setup now. Your bank details will appear here once ready.'
+                    : 'Start setup now. Your account activates after identity verification.',
                 textAlign: TextAlign.center,
                 style: AppTextStyles.bodyS),
           ],
@@ -821,16 +868,16 @@ class _ReceiveMoneyStateScroll extends StatelessWidget {
 }
 
 class _PaystackProvisioningCard extends StatelessWidget {
-  final String? message;
   final bool actionRequired;
   final bool waitingForKyc;
+  final bool? bvnVerified;
   final VoidCallback onRefresh;
   final VoidCallback onRetry;
 
   const _PaystackProvisioningCard({
-    required this.message,
     required this.actionRequired,
     this.waitingForKyc = false,
+    this.bvnVerified,
     required this.onRefresh,
     required this.onRetry,
   });
@@ -854,7 +901,7 @@ class _PaystackProvisioningCard extends StatelessWidget {
             const SizedBox(height: AppSpacing.md),
             Text(
               actionRequired
-                  ? 'TrustPay account setup needs attention'
+                  ? AccountSetupCopy.actionRequiredTitle
                   : waitingForKyc
                       ? 'Account request saved'
                       : 'TrustPay is preparing your NGN account',
@@ -863,13 +910,20 @@ class _PaystackProvisioningCard extends StatelessWidget {
             ),
             const SizedBox(height: AppSpacing.md),
             Text(
-              message?.trim().isNotEmpty == true
-                  ? message!
-                  : actionRequired
-                      ? 'Review your verification details or contact support, then retry account setup.'
-                      : waitingForKyc
-                          ? 'Your setup request is saved. We’ll create your NGN account after your identity is verified.'
-                          : 'Your request was accepted. Refresh shortly; the account number will appear after server confirmation.',
+              actionRequired
+                  ? AccountSetupCopy.actionRequiredBody(
+                      bvnVerified: bvnVerified)
+                  : waitingForKyc
+                      ? bvnVerified == true
+                          ? AccountSetupCopy.stepTwoDetail(
+                              identityVerified: true,
+                              identityPending: false,
+                              requestSaved: true,
+                              accountPending: false,
+                              actionRequired: false,
+                            )
+                          : AccountSetupCopy.waitingForKycBody
+                      : AccountSetupCopy.pendingBody,
               style: AppTextStyles.bodyS,
               textAlign: TextAlign.center,
             ),
@@ -888,13 +942,15 @@ class _PaystackProvisioningCard extends StatelessWidget {
                   FilledButton.icon(
                     onPressed: onRetry,
                     icon: const Icon(Icons.arrow_forward_rounded),
-                    label: const Text('View account setup'),
+                    label: Text(bvnVerified == true
+                        ? 'Continue setup'
+                        : 'View account setup'),
                   ),
                 if (actionRequired)
                   FilledButton.icon(
                     onPressed: onRetry,
                     icon: const Icon(Icons.refresh_rounded),
-                    label: const Text('Review and retry'),
+                    label: const Text('Try account setup again'),
                   ),
               ],
             ),

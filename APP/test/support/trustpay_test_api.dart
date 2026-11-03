@@ -34,6 +34,8 @@ TrustPayTestBundle buildTrustPayTestBundle({
   bool includeTransactions = true,
   bool includeDeposits = true,
   bool includeVirtualAccounts = true,
+  String? virtualAccountProvisioningStatus,
+  String virtualAccountProvisioningMessage = '',
   bool includeReferralRewards = true,
   bool transactionPinConfigured = true,
   bool includeVtuProviders = false,
@@ -45,6 +47,8 @@ TrustPayTestBundle buildTrustPayTestBundle({
     includeTransactions: includeTransactions,
     includeDeposits: includeDeposits,
     includeVirtualAccounts: includeVirtualAccounts,
+    virtualAccountProvisioningStatus: virtualAccountProvisioningStatus,
+    virtualAccountProvisioningMessage: virtualAccountProvisioningMessage,
     includeReferralRewards: includeReferralRewards,
     includeVtuProviders: includeVtuProviders,
     transactionPinConfigured: transactionPinConfigured,
@@ -87,6 +91,8 @@ class FakeTrustPayApiAdapter implements HttpClientAdapter {
   final bool includeTransactions;
   final bool includeDeposits;
   final bool includeVirtualAccounts;
+  final String? virtualAccountProvisioningStatus;
+  final String virtualAccountProvisioningMessage;
   bool _accountProvisioned = false;
   bool _accountSetupRequested = false;
   bool revealAccountNumbers = true;
@@ -109,6 +115,8 @@ class FakeTrustPayApiAdapter implements HttpClientAdapter {
     required this.includeTransactions,
     required this.includeDeposits,
     required this.includeVirtualAccounts,
+    this.virtualAccountProvisioningStatus,
+    this.virtualAccountProvisioningMessage = '',
     required this.includeReferralRewards,
     required this.includeVtuProviders,
     this.transactionPinConfigured = true,
@@ -207,11 +215,13 @@ class FakeTrustPayApiAdapter implements HttpClientAdapter {
     if (method == 'GET' && path == '/api/banking/accounts/provisioning') {
       return _jsonResponse({
         'provider': 'PAYSTACK',
-        'status': (_accountProvisioned || includeVirtualAccounts)
-            ? 'ACTIVE'
-            : _accountSetupRequested
-                ? 'WAITING_FOR_KYC'
-                : 'NOT_REQUESTED',
+        'status': virtualAccountProvisioningStatus ??
+            ((_accountProvisioned || includeVirtualAccounts)
+                ? 'ACTIVE'
+                : _accountSetupRequested
+                    ? 'WAITING_FOR_KYC'
+                    : 'NOT_REQUESTED'),
+        'message': virtualAccountProvisioningMessage,
         'updatedAt': _accountProvisioned ? '2026-10-30T10:00:00.000Z' : null,
       });
     }

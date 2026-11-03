@@ -23,6 +23,7 @@ import '../../auth/widgets/tawk_service.dart';
 import '../../notifications/services/notifications_service.dart';
 import '../../notifications/widgets/notification_inbox.dart';
 import '../../wallet/screens/virtual_account_screen.dart';
+import '../../wallet/widgets/account_setup_presenter.dart';
 
 enum DashboardDetailKind {
   wallets,
@@ -1231,9 +1232,7 @@ class _AccountDetailsBodyState extends State<_AccountDetailsBody> {
 
     if (_provisioning?.isPending == true) {
       setState(() {
-        _message = _provisioning?.message.isNotEmpty == true
-            ? _provisioning!.message
-            : 'TrustPay is already preparing your NGN receiving account. Refresh shortly.';
+        _message = AccountSetupCopy.pendingBody;
       });
       await _loadProvisioningStatus();
       return;
@@ -1284,10 +1283,15 @@ class _AccountDetailsBodyState extends State<_AccountDetailsBody> {
           ..._accounts.where((item) =>
               item.displayAccountNumber != account.displayAccountNumber),
         ];
-        _message = account.status.toUpperCase() == 'PENDING'
-            ? 'TrustPay is preparing your NGN receiving account. Refresh shortly.'
-            : account.status.toUpperCase() == 'ACTION_REQUIRED'
-                ? 'TrustPay account setup needs attention. Review your details or contact support, then retry.'
+        final status = account.status.trim().toUpperCase();
+        final isPending =
+            {'PENDING', 'PROCESSING', 'PROVISIONING'}.contains(status);
+        final isActionRequired =
+            {'ACTION_REQUIRED', 'FAILED', 'REJECTED'}.contains(status);
+        _message = isPending
+            ? AccountSetupCopy.pendingBody
+            : isActionRequired
+                ? AccountSetupCopy.actionRequiredBody(bvnVerified: null)
                 : 'TrustPay receiving account is ready.';
       });
     } on DioException catch (error) {
@@ -1775,7 +1779,12 @@ class _VirtualAccountSummaryCard extends StatelessWidget {
             const Icon(Icons.warning_amber_rounded),
             const SizedBox(height: AppSpacing.sm),
             Text(
-              'TrustPay account setup needs attention. Review the details or contact support, then retry.',
+              AccountSetupCopy.actionRequiredTitle,
+              style: AppTextStyles.headingM,
+            ),
+            const SizedBox(height: AppSpacing.xs),
+            Text(
+              AccountSetupCopy.actionRequiredBody(bvnVerified: null),
               style: AppTextStyles.bodyM,
             ),
             const SizedBox(height: AppSpacing.md),
@@ -1795,7 +1804,7 @@ class _VirtualAccountSummaryCard extends StatelessWidget {
             const Icon(Icons.schedule_rounded),
             const SizedBox(height: AppSpacing.sm),
             Text(
-              'TrustPay is preparing your NGN receiving account. Refresh shortly.',
+              AccountSetupCopy.pendingBody,
               style: AppTextStyles.bodyM,
             ),
           ] else if (current == null) ...[

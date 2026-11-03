@@ -1,4 +1,5 @@
 import { KoraAccountsService } from '../kora/kora-accounts.service';
+import { AccountNotificationsService } from '../notifications/account-notifications.service';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { PaystackVirtualAccountProvider } from './providers/paystack-virtual-account.provider';
 import {
@@ -49,6 +50,8 @@ export class BankingService {
     private readonly logger: PinoLogger,
     @Optional() private readonly paystack?: PaystackVirtualAccountProvider,
     @Optional() private readonly koraAccounts?: KoraAccountsService,
+    @Optional()
+    private readonly accountNotifications?: AccountNotificationsService,
   ) {}
 
   async getVirtualAccounts(userId: string) {
@@ -115,21 +118,21 @@ export class BankingService {
       throw new BadRequestException('Account setup consent is required');
     // This is consent to future setup, never an issued or usable account.
     // Serialize requests with identity finalization using the same user lock.
-    return this.prisma.$transaction(async (tx) => {
+    const saved = await this.prisma.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT id FROM users WHERE id = ${userId} FOR UPDATE`;
       const user = await tx.user.findUnique({
         where: { id: userId },
-        select: { id: true, isSuspended: true },
+        select: { id: true, isSuspended: true, kycStatus: true, kycTier: true },
       });
       if (!user) throw new NotFoundException('User not found');
       if (user.isSuspended) throw new ForbiddenException('User is suspended');
       let request = await tx.paystackAccountRequest.findUnique({
         where: { userId },
       });
+      const binding = await tx.paystackCustomer.findUnique({
+        where: { userId },
+      });
       if (!request) {
-        const binding = await tx.paystackCustomer.findUnique({
-          where: { userId },
-        });
         const created = await tx.paystackAccountRequest.createMany({
           skipDuplicates: true,
           data: [
@@ -161,11 +164,33 @@ export class BankingService {
           });
       }
       return {
-        provider: 'PAYSTACK',
-        status: request.status,
-        updatedAt: request.updatedAt,
+        response: {
+          provider: 'PAYSTACK' as const,
+          status: request.status,
+          updatedAt: request.updatedAt,
+        },
+        shouldPrepare:
+          user.kycStatus === 'VERIFIED' &&
+          isKycTierAtLeast(user.kycTier, 'TIER_1') &&
+          binding?.validationStatus === 'VERIFIED' &&
+          ['WAITING_FOR_KYC', 'ACTION_REQUIRED'].includes(request.status),
       };
     });
+    if (!saved.shouldPrepare) return saved.response;
+    // Consent is committed before calling the provider. The existing provider
+    // lease and recovery-before-create protect concurrent confirmation/retry.
+    await this.provisionVirtualAccount(userId, {
+      currency: 'NGN',
+      provider: 'paystack',
+    });
+    const current = await this.prisma.paystackAccountRequest.findUniqueOrThrow({
+      where: { userId },
+    });
+    return {
+      provider: 'PAYSTACK',
+      status: current.status,
+      updatedAt: current.updatedAt,
+    };
   }
 
   async getTransferStatus(reference: string) {
@@ -265,8 +290,14 @@ export class BankingService {
     // bankCode is optional in the provider response — requiring it here would
     // re-provision against the provider on every call for accounts that were
     // issued without one.
+    if (existingAccount?.status === 'DISABLED') {
+      throw new ForbiddenException(
+        'This receiving account is disabled. Contact support for help.',
+      );
+    }
     if (
-      existingAccount?.accountNumber &&
+      existingAccount?.status === 'ACTIVE' &&
+      existingAccount.accountNumber &&
       existingAccount.accountName &&
       existingAccount.bankName
     ) {
@@ -407,68 +438,81 @@ export class BankingService {
       );
     }
 
-    const account = await this.prisma.virtualAccount.upsert({
-      where: {
-        userId_provider_currency: {
+    return this.prisma.$transaction(async (tx) => {
+      const account = await tx.virtualAccount.upsert({
+        where: {
+          userId_provider_currency: {
+            userId,
+            provider: normalizedProvider,
+            currency: dto.currency,
+          },
+        },
+        update: {
+          providerAccountId: providerAccount.providerAccountId,
+          providerCustomerId: providerAccount.providerCustomerId,
+          accountNumber: providerAccount.accountNumber,
+          accountNumberMasked: maskAccountNumber(providerAccount.accountNumber),
+          accountName: providerAccount.accountName,
+          bankName: providerAccount.bankName,
+          bankCode: providerAccount.bankCode,
+          status: providerAccount.status,
+          metadata: this.toJsonInput(
+            redactProviderPayload(providerAccount.raw || {}),
+          ),
+        },
+        create: {
           userId,
           provider: normalizedProvider,
+          providerAccountId: providerAccount.providerAccountId,
+          providerCustomerId: providerAccount.providerCustomerId,
+          accountNumber: providerAccount.accountNumber,
+          accountNumberMasked: maskAccountNumber(providerAccount.accountNumber),
+          accountName: providerAccount.accountName,
+          bankName: providerAccount.bankName,
+          bankCode: providerAccount.bankCode,
           currency: dto.currency,
+          status: providerAccount.status,
+          metadata: this.toJsonInput(
+            redactProviderPayload(providerAccount.raw || {}),
+          ),
         },
-      },
-      update: {
-        providerAccountId: providerAccount.providerAccountId,
-        providerCustomerId: providerAccount.providerCustomerId,
-        accountNumber: providerAccount.accountNumber,
-        accountNumberMasked: maskAccountNumber(providerAccount.accountNumber),
-        accountName: providerAccount.accountName,
-        bankName: providerAccount.bankName,
-        bankCode: providerAccount.bankCode,
-        status: providerAccount.status,
-        metadata: this.toJsonInput(
-          redactProviderPayload(providerAccount.raw || {}),
-        ),
-      },
-      create: {
-        userId,
-        provider: normalizedProvider,
-        providerAccountId: providerAccount.providerAccountId,
-        providerCustomerId: providerAccount.providerCustomerId,
-        accountNumber: providerAccount.accountNumber,
-        accountNumberMasked: maskAccountNumber(providerAccount.accountNumber),
-        accountName: providerAccount.accountName,
-        bankName: providerAccount.bankName,
-        bankCode: providerAccount.bankCode,
-        currency: dto.currency,
-        status: providerAccount.status,
-        metadata: this.toJsonInput(
-          redactProviderPayload(providerAccount.raw || {}),
-        ),
-      },
-      select: {
-        id: true,
-        provider: true,
-        accountNumber: true,
-        accountNumberMasked: true,
-        accountName: true,
-        bankName: true,
-        bankCode: true,
-        currency: true,
-        status: true,
-        createdAt: true,
-        updatedAt: true,
-      },
-    });
-    if (provider === 'paystack')
-      await this.prisma.paystackAccountRequest.update({
-        where: { userId },
-        data: {
-          status: 'ACTIVE',
-          claimedAt: null,
-          nextAttemptAt: null,
-          lastError: null,
+        select: {
+          id: true,
+          provider: true,
+          accountNumber: true,
+          accountNumberMasked: true,
+          accountName: true,
+          bankName: true,
+          bankCode: true,
+          currency: true,
+          status: true,
+          createdAt: true,
+          updatedAt: true,
         },
       });
-    return account;
+      if (provider === 'paystack')
+        await tx.paystackAccountRequest.update({
+          where: { userId },
+          data: {
+            status: 'ACTIVE',
+            claimedAt: null,
+            nextAttemptAt: null,
+            lastError: null,
+          },
+        });
+      if (provider === 'paystack' && account.status === 'ACTIVE') {
+        await this.accountNotifications?.accountReady(tx, userId, account.id);
+        await tx.auditLog.create({
+          data: {
+            action: 'RECEIVING_ACCOUNT_READY',
+            targetType: 'VirtualAccount',
+            targetId: account.id,
+            metadata: { userId, provider: 'PAYSTACK', currency: dto.currency },
+          },
+        });
+      }
+      return account;
+    });
   }
 
   async processPaystackAccountAssignment(
