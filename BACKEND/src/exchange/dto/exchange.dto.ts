@@ -18,6 +18,8 @@ import {
   MONEY_AMOUNT_PATTERN,
   normalizeDecimalInput,
 } from '../../common/dto/query.dto';
+import { RATE_QUOTE_BASES } from '../rate.types';
+import type { RateQuoteBasis } from '../rate.types';
 
 const EXCHANGE_PAYOUT_STATUSES = [
   'PENDING_APPROVAL',
@@ -90,13 +92,19 @@ export class AdminUpdateRateDto {
   @IsIn(SUPPORTED_CURRENCIES)
   to: (typeof SUPPORTED_CURRENCIES)[number];
 
-  // Absolute ceiling; the service also validates the Ghana pair's direction.
-  // Rates always mean target units received per 1 source unit.
+  // Absolute ceiling; the service validates the direction for the selected
+  // quote basis. Existing clients omit quoteBasis and continue to submit the
+  // canonical target-per-source convention.
   @IsNumber()
   @Type(() => Number)
   @IsPositive()
   @Max(100_000)
   rate: number;
+
+  @IsOptional()
+  @IsString()
+  @IsIn(RATE_QUOTE_BASES)
+  quoteBasis?: RateQuoteBasis;
 
   // Markup remains supported for older clients, but the admin UI now writes
   // the customer-facing rate directly with a zero markup.

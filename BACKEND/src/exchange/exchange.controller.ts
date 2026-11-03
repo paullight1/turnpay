@@ -166,15 +166,19 @@ export class ExchangeController {
       markup,
       user.userId,
       dto.reason?.trim() || undefined,
+      undefined,
+      { quoteBasis: dto.quoteBasis },
     );
-    const effectiveRate = persisted.rate * (1 - persisted.markup / 100);
     return {
       success: true,
       from: dto.from,
       to: dto.to,
       rate: persisted.rate,
+      inputRate: persisted.inputRate,
+      quoteBasis: persisted.quoteBasis,
       markup: persisted.markup,
-      effectiveRate,
+      baseRate: persisted.canonicalRate,
+      effectiveRate: persisted.effectiveRate,
       message: `Rate updated for ${dto.from}/${dto.to}`,
     };
   }

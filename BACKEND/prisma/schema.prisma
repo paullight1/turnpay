@@ -861,12 +861,18 @@ model Rate {
   rate       Decimal   @db.Decimal(10, 4)
   markup     Decimal   @default(0) @db.Decimal(5, 2)
   source     String    @default("system")
+  quoteBasis RateQuoteBasis @default(TARGET_PER_SOURCE)
   validUntil DateTime?
   createdAt  DateTime  @default(now())
   updatedAt  DateTime  @default(now()) @updatedAt
 
   @@unique([from, to])
   @@map("rates")
+}
+
+enum RateQuoteBasis {
+  TARGET_PER_SOURCE
+  SOURCE_PER_TARGET
 }
 
 enum RateOverrideStatus {

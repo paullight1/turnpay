@@ -14,6 +14,7 @@ import { AxiosResponse } from 'axios';
 import { PinoLogger } from 'nestjs-pino';
 import { Prisma } from '@prisma/client';
 import { Decimal } from '@prisma/client/runtime/library';
+import { DEFAULT_RATE_QUOTE_BASIS, RateQuoteBasis } from '../rate.types';
 
 export class AdminExchangeRateNotSetException extends ServiceUnavailableException {
   constructor() {
@@ -37,7 +38,11 @@ interface FxRateResponse {
 }
 
 interface CachedRate {
+  /** Canonical target units per source unit used by quote/execution code. */
   rate: number;
+  /** Original admin/provider input, in the persisted quote basis. */
+  inputRate: number;
+  quoteBasis: RateQuoteBasis;
   markup: number;
   fetchedAt: number;
   /** Absolute expiry copied from the persisted rate when available. */
@@ -47,7 +52,11 @@ interface CachedRate {
 }
 
 interface RateResult {
+  /** Canonical target units per source unit. */
   rate: number;
+  /** Original persisted/admin input value. */
+  inputRate: number;
+  quoteBasis: RateQuoteBasis;
   markup: number;
   isStale: boolean;
 }
@@ -63,6 +72,7 @@ const CIRCUIT_REDIS_KEY = 'fx:circuit:state';
 const CIRCUIT_FAILURES_KEY = 'fx:circuit:failures';
 const CIRCUIT_OPENED_AT_KEY = 'fx:circuit:openedAt';
 const DEFAULT_MARKUP_PERCENT = 2.5;
+const CANONICAL_RATE_DECIMAL_PLACES = 6;
 
 @Injectable()
 export class RateService implements OnModuleInit {
@@ -107,32 +117,20 @@ export class RateService implements OnModuleInit {
     // Check in-memory cache first (fast path)
     const memoryCached = this.memoryCache.get(key);
     if (memoryCached && this.isFresh(memoryCached)) {
-      return {
-        rate: memoryCached.rate,
-        markup: memoryCached.markup,
-        isStale: false,
-      };
+      return this.toRateResult(memoryCached, false);
     }
 
     // Try Redis cache (second layer, survives restarts)
     const redisCached = await this.loadFromRedis(key);
     if (redisCached && this.isFresh(redisCached)) {
       this.memoryCache.set(key, redisCached);
-      return {
-        rate: redisCached.rate,
-        markup: redisCached.markup,
-        isStale: false,
-      };
+      return this.toRateResult(redisCached, false);
     }
 
     // Try DB stored rate
     const stored = await this.loadStoredRate(from, to);
     if (stored && this.isFresh(stored)) {
-      return {
-        rate: stored.rate,
-        markup: stored.markup,
-        isStale: false,
-      };
+      return this.toRateResult(stored, false);
     }
 
     // Circuit is open — serve stale rate if available
@@ -143,11 +141,7 @@ export class RateService implements OnModuleInit {
           { from, to, rate: staleRate.rate },
           'Circuit OPEN — serving stale rate',
         );
-        return {
-          rate: staleRate.rate,
-          markup: staleRate.markup,
-          isStale: true,
-        };
+        return this.toRateResult(staleRate, true);
       }
     }
 
@@ -156,11 +150,7 @@ export class RateService implements OnModuleInit {
 
     const refreshed = this.memoryCache.get(key);
     if (refreshed && this.isFresh(refreshed)) {
-      return {
-        rate: refreshed.rate,
-        markup: refreshed.markup,
-        isStale: false,
-      };
+      return this.toRateResult(refreshed, false);
     }
 
     // A failed fetch can leave a stale DB/cache value in memory even while
@@ -173,11 +163,7 @@ export class RateService implements OnModuleInit {
         { from, to, rate: staleRate.rate },
         'Serving bounded stale rate after refresh failure',
       );
-      return {
-        rate: staleRate.rate,
-        markup: staleRate.markup,
-        isStale: true,
-      };
+      return this.toRateResult(staleRate, true);
     }
 
     // Last resort: hardcoded fallback rates
@@ -187,7 +173,13 @@ export class RateService implements OnModuleInit {
         { from, to, rate: fallback.rate },
         'No rate available — using hardcoded fallback',
       );
-      return { ...fallback, isStale: true };
+      return {
+        rate: fallback.rate,
+        inputRate: fallback.rate,
+        quoteBasis: DEFAULT_RATE_QUOTE_BASIS,
+        markup: fallback.markup,
+        isStale: true,
+      };
     }
 
     throw new Error(`Rate not available for ${from} to ${to}`);
@@ -205,13 +197,18 @@ export class RateService implements OnModuleInit {
     const stored = await this.prisma.rate.findUnique({
       where: { from_to: { from, to } },
     });
-    const rate = stored?.rate.toNumber();
+    const inputRate = stored?.rate.toNumber();
+    const quoteBasis = this.readQuoteBasis(stored?.quoteBasis);
+    const rate = this.isFinitePositiveRate(inputRate)
+      ? this.toCanonicalRate(inputRate, quoteBasis)
+      : undefined;
     const markup = stored?.markup.toNumber();
     const expiry = stored?.validUntil?.getTime();
     if (
       stored?.source !== 'admin' ||
+      !this.isFinitePositiveRate(inputRate) ||
+      !this.isGhanaRateDirectionValid(from, to, inputRate, quoteBasis) ||
       !this.isFinitePositiveRate(rate) ||
-      !this.isGhanaRateDirectionValid(from, to, rate) ||
       markup === undefined ||
       !Number.isFinite(markup) ||
       markup < 0 ||
@@ -222,7 +219,23 @@ export class RateService implements OnModuleInit {
       throw new AdminExchangeRateNotSetException();
     // Admin prices stay active until replaced or explicitly expired. The
     // short market-feed freshness window applies only to API mode.
-    return { rate: rate, markup, isStale: false };
+    return {
+      rate,
+      inputRate: inputRate as number,
+      quoteBasis,
+      markup,
+      isStale: false,
+    };
+  }
+
+  private toRateResult(cached: CachedRate, isStale: boolean): RateResult {
+    return {
+      rate: cached.rate,
+      inputRate: cached.inputRate,
+      quoteBasis: cached.quoteBasis,
+      markup: cached.markup,
+      isStale,
+    };
   }
 
   /**
@@ -237,15 +250,35 @@ export class RateService implements OnModuleInit {
     adminId?: string,
     reason?: string,
     database: PrismaService | Prisma.TransactionClient = this.prisma,
-    options: { refreshCache?: boolean } = {},
-  ): Promise<{ rate: number; markup: number }> {
+    options: {
+      refreshCache?: boolean;
+      quoteBasis?: RateQuoteBasis;
+    } = {},
+  ): Promise<{
+    /** Raw value entered by the administrator, retained for compatibility. */
+    rate: number;
+    inputRate: number;
+    quoteBasis: RateQuoteBasis;
+    /** Canonical target-per-source multiplier used by all customer quotes. */
+    canonicalRate: number;
+    markup: number;
+    effectiveRate: number;
+  }> {
+    const quoteBasis = this.readQuoteBasis(options.quoteBasis);
     const persistedRate = this.normalizePersistedRate(rate);
-    if (!this.isGhanaRateDirectionValid(from, to, persistedRate)) {
+    if (!this.isGhanaRateDirectionValid(from, to, persistedRate, quoteBasis)) {
       throw new BadRequestException(
-        'Rate direction is invalid. Enter GHS received per 1 NGN (below 1), or NGN received per 1 GHS (above 1).',
+        quoteBasis === 'SOURCE_PER_TARGET'
+          ? 'Rate direction is invalid for the selected source-per-target units.'
+          : 'Rate direction is invalid. Enter GHS received per 1 NGN (below 1), or NGN received per 1 GHS (above 1).',
       );
     }
     const persistedMarkup = this.normalizePersistedMarkup(markup);
+    const canonicalRate = this.toCanonicalRate(persistedRate, quoteBasis);
+    const effectiveRate = this.calculateEffectiveRate(
+      canonicalRate,
+      persistedMarkup,
+    );
 
     const persistRateAndAudit = async (
       db: PrismaService | Prisma.TransactionClient,
@@ -260,6 +293,12 @@ export class RateService implements OnModuleInit {
       const oldRateValue = oldRate
         ? {
             rate: oldRate.rate.toNumber(),
+            inputRate: oldRate.rate.toNumber(),
+            quoteBasis: this.readQuoteBasis(oldRate.quoteBasis),
+            canonicalRate: this.toCanonicalRate(
+              oldRate.rate.toNumber(),
+              this.readQuoteBasis(oldRate.quoteBasis),
+            ),
             markup: oldRate.markup.toNumber(),
             source: oldRate.source,
           }
@@ -272,6 +311,7 @@ export class RateService implements OnModuleInit {
         update: {
           rate: String(persistedRate),
           markup: String(persistedMarkup),
+          quoteBasis,
           source: 'admin',
           validUntil: null,
         },
@@ -280,6 +320,7 @@ export class RateService implements OnModuleInit {
           to,
           rate: String(persistedRate),
           markup: String(persistedMarkup),
+          quoteBasis,
           source: 'admin',
           validUntil: null,
         },
@@ -296,13 +337,25 @@ export class RateService implements OnModuleInit {
             before: oldRateValue
               ? {
                   rate: oldRateValue.rate,
+                  inputRate: oldRateValue.inputRate,
+                  canonicalRate: oldRateValue.canonicalRate,
                   markup: oldRateValue.markup,
+                  quoteBasis: oldRateValue.quoteBasis,
                   source: oldRateValue.source,
                 }
-              : { rate: null, markup: null },
+              : {
+                  rate: null,
+                  inputRate: null,
+                  canonicalRate: null,
+                  markup: null,
+                  quoteBasis: null,
+                },
             after: {
               rate: persistedRate,
+              inputRate: persistedRate,
+              canonicalRate,
               markup: persistedMarkup,
+              quoteBasis,
               source: 'admin',
             },
             metadata: { from, to },
@@ -323,15 +376,36 @@ export class RateService implements OnModuleInit {
     // committed. Redis is a cache and may lag, but it must not expose an
     // unaudited admin rate when the audit write fails.
     if (options.refreshCache !== false) {
-      await this.refreshRateCache(from, to, persistedRate, persistedMarkup);
+      await this.refreshRateCache(
+        from,
+        to,
+        persistedRate,
+        persistedMarkup,
+        quoteBasis,
+      );
     }
 
     this.logger.info(
-      { from, to, rate: persistedRate, markup: persistedMarkup, adminId },
+      {
+        from,
+        to,
+        rate: persistedRate,
+        canonicalRate,
+        quoteBasis,
+        markup: persistedMarkup,
+        adminId,
+      },
       'Manual rate set by admin',
     );
 
-    return { rate: persistedRate, markup: persistedMarkup };
+    return {
+      rate: persistedRate,
+      inputRate: persistedRate,
+      quoteBasis,
+      canonicalRate,
+      markup: persistedMarkup,
+      effectiveRate,
+    };
   }
 
   async refreshRateCache(
@@ -339,11 +413,16 @@ export class RateService implements OnModuleInit {
     to: string,
     rate: number,
     markup: number,
+    quoteBasis: RateQuoteBasis = DEFAULT_RATE_QUOTE_BASIS,
   ): Promise<void> {
+    const normalizedBasis = this.readQuoteBasis(quoteBasis);
     const persistedRate = this.normalizePersistedRate(rate);
     const persistedMarkup = this.normalizePersistedMarkup(markup);
+    const canonicalRate = this.toCanonicalRate(persistedRate, normalizedBasis);
     const cached: CachedRate = {
-      rate: persistedRate,
+      rate: canonicalRate,
+      inputRate: persistedRate,
+      quoteBasis: normalizedBasis,
       markup: persistedMarkup,
       fetchedAt: Date.now(),
       source: 'admin',
@@ -704,6 +783,8 @@ export class RateService implements OnModuleInit {
       if (raw) {
         const parsed = JSON.parse(raw) as Partial<CachedRate>;
         const rate = Number(parsed.rate);
+        const inputRate = Number(parsed.inputRate ?? parsed.rate);
+        const quoteBasis = this.readQuoteBasis(parsed.quoteBasis);
         const markup = Number(parsed.markup);
         const fetchedAt = Number(parsed.fetchedAt);
         const validUntil =
@@ -713,6 +794,7 @@ export class RateService implements OnModuleInit {
 
         if (
           !Number.isFinite(rate) ||
+          !Number.isFinite(inputRate) ||
           !Number.isFinite(markup) ||
           !Number.isFinite(fetchedAt) ||
           (validUntil !== null && !Number.isFinite(validUntil))
@@ -722,6 +804,8 @@ export class RateService implements OnModuleInit {
 
         return {
           rate,
+          inputRate,
+          quoteBasis,
           markup,
           fetchedAt,
           validUntil,
@@ -761,8 +845,12 @@ export class RateService implements OnModuleInit {
     }
 
     const key = `${from}_${to}`;
+    const inputRate = stored.rate.toNumber();
+    const quoteBasis = this.readQuoteBasis(stored.quoteBasis);
     const cached: CachedRate = {
-      rate: stored.rate.toNumber(),
+      rate: this.toCanonicalRate(inputRate, quoteBasis),
+      inputRate,
+      quoteBasis,
       markup: stored.markup.toNumber(),
       // Keep the source timestamp. Reading an old row must not rejuvenate it.
       fetchedAt: stored.updatedAt.getTime(),
@@ -781,8 +869,12 @@ export class RateService implements OnModuleInit {
     }
 
     for (const stored of storedRates) {
+      const inputRate = stored.rate.toNumber();
+      const quoteBasis = this.readQuoteBasis(stored.quoteBasis);
       this.memoryCache.set(`${stored.from}_${stored.to}`, {
-        rate: stored.rate.toNumber(),
+        rate: this.toCanonicalRate(inputRate, quoteBasis),
+        inputRate,
+        quoteBasis,
         markup: stored.markup.toNumber(),
         // Keep the source timestamp. Reading an old row must not rejuvenate it.
         fetchedAt: stored.updatedAt.getTime(),
@@ -807,8 +899,12 @@ export class RateService implements OnModuleInit {
       });
 
       if (existing?.source === 'admin') {
+        const inputRate = existing.rate.toNumber();
+        const quoteBasis = this.readQuoteBasis(existing.quoteBasis);
         this.memoryCache.set(pair, {
-          rate: existing.rate.toNumber(),
+          rate: this.toCanonicalRate(inputRate, quoteBasis),
+          inputRate,
+          quoteBasis,
           markup: existing.markup.toNumber(),
           fetchedAt: existing.updatedAt.getTime(),
           validUntil: existing.validUntil?.getTime() ?? null,
@@ -831,6 +927,8 @@ export class RateService implements OnModuleInit {
 
       this.memoryCache.set(pair, {
         rate,
+        inputRate: rate,
+        quoteBasis: DEFAULT_RATE_QUOTE_BASIS,
         markup,
         fetchedAt: Date.now(),
         source: 'fallback',
@@ -867,9 +965,13 @@ export class RateService implements OnModuleInit {
       });
 
       if (existing?.source === 'admin') {
+        const inputRate = existing.rate.toNumber();
+        const quoteBasis = this.readQuoteBasis(existing.quoteBasis);
         const key = `${from}_${to}`;
         this.memoryCache.set(key, {
-          rate: existing.rate.toNumber(),
+          rate: this.toCanonicalRate(inputRate, quoteBasis),
+          inputRate,
+          quoteBasis,
           markup: existing.markup.toNumber(),
           fetchedAt: existing.updatedAt.getTime(),
           validUntil: existing.validUntil?.getTime() ?? null,
@@ -907,6 +1009,8 @@ export class RateService implements OnModuleInit {
       const key = `${from}_${to}`;
       const cached: CachedRate = {
         rate,
+        inputRate: rate,
+        quoteBasis: DEFAULT_RATE_QUOTE_BASIS,
         markup: effectiveMarkup,
         fetchedAt,
         validUntil: validUntil.getTime(),
@@ -932,12 +1036,73 @@ export class RateService implements OnModuleInit {
     return typeof value === 'number' && Number.isFinite(value) && value > 0;
   }
 
-  // This pair's current quote convention is target units per source unit.
-  // Reject inverted units; never silently invert an operator's price.
-  private isGhanaRateDirectionValid(from: string, to: string, rate: number) {
-    if (from === 'NGN' && to === 'GHS') return rate < 1;
-    if (from === 'GHS' && to === 'NGN') return rate > 1;
+  /**
+   * Validate the operator's entered units without silently changing the
+   * configured business price. The canonical customer multiplier is always
+   * target-per-source, but SOURCE_PER_TARGET deliberately reverses the
+   * expected magnitude of the raw input.
+   */
+  private isGhanaRateDirectionValid(
+    from: string,
+    to: string,
+    rate: number,
+    quoteBasis: RateQuoteBasis = DEFAULT_RATE_QUOTE_BASIS,
+  ) {
+    if (from === 'NGN' && to === 'GHS') {
+      return quoteBasis === 'SOURCE_PER_TARGET' ? rate > 1 : rate < 1;
+    }
+    if (from === 'GHS' && to === 'NGN') {
+      return quoteBasis === 'SOURCE_PER_TARGET' ? rate < 1 : rate > 1;
+    }
     return true;
+  }
+
+  private readQuoteBasis(value: unknown): RateQuoteBasis {
+    if (
+      value === undefined ||
+      value === null ||
+      value === 'TARGET_PER_SOURCE'
+    ) {
+      return DEFAULT_RATE_QUOTE_BASIS;
+    }
+    if (value === 'SOURCE_PER_TARGET') return 'SOURCE_PER_TARGET';
+    throw new BadRequestException('quoteBasis must be a supported rate unit');
+  }
+
+  /**
+   * Convert an entered/persisted value to the only unit accepted by quote and
+   * execution code. Reciprocal precision is intentionally kept above the
+   * persisted Decimal(10,4) scale. The six-decimal canonical precision matches
+   * the frozen manual-quote rate precision; rounding it back to four places
+   * would turn 1/87 into .0115 and materially change the customer quote.
+   */
+  private toCanonicalRate(
+    inputRate: number | undefined,
+    quoteBasis: RateQuoteBasis,
+  ): number {
+    if (!this.isFinitePositiveRate(inputRate)) {
+      throw new Error('FX rate must be finite and positive');
+    }
+
+    if (quoteBasis === 'TARGET_PER_SOURCE') {
+      return inputRate;
+    }
+
+    const reciprocal = new Decimal(1)
+      .div(inputRate)
+      .toDecimalPlaces(CANONICAL_RATE_DECIMAL_PLACES, Decimal.ROUND_DOWN)
+      .toNumber();
+    if (!this.isFinitePositiveRate(reciprocal)) {
+      throw new Error('FX rate reciprocal is not positive');
+    }
+    return reciprocal;
+  }
+
+  private calculateEffectiveRate(rate: number, markup: number): number {
+    return new Decimal(rate)
+      .mul(new Decimal(1).minus(new Decimal(markup).div(100)))
+      .toDecimalPlaces(12)
+      .toNumber();
   }
 
   private normalizePersistedRate(value: number): number {

@@ -108,14 +108,14 @@ export class ExchangeService {
 
   async getRate(from: string, to: string) {
     try {
-      const { rate, markup, isStale } = await this.rateService.getRate(
-        from,
-        to,
-      );
+      const { rate, inputRate, quoteBasis, markup, isStale } =
+        await this.rateService.getRate(from, to);
       return {
         from,
         to,
         baseRate: rate,
+        inputRate,
+        quoteBasis,
         markupPercent: markup,
         effectiveRate: rate * (1 - markup / 100),
         isStale,
@@ -129,6 +129,8 @@ export class ExchangeService {
         to,
         configured: false,
         baseRate: null,
+        inputRate: null,
+        quoteBasis: null,
         markupPercent: null,
         effectiveRate: null,
         isStale: true,

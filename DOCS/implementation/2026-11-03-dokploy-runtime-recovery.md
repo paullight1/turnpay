@@ -11,3 +11,16 @@ The installed auth-js SDK throws ordinary `Error` objects for expired JWTs and m
 The Supabase adapter now maps known claim-rejection exceptions to `UnauthorizedException`. Signature verification, provider-session validation and all database authorization remain enforced. Malformed token envelopes are rejected before SDK parsing; decoded claims never grant authentication. Unexpected verification/runtime errors remain distinct and are not converted into credential rejection. No raw token, password or provider credential is logged.
 
 The real-SDK regressions failed twice before the fix. All 23 Supabase/authorization tests and scoped lint passed afterward. An isolated backend build contains main plus only the two reviewed authentication files, preserving unrelated shared-checkout work. Hosted post-deployment checks are recorded below when complete. No genuine payment, identity decision, account opening or WhatsApp message was executed.
+
+
+## Hosted verification
+
+Dokploy deployed `41f2bd976552cedd0613edcfad485243f665a6d9` successfully. A synthetic expired JWT to `/api/exchange/provider/config` now returns HTTP 401 instead of 500. After restarting the Flutter preview, real signed-in bootstrap, banking accounts/beneficiaries, transaction history and notification-count reads all returned HTTP 200 through the canonical Dokploy API proxy.
+
+## Explicit admin rate units
+
+`Rate.quoteBasis` distinguishes `TARGET_PER_SOURCE` multipliers from `SOURCE_PER_TARGET` divisors. The raw administrator input is retained at its existing four-decimal persistence precision. Reciprocal canonical rates round down to six decimals, matching frozen manual quote precision. Both directions remain independently administered; no market-feed price replaces them.
+
+Migration 053 is atomic and marks only the exact legacy admin entries NGN/GHS 87 and GHS/NGN 0.0111 as divisors. It adds two system unit-correction audits and does not rewrite historical quotes/orders. A disposable PostgreSQL database verified migration 000–053, unchanged numeric prices/history, two audits and repeat-deploy idempotence. The production database target was matched to the running Dokploy container using a credential-free database-identity hash. Only migrations through 053 were deployed from an isolated release directory. Read-back confirms both raw values unchanged, both explicit divisor units, and two audit rows.
+
+Dokploy currently uses Railpack with `sh scripts/validate-production-config.sh node dist/src/main.js`; this bypasses the Docker migration startup wrapper even though `RUN_MIGRATIONS_ON_STARTUP=true`. Migration 053 was therefore explicitly deployed before the application release. Future schema releases must run `prisma migrate deploy` explicitly until the Railpack startup command is aligned.

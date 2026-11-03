@@ -653,6 +653,7 @@ export const adminExchangeRateApi = {
       from: string;
       to: string;
       rate: number;
+      quoteBasis?: "TARGET_PER_SOURCE" | "SOURCE_PER_TARGET";
       markup?: number;
       reason?: string;
     },

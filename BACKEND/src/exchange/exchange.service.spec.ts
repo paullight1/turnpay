@@ -292,6 +292,23 @@ describe('ExchangeService', () => {
       expect(mockRedis.set).toHaveBeenCalled();
     });
 
+    it('keeps a six-decimal divisor reciprocal from over-crediting a manual quote', async () => {
+      mockRateService.getRate.mockResolvedValue({
+        rate: 0.008695,
+        markup: 0,
+        isStale: false,
+      });
+
+      const quote = await service.createQuote('user-1', {
+        from: 'NGN',
+        to: 'GHS',
+        amount: '10000',
+      });
+
+      expect(quote.rate).toBe(0.008695);
+      expect(quote.receiveAmount).toBe('86.95');
+    });
+
     it('rejects creating a quote when the exchange rate is stale', async () => {
       mockRateService.getRate.mockResolvedValue({
         rate: 3.1746,
@@ -1345,6 +1362,8 @@ describe('unset admin rate preview', () => {
       to: 'NGN',
       configured: false,
       baseRate: null,
+      inputRate: null,
+      quoteBasis: null,
       markupPercent: null,
       effectiveRate: null,
       isStale: true,

@@ -89,7 +89,13 @@ describe('RateService freshness and stale fallback', () => {
 
     const result = await service.getRate('NGN', 'GHS');
 
-    expect(result).toEqual({ rate: 0.315, markup: 2.5, isStale: true });
+    expect(result).toMatchObject({
+      rate: 0.315,
+      inputRate: 0.315,
+      quoteBasis: 'TARGET_PER_SOURCE',
+      markup: 2.5,
+      isStale: true,
+    });
     expect((service as any).memoryCache.get('NGN_GHS').fetchedAt).toBe(
       updatedAt.getTime(),
     );
@@ -112,7 +118,13 @@ describe('RateService freshness and stale fallback', () => {
 
     const result = await service.getRate('NGN', 'GHS');
 
-    expect(result).toEqual({ rate: 0.315, markup: 2.5, isStale: true });
+    expect(result).toMatchObject({
+      rate: 0.315,
+      inputRate: 0.315,
+      quoteBasis: 'TARGET_PER_SOURCE',
+      markup: 2.5,
+      isStale: true,
+    });
     expect(http.get).toHaveBeenCalledTimes(2);
   });
 
@@ -129,7 +141,13 @@ describe('RateService freshness and stale fallback', () => {
 
     const result = await service.getRate('NGN', 'GHS');
 
-    expect(result).toEqual({ rate: 0.3, markup: 2.5, isStale: true });
+    expect(result).toMatchObject({
+      rate: 0.3,
+      inputRate: 0.3,
+      quoteBasis: 'TARGET_PER_SOURCE',
+      markup: 2.5,
+      isStale: true,
+    });
   });
 
   it('does not serve an old DB rate after the bounded stale retention window', async () => {
@@ -146,7 +164,13 @@ describe('RateService freshness and stale fallback', () => {
 
     const result = await service.getRate('NGN', 'GHS');
 
-    expect(result).toEqual({ rate: 0.315, markup: 2.5, isStale: true });
+    expect(result).toMatchObject({
+      rate: 0.315,
+      inputRate: 0.315,
+      quoteBasis: 'TARGET_PER_SOURCE',
+      markup: 2.5,
+      isStale: true,
+    });
   });
 });
 
@@ -326,7 +350,14 @@ describe('RateService provider mapping and persistence safety', () => {
         'admin-1',
         'verified market update',
       ),
-    ).resolves.toEqual({ rate: 0.3151, markup: 2.56 });
+    ).resolves.toMatchObject({
+      rate: 0.3151,
+      inputRate: 0.3151,
+      quoteBasis: 'TARGET_PER_SOURCE',
+      canonicalRate: 0.3151,
+      markup: 2.56,
+      effectiveRate: 0.30703344,
+    });
 
     expect(prisma.$transaction).toHaveBeenCalledTimes(1);
     expect(order.indexOf('db')).toBeLessThan(order.indexOf('audit'));
@@ -360,6 +391,125 @@ describe('RateService provider mapping and persistence safety', () => {
 });
 
 describe('admin-controlled exchange rates', () => {
+  it('normalizes legacy source-per-target admin values only at read time', async () => {
+    const { service } = createRateService({
+      rateSource: 'admin',
+      stored: {
+        rate: new Decimal('87.0000'),
+        markup: new Decimal(0),
+        quoteBasis: 'SOURCE_PER_TARGET',
+        source: 'admin',
+        validUntil: null,
+        updatedAt: new Date(),
+      },
+    });
+
+    const result = await service.getRate('NGN', 'GHS');
+
+    expect(result.inputRate).toBe(87);
+    expect(result.quoteBasis).toBe('SOURCE_PER_TARGET');
+    expect(result.rate).toBeCloseTo(1 / 87, 6);
+    expect(result.rate).not.toBe(0.0115);
+  });
+
+  it('rounds divisor reciprocals down at six decimals for frozen manual quotes', async () => {
+    const { service } = createRateService({
+      rateSource: 'admin',
+      stored: {
+        rate: new Decimal('115.0000'),
+        markup: new Decimal(0),
+        quoteBasis: 'SOURCE_PER_TARGET',
+        source: 'admin',
+        validUntil: null,
+        updatedAt: new Date(),
+      },
+    });
+
+    const result = await service.getRate('NGN', 'GHS');
+
+    expect(result.rate).toBe(0.008695);
+    expect(
+      new Decimal(result.rate).mul(10_000).toDecimalPlaces(2).toFixed(2),
+    ).toBe('86.95');
+  });
+
+  it('keeps the raw source-per-target value while caching a precise canonical reciprocal', async () => {
+    const { service, prisma, redis } = createRateService({
+      rateSource: 'admin',
+    });
+
+    const result = await service.setManualRate(
+      'NGN',
+      'GHS',
+      87,
+      0,
+      'admin-1',
+      'preserve existing admin price units',
+      undefined,
+      { quoteBasis: 'SOURCE_PER_TARGET' },
+    );
+
+    expect(result).toMatchObject({
+      rate: 87,
+      inputRate: 87,
+      quoteBasis: 'SOURCE_PER_TARGET',
+      markup: 0,
+    });
+    expect(result.canonicalRate).toBeCloseTo(1 / 87, 6);
+    expect(result.effectiveRate).toBeCloseTo(1 / 87, 6);
+    expect(prisma.rate.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        update: expect.objectContaining({
+          rate: '87',
+          quoteBasis: 'SOURCE_PER_TARGET',
+        }),
+        create: expect.objectContaining({
+          rate: '87',
+          quoteBasis: 'SOURCE_PER_TARGET',
+        }),
+      }),
+    );
+    const cached = JSON.parse(redis.set.mock.calls.at(-1)[1]);
+    expect(cached.inputRate).toBe(87);
+    expect(cached.quoteBasis).toBe('SOURCE_PER_TARGET');
+    expect(cached.rate).toBeCloseTo(1 / 87, 6);
+    expect(cached.rate).not.toBe(0.0115);
+    expect(prisma.auditLog.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          before: expect.objectContaining({ quoteBasis: null }),
+          after: expect.objectContaining({
+            quoteBasis: 'SOURCE_PER_TARGET',
+            canonicalRate: expect.closeTo(1 / 87, 6),
+          }),
+        }),
+      }),
+    );
+  });
+
+  it.each([
+    ['NGN', 'GHS', 0.0086],
+    ['GHS', 'NGN', 125.5],
+  ])(
+    'rejects a target-per-source magnitude submitted as source-per-target for %s/%s',
+    async (from, to, rate) => {
+      const { service, prisma } = createRateService({ rateSource: 'admin' });
+      await expect(
+        service.setManualRate(
+          from,
+          to,
+          rate,
+          0,
+          undefined,
+          undefined,
+          undefined,
+          { quoteBasis: 'SOURCE_PER_TARGET' },
+        ),
+      ).rejects.toThrow('Rate direction');
+      expect(prisma.rate.upsert).not.toHaveBeenCalled();
+    },
+  );
+
   it.each([
     ['NGN', 'GHS', '87'],
     ['GHS', 'NGN', '0.0111'],
@@ -413,8 +563,10 @@ describe('admin-controlled exchange rates', () => {
         fetchedAt: Date.now(),
       }),
     });
-    expect(await service.getRate('GHS', 'NGN')).toEqual({
+    expect(await service.getRate('GHS', 'NGN')).toMatchObject({
       rate: 125.5,
+      inputRate: 125.5,
+      quoteBasis: 'TARGET_PER_SOURCE',
       markup: 0,
       isStale: false,
     });

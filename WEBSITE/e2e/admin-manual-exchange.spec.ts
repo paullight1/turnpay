@@ -72,6 +72,15 @@ function parseJsonBody<T>(route: Route): T {
   return JSON.parse(raw) as T;
 }
 
+function canonicalRateForFixture(rate: number, quoteBasis: string) {
+  if (quoteBasis !== "SOURCE_PER_TARGET") return rate;
+  const [whole, fraction = ""] = rate.toString().split(".");
+  const numerator = BigInt(`${whole}${fraction}`);
+  const denominator = BigInt(10) ** BigInt(fraction.length);
+  const scaled = (BigInt(1_000_000) * denominator) / numerator;
+  return Number(scaled) / 1_000_000;
+}
+
 function encodeSessionCookie(session: AdminSession) {
   return `base64-${Buffer.from(JSON.stringify(session), "utf8").toString("base64url")}`;
 }
@@ -243,7 +252,10 @@ async function installAdminManualExchangeMocks(page: Page) {
 
   await page.route("**/api/admin/users**", async (route) => {
     const url = new URL(route.request().url());
-    if (route.request().method() !== "GET" || url.searchParams.get("role") !== "ADMIN") {
+    if (
+      route.request().method() !== "GET" ||
+      url.searchParams.get("role") !== "ADMIN"
+    ) {
       await route.fallback();
       return;
     }
@@ -385,15 +397,16 @@ async function installAdminManualExchangeMocks(page: Page) {
             ? body.payoutOutcome === "ALREADY_SENT"
               ? "PAYOUT_SENT"
               : "PAYOUT_PROCESSING"
-          : body.action === "MARK_SENT"
-            ? "PAYOUT_SENT"
-            : body.action === "COMPLETE" || body.action === "RECORD_CEDIS_SENT"
-              ? "COMPLETED"
-              : body.action === "REQUEST_INFO"
-                ? "NEEDS_MORE_INFO"
-                : body.action === "REJECT"
-                  ? "REJECTED"
-                  : "PAYOUT_PENDING";
+            : body.action === "MARK_SENT"
+              ? "PAYOUT_SENT"
+              : body.action === "COMPLETE" ||
+                  body.action === "RECORD_CEDIS_SENT"
+                ? "COMPLETED"
+                : body.action === "REQUEST_INFO"
+                  ? "NEEDS_MORE_INFO"
+                  : body.action === "REJECT"
+                    ? "REJECTED"
+                    : "PAYOUT_PENDING";
     Object.assign(order, {
       status: nextStatus,
       updatedAt: now,
@@ -486,58 +499,201 @@ test.describe("Admin manual exchange queue", () => {
     ).toBeVisible({ timeout: 15000 });
   });
 
-  test("admin sets each direction from an empty rate without an API feed", async ({ page }) => {
-    const saved = new Map<string, number>();
+  test("admin sets each direction from an empty rate without an API feed", async ({
+    page,
+  }) => {
+    const saved = new Map<string, { rate: number; quoteBasis: string }>();
     const writes: Record<string, unknown>[] = [];
     await page.route("**/api/exchange/rate?*", (route) => {
       const q = new URL(route.request().url()).searchParams;
-      const from = q.get("from")!, to = q.get("to")!;
-      const rate = saved.get(`${from}:${to}`);
-      return route.fulfill({ json: {
-        from, to, configured: rate !== undefined,
-        baseRate: rate ?? null, effectiveRate: rate ?? null,
-        markupPercent: rate === undefined ? null : 0,
-        isStale: rate === undefined,
-      } });
+      const from = q.get("from")!,
+        to = q.get("to")!;
+      const savedRate = saved.get(`${from}:${to}`);
+      const rate = savedRate?.rate;
+      return route.fulfill({
+        json: {
+          from,
+          to,
+          configured: rate !== undefined,
+          baseRate: savedRate
+            ? canonicalRateForFixture(rate!, savedRate.quoteBasis)
+            : null,
+          inputRate: rate ?? null,
+          quoteBasis: savedRate?.quoteBasis ?? null,
+          effectiveRate: savedRate
+            ? canonicalRateForFixture(rate!, savedRate.quoteBasis)
+            : null,
+          markupPercent: rate === undefined ? null : 0,
+          isStale: rate === undefined,
+        },
+      });
     });
     await page.route("**/api/exchange/rates", (route) => {
       const body = route.request().postDataJSON();
       expect(route.request().headers()["idempotency-key"]).toBeTruthy();
       expect(body.markup).toBe(0);
-      saved.set(`${body.from}:${body.to}`, body.rate);
+      const canonical = canonicalRateForFixture(body.rate, body.quoteBasis);
+      saved.set(`${body.from}:${body.to}`, {
+        rate: body.rate,
+        quoteBasis: body.quoteBasis,
+      });
       writes.push(body);
-      return route.fulfill({ json: { success: true, ...body, effectiveRate: body.rate } });
+      return route.fulfill({
+        json: {
+          success: true,
+          ...body,
+          inputRate: body.rate,
+          baseRate: canonical,
+          effectiveRate: canonical,
+        },
+      });
     });
     const menu = page.getByRole("button", { name: "Open menu", exact: true });
     if (await menu.isVisible()) await menu.click();
-    await page.getByRole("navigation", { name: "Admin navigation" })
-      .getByRole("link", { name: "Exchange rates", exact: true }).click();
+    await page
+      .getByRole("navigation", { name: "Admin navigation" })
+      .getByRole("link", { name: "Exchange rates", exact: true })
+      .click();
     const rates = page.getByRole("region", { name: "Exchange rate controls" });
     await expect(rates).toBeVisible({ timeout: 30000 });
-    const naira = rates.getByRole("region", { name: "Naira to cedis", exact: true });
-    const cedis = rates.getByRole("region", { name: "Cedis to naira", exact: true });
+    const naira = rates.getByRole("region", {
+      name: "Naira to cedis",
+      exact: true,
+    });
+    const cedis = rates.getByRole("region", {
+      name: "Cedis to naira",
+      exact: true,
+    });
     await expect(naira.getByRole("status")).toHaveText("Not set");
     await expect(cedis.getByRole("status")).toHaveText("Not set");
-    await naira.getByLabel("Cedis for 1 naira").fill("87");
-    await expect(naira.getByRole("button", { name: "Save naira to cedis", exact: true })).toBeDisabled();
-    await expect(naira.getByRole("alert")).toContainText("below 1");
-    await naira.getByLabel("Cedis for 1 naira").fill("0.0086");
-    await expect(naira.getByText("1 NGN = 0.0086 GHS", { exact: true })).toBeVisible();
-    await naira.getByRole("button", { name: "Save naira to cedis", exact: true }).click();
+    await naira.getByLabel("NGN per 1 GHS").fill("87");
+    await expect(
+      naira.getByText("87 NGN = 1 GHS", { exact: true }),
+    ).toBeVisible();
+    await expect(
+      naira.getByText("1 NGN ≈ 0.011494 GHS", { exact: true }),
+    ).toBeVisible();
+    await naira
+      .getByRole("button", { name: "Save naira to cedis", exact: true })
+      .click();
     await expect(naira.getByRole("status")).toHaveText("Saved");
-    await expect(cedis.getByLabel("Naira for 1 cedi")).toHaveValue("");
+    await expect(cedis.getByLabel("NGN received for 1 GHS")).toHaveValue("");
     await expect(cedis.getByRole("status")).toHaveText("Not set");
-    await cedis.getByLabel("Naira for 1 cedi").fill("0.03");
-    await expect(cedis.getByRole("button", { name: "Save cedis to naira", exact: true })).toBeDisabled();
+    await cedis.getByLabel("NGN received for 1 GHS").fill("0.03");
+    await expect(
+      cedis.getByRole("button", { name: "Save cedis to naira", exact: true }),
+    ).toBeDisabled();
     await expect(cedis.getByRole("alert")).toContainText("above 1");
-    await cedis.getByLabel("Naira for 1 cedi").fill("125.50");
-    await expect(cedis.getByText("1 GHS = 125.50 NGN", { exact: true })).toBeVisible();
-    await expect(cedis.getByText("To receive at least 1 NGN, send 0.01 GHS.", { exact: true })).toBeVisible();
-    await cedis.getByRole("button", { name: "Save cedis to naira", exact: true }).click();
+    await cedis.getByLabel("NGN received for 1 GHS").fill("125.50");
+    await expect(
+      cedis.getByText("1 GHS ≈ 125.5 NGN", { exact: true }),
+    ).toBeVisible();
+    await expect(
+      cedis.getByText("To receive at least 1 NGN, send 0.01 GHS.", {
+        exact: true,
+      }),
+    ).toBeVisible();
+    await cedis
+      .getByRole("button", { name: "Save cedis to naira", exact: true })
+      .click();
     await expect(cedis.getByRole("status")).toHaveText("Saved");
     expect(writes).toEqual([
-      { from: "NGN", to: "GHS", rate: 0.0086, markup: 0 },
-      { from: "GHS", to: "NGN", rate: 125.5, markup: 0 },
+      {
+        from: "NGN",
+        to: "GHS",
+        rate: 87,
+        quoteBasis: "SOURCE_PER_TARGET",
+        markup: 0,
+      },
+      {
+        from: "GHS",
+        to: "NGN",
+        rate: 125.5,
+        quoteBasis: "TARGET_PER_SOURCE",
+        markup: 0,
+      },
+    ]);
+  });
+
+  test("rounds a divisor reciprocal down before and after saving", async ({
+    page,
+  }) => {
+    const saved = new Map<string, { rate: number; quoteBasis: string }>();
+    const writes: Record<string, unknown>[] = [];
+    await page.route("**/api/exchange/rate?*", (route) => {
+      const q = new URL(route.request().url()).searchParams;
+      const from = q.get("from")!;
+      const to = q.get("to")!;
+      const savedRate = saved.get(`${from}:${to}`);
+      const rate = savedRate?.rate;
+      const canonical = savedRate
+        ? canonicalRateForFixture(rate!, savedRate.quoteBasis)
+        : null;
+      return route.fulfill({
+        json: {
+          from,
+          to,
+          configured: rate !== undefined,
+          baseRate: canonical,
+          inputRate: rate ?? null,
+          quoteBasis: savedRate?.quoteBasis ?? null,
+          effectiveRate: canonical,
+          markupPercent: rate === undefined ? null : 0,
+          isStale: rate === undefined,
+        },
+      });
+    });
+    await page.route("**/api/exchange/rates", (route) => {
+      const body = route.request().postDataJSON();
+      const canonical = canonicalRateForFixture(body.rate, body.quoteBasis);
+      writes.push(body);
+      saved.set(`${body.from}:${body.to}`, {
+        rate: body.rate,
+        quoteBasis: body.quoteBasis,
+      });
+      return route.fulfill({
+        json: {
+          success: true,
+          ...body,
+          inputRate: body.rate,
+          baseRate: canonical,
+          effectiveRate: canonical,
+        },
+      });
+    });
+
+    const menu = page.getByRole("button", { name: "Open menu", exact: true });
+    if (await menu.isVisible()) await menu.click();
+    await page
+      .getByRole("navigation", { name: "Admin navigation" })
+      .getByRole("link", { name: "Exchange rates", exact: true })
+      .click();
+    const rates = page.getByRole("region", { name: "Exchange rate controls" });
+    await expect(rates).toBeVisible({ timeout: 30000 });
+    const naira = rates.getByRole("region", {
+      name: "Naira to cedis",
+      exact: true,
+    });
+
+    await naira.getByLabel("NGN per 1 GHS").fill("115");
+    await expect(
+      naira.getByText("1 NGN ≈ 0.008695 GHS", { exact: true }),
+    ).toBeVisible();
+    await naira
+      .getByRole("button", { name: "Save naira to cedis", exact: true })
+      .click();
+    await expect(naira.getByRole("status")).toHaveText("Saved");
+    await expect(
+      naira.getByText("1 NGN ≈ 0.008695 GHS", { exact: true }),
+    ).toBeVisible();
+    expect(writes).toEqual([
+      {
+        from: "NGN",
+        to: "GHS",
+        rate: 115,
+        quoteBasis: "SOURCE_PER_TARGET",
+        markup: 0,
+      },
     ]);
   });
 
@@ -778,7 +934,9 @@ test.describe("Admin manual exchange queue", () => {
       const menu = page.getByRole("button", { name: "Open menu", exact: true });
       if (await menu.isVisible()) {
         await menu.click();
-        await expect(page.getByRole("dialog", { name: "Navigation menu", exact: true })).toBeVisible();
+        await expect(
+          page.getByRole("dialog", { name: "Navigation menu", exact: true }),
+        ).toBeVisible();
       }
     };
     await page.goto("/admin");
@@ -937,16 +1095,10 @@ test.describe("Admin manual exchange queue", () => {
       .getByRole("button", { name: "Supervised handover", exact: true })
       .click();
     const form = page.locator("form");
-    await form
-      .getByLabel("Receiving administrator")
-      .click();
-    await page
-      .getByRole("option", { name: /Second TrustPay Admin/ })
-      .click();
+    await form.getByLabel("Receiving administrator").click();
+    await page.getByRole("option", { name: /Second TrustPay Admin/ }).click();
     await form.getByLabel("Real-world payout outcome").click();
-    await page
-      .getByRole("option", { name: /Confirmed not sent/ })
-      .click();
+    await page.getByRole("option", { name: /Confirmed not sent/ }).click();
     await form.locator("#manual-payout-proof").setInputFiles({
       name: "payout-proof.pdf",
       mimeType: "application/pdf",
@@ -969,8 +1121,11 @@ test.describe("Admin manual exchange queue", () => {
         exact: true,
       })
       .click();
-    await expect(page.getByRole("table").getByText("Payout Being Processed")).toBeVisible();
-    const request = getTestState(page).manualExchangeTestState.reviewRequests.at(-1);
+    await expect(
+      page.getByRole("table").getByText("Payout Being Processed"),
+    ).toBeVisible();
+    const request =
+      getTestState(page).manualExchangeTestState.reviewRequests.at(-1);
     expect(request?.body).toMatchObject({
       action: "HANDOVER_PAYOUT",
       handoverToAdminId: "user-456",
