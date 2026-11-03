@@ -105,6 +105,7 @@ describe('ExchangeService', () => {
 
   const mockRateService = {
     getRate: jest.fn().mockResolvedValue({ rate: 3.1746, markup: 2.5 }),
+    assertQuoteSafe: jest.fn(),
     setManualRate: jest.fn(),
     refreshRateCache: jest.fn(),
   };
@@ -250,7 +251,45 @@ describe('ExchangeService', () => {
     ).rejects.toThrow('already reviewed');
   });
 
+  it('keeps admin repair fields but returns no executable customer rate for a crossed pair', async () => {
+    mockRateService.getRate.mockResolvedValue({
+      rate: 0.011494,
+      inputRate: 87,
+      quoteBasis: 'SOURCE_PER_TARGET',
+      markup: 0,
+      isStale: false,
+      pairSafety: {
+        safe: false,
+        oppositeEffectiveRate: '90.09009',
+        maximumEffectiveRate: '0.0111',
+      },
+    });
+    expect(await service.getRate('NGN', 'GHS')).toMatchObject({
+      configured: false,
+      inputRate: 87,
+      baseRate: 0.011494,
+      effectiveRate: null,
+      blockedReason: 'EXCHANGE_RATE_PAIR_CONFLICT',
+    });
+  });
+
   describe('createQuote', () => {
+    it('never rounds the received amount up to create small-amount round-trip gains', async () => {
+      mockRateService.getRate.mockResolvedValue({
+        rate: 0.01,
+        markup: 0,
+        isStale: false,
+      });
+      await expect(
+        service.createQuote('user-1', {
+          from: 'NGN',
+          to: 'GHS',
+          amount: '0.51',
+        }),
+      ).rejects.toThrow('too small');
+      expect(mockRedis.set).not.toHaveBeenCalled();
+    });
+
     it('rejects an amount that rounds to zero in the destination currency', async () => {
       mockRateService.getRate.mockResolvedValue({
         rate: 0.001,
@@ -329,6 +368,88 @@ describe('ExchangeService', () => {
   });
 
   describe('executeQuote', () => {
+    it('rejects an old unexecuted quote whose received cents were rounded up', async () => {
+      mockRedis.get.mockResolvedValue(
+        JSON.stringify({
+          id: 'old-rounded',
+          userId: 'user-1',
+          from: 'NGN',
+          to: 'GHS',
+          rate: 0.01,
+          amount: '0.51',
+          sendAmount: '0.52',
+          receiveAmount: '0.01',
+          fee: '0.01',
+          expiresAt: new Date(Date.now() + 60000).toISOString(),
+        }),
+      );
+      mockPrisma.user.findUnique.mockResolvedValue({
+        kycStatus: 'VERIFIED',
+        kycTier: 'TIER_2',
+        isSuspended: false,
+      });
+      await expect(
+        service.executeQuote('user-1', { quoteId: 'old-rounded' }),
+      ).rejects.toThrow('new quote');
+      expect(mockLedger.debitWallet).not.toHaveBeenCalled();
+      expect(mockLedger.creditWallet).not.toHaveBeenCalled();
+    });
+
+    it('revalidates frozen terms inside the first money transaction', async () => {
+      mockRedis.get.mockResolvedValue(
+        JSON.stringify({
+          id: 'quote-old',
+          userId: 'user-1',
+          from: 'NGN',
+          to: 'GHS',
+          rate: 0.02,
+          amount: '100',
+          sendAmount: '100',
+          receiveAmount: '2',
+          fee: '0',
+          expiresAt: new Date(Date.now() + 60000).toISOString(),
+        }),
+      );
+      mockPrisma.user.findUnique.mockResolvedValue({
+        kycStatus: 'VERIFIED',
+        kycTier: 'TIER_2',
+        isSuspended: false,
+      });
+      mockRateService.assertQuoteSafe.mockRejectedValueOnce(
+        new ConflictException('Quote price changed'),
+      );
+      await expect(
+        service.executeQuote('user-1', { quoteId: 'quote-old' }),
+      ).rejects.toThrow('Quote price changed');
+      expect(mockRateService.assertQuoteSafe).toHaveBeenCalledWith(
+        mockPrisma,
+        'NGN',
+        'GHS',
+        0.02,
+      );
+      expect(mockLedger.debitWallet).not.toHaveBeenCalled();
+    });
+
+    it('blocks an unexecuted cached quote when paired pricing has become unsafe', async () => {
+      mockRedis.get.mockResolvedValue(
+        JSON.stringify({
+          id: 'quote-old',
+          userId: 'user-1',
+          from: 'NGN',
+          to: 'GHS',
+          expiresAt: new Date(Date.now() + 60000).toISOString(),
+        }),
+      );
+      mockRateService.getRate.mockRejectedValue(
+        new ServiceUnavailableException('Exchange pricing is being updated'),
+      );
+      await expect(
+        service.executeQuote('user-1', { quoteId: 'quote-old' }),
+      ).rejects.toThrow('pricing');
+      expect(mockLedger.debitWallet).not.toHaveBeenCalled();
+      expect(mockPrisma.transaction.create).not.toHaveBeenCalled();
+    });
+
     it.each([new Date(0).toISOString(), 'invalid-date'])(
       'rejects a stored quote with expired or invalid expiry %s before moving money',
       async (expiresAt) => {

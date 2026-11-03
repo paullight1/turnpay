@@ -22,6 +22,7 @@ describe('Provider exchange financial integrity', () => {
   let paystack: { configured: boolean; request: jest.Mock };
   let kora: { request: jest.Mock };
   let withdrawals: GhsWithdrawalsService;
+  let rateLookup: { getRate: jest.Mock; assertQuoteSafe: jest.Mock };
   let verification: Record<string, unknown>;
   const config = new ConfigService({
     BANK_ACCOUNT_ENCRYPTION_KEY: 'synthetic-test-secret',
@@ -76,12 +77,16 @@ describe('Provider exchange financial integrity', () => {
     };
     const ledger = new LedgerService(db as never);
     const hold = new SettlementHoldService(db as never);
+    rateLookup = {
+      assertQuoteSafe: jest.fn().mockResolvedValue(undefined),
+      getRate: jest
+        .fn()
+        .mockResolvedValue({ rate: 100, markup: 0, isStale: false }),
+    };
     service = new ProviderExchangeService(
       db as never,
       ledger,
-      {
-        getRate: async () => ({ rate: 100, markup: 0, isStale: false }),
-      } as never,
+      rateLookup as never,
       { verifyRequired: jest.fn() } as never,
       config,
       capabilities as never,
@@ -155,6 +160,76 @@ describe('Provider exchange financial integrity', () => {
       destinationCode: '058',
       destinationNumber: '0123456789',
     });
+  it('checks frozen provider terms inside the reservation transaction', async () => {
+    const q = await quote();
+    rateLookup.assertQuoteSafe.mockRejectedValueOnce(
+      new Error('Quote price changed'),
+    );
+    await expect(
+      service.create(
+        fixture.users.sender.id,
+        q.id,
+        '1234',
+        'frozen-pair-attempt-12345',
+      ),
+    ).rejects.toThrow('Quote price changed');
+    expect(
+      await db.providerExchangeOrder.count({ where: { quoteId: q.id } }),
+    ).toBe(0);
+    expect(rateLookup.assertQuoteSafe).toHaveBeenCalled();
+  });
+
+  it('rejects an old upward-rounded provider target before reservation', async () => {
+    const q = await quote();
+    await db.providerExchangeQuote.update({
+      where: { id: q.id },
+      data: {
+        amount: '0.51',
+        rate: '0.01',
+        targetAmount: '0.01',
+        total: '0.51',
+        fee: '0',
+      },
+    });
+    await expect(
+      service.create(
+        fixture.users.sender.id,
+        q.id,
+        '1234',
+        'rounded-target-attempt-12345',
+      ),
+    ).rejects.toThrow('new quote');
+    expect(
+      await db.providerExchangeOrder.count({ where: { quoteId: q.id } }),
+    ).toBe(0);
+  });
+
+  it('blocks a previously issued provider quote when the live rate pair becomes unsafe', async () => {
+    const q = await quote();
+    const before = await db.transaction.count({
+      where: { userId: fixture.users.sender.id },
+    });
+    rateLookup.getRate.mockRejectedValue(
+      new Error('Exchange pricing is being updated'),
+    );
+    await expect(
+      service.create(
+        fixture.users.sender.id,
+        q.id,
+        '1234',
+        'unsafe-pair-attempt-12345',
+      ),
+    ).rejects.toThrow('pricing');
+    expect(
+      await db.providerExchangeOrder.count({ where: { quoteId: q.id } }),
+    ).toBe(0);
+    expect(
+      await db.transaction.count({
+        where: { userId: fixture.users.sender.id },
+      }),
+    ).toBe(before);
+  });
+
   it('freezes terms and debits once across concurrent same-key attempts', async () => {
     const q = await quote();
     const results = await Promise.allSettled([

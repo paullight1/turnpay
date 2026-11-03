@@ -309,9 +309,24 @@ export class ProviderExchangeService {
         );
       return orderView(existing);
     }
+    // Completed replays have returned. Check pricing before reserving funds,
+    // outside the money transaction (API-mode rate refreshes may use HTTP).
+    const quoteForPricing = await this.prisma.providerExchangeQuote.findFirst({
+      where: { id: quoteId, userId },
+    });
+    if (!quoteForPricing)
+      throw new NotFoundException('Exchange quote not found');
+    const live = await this.rates.getRate(
+      quoteForPricing.sourceCurrency,
+      quoteForPricing.targetCurrency,
+    );
+    if (live.isStale) {
+      throw new ServiceUnavailableException(
+        'A fresh exchange rate is required',
+      );
+    }
     try {
       const order = await serialMoney(this.prisma, async (tx) => {
-        await eligibleKoraUser(tx, userId);
         const q = await tx.providerExchangeQuote.findFirst({
           where: { id: quoteId, userId },
         });
@@ -320,6 +335,25 @@ export class ProviderExchangeService {
           throw new ConflictException(
             'This quote expired. Review a new quote before paying.',
           );
+        await this.rates.assertQuoteSafe(
+          tx,
+          q.sourceCurrency,
+          q.targetCurrency,
+          q.rate.toString(),
+        );
+        const maximumTarget = q.amount
+          .mul(q.rate)
+          .toDecimalPlaces(2, Decimal.ROUND_DOWN);
+        if (
+          !q.targetAmount.isFinite() ||
+          q.targetAmount.lte(0) ||
+          q.targetAmount.gt(maximumTarget)
+        ) {
+          throw new ConflictException(
+            'This quote needs to be refreshed. Request a new quote.',
+          );
+        }
+        await eligibleKoraUser(tx, userId);
         await this.holds.assertOutboundAllowed(
           { operation: 'EXCHANGE', currency: q.sourceCurrency },
           tx,

@@ -94,6 +94,15 @@ class _ExchangeConverterState extends State<ExchangeConverter> {
     });
     try {
       final data = await widget.service.previewRate(widget.source);
+      if (data['blockedReason'] == 'EXCHANGE_RATE_PAIR_CONFLICT') {
+        if (!mounted || generation != _generation) return;
+        setState(() {
+          _rateDirectionInvalid = true;
+          _rate = null;
+          _receive.clear();
+        });
+        return;
+      }
       if (data['configured'] == false) {
         if (!mounted || generation != _generation) return;
         setState(() {

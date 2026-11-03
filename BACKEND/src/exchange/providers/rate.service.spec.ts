@@ -12,6 +12,7 @@ function createRateService(options: {
 }) {
   const prisma = {
     $transaction: jest.fn(),
+    $executeRaw: jest.fn().mockResolvedValue(1),
     rate: {
       findUnique: jest
         .fn()
@@ -643,4 +644,86 @@ describe('admin-controlled exchange rates', () => {
     expect(prisma.rate.upsert).not.toHaveBeenCalled();
     expect(http.get).not.toHaveBeenCalled();
   });
+});
+
+describe('admin rate pair financial safety', () => {
+  const row = (
+    from: string,
+    rate: string,
+    basis = 'TARGET_PER_SOURCE',
+    markup = '0',
+  ) => ({
+    from,
+    to: from === 'NGN' ? 'GHS' : 'NGN',
+    rate: new Decimal(rate),
+    quoteBasis: basis,
+    markup: new Decimal(markup),
+    source: 'admin',
+    validUntil: null,
+    updatedAt: new Date(),
+  });
+
+  it.each(['NGN', 'GHS'])(
+    'blocks new executable %s rates when the saved pair creates profit',
+    async (from) => {
+      const forward = row('NGN', '87', 'SOURCE_PER_TARGET');
+      const reverse = row('GHS', '0.0111', 'SOURCE_PER_TARGET');
+      const { service, prisma } = createRateService({
+        rateSource: 'admin',
+        stored: from === 'NGN' ? forward : reverse,
+      });
+      prisma.rate.findMany.mockResolvedValue([
+        from === 'NGN' ? reverse : forward,
+      ]);
+      await expect(
+        service.getRate(from, from === 'NGN' ? 'GHS' : 'NGN'),
+      ).rejects.toThrow('pricing');
+    },
+  );
+
+  it('rejects an admin edit that crosses the opposite price before saving or auditing', async () => {
+    const { service, prisma, redis } = createRateService({
+      rateSource: 'admin',
+    });
+    prisma.rate.findMany.mockResolvedValue([row('GHS', '90')]);
+    await expect(
+      service.setManualRate('NGN', 'GHS', 87, 0, 'admin-1', 'Test', undefined, {
+        quoteBasis: 'SOURCE_PER_TARGET',
+      }),
+    ).rejects.toThrow('round trip');
+    expect(prisma.rate.upsert).not.toHaveBeenCalled();
+    expect(prisma.auditLog.create).not.toHaveBeenCalled();
+    expect(redis.set).not.toHaveBeenCalled();
+  });
+
+  it('allows an admin correction and checks inside the locked transaction', async () => {
+    const { service, prisma } = createRateService({ rateSource: 'admin' });
+    prisma.rate.findMany.mockResolvedValue([
+      row('NGN', '87', 'SOURCE_PER_TARGET'),
+    ]);
+    await service.setManualRate('GHS', 'NGN', 85, 0, 'admin-1');
+    expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+    expect(prisma.$executeRaw).toHaveBeenCalledTimes(1);
+    expect(prisma.$executeRaw.mock.invocationCallOrder[0]).toBeLessThan(
+      prisma.rate.findMany.mock.invocationCallOrder[0],
+    );
+    expect(prisma.auditLog.create).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ['0.01', '100', '0'],
+    ['0.0101', '100', '1'],
+  ])(
+    'allows equality or a markup-protected spread: %s',
+    async (rate, reverse, markup) => {
+      const { service, prisma } = createRateService({
+        rateSource: 'admin',
+        stored: row('NGN', rate, 'TARGET_PER_SOURCE', markup),
+      });
+      prisma.rate.findMany.mockResolvedValue([row('GHS', reverse)]);
+      await expect(service.getRate('NGN', 'GHS')).resolves.toMatchObject({
+        rate: Number(rate),
+      });
+    },
+  );
 });

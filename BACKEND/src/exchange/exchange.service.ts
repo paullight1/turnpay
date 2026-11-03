@@ -108,8 +108,8 @@ export class ExchangeService {
 
   async getRate(from: string, to: string) {
     try {
-      const { rate, inputRate, quoteBasis, markup, isStale } =
-        await this.rateService.getRate(from, to);
+      const { rate, inputRate, quoteBasis, markup, isStale, pairSafety } =
+        await this.rateService.getRate(from, to, { forDisplay: true });
       return {
         from,
         to,
@@ -117,8 +117,18 @@ export class ExchangeService {
         inputRate,
         quoteBasis,
         markupPercent: markup,
-        effectiveRate: rate * (1 - markup / 100),
+        effectiveRate:
+          pairSafety?.safe === false ? null : rate * (1 - markup / 100),
         isStale,
+        ...(pairSafety
+          ? {
+              configured: pairSafety.safe,
+              blockedReason: pairSafety.safe
+                ? null
+                : 'EXCHANGE_RATE_PAIR_CONFLICT',
+              pairSafety,
+            }
+          : {}),
       };
     } catch (error) {
       if (!(error instanceof AdminExchangeRateNotSetException)) throw error;
@@ -157,7 +167,9 @@ export class ExchangeService {
     }
     const fee = this.calculateFee(amount, markup);
     const sendAmount = amount.plus(fee);
-    const receiveAmount = amount.mul(effectiveRate).toDecimalPlaces(2);
+    const receiveAmount = amount
+      .mul(effectiveRate)
+      .toDecimalPlaces(2, Decimal.ROUND_DOWN);
     if (!receiveAmount.isFinite() || receiveAmount.lte(0)) {
       throw new BadRequestException('Amount is too small for this exchange');
     }
@@ -240,6 +252,10 @@ export class ExchangeService {
       );
     }
 
+    // A cached quote is not a completed exchange. Recheck the live pair
+    // before its first debit, while durable completed replays return above.
+    await this.getFreshRate(quote.from, quote.to);
+
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
       select: {
@@ -283,6 +299,24 @@ export class ExchangeService {
     const result = await this.prisma
       .$transaction(
         async (tx) => {
+          await this.rateService.assertQuoteSafe(
+            tx,
+            quote.from,
+            quote.to,
+            quote.rate,
+          );
+          const maximumReceive = amount
+            .mul(new Decimal(quote.rate))
+            .toDecimalPlaces(2, Decimal.ROUND_DOWN);
+          if (
+            !receiveAmount.isFinite() ||
+            receiveAmount.lte(0) ||
+            receiveAmount.gt(maximumReceive)
+          ) {
+            throw new ConflictException(
+              'This quote needs to be refreshed. Request a new quote.',
+            );
+          }
           const sourceWallet = await tx.wallet.findUnique({
             where: {
               userId_currency: {

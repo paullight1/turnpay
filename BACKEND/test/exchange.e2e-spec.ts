@@ -35,6 +35,7 @@ describe('Exchange Quote E2E', () => {
   const executedQuotes = new Set<string>();
 
   const mockExchangeService = {
+    assertQuoteSafe: jest.fn().mockResolvedValue(undefined),
     getRate: jest.fn().mockResolvedValue({
       from: 'GHS',
       to: 'NGN',
@@ -167,6 +168,7 @@ describe('Exchange Quote E2E', () => {
   };
 
   const mockRateService = {
+    assertQuoteSafe: jest.fn().mockResolvedValue(undefined),
     getRate: jest.fn().mockResolvedValue({
       rate: 3.1746,
       markup: 2.5,

@@ -27,6 +27,7 @@ type CurrentRate = {
   effectiveRate: number | string | null;
   isStale: boolean;
   configured?: boolean;
+  blockedReason?: string | null;
 };
 
 type UpdateRateResponse = {
@@ -68,6 +69,10 @@ export function RateControlCard() {
   return (
     <div className="grid gap-4">
       <h2 className="text-lg font-semibold">Exchange rates</h2>
+      <p className="text-sm text-muted-foreground">
+        Set both prices here. They are checked together to prevent a profitable
+        round trip.
+      </p>
       <div className="grid min-w-0 gap-4 lg:grid-cols-2">
         {CURRENCY_PAIRS.map((direction) => (
           <DirectionRateEditor key={direction.from} selectedPair={direction} />
@@ -125,6 +130,45 @@ function canonicalRate(value: number, basis: RateQuoteBasis): number | null {
   return Number.isFinite(result) && result > 0 ? result : null;
 }
 
+function decimalRatio(value: string | number) {
+  const match = /^(\d+)(?:\.(\d+))?(?:e([+-]?\d+))?$/i.exec(String(value));
+  if (!match) return null;
+  const fraction = match[2] ?? "";
+  const scale = fraction.length - Number(match[3] ?? 0);
+  if (Math.abs(scale) > 320) return null;
+  const numerator = BigInt(match[1] + fraction);
+  return scale >= 0
+    ? { numerator, denominator: BigInt(10) ** BigInt(scale) }
+    : {
+        numerator: numerator * BigInt(10) ** BigInt(-scale),
+        denominator: BigInt(1),
+      };
+}
+
+function createsRoundTripProfit(
+  draft: number,
+  opposite: CurrentRate | undefined,
+) {
+  if (
+    !opposite ||
+    (opposite.configured === false &&
+      opposite.blockedReason !== "EXCHANGE_RATE_PAIR_CONFLICT") ||
+    opposite.isStale
+  )
+    return false;
+  const forward = decimalRatio(draft);
+  const reverse = decimalRatio(String(opposite.baseRate ?? ""));
+  const markup = decimalRatio(String(opposite.markupPercent ?? 0));
+  if (!forward || !reverse || !markup) return false;
+  const hundred = BigInt(100);
+  const factor = hundred * markup.denominator - markup.numerator;
+  return (
+    factor > BigInt(0) &&
+    forward.numerator * reverse.numerator * factor >
+      forward.denominator * reverse.denominator * hundred * markup.denominator
+  );
+}
+
 function displayRate(value: number): string {
   if (!Number.isFinite(value)) return "";
   return value.toFixed(6).replace(/\.?(0+)$/, "");
@@ -158,6 +202,19 @@ function DirectionRateEditor({
     refetchInterval: 10000,
   });
 
+  const oppositeRateQuery = useQuery({
+    queryKey: ["admin-exchange-rate", selectedPair.to, selectedPair.from],
+    queryFn: async () => {
+      const res = await adminExchangeRateApi.getRate(
+        selectedPair.to,
+        selectedPair.from,
+      );
+      return res.data as CurrentRate;
+    },
+    staleTime: 30000,
+    refetchInterval: 10000,
+  });
+
   // Prefill once. Background refreshes must never overwrite an administrator's
   // in-progress edit or silently switch the units underneath it.
   useEffect(() => {
@@ -170,7 +227,9 @@ function DirectionRateEditor({
     setPrefilled(true);
     setQuoteBasis(serverBasis);
     setRate(
-      rateQuery.data.configured === false || rateQuery.data.isStale
+      (rateQuery.data.configured === false &&
+        rateQuery.data.blockedReason !== "EXCHANGE_RATE_PAIR_CONFLICT") ||
+        rateQuery.data.isStale
         ? ""
         : String(rateQuery.data.inputRate ?? rateQuery.data.baseRate ?? ""),
     );
@@ -203,9 +262,16 @@ function DirectionRateEditor({
       ? "Enter cedis received for ₦1, below 1."
       : "Enter naira received for GH₵1, above 1.";
   }, [numericDraftRate, positiveDraft, quoteBasis, selectedPair.from]);
-  const validDraft = positiveDraft && !directionError;
-  const canonicalDraftRate = validDraft
+  const directionValid = positiveDraft && !directionError;
+  const canonicalDraftRate = directionValid
     ? canonicalRate(numericDraftRate, quoteBasis)
+    : null;
+  const pairConflict =
+    canonicalDraftRate !== null &&
+    createsRoundTripProfit(canonicalDraftRate, oppositeRateQuery.data);
+  const validDraft = directionValid && !pairConflict;
+  const pairError = pairConflict
+    ? "These prices allow a profitable round trip. Reduce the amount received or adjust the opposite rate."
     : null;
   const currentInputRate = Number(
     rateQuery.data?.inputRate ?? rateQuery.data?.baseRate,
@@ -277,7 +343,7 @@ function DirectionRateEditor({
 
   const submitRate = () => {
     if (!validDraft) {
-      toast.error(directionError ?? "Enter a positive rate");
+      toast.error(directionError ?? pairError ?? "Enter a positive rate");
       return;
     }
     updateRateMutation.mutate();
@@ -294,11 +360,14 @@ function DirectionRateEditor({
               ? "Unavailable"
               : hasUnsavedChanges
                 ? "Unsaved"
-                : rateQuery.data?.configured === false
-                  ? "Not set"
-                  : rateQuery.data?.isStale
-                    ? "Stale"
-                    : "Saved"}
+                : rateQuery.data?.blockedReason ===
+                    "EXCHANGE_RATE_PAIR_CONFLICT"
+                  ? "Needs attention"
+                  : rateQuery.data?.configured === false
+                    ? "Not set"
+                    : rateQuery.data?.isStale
+                      ? "Stale"
+                      : "Saved"}
         </span>
       </div>
 
@@ -409,7 +478,12 @@ function DirectionRateEditor({
             {directionError}
           </p>
         )}
-        {validDraft && canonicalDraftRate && (
+        {pairError && (
+          <p role="alert" className="text-destructive">
+            {pairError}
+          </p>
+        )}
+        {directionValid && canonicalDraftRate && (
           <>
             {quoteBasis === "SOURCE_PER_TARGET" && (
               <p>{`${rate.trim()} ${selectedPair.from} = 1 ${selectedPair.to}`}</p>
@@ -442,6 +516,8 @@ function DirectionRateEditor({
           updateRateMutation.isPending ||
           rateQuery.isLoading ||
           rateQuery.isError ||
+          oppositeRateQuery.isLoading ||
+          oppositeRateQuery.isError ||
           !validDraft
         }
       >

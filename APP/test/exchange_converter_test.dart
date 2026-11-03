@@ -12,6 +12,17 @@ class _MissingRate extends ManualExchangeService {
       };
 }
 
+class _ConflictingRates extends ManualExchangeService {
+  @override
+  Future<Map<String, dynamic>> previewRate(String source) async => {
+        'configured': false,
+        'blockedReason': 'EXCHANGE_RATE_PAIR_CONFLICT',
+        'inputRate': 87,
+        'effectiveRate': null,
+        'isStale': false,
+      };
+}
+
 class _Rates extends ManualExchangeService {
   String rate = '0.02';
   bool stale = false;
@@ -29,6 +40,34 @@ class _RecoveringRates extends ManualExchangeService {
 }
 
 void main() {
+  testWidgets(
+      'explains temporarily blocked paired prices without an executable estimate',
+      (tester) async {
+    final amount = TextEditingController(text: '10000');
+    final key = GlobalKey<FormState>();
+    await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+            body: Form(
+                key: key,
+                child: ExchangeConverter(
+                    source: 'NGN',
+                    amount: amount,
+                    service: _ConflictingRates(),
+                    onSwap: null,
+                    enabled: true)))));
+    await tester.pumpAndSettle();
+    expect(
+        find.text(
+            'This exchange rate is being corrected. Please try again shortly.'),
+        findsOneWidget);
+    expect(key.currentState!.validate(), isFalse);
+    expect(
+        tester.widget<TextFormField>(find.byType(TextFormField).last).enabled,
+        isFalse);
+    await tester.pumpWidget(const SizedBox.shrink());
+    amount.dispose();
+  });
+
   test('preview uses exact arithmetic and reverse entry rounds up', () {
     expect(convertExchangePreview('1000', '0.02'), '20.00');
     expect(convertExchangePreview('20', '0.02', inverse: true), '1000.00');

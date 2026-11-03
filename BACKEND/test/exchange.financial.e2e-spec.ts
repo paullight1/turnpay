@@ -41,6 +41,7 @@ describe('quote exchange financial boundaries (real PostgreSQL)', () => {
     service = new ExchangeService(
       prisma as never,
       {
+        assertQuoteSafe: jest.fn().mockResolvedValue(undefined),
         getRate: jest
           .fn()
           .mockResolvedValue({ rate: 0.02, markup: 0, isStale: false }),

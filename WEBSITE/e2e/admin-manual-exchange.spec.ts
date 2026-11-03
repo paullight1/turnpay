@@ -584,12 +584,12 @@ test.describe("Admin manual exchange queue", () => {
       cedis.getByRole("button", { name: "Save cedis to naira", exact: true }),
     ).toBeDisabled();
     await expect(cedis.getByRole("alert")).toContainText("above 1");
-    await cedis.getByLabel("NGN received for 1 GHS").fill("125.50");
+    await cedis.getByLabel("NGN received for 1 GHS").fill("85");
     await expect(
-      cedis.getByText("1 GHS ≈ 125.5 NGN", { exact: true }),
+      cedis.getByText("1 GHS ≈ 85 NGN", { exact: true }),
     ).toBeVisible();
     await expect(
-      cedis.getByText("To receive at least 1 NGN, send 0.01 GHS.", {
+      cedis.getByText("To receive at least 1 NGN, send 0.02 GHS.", {
         exact: true,
       }),
     ).toBeVisible();
@@ -608,11 +608,77 @@ test.describe("Admin manual exchange queue", () => {
       {
         from: "GHS",
         to: "NGN",
-        rate: 125.5,
+        rate: 85,
         quoteBasis: "TARGET_PER_SOURCE",
         markup: 0,
       },
     ]);
+  });
+
+  test("keeps unsafe saved prices editable and blocks a crossed draft until corrected", async ({
+    page,
+  }) => {
+    const writes: Record<string, unknown>[] = [];
+    await page.route("**/api/exchange/rate?*", (route) => {
+      const from = new URL(route.request().url()).searchParams.get("from");
+      const ngn = from === "NGN";
+      return route.fulfill({
+        json: {
+          from,
+          to: ngn ? "GHS" : "NGN",
+          configured: false,
+          baseRate: ngn ? 0.011494 : 90.09009,
+          inputRate: ngn ? 87 : 0.0111,
+          quoteBasis: "SOURCE_PER_TARGET",
+          markupPercent: 0,
+          effectiveRate: null,
+          isStale: false,
+          blockedReason: "EXCHANGE_RATE_PAIR_CONFLICT",
+        },
+      });
+    });
+    await page.route("**/api/exchange/rates", (route) => {
+      const body = route.request().postDataJSON();
+      writes.push(body);
+      return route.fulfill({
+        json: {
+          ...body,
+          success: true,
+          inputRate: body.rate,
+          baseRate: 0.010526,
+          effectiveRate: 0.010526,
+        },
+      });
+    });
+    const menu = page.getByRole("button", { name: "Open menu", exact: true });
+    if (await menu.isVisible()) await menu.click();
+    await page
+      .getByRole("navigation", { name: "Admin navigation" })
+      .getByRole("link", { name: "Exchange rates", exact: true })
+      .click();
+    const naira = page.getByRole("region", {
+      name: "Naira to cedis",
+      exact: true,
+    });
+    await expect(naira.getByLabel("NGN per 1 GHS")).toHaveValue("87");
+    await expect(naira.getByRole("alert")).toContainText("round trip");
+    await expect(
+      naira.getByRole("button", { name: "Save naira to cedis", exact: true }),
+    ).toBeDisabled();
+    await naira.getByLabel("NGN per 1 GHS").fill("95");
+    await expect(
+      naira.getByRole("button", { name: "Save naira to cedis", exact: true }),
+    ).toBeEnabled();
+    await naira
+      .getByRole("button", { name: "Save naira to cedis", exact: true })
+      .click();
+    await expect.poll(() => writes.length).toBe(1);
+    expect(writes[0]).toMatchObject({
+      from: "NGN",
+      to: "GHS",
+      rate: 95,
+      quoteBasis: "SOURCE_PER_TARGET",
+    });
   });
 
   test("rounds a divisor reciprocal down before and after saving", async ({

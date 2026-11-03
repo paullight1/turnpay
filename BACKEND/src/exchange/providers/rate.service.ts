@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   OnModuleInit,
   ServiceUnavailableException,
@@ -51,7 +52,23 @@ interface CachedRate {
   source?: string;
 }
 
+export interface RatePairSafety {
+  safe: boolean;
+  oppositeEffectiveRate: string;
+  maximumEffectiveRate: string;
+}
+
+export class AdminExchangeRatePairConflictException extends ServiceUnavailableException {
+  constructor() {
+    super({
+      code: 'EXCHANGE_RATE_PAIR_CONFLICT',
+      message: 'Exchange pricing is being updated. Please try again shortly.',
+    });
+  }
+}
+
 interface RateResult {
+  pairSafety?: RatePairSafety;
   /** Canonical target units per source unit. */
   rate: number;
   /** Original persisted/admin input value. */
@@ -73,6 +90,8 @@ const CIRCUIT_FAILURES_KEY = 'fx:circuit:failures';
 const CIRCUIT_OPENED_AT_KEY = 'fx:circuit:openedAt';
 const DEFAULT_MARKUP_PERCENT = 2.5;
 const CANONICAL_RATE_DECIMAL_PLACES = 6;
+// Preserve tiny excesses above one when checking two effective prices.
+const PairDecimal = Decimal.clone({ precision: 40 });
 
 @Injectable()
 export class RateService implements OnModuleInit {
@@ -110,8 +129,13 @@ export class RateService implements OnModuleInit {
    * Returns isStale=true whenever a rate is outside its execution freshness
    * window, while still retaining a bounded stale value for display.
    */
-  async getRate(from: string, to: string): Promise<RateResult> {
-    if (this.usesAdminRates()) return this.getAdminRate(from, to);
+  async getRate(
+    from: string,
+    to: string,
+    options: { forDisplay?: boolean } = {},
+  ): Promise<RateResult> {
+    if (this.usesAdminRates())
+      return this.getAdminRate(from, to, options.forDisplay);
     const key = `${from}_${to}`;
 
     // Check in-memory cache first (fast path)
@@ -191,10 +215,15 @@ export class RateService implements OnModuleInit {
     );
   }
 
-  private async getAdminRate(from: string, to: string): Promise<RateResult> {
+  private async getAdminRate(
+    from: string,
+    to: string,
+    forDisplay = false,
+    database: PrismaService | Prisma.TransactionClient = this.prisma,
+  ): Promise<RateResult> {
     // The database is authoritative: another admin/process may have changed
     // the price. Do not substitute an API value or an old Redis/memory entry.
-    const stored = await this.prisma.rate.findUnique({
+    const stored = await database.rate.findUnique({
       where: { from_to: { from, to } },
     });
     const inputRate = stored?.rate.toNumber();
@@ -217,6 +246,16 @@ export class RateService implements OnModuleInit {
         (!Number.isFinite(expiry) || expiry <= Date.now()))
     )
       throw new AdminExchangeRateNotSetException();
+    const pairSafety = await this.getPairSafety(
+      database,
+      from,
+      to,
+      rate,
+      markup,
+    );
+    if (pairSafety && !pairSafety.safe && !forDisplay) {
+      throw new AdminExchangeRatePairConflictException();
+    }
     // Admin prices stay active until replaced or explicitly expired. The
     // short market-feed freshness window applies only to API mode.
     return {
@@ -225,6 +264,56 @@ export class RateService implements OnModuleInit {
       quoteBasis,
       markup,
       isStale: false,
+      ...(pairSafety ? { pairSafety } : {}),
+    };
+  }
+
+  private async getPairSafety(
+    db: PrismaService | Prisma.TransactionClient,
+    from: string,
+    to: string,
+    canonicalRate: number,
+    markup: number,
+  ): Promise<RatePairSafety | undefined> {
+    const [opposite] = await db.rate.findMany({
+      where: { from: to, to: from, source: 'admin' },
+      take: 1,
+    });
+    // An unavailable reverse direction cannot issue a quote. Enabling or
+    // replacing it goes through this same pair check before it can be saved.
+    if (
+      !opposite ||
+      opposite.source !== 'admin' ||
+      (opposite.validUntil && opposite.validUntil.getTime() <= Date.now())
+    )
+      return;
+    const input = opposite.rate.toNumber();
+    const oppositeMarkup = opposite.markup.toNumber();
+    const basis = this.readQuoteBasis(opposite.quoteBasis);
+    if (
+      !this.isFinitePositiveRate(input) ||
+      !this.isGhanaRateDirectionValid(to, from, input, basis) ||
+      !Number.isFinite(oppositeMarkup) ||
+      oppositeMarkup < 0 ||
+      oppositeMarkup >= 100
+    )
+      return;
+    const oppositeCanonical = this.toCanonicalRate(input, basis);
+    const effective = new PairDecimal(String(canonicalRate)).mul(
+      new PairDecimal(1).minus(new PairDecimal(String(markup)).div(100)),
+    );
+    const reverse = new PairDecimal(String(oppositeCanonical)).mul(
+      new PairDecimal(1).minus(
+        new PairDecimal(String(oppositeMarkup)).div(100),
+      ),
+    );
+    return {
+      safe: effective.mul(reverse).lte(1),
+      oppositeEffectiveRate: reverse.toString(),
+      maximumEffectiveRate: new PairDecimal(1)
+        .div(reverse)
+        .toDecimalPlaces(12, PairDecimal.ROUND_DOWN)
+        .toString(),
     };
   }
 
@@ -236,6 +325,50 @@ export class RateService implements OnModuleInit {
       markup: cached.markup,
       isStale,
     };
+  }
+
+  /** Called inside the first money transaction, before wallet/user locks. */
+  async assertQuoteSafe(
+    tx: Prisma.TransactionClient,
+    from: string,
+    to: string,
+    frozenRate: string | number,
+  ): Promise<void> {
+    if (!this.usesAdminRates()) return;
+    const pairKey = `trustpay:admin-fx:${[from, to].sort().join(':')}`;
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock_shared(hashtext(${pairKey}))`;
+    try {
+      // Row locks also detect a stale Serializable snapshot after waiting
+      // for an admin writer. They protect against direct database updates.
+      await tx.$queryRaw`SELECT "id" FROM "rates"
+        WHERE ("from" = ${from} AND "to" = ${to}) OR ("from" = ${to} AND "to" = ${from})
+        ORDER BY "from", "to" FOR SHARE`;
+    } catch (error) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        (error.code === 'P2034' ||
+          (error.code === 'P2010' && error.meta?.code === '40001'))
+      ) {
+        throw new ConflictException(
+          'Exchange pricing changed. Request a new quote.',
+        );
+      }
+      throw error;
+    }
+    const current = await this.getAdminRate(from, to, false, tx);
+    const effective = new PairDecimal(String(current.rate)).mul(
+      new PairDecimal(1).minus(
+        new PairDecimal(String(current.markup)).div(100),
+      ),
+    );
+    const frozen = new PairDecimal(String(frozenRate));
+    // Requiring no more than the current own-leg price also stops two
+    // different old quotes from combining more generous historical terms.
+    if (!frozen.isFinite() || frozen.lte(0) || frozen.gt(effective)) {
+      throw new ConflictException(
+        'This quote price changed. Request a new quote.',
+      );
+    }
   }
 
   /**
@@ -283,6 +416,24 @@ export class RateService implements OnModuleInit {
     const persistRateAndAudit = async (
       db: PrismaService | Prisma.TransactionClient,
     ) => {
+      // Serialize both directions, including first insert, before reading
+      // either row. The transaction also contains the price and its audit.
+      const pairKey = `trustpay:admin-fx:${[from, to].sort().join(':')}`;
+      await db.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${pairKey}))`;
+      const safety = await this.getPairSafety(
+        db,
+        from,
+        to,
+        canonicalRate,
+        persistedMarkup,
+      );
+      if (safety && !safety.safe) {
+        throw new BadRequestException({
+          code: 'EXCHANGE_RATE_PAIR_CONFLICT',
+          message:
+            'These rates allow a profitable round trip. Reduce this payout rate or adjust the opposite rate in the admin dashboard.',
+        });
+      }
       // Get the old rate and write the new rate/audit record in one DB
       // transaction for direct admin overrides. The dual-approval path passes
       // its existing transaction client and writes its review audit there.
@@ -364,7 +515,7 @@ export class RateService implements OnModuleInit {
       }
     };
 
-    if (database === this.prisma && adminId) {
+    if (database === this.prisma) {
       await this.prisma.$transaction(async (tx) => {
         await persistRateAndAudit(tx);
       });
