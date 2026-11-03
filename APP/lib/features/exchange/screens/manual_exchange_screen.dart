@@ -363,12 +363,7 @@ class _ManualExchangeScreenState extends State<ManualExchangeScreen>
 
   Future<String?> _requireTransactionPin() async {
     try {
-      final values = await Future.wait<dynamic>([
-        _securityService.getConfig(),
-        _authService.getTransactionPinStatus(),
-      ]);
-      final device = values[0] as TransactionSecurityConfig;
-      final server = values[1] as TransactionPinServerStatus;
+      final server = await _authService.getTransactionPinStatus();
 
       if (!mounted) return null;
       if (!server.configured) {
@@ -423,8 +418,8 @@ class _ManualExchangeScreenState extends State<ManualExchangeScreen>
       return Navigator.of(context).push<String>(
         MaterialPageRoute(
           fullscreenDialog: true,
-          builder: (_) => TransactionPinScreen.verify(
-            pinLength: server.pinLength ?? device.pinLength,
+          builder: (_) => TransactionPinScreen.collect(
+            pinLength: server.pinLength ?? 4,
             title: 'Enter your transaction PIN',
             subtitle:
                 'Approve this exchange request before the order is created.',

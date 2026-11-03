@@ -32,11 +32,9 @@ Future<String?> requireGhanaPin(BuildContext context) async {
             'Check your transaction PIN settings in Security & Limits before continuing.')));
     return null;
   }
-  final device = await security.getConfig();
-  if (!context.mounted) return null;
   return Navigator.of(context).push<String>(MaterialPageRoute(
-      builder: (_) => TransactionPinScreen.verify(
-          pinLength: status.pinLength ?? device.pinLength,
+      builder: (_) => TransactionPinScreen.collect(
+          pinLength: status.pinLength ?? 4,
           title: 'Enter your transaction PIN',
           subtitle: 'Approve the amount and recipient you just reviewed.',
           securityService: security,

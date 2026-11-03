@@ -34,6 +34,7 @@ import '../../security/screens/transaction_security_screen.dart';
 import '../widgets/vtu_phone.dart';
 import '../widgets/transfer_widgets.dart';
 import '../widgets/transfer_review_dialog.dart';
+import '../widgets/payment_review_sheet.dart';
 import '../widgets/vtu_purchase_widgets.dart';
 import 'extended_vtu_form.dart';
 import 'transfer_receipt_screen.dart';
@@ -103,6 +104,8 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
   late final ApiClient _apiClient;
   late final HomeDataService _homeDataService;
   late final AuthService _authService;
+  Future<TransactionPinServerStatus>? _pinStatusRequest;
+  DateTime? _pinStatusRequestedAt;
   late final TransactionSecurityService _transactionSecurityService;
   late final PaymentAttemptStore _paymentAttemptStore;
   late final PaymentRecoveryService _paymentRecoveryService;
@@ -275,6 +278,10 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
           store: _paymentAttemptStore,
         );
     _authService = AuthService(apiClient: _apiClient);
+    if (widget.kind != MoneyActionKind.fund) {
+      _preparedTransactionPinStatus()
+          .then<void>((_) {}, onError: (Object _, StackTrace __) {});
+    }
     _homeDataService = HomeDataService(apiClient: _apiClient);
     _vtuService = VtuService(apiClient: _apiClient);
     _walletService = WalletService(apiClient: _apiClient);
@@ -3239,6 +3246,8 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
       _orderPollAttempts = 0;
       _scheduleVtuOrderAutoCheck();
     } catch (error) {
+      final pinRejection = transactionPinRejectionMessage(error);
+      if (pinRejection != null) _pinStatusRequest = null;
       if (requestStarted &&
           receivedPaymentState?.isTerminal != true &&
           paymentAttemptKey != null &&
@@ -3259,15 +3268,16 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
       if (mounted) {
         setState(() {
           _setMessageState(
-            receivedPaymentState == PaymentAttemptState.success
-                ? 'Payment confirmed. Reference: ${_responseString(receivedPaymentData?['reference'])}. Open your history for the receipt.'
-                : receivedPaymentState?.isTerminal == true
-                    ? 'This payment is ${receivedPaymentState!.wireName.toLowerCase()}. Check your history for the final details.'
-                    : !requestStarted
-                        ? 'Payment protection could not prepare the transfer. No transfer request was sent. Try again.'
-                        : paymentOperation == null
-                            ? authErrorMessage(error, 'Request failed')
-                            : 'We could not confirm this payment. It is still unresolved and will not be sent again automatically.',
+            pinRejection ??
+                (receivedPaymentState == PaymentAttemptState.success
+                    ? 'Payment confirmed. Reference: ${_responseString(receivedPaymentData?['reference'])}. Open your history for the receipt.'
+                    : receivedPaymentState?.isTerminal == true
+                        ? 'This payment is ${receivedPaymentState!.wireName.toLowerCase()}. Check your history for the final details.'
+                        : !requestStarted
+                            ? 'Payment protection could not prepare the transfer. No transfer request was sent. Try again.'
+                            : paymentOperation == null
+                                ? authErrorMessage(error, 'Request failed')
+                                : 'We could not confirm this payment. It is still unresolved and will not be sent again automatically.'),
             type: receivedPaymentState == PaymentAttemptState.success
                 ? MoneyActionFeedbackType.success
                 : !requestStarted || paymentOperation == null
@@ -4018,85 +4028,18 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
     final config = _configFor(widget.kind);
     final rows = _reviewRows(amount);
 
-    if (_isTransferAction) {
-      return await showDialog<bool>(
-            context: context,
-            builder: (dialogContext) => TransferReviewDialog(
-              title: 'Review ${config.title.toLowerCase()}',
-              amount: amount,
-              currency: _currency,
-              amountWords: moneyAmountInWords(amount, _currency),
-              entries: rows
-                  .skip(1)
-                  .map((row) => TransferReviewEntry(row.label, row.value))
-                  .toList(),
-              onEdit: () => Navigator.of(dialogContext).pop(false),
-              onContinue: () => Navigator.of(dialogContext).pop(true),
-            ),
-          ) ??
-          false;
-    }
-
-    return await showDialog<bool>(
-          context: context,
-          builder: (dialogContext) {
-            return AlertDialog(
-              backgroundColor: AppColors.surface,
-              title: Text(
-                'Review ${config.title.toLowerCase()}',
-                style: AppTextStyles.headingM,
-              ),
-              content: SingleChildScrollView(
-                  child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Text(
-                    rows.first.label,
-                    textAlign: TextAlign.center,
-                    style: AppTextStyles.bodyS.copyWith(
-                      color: AppColors.textSecondary,
-                    ),
-                  ),
-                  const SizedBox(height: AppSpacing.xs),
-                  Text(
-                    rows.first.value,
-                    textAlign: TextAlign.center,
-                    style: AppTextStyles.headingL,
-                  ),
-                  const SizedBox(height: AppSpacing.md),
-                  for (final row in rows.skip(1))
-                    _ReviewDialogRow(label: row.label, value: row.value),
-                  const SizedBox(height: AppSpacing.sm),
-                  Text(
-                    'Only continue if these details are correct.',
-                    style: AppTextStyles.bodyS,
-                  ),
-                ],
-              )),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.of(dialogContext).pop(false),
-                  child: Text(
-                    'Edit',
-                    style: AppTextStyles.labelM.copyWith(
-                      color: AppColors.textSecondary,
-                    ),
-                  ),
-                ),
-                FilledButton(
-                  onPressed: () => Navigator.of(dialogContext).pop(true),
-                  style: FilledButton.styleFrom(
-                    backgroundColor: AppColors.primary,
-                    foregroundColor: Colors.white,
-                  ),
-                  child: const Text('Continue'),
-                ),
-              ],
-            );
-          },
-        ) ??
-        false;
+    return showPaymentReviewSheet(
+      context,
+      title: 'Review ${config.title.toLowerCase()}',
+      amountLabel: _isTransferAction
+          ? transferMoneyLabel(amount, _currency)
+          : rows.first.value,
+      amountWords: moneyAmountInWords(amount, _currency),
+      entries: rows
+          .skip(1)
+          .map((row) => PaymentReviewEntry(row.label, row.value))
+          .toList(),
+    );
   }
 
   List<_ReviewRowData> _reviewRows(String amount) {
@@ -4899,6 +4842,17 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
     return currency == 'NGN' ? 'Bank account' : 'Mobile money wallet';
   }
 
+  Future<TransactionPinServerStatus> _preparedTransactionPinStatus() {
+    final now = DateTime.now();
+    if (_pinStatusRequest == null ||
+        _pinStatusRequestedAt == null ||
+        now.difference(_pinStatusRequestedAt!) > const Duration(seconds: 30)) {
+      _pinStatusRequestedAt = now;
+      _pinStatusRequest = _authService.getTransactionPinStatus();
+    }
+    return _pinStatusRequest!;
+  }
+
   Future<String?> _requireTransactionApproval({
     required String title,
     required String subtitle,
@@ -4907,12 +4861,7 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
       setState(() => _isAwaitingTransferApproval = true);
     }
     try {
-      final results = await Future.wait<dynamic>([
-        _transactionSecurityService.getConfig(),
-        _authService.getTransactionPinStatus(),
-      ]);
-      final config = results[0] as TransactionSecurityConfig;
-      final serverStatus = results[1] as TransactionPinServerStatus;
+      final serverStatus = await _preparedTransactionPinStatus();
 
       if (!mounted) {
         return null;
@@ -4958,6 +4907,7 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
 
         if (shouldSetup && mounted) {
           await context.push(AppRoutes.transactionSecurity);
+          _pinStatusRequest = null;
         }
         return null;
       }
@@ -4981,8 +4931,8 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
 
       final approvedPin = await Navigator.of(context).push<String>(
         MaterialPageRoute(
-          builder: (_) => TransactionPinScreen.verify(
-            pinLength: serverStatus.pinLength ?? config.pinLength,
+          builder: (_) => TransactionPinScreen.collect(
+            pinLength: serverStatus.pinLength ?? 4,
             title: title,
             subtitle: subtitle,
             securityService: _transactionSecurityService,
@@ -6355,34 +6305,6 @@ class _InputField extends StatelessWidget {
         counterText: maxCodePoints == null
             ? null
             : '${controller.text.runes.length}/$maxCodePoints',
-      ),
-    );
-  }
-}
-
-class _ReviewDialogRow extends StatelessWidget {
-  final String label;
-  final String value;
-
-  const _ReviewDialogRow({required this.label, required this.value});
-
-  @override
-  Widget build(BuildContext context) {
-    AppColors.watch(context);
-    return Padding(
-      padding: const EdgeInsets.only(bottom: AppSpacing.sm),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          SizedBox(width: 92, child: Text(label, style: AppTextStyles.bodyS)),
-          Expanded(
-            child: Text(
-              value,
-              style: AppTextStyles.labelS,
-              textAlign: TextAlign.right,
-            ),
-          ),
-        ],
       ),
     );
   }

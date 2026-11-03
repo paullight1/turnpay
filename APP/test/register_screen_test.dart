@@ -379,7 +379,9 @@ class _ConflictAuthService extends AuthService {
 
 class _FakeTransactionSecurityService extends TransactionSecurityService {
   @override
-  Future<void> savePin(String pin, {required int pinLength}) async {}
+  Future<void> savePin(String pin, {required int pinLength}) async {
+    fail('Registration must not copy a transaction PIN to app unlock');
+  }
 
   @override
   Future<TransactionSecurityConfig> getConfig() async {

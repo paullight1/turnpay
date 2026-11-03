@@ -154,11 +154,11 @@ void main() {
     await snapshot(tester, key, 'bank-recipient');
     await tester.tap(find.text('Review transfer'));
     for (var i = 0;
-        i < 30 && find.byType(AlertDialog).evaluate().isEmpty;
+        i < 30 && find.byType(BottomSheet).evaluate().isEmpty;
         i++) {
       await tester.pump(const Duration(milliseconds: 100));
     }
-    expect(find.byType(AlertDialog), findsOneWidget);
+    expect(find.byType(BottomSheet), findsOneWidget);
     expect(find.text('Name'), findsOneWidget);
     expect(
         bundle.adapter.requestedUris

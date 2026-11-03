@@ -170,6 +170,50 @@ Future<void> _capture(WidgetTester tester, GlobalKey key, String name) async {
 }
 
 void main() {
+  testWidgets(
+      'airtime approval checks PIN only with the purchase and never writes an app PIN',
+      (tester) async {
+    final security = _VtuTestSecurity();
+    var standaloneChecks = 0, purchases = 0;
+    await _render(tester, MoneyActionKind.airtime, security: security,
+        requests: (options, handler) {
+      if (options.path == '/api/auth/transaction-pin/verify') {
+        standaloneChecks++;
+      }
+      if (options.path == '/api/vtu/purchase') {
+        purchases++;
+        expect(options.data['transactionPin'], '2468');
+        handler.resolve(Response(requestOptions: options, data: {
+          'status': 'SUCCESS',
+          'reference': 'VTU-BOUNDARY',
+          'orderId': 'boundary-order',
+          'amount': '500.00',
+          'currency': 'NGN'
+        }));
+      } else {
+        handler.next(options);
+      }
+    });
+    await tester.enterText(_phone(), '08031234567');
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Continue to amount'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('₦500'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Buy airtime'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Continue'));
+    await tester.pumpAndSettle();
+    for (final digit in ['2', '4', '6', '8']) {
+      await tester.tap(find.text(digit));
+      await tester.pump();
+    }
+    await tester.pumpAndSettle();
+    expect(purchases, 1);
+    expect(standaloneChecks, 0);
+    expect(security.saves, 0);
+    await tester.pumpWidget(const SizedBox());
+  });
   setUpAll(() async {
     GoogleFonts.config.allowRuntimeFetching = false;
     if (!const bool.fromEnvironment('VTU_CAPTURE')) return;
@@ -572,6 +616,7 @@ void main() {
 }
 
 class _VtuTestSecurity extends TransactionSecurityService {
+  int saves = 0;
   @override
   Future<TransactionSecurityConfig> getConfig() async =>
       const TransactionSecurityConfig(
@@ -582,5 +627,7 @@ class _VtuTestSecurity extends TransactionSecurityService {
           hasBiometric: false,
           biometricLabel: 'Biometric approval');
   @override
-  Future<void> saveVerifiedDevicePin(String pin) async {}
+  Future<void> saveVerifiedDevicePin(String pin) async {
+    saves++;
+  }
 }

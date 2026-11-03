@@ -68,7 +68,7 @@ void registerInternalTransferFlowTests({bool useIntegrationBinding = true}) {
     await tester.ensureVisible(submit);
     await tester.tap(submit);
     // Wait for the review after recipient and KYC checks finish.
-    await waitForText(tester, 'Continue', settle: false);
+    await waitForText(tester, 'Continue');
   }
 
   Future<void> enterExistingPin(WidgetTester tester) async {

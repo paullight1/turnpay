@@ -366,6 +366,12 @@ class FakeTrustPayApiAdapter implements HttpClientAdapter {
     }
 
     if (method == 'POST' && path == '/api/transfers/internal') {
+      final data = Map<String, dynamic>.from(options.data as Map);
+      // The real financial endpoint verifies before creating an attempt or debit.
+      if (data['transactionPin'] != '2468') {
+        return _jsonResponse({'message': 'Invalid transaction PIN'},
+            statusCode: 403);
+      }
       final idempotencyKey =
           '${options.headers['Idempotency-Key'] ?? options.headers['idempotency-key'] ?? ''}';
       internalTransferIdempotencyKeys.add(idempotencyKey);
@@ -381,7 +387,6 @@ class FakeTrustPayApiAdapter implements HttpClientAdapter {
           'message': 'Distributed controls unavailable',
         }, statusCode: 503);
       }
-      final data = Map<String, dynamic>.from(options.data as Map);
       return _jsonResponse({
         'reference': 'IT-INTEGRATION-001',
         'status': 'SUCCESS',

@@ -163,10 +163,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
         transactionPin: _transactionPinController.text,
         referralCode: _referralCodeController.text,
       );
-      await _securityService.savePin(
-        _transactionPinController.text,
-        pinLength: _pinLength,
-      );
 
       if (!mounted) return;
 
@@ -203,7 +199,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
   Future<void> _offerBiometricSetup() async {
     final config = await _securityService.getConfig();
-    if (!mounted || !config.canUseBiometrics || !config.hasBiometric) return;
+    if (!mounted || !config.canUseBiometrics) return;
 
     final shouldEnable = await showDialog<bool>(
           context: context,
@@ -211,7 +207,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
             return AlertDialog(
               backgroundColor: AppColors.surface,
               title: Text(
-                'Enable biometric app unlock',
+                'Enable phone-security app unlock',
                 style: AppTextStyles.headingM,
               ),
               content: Text(

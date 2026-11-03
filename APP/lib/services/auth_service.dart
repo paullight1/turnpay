@@ -296,6 +296,8 @@ class TransactionPinServerStatus {
 }
 
 String authErrorMessage(Object error, String fallback) {
+  final pinMessage = transactionPinRejectionMessage(error);
+  if (pinMessage != null) return pinMessage;
   final path = _extractRequestPath(error);
 
   if (error is DioException) {
@@ -346,6 +348,28 @@ String authErrorMessage(Object error, String fallback) {
   }
 
   return fallback;
+}
+
+/// Only authenticated, explicit PIN rejections get PIN-specific retry copy.
+/// A transport/server failure remains an uncertain payment outcome.
+String? transactionPinRejectionMessage(Object error) {
+  if (error is! DioException || error.response?.statusCode != 403) return null;
+  dynamic value = error.response?.data;
+  for (var depth = 0; depth < 4 && value is Map; depth++) {
+    value = value['message'];
+  }
+  return switch (value) {
+    'Invalid transaction PIN' => 'Incorrect transaction PIN. Try again.',
+    'Transaction PIN is temporarily locked' =>
+      'Your transaction PIN is temporarily locked. Try again later.',
+    'Transaction PIN changed; please try again' =>
+      'Your transaction PIN changed. Enter your current transaction PIN.',
+    'Transaction PIN was recently reset; money movement is temporarily locked' =>
+      'Payments are temporarily paused after your transaction PIN change. Check Security & Limits for the end time.',
+    'Transaction PIN setup is required' =>
+      'Create your transaction PIN in Security & Limits before paying.',
+    _ => null,
+  };
 }
 
 String? _registrationConflictMessage(Object? data) {

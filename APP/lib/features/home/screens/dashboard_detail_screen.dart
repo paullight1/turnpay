@@ -934,14 +934,14 @@ class _SecurityLimitsBody extends StatelessWidget {
         ),
         _ProfileActionRow(
           icon: Icons.password_rounded,
-          label: 'Change PIN',
+          label: 'Transaction PIN',
           detail: 'Create or update the PIN used before transactions',
           onTap: onTransactionSecurity,
         ),
         _ProfileActionRow(
           icon: Icons.fingerprint_rounded,
-          label: 'Biometric app unlock',
-          detail: 'Unlock the app with fingerprint or Face ID where supported',
+          label: 'App unlock',
+          detail: 'Use a separate app PIN or your phone security',
           onTap: onTransactionSecurity,
         ),
         _DataPanel(

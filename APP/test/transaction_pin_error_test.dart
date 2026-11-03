@@ -1,6 +1,7 @@
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:trustpay_app/features/security/screens/transaction_security_screen.dart';
+import 'package:trustpay_app/services/auth_service.dart';
 
 DioException _buildDioException({
   required dynamic data,
@@ -22,6 +23,18 @@ DioException _buildDioException({
 }
 
 void main() {
+  test(
+      'a payment PIN rejection has actionable copy without pretending a network failure is final',
+      () {
+    expect(
+        transactionPinRejectionMessage(_buildDioException(
+            statusCode: 403, data: {'message': 'Invalid transaction PIN'})),
+        'Incorrect transaction PIN. Try again.');
+    expect(
+        transactionPinRejectionMessage(_buildDioException(
+            statusCode: 500, data: {'message': 'Invalid transaction PIN'})),
+        isNull);
+  });
   group('isTransactionPinAlreadySetError', () {
     test('detects the nested conflict payload returned by the backend', () {
       final error = _buildDioException(

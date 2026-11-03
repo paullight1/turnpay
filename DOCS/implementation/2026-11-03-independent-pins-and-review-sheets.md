@@ -1,0 +1,13 @@
+# Independent PINs and payment review
+
+The transaction PIN approves payments and transfers through the existing backend verifier. App unlock uses a separate device credential, managed in Security & Limits. Existing device PINs continue working; new app-unlock codes contain six digits. Registration and transaction PIN setup/reset no longer overwrite the device code.
+
+Payment screens collect a fresh PIN and submit it with the actual money request. Previously they called the standalone verifier first (limited to five requests per 15 minutes, including successful checks), then hashed and saved the code locally, then called a payment endpoint that checked it again. Collection now performs no standalone verification or local hashing. Backend PIN checks, failed-attempt lockouts, KYC and reset holds remain in force. An explicit wrong-PIN response has actionable retry copy; unresolved payments retain their original attempt/idempotency key.
+
+App-unlock hashing keeps PBKDF2-SHA256 at 120,000 iterations, 16 random salt bytes and a 32-byte result. Native derivation uses a background isolate. Web uses SubtleCrypto, with a yielding compatible fallback. Device writes are ordered with logout/user changes so an in-flight hash cannot restore cleared credentials. Legacy salted hashes and SHA256 migration remain supported.
+
+Supported native devices can unlock with face/fingerprint or their OS screen-lock credential. Enabling or disabling this option requires fresh OS proof. It also works without a custom app PIN; cancellation leaves the lock closed. Web accurately reports phone security unavailable and retains the app-PIN option. Account-password recovery remains available. Android already declares USE_BIOMETRIC and uses FlutterFragmentActivity; iOS already declares its Face ID usage message. Native OS prompts still require physical-device validation.
+
+Payment review is a scrollable bottom sheet with a prominent currency amount and fixed, full-width Continue/Edit actions (60/56px minimum). Dismiss/Edit sends no money request. Security settings show each PIN separately and explain the existing one-hour payment hold after a transaction-PIN reset, including its end time. Keypad routes reject repeated completion and pending-request dismissal; app-lock and review layouts support small screens and large text.
+
+Verification includes independent credential-boundary tests, correct/incorrect PIN retry with exactly one successful fixture transfer, legacy/hash-vector checks, logout during hashing, OS-only lock/cancellation, onboarding/session recovery, and 360/430px review sheets at 2x text. No customer's genuine PIN was changed and no live payment was submitted by the agent.

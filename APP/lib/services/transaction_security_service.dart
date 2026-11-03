@@ -5,6 +5,7 @@ import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:local_auth/local_auth.dart';
+import 'app_pin_kdf.dart';
 
 class TransactionSecurityConfig {
   final bool hasPin;
@@ -23,10 +24,13 @@ class TransactionSecurityConfig {
     required this.biometricLabel,
   });
 
-  bool get shouldOfferBiometrics =>
-      canUseBiometrics && hasBiometric && biometricEnabled;
+  bool get hasAppLock => hasPin || biometricEnabled;
+
+  bool get shouldOfferBiometrics => canUseBiometrics && biometricEnabled;
 }
 
+/// Device-local app unlock only. Server transaction PINs are never saved here.
+/// Legacy storage keys are retained so existing app locks continue to work.
 class TransactionSecurityService {
   static const _storage = FlutterSecureStorage();
   static const _pinHashKey = 'trustpay_tx_pin_hash';
@@ -40,6 +44,22 @@ class TransactionSecurityService {
   static const _pinFailedAttemptsKey = 'trustpay_tx_pin_failed_attempts';
   static const _pinLockedUntilKey = 'trustpay_tx_pin_locked_until';
   static const _activeUserKey = 'trustpay_tx_pin_active_user';
+
+  // Order device credential writes with logout/account changes. In particular,
+  // a KDF completing in an isolate must not resurrect a cleared credential.
+  static Future<void>? _deviceOperations;
+  Future<T> _serialize<T>(Future<T> Function() operation) {
+    final pending = _deviceOperations;
+    final next =
+        pending == null ? operation() : pending.then((_) => operation());
+    final tail =
+        next.then<void>((_) {}, onError: (Object error, StackTrace stack) {});
+    _deviceOperations = tail;
+    tail.then((_) {
+      if (identical(_deviceOperations, tail)) _deviceOperations = null;
+    });
+    return next;
+  }
 
   final LocalAuthentication _localAuth = LocalAuthentication();
 
@@ -58,7 +78,7 @@ class TransactionSecurityService {
         biometricEnabled: false,
         canUseBiometrics: false,
         hasBiometric: false,
-        biometricLabel: 'Biometric app unlock',
+        biometricLabel: 'Phone security',
       );
     }
 
@@ -69,7 +89,9 @@ class TransactionSecurityService {
     try {
       canAuthenticate = await _localAuth.canCheckBiometrics ||
           await _localAuth.isDeviceSupported();
-      final available = await _localAuth.getAvailableBiometrics();
+      final available = await _localAuth
+          .getAvailableBiometrics()
+          .catchError((_) => <BiometricType>[]);
       hasBiometric = canAuthenticate && available.isNotEmpty;
       biometricLabel = _biometricLabel(available);
     } catch (_) {
@@ -91,11 +113,17 @@ class TransactionSecurityService {
     );
   }
 
-  Future<void> savePin(String pin, {required int pinLength}) async {
+  Future<void> savePin(String pin, {required int pinLength}) =>
+      _serialize(() => _saveAppPin(pin, pinLength: pinLength));
+
+  Future<void> _saveAppPin(String pin, {required int pinLength}) async {
+    if (!RegExp(r'^\d{4,6}$').hasMatch(pin) || pin.length != pinLength) {
+      throw ArgumentError('App-unlock PIN must contain 4 to 6 digits');
+    }
     await _purgeLegacyStoredPinValue();
     final salt = _generateSalt();
     final saltB64 = base64.encode(salt);
-    final digest = await _derivePinHashAsync(pin, salt);
+    final digest = await deriveAppPinHash(pin, salt);
 
     await _storage.write(key: _pinSaltKey, value: saltB64);
     await _storage.write(key: _pinHashKey, value: digest);
@@ -107,10 +135,13 @@ class TransactionSecurityService {
     return savePin(pin, pinLength: pin.length);
   }
 
-  Future<void> bindToAuthenticatedUser(String userId) async {
+  Future<void> bindToAuthenticatedUser(String userId) =>
+      _serialize(() => _bindUser(userId));
+
+  Future<void> _bindUser(String userId) async {
     final normalized = userId.trim();
     if (normalized.isEmpty) {
-      await clearAllDevicePinState();
+      await _clearAllDevicePinState();
       return;
     }
 
@@ -121,7 +152,9 @@ class TransactionSecurityService {
     await _storage.write(key: _activeUserKey, value: normalized);
   }
 
-  Future<void> clearAllDevicePinState() async {
+  Future<void> clearAllDevicePinState() => _serialize(_clearAllDevicePinState);
+
+  Future<void> _clearAllDevicePinState() async {
     await _clearPersistedPinState();
     await _storage.delete(key: _activeUserKey);
   }
@@ -131,7 +164,10 @@ class TransactionSecurityService {
     return result.approved;
   }
 
-  Future<PinVerificationResult> verifyPinWithLockout(String pin) async {
+  Future<PinVerificationResult> verifyPinWithLockout(String pin) =>
+      _serialize(() => _verifyAppPin(pin));
+
+  Future<PinVerificationResult> _verifyAppPin(String pin) async {
     await _purgeLegacyStoredPinValue();
     final now = DateTime.now().toUtc();
     final lockedUntil = await _readLockedUntil();
@@ -200,7 +236,7 @@ class TransactionSecurityService {
     try {
       return await _localAuth.authenticate(
         localizedReason: reason,
-        biometricOnly: true,
+        biometricOnly: false,
         persistAcrossBackgrounding: true,
       );
     } catch (_) {
@@ -254,7 +290,7 @@ class TransactionSecurityService {
     final saltB64 = await _storage.read(key: _pinSaltKey);
     if (saltB64 != null && saltB64.isNotEmpty) {
       final salt = base64.decode(saltB64);
-      final digest = await _derivePinHashAsync(pin, salt);
+      final digest = await deriveAppPinHash(pin, salt);
       return _constantTimeEquals(digest, saved);
     }
 
@@ -270,7 +306,7 @@ class TransactionSecurityService {
     await _storage.write(key: _pinSaltKey, value: base64.encode(salt));
     await _storage.write(
       key: _pinHashKey,
-      value: await _derivePinHashAsync(pin, salt),
+      value: await deriveAppPinHash(pin, salt),
     );
     return true;
   }
@@ -283,102 +319,11 @@ class TransactionSecurityService {
   // PBKDF2-HMAC-SHA256 implemented on top of package:crypto so no extra
   // dependency is required. Salt is random per install (regenerated whenever a
   // PIN is (re)saved) and stored alongside the derived hash.
-  static const _pbkdf2Iterations = 120000;
   static const _saltLength = 16;
-  static const _keyLength = 32;
 
   static List<int> _generateSalt() {
     final random = math.Random.secure();
     return List<int>.generate(_saltLength, (_) => random.nextInt(256));
-  }
-
-  static String _derivePinHash(String pin, List<int> salt) {
-    final bytes = _pbkdf2(
-      password: utf8.encode(pin),
-      salt: salt,
-      iterations: _pbkdf2Iterations,
-      keyLength: _keyLength,
-    );
-    return base64.encode(bytes);
-  }
-
-  static Future<String> _derivePinHashAsync(String pin, List<int> salt) async {
-    if (!kIsWeb) return _derivePinHash(pin, salt);
-
-    final bytes = await _pbkdf2WithEventLoopYields(
-      password: utf8.encode(pin),
-      salt: salt,
-      iterations: _pbkdf2Iterations,
-      keyLength: _keyLength,
-    );
-    return base64.encode(bytes);
-  }
-
-  /// Flutter web's `compute` runs on the browser's current event loop. Yield
-  /// during PBKDF2 so the unlock UI can paint progress instead of freezing.
-  static Future<List<int>> _pbkdf2WithEventLoopYields({
-    required List<int> password,
-    required List<int> salt,
-    required int iterations,
-    required int keyLength,
-  }) async {
-    final hmac = Hmac(sha256, password);
-    final blockCount = (keyLength / 32).ceil();
-    final derived = <int>[];
-
-    for (var block = 1; block <= blockCount; block++) {
-      final blockIndex = [
-        (block >> 24) & 0xff,
-        (block >> 16) & 0xff,
-        (block >> 8) & 0xff,
-        block & 0xff,
-      ];
-      var u = hmac.convert([...salt, ...blockIndex]).bytes;
-      final t = List<int>.from(u);
-      for (var i = 1; i < iterations; i++) {
-        u = hmac.convert(u).bytes;
-        for (var j = 0; j < t.length; j++) {
-          t[j] ^= u[j];
-        }
-        if (i % 1000 == 0) {
-          await Future<void>.delayed(Duration.zero);
-        }
-      }
-      derived.addAll(t);
-    }
-
-    return derived.sublist(0, keyLength);
-  }
-
-  static List<int> _pbkdf2({
-    required List<int> password,
-    required List<int> salt,
-    required int iterations,
-    required int keyLength,
-  }) {
-    final hmac = Hmac(sha256, password);
-    final blockCount = (keyLength / 32).ceil();
-    final derived = <int>[];
-
-    for (var block = 1; block <= blockCount; block++) {
-      final blockIndex = [
-        (block >> 24) & 0xff,
-        (block >> 16) & 0xff,
-        (block >> 8) & 0xff,
-        block & 0xff,
-      ];
-      var u = hmac.convert([...salt, ...blockIndex]).bytes;
-      final t = List<int>.from(u);
-      for (var i = 1; i < iterations; i++) {
-        u = hmac.convert(u).bytes;
-        for (var j = 0; j < t.length; j++) {
-          t[j] ^= u[j];
-        }
-      }
-      derived.addAll(t);
-    }
-
-    return derived.sublist(0, keyLength);
   }
 
   static bool _constantTimeEquals(String a, String b) {
@@ -401,7 +346,7 @@ class TransactionSecurityService {
           ? 'Touch ID'
           : 'Fingerprint';
     }
-    return 'Biometric app unlock';
+    return 'Phone security';
   }
 }
 

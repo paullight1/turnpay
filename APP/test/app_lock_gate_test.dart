@@ -59,8 +59,7 @@ void main() {
 
     expect(find.text('Unlock TrustPay'), findsOneWidget);
     expect(find.bySemanticsLabel('Protected content'), findsNothing);
-    expect(
-        find.text('Enter your transaction PIN to continue.'), findsOneWidget);
+    expect(find.text('Enter your app-unlock PIN to continue.'), findsOneWidget);
 
     for (final digit in ['2', '4', '6', '8']) {
       await tester.tap(find.text(digit));
@@ -70,9 +69,70 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Unlock TrustPay'), findsNothing);
-    expect(find.text('Enter your transaction PIN to continue.'), findsNothing);
+    expect(find.text('Enter your app-unlock PIN to continue.'), findsNothing);
     expect(find.bySemanticsLabel('Protected content'), findsOneWidget);
     semantics.dispose();
+  });
+
+  testWidgets(
+      'phone-security-only lock stays closed after cancelled OS authentication',
+      (tester) async {
+    _usePhoneSurface(tester);
+    setMockSecureStorage(refreshToken: 'refresh-token');
+    final service = _FakeAppLockSecurityService(
+        config: const TransactionSecurityConfig(
+            hasPin: false,
+            pinLength: 4,
+            biometricEnabled: true,
+            canUseBiometrics: true,
+            hasBiometric: false,
+            biometricLabel: 'Phone security'),
+        approvedPin: '2468',
+        biometricResult: false);
+    await tester.pumpWidget(ProviderScope(
+        child: MaterialApp(
+            home: AppLockGate(
+                securityService: service,
+                child: const Scaffold(body: Text('Protected content'))))));
+    await tester.pumpAndSettle();
+    expect(find.text('Unlock TrustPay'), findsOneWidget);
+    expect(find.text('1'), findsNothing);
+    await tester.tap(find.text('Use phone security'));
+    await tester.pumpAndSettle();
+    expect(service.biometricCalls, 1);
+    expect(find.text('Unlock TrustPay'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('app lock remains usable on a short screen at large text',
+      (tester) async {
+    tester.view.physicalSize = const Size(360, 600);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    setMockSecureStorage(refreshToken: 'refresh-token');
+    final service = _FakeAppLockSecurityService(
+        config: const TransactionSecurityConfig(
+            hasPin: true,
+            pinLength: 6,
+            biometricEnabled: false,
+            canUseBiometrics: false,
+            hasBiometric: false,
+            biometricLabel: 'Phone security'),
+        approvedPin: '864208');
+    await tester.pumpWidget(ProviderScope(
+        child: MaterialApp(
+            home: MediaQuery(
+                data: const MediaQueryData(
+                    size: Size(360, 600), textScaler: TextScaler.linear(2)),
+                child: AppLockGate(
+                    securityService: service,
+                    child: const Scaffold(body: Text('Protected')))))));
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    await tester.ensureVisible(find.text('Use account password'));
+    expect(find.text('Use account password'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox.shrink());
   });
 
   testWidgets('app lock gate stays open when no pin is saved', (tester) async {
@@ -108,7 +168,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Unlock TrustPay'), findsNothing);
-    expect(find.text('Enter your transaction PIN to continue.'), findsNothing);
+    expect(find.text('Enter your app-unlock PIN to continue.'), findsNothing);
     expect(find.text('Protected content'), findsOneWidget);
   });
 
@@ -314,8 +374,7 @@ void main() {
     await tester.pump();
 
     expect(find.text('Unlock TrustPay'), findsOneWidget);
-    expect(
-        find.text('Enter your transaction PIN to continue.'), findsOneWidget);
+    expect(find.text('Enter your app-unlock PIN to continue.'), findsOneWidget);
   });
 
   testWidgets('keeps the lock closed when PIN verification throws',

@@ -8,6 +8,7 @@ import '../../../core/theme/app_theme.dart';
 import '../../../core/widgets/trustpay_lottie.dart';
 import '../../../core/widgets/tp_page_header.dart';
 import '../../../services/auth_service.dart';
+import 'app_unlock_pin_screen.dart';
 import '../../../services/transaction_security_service.dart';
 
 class _TransactionSecuritySnapshot {
@@ -68,61 +69,16 @@ class _TransactionSecurityScreenState extends State<TransactionSecurityScreen> {
   Future<void> _openPinSetup() async {
     final state = await _future;
     if (!mounted) return;
-    final entryMode = TransactionPinServerPolicy.entryMode(
-      serverConfigured: state.server.configured,
-    );
-    var screenMode = PinScreenMode.create;
-    if (entryMode == TransactionPinServerEntryMode.verifyExisting) {
-      final selected = await showModalBottomSheet<PinScreenMode>(
-        context: context,
-        backgroundColor: AppColors.surface,
-        showDragHandle: true,
-        builder: (context) => SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(
-              AppSpacing.lg,
-              AppSpacing.sm,
-              AppSpacing.lg,
-              AppSpacing.lg,
-            ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Text('Manage transaction PIN', style: AppTextStyles.headingM),
-                const SizedBox(height: AppSpacing.sm),
-                Text(
-                  'Verify this device or replace the PIN after confirming your current one.',
-                  style: AppTextStyles.bodyM,
-                ),
-                const SizedBox(height: AppSpacing.md),
-                FilledButton.icon(
-                  onPressed: () =>
-                      Navigator.of(context).pop(PinScreenMode.verify),
-                  icon: const Icon(Icons.verified_user_outlined),
-                  label: const Text('Verify on this device'),
-                ),
-                const SizedBox(height: AppSpacing.sm),
-                OutlinedButton.icon(
-                  onPressed: () =>
-                      Navigator.of(context).pop(PinScreenMode.reset),
-                  icon: const Icon(Icons.password_rounded),
-                  label: const Text('Reset transaction PIN'),
-                ),
-              ],
-            ),
-          ),
-        ),
-      );
-      if (selected == null || !mounted) return;
-      screenMode = selected;
-    }
+    final screenMode =
+        state.server.configured ? PinScreenMode.reset : PinScreenMode.create;
 
     final result = await Navigator.of(context).push<Object?>(
       MaterialPageRoute(
         builder: (_) => switch (screenMode) {
-          PinScreenMode.verify => TransactionPinScreen.verify(
-              pinLength: state.server.pinLength ?? state.device.pinLength,
+          PinScreenMode.verify ||
+          PinScreenMode.collect =>
+            TransactionPinScreen.verify(
+              pinLength: state.server.pinLength ?? 4,
               title: 'Verify transaction PIN',
               subtitle:
                   'Confirm the PIN already configured on your TrustPay account.',
@@ -130,7 +86,7 @@ class _TransactionSecurityScreenState extends State<TransactionSecurityScreen> {
               authService: _authService,
             ),
           PinScreenMode.reset => TransactionPinScreen.reset(
-              pinLength: state.server.pinLength ?? state.device.pinLength,
+              pinLength: state.server.pinLength ?? 4,
               securityService: _securityService,
               authService: _authService,
             ),
@@ -152,27 +108,31 @@ class _TransactionSecurityScreenState extends State<TransactionSecurityScreen> {
     TransactionSecurityConfig config,
     bool enabled,
   ) async {
-    if (!config.hasPin) {
-      _showToast('Set your transaction PIN first.');
+    if (!config.canUseBiometrics) {
+      _showToast('Phone security is not available on this device.');
       return;
     }
-    if (!config.canUseBiometrics || !config.hasBiometric) {
-      _showToast('${config.biometricLabel} is not available on this device.');
+    final approved = await _securityService.authenticateBiometric(
+      reason: enabled
+          ? 'Enable phone security for TrustPay app unlock'
+          : 'Confirm disabling phone security for TrustPay',
+    );
+    if (!mounted) return;
+    if (!approved) {
+      _showToast(
+          'Phone security was not confirmed. Your settings are unchanged.');
       return;
-    }
-
-    if (enabled) {
-      final approved = await _securityService.authenticateBiometric(
-        reason: 'Enable ${config.biometricLabel} for TrustPay app unlock',
-      );
-      if (!approved) {
-        _showToast('${config.biometricLabel} setup was not completed.');
-        return;
-      }
     }
 
     await _securityService.setBiometricEnabled(enabled);
-    _reload();
+    if (mounted) _reload();
+  }
+
+  Future<void> _openAppPin(TransactionSecurityConfig config) async {
+    final changed = await Navigator.of(context).push<bool>(MaterialPageRoute(
+        builder: (_) => AppUnlockPinScreen(
+            securityService: _securityService, config: config)));
+    if (mounted && changed == true) _reload();
   }
 
   IconData _biometricIcon(TransactionSecurityConfig config) {
@@ -215,7 +175,7 @@ class _TransactionSecurityScreenState extends State<TransactionSecurityScreen> {
                   sliver: SliverList.list(
                     children: [
                       TpPageHeader(
-                        label: 'Transaction Security',
+                        label: 'PIN & app unlock',
                         menuActions: [
                           TpPageMenuAction(
                             label: 'More',
@@ -226,7 +186,7 @@ class _TransactionSecurityScreenState extends State<TransactionSecurityScreen> {
                       ),
                       const SizedBox(height: AppSpacing.sm),
                       Text(
-                        'Protect money actions with a fresh transaction PIN. Biometrics unlock the app only.',
+                        'Choose how you approve payments and unlock TrustPay.',
                         style: AppTextStyles.bodyM,
                       ),
                       const SizedBox(height: AppSpacing.xl),
@@ -264,34 +224,52 @@ class _TransactionSecurityScreenState extends State<TransactionSecurityScreen> {
                                       ? 'Manage transaction PIN'
                                       : 'Create transaction PIN',
                                   detail: server.configured
-                                      ? 'Verify this device or reset your server PIN using the current PIN.'
+                                      ? 'Approve payments and transfers with this PIN. Changing it pauses payments for one hour.'
                                       : 'Set the PIN used for money action approvals.',
                                   icon: Icons.password_rounded,
                                   cta: server.configured
-                                      ? 'Change PIN'
+                                      ? 'Change transaction PIN'
                                       : 'Create PIN',
                                   onTap: _openPinSetup,
                                 ),
                                 const SizedBox(height: AppSpacing.md),
-                                _BiometricTogglePanel(
-                                  title: config.biometricLabel,
-                                  detail: config.hasBiometric
-                                      ? 'Use ${config.biometricLabel} to unlock the TrustPay app after it locks.'
-                                      : '${config.biometricLabel} is not available on this device or current build.',
-                                  icon: _biometricIcon(config),
-                                  value: config.biometricEnabled &&
-                                      config.hasBiometric,
-                                  enabled:
-                                      server.configured && config.hasBiometric,
-                                  onChanged: (value) =>
-                                      _toggleBiometric(config, value),
+                                if (server.locked)
+                                  const _SecurityInfoPanel(
+                                      title:
+                                          'Transaction PIN temporarily locked',
+                                      detail:
+                                          'Please wait before trying another payment PIN.',
+                                      icon: Icons.lock_clock_outlined),
+                                if (server.resetHoldUntil != null &&
+                                    server.resetHoldUntil!
+                                        .isAfter(DateTime.now()))
+                                  _SecurityInfoPanel(
+                                      title: 'Payments temporarily paused',
+                                      detail:
+                                          'Your PIN was changed. Payments resume at ${TimeOfDay.fromDateTime(server.resetHoldUntil!.toLocal()).format(context)} on ${server.resetHoldUntil!.toLocal().day}/${server.resetHoldUntil!.toLocal().month}. Your app unlock is unchanged.',
+                                      icon: Icons.schedule_rounded),
+                                const SizedBox(height: AppSpacing.lg),
+                                _SecurityActionPanel(
+                                  title: 'App unlock',
+                                  detail:
+                                      'Unlock TrustPay on this device with a separate app-unlock PIN. This code does not approve payments.',
+                                  cta: config.hasPin
+                                      ? 'Change app-unlock PIN'
+                                      : 'Create app-unlock PIN',
+                                  icon: Icons.phonelink_lock_rounded,
+                                  onTap: () => _openAppPin(config),
                                 ),
                                 const SizedBox(height: AppSpacing.md),
-                                const _SecurityInfoPanel(
-                                  title: 'Current behavior',
-                                  detail:
-                                      'Money action routes always request a freshly entered transaction PIN before submission. Biometrics are limited to app unlock until a server challenge can bind approval to the device.',
-                                  icon: Icons.verified_user_outlined,
+                                _BiometricTogglePanel(
+                                  title: config.biometricLabel,
+                                  detail: config.canUseBiometrics
+                                      ? 'Unlock with your phone’s fingerprint, face or screen-lock code.'
+                                      : 'Phone security is unavailable in this browser or on this device. You can use an app-unlock PIN.',
+                                  icon: _biometricIcon(config),
+                                  value: config.biometricEnabled,
+                                  enabled: config.canUseBiometrics,
+                                  onChanged: (value) =>
+                                      _toggleBiometric(config, value),
                                 ),
                               ],
                             );
@@ -361,6 +339,24 @@ class TransactionPinScreen extends StatefulWidget {
     );
   }
 
+  /// Collect a fresh code for the money endpoint to verify exactly once.
+  /// This is not a successful authorization and never persists the code.
+  factory TransactionPinScreen.collect({
+    required int pinLength,
+    required String title,
+    required String subtitle,
+    TransactionSecurityService? securityService,
+    AuthService? authService,
+    Widget? confirmationSummary,
+  }) =>
+      TransactionPinScreen._(
+        mode: PinScreenMode.collect,
+        initialPinLength: pinLength,
+        title: title,
+        subtitle: subtitle,
+        confirmationSummary: confirmationSummary,
+      );
+
   factory TransactionPinScreen.reset({
     required int pinLength,
     TransactionSecurityService? securityService,
@@ -370,7 +366,8 @@ class TransactionPinScreen extends StatefulWidget {
       mode: PinScreenMode.reset,
       initialPinLength: pinLength,
       title: 'Verify current PIN',
-      subtitle: 'Enter your current server PIN before choosing a new one.',
+      subtitle:
+          'Enter your current transaction PIN. Changing it pauses payments for one hour.',
       securityService: securityService,
       authService: authService,
     );
@@ -381,7 +378,6 @@ class TransactionPinScreen extends StatefulWidget {
 }
 
 class _TransactionPinScreenState extends State<TransactionPinScreen> {
-  late final TransactionSecurityService _securityService;
   late final AuthService _authService;
   final StringBuffer _buffer = StringBuffer();
   String? _firstPin;
@@ -390,17 +386,17 @@ class _TransactionPinScreenState extends State<TransactionPinScreen> {
   late int _pinLength;
   bool _verifyExistingServerPin = false;
   bool _isWorking = false;
+  bool _completed = false;
 
   @override
   void initState() {
     super.initState();
-    _securityService = widget.securityService ?? TransactionSecurityService();
     _authService = widget.authService ?? AuthService();
     _pinLength = widget.initialPinLength;
   }
 
   Future<void> _handleDigit(String digit) async {
-    if (_isWorking || _buffer.length >= _pinLength) {
+    if (_isWorking || _completed || _buffer.length >= _pinLength) {
       return;
     }
 
@@ -415,7 +411,7 @@ class _TransactionPinScreenState extends State<TransactionPinScreen> {
       try {
         await _completeStep();
       } finally {
-        if (mounted) setState(() => _isWorking = false);
+        if (mounted && !_completed) setState(() => _isWorking = false);
       }
     }
   }
@@ -437,6 +433,11 @@ class _TransactionPinScreenState extends State<TransactionPinScreen> {
 
   Future<void> _completeStep() async {
     final pin = _buffer.toString();
+    if (widget.mode == PinScreenMode.collect) {
+      _completed = true;
+      Navigator.of(context).pop(pin);
+      return;
+    }
     if (widget.mode == PinScreenMode.reset) {
       await _completeResetStep(pin);
       return;
@@ -465,7 +466,6 @@ class _TransactionPinScreenState extends State<TransactionPinScreen> {
 
       try {
         await _authService.setTransactionPin(pin);
-        await _securityService.savePin(pin, pinLength: _pinLength);
       } catch (error) {
         if (isTransactionPinAlreadySetError(error)) {
           try {
@@ -477,7 +477,7 @@ class _TransactionPinScreenState extends State<TransactionPinScreen> {
               _buffer.clear();
               _firstPin = null;
               _error = status.configured
-                  ? 'A server PIN already exists. Enter that PIN to verify this device.'
+                  ? 'A transaction PIN already exists. Enter your existing transaction PIN.'
                   : 'PIN state changed. Try setup again.';
             });
           } catch (_) {
@@ -491,6 +491,7 @@ class _TransactionPinScreenState extends State<TransactionPinScreen> {
           return;
         }
 
+        if (!mounted) return;
         setState(() {
           _buffer.clear();
           _firstPin = null;
@@ -502,14 +503,15 @@ class _TransactionPinScreenState extends State<TransactionPinScreen> {
         return;
       }
       if (!mounted) return;
+      _completed = true;
       Navigator.of(context).pop(true);
       return;
     }
 
     try {
       await _authService.verifyTransactionPin(pin);
-      await _securityService.saveVerifiedDevicePin(pin);
       if (!mounted) return;
+      _completed = true;
       Navigator.of(context).pop(pin);
       return;
     } catch (error) {
@@ -581,8 +583,13 @@ class _TransactionPinScreenState extends State<TransactionPinScreen> {
         currentPin: _currentPin!,
         newPin: pin,
       );
-      await _securityService.saveVerifiedDevicePin(pin);
       if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text(
+            'Transaction PIN changed. Payments are paused for one hour for your security. App unlock is unchanged.'),
+        duration: Duration(seconds: 8),
+      ));
+      _completed = true;
       Navigator.of(context).pop(true);
     } catch (error) {
       if (!mounted) return;
@@ -618,7 +625,7 @@ class _TransactionPinScreenState extends State<TransactionPinScreen> {
     final currentSubtitle = widget.mode == PinScreenMode.reset
         ? switch (resetStep) {
             TransactionPinResetStep.verifyCurrent =>
-              'Enter your current server PIN before choosing a new one.',
+              'Enter your current transaction PIN. Changing it pauses payments for one hour.',
             TransactionPinResetStep.enterReplacement =>
               'Choose a different $_pinLength-digit PIN.',
             TransactionPinResetStep.confirmReplacement =>
@@ -632,132 +639,163 @@ class _TransactionPinScreenState extends State<TransactionPinScreen> {
                 ? 'Enter the PIN already configured on your TrustPay account.'
                 : widget.subtitle;
 
-    return Scaffold(
-      backgroundColor: AppColors.background,
-      body: SafeArea(
-        child: SingleChildScrollView(
-          keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(
-              AppSpacing.lg,
-              AppSpacing.md,
-              AppSpacing.lg,
-              AppSpacing.xxl,
-            ),
-            child: Column(
-              children: [
-                Row(
-                  children: [
-                    const Spacer(),
-                    const SizedBox(width: AppSpacing.md),
-                    _TopIconButton(
-                      icon: Icons.close_rounded,
-                      onTap: () {
-                        if (Navigator.of(context).canPop()) {
-                          Navigator.of(context).pop();
-                        } else {
-                          context.go(AppRoutes.home);
-                        }
-                      },
+    return Focus(
+        autofocus: true,
+        onKeyEvent: (node, event) {
+          if (event is! KeyDownEvent) return KeyEventResult.ignored;
+          final digit = event.character;
+          if (digit != null && RegExp(r'^\d$').hasMatch(digit)) {
+            _handleDigit(digit);
+            return KeyEventResult.handled;
+          }
+          if (event.logicalKey == LogicalKeyboardKey.backspace) {
+            _handleDelete();
+            return KeyEventResult.handled;
+          }
+          return KeyEventResult.ignored;
+        },
+        child: PopScope(
+            canPop: !_isWorking,
+            child: Scaffold(
+              backgroundColor: AppColors.background,
+              body: SafeArea(
+                child: SingleChildScrollView(
+                  keyboardDismissBehavior:
+                      ScrollViewKeyboardDismissBehavior.onDrag,
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(
+                      AppSpacing.lg,
+                      AppSpacing.md,
+                      AppSpacing.lg,
+                      AppSpacing.xxl,
                     ),
-                  ],
-                ),
-                SizedBox(
-                    height: isTransferConfirmation
-                        ? AppSpacing.md
-                        : AppSpacing.xxl),
-                Text(
-                  currentTitle,
-                  style: isTransferConfirmation
-                      ? AppTextStyles.headingM
-                      : AppTextStyles.headingXL,
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: AppSpacing.sm),
-                Text(
-                  currentSubtitle,
-                  style: AppTextStyles.bodyM,
-                  textAlign: TextAlign.center,
-                ),
-                SizedBox(
-                    height:
-                        isTransferConfirmation ? AppSpacing.md : AppSpacing.lg),
-                if (widget.confirmationSummary != null) ...[
-                  widget.confirmationSummary!,
-                  const SizedBox(height: AppSpacing.md),
-                ],
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: List.generate(
-                    _pinLength,
-                    (index) => _PinDot(
-                      filled: index < _buffer.length,
-                      value: index < _buffer.length ? '*' : null,
+                    child: Column(
+                      children: [
+                        Row(
+                          children: [
+                            const Spacer(),
+                            const SizedBox(width: AppSpacing.md),
+                            _TopIconButton(
+                              icon: Icons.close_rounded,
+                              onTap: () {
+                                if (_isWorking) return;
+                                if (Navigator.of(context).canPop()) {
+                                  Navigator.of(context).pop();
+                                } else {
+                                  context.go(AppRoutes.home);
+                                }
+                              },
+                            ),
+                          ],
+                        ),
+                        SizedBox(
+                            height: isTransferConfirmation
+                                ? AppSpacing.md
+                                : AppSpacing.xxl),
+                        Text('TRANSACTION PIN',
+                            style: AppTextStyles.labelM
+                                .copyWith(color: AppColors.primary)),
+                        const SizedBox(height: AppSpacing.md),
+                        Text(
+                          currentTitle,
+                          style: isTransferConfirmation
+                              ? AppTextStyles.headingM
+                              : AppTextStyles.headingXL,
+                          textAlign: TextAlign.center,
+                        ),
+                        const SizedBox(height: AppSpacing.sm),
+                        Text(
+                          currentSubtitle,
+                          style: AppTextStyles.bodyM,
+                          textAlign: TextAlign.center,
+                        ),
+                        SizedBox(
+                            height: isTransferConfirmation
+                                ? AppSpacing.md
+                                : AppSpacing.lg),
+                        if (widget.confirmationSummary != null) ...[
+                          widget.confirmationSummary!,
+                          const SizedBox(height: AppSpacing.md),
+                        ],
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: List.generate(
+                            _pinLength,
+                            (index) => _PinDot(
+                              filled: index < _buffer.length,
+                              value: index < _buffer.length ? '*' : null,
+                            ),
+                          ),
+                        ),
+                        if (_error != null) ...[
+                          const SizedBox(height: AppSpacing.md),
+                          Text(
+                            _error!,
+                            style: AppTextStyles.bodyS
+                                .copyWith(color: AppColors.error),
+                            textAlign: TextAlign.center,
+                          ),
+                        ],
+                        const SizedBox(height: AppSpacing.md),
+                        if (_isWorking) ...[
+                          Semantics(
+                              liveRegion: true,
+                              child: Text(widget.mode == PinScreenMode.collect
+                                  ? 'Continuing…'
+                                  : 'Checking transaction PIN…')),
+                          const SizedBox(height: AppSpacing.sm),
+                          const LinearProgressIndicator(minHeight: 3),
+                        ],
+                        const SizedBox(height: AppSpacing.md),
+                        GridView.count(
+                          crossAxisCount: 3,
+                          shrinkWrap: true,
+                          childAspectRatio: isTransferConfirmation
+                              ? (MediaQuery.sizeOf(context).width -
+                                      AppSpacing.lg * 2) /
+                                  3 /
+                                  56
+                              : 1.35,
+                          physics: const NeverScrollableScrollPhysics(),
+                          children: [
+                            for (final digit in [
+                              '1',
+                              '2',
+                              '3',
+                              '4',
+                              '5',
+                              '6',
+                              '7',
+                              '8',
+                              '9'
+                            ])
+                              _KeypadButton(
+                                label: digit,
+                                onTap: _isWorking
+                                    ? null
+                                    : () => _handleDigit(digit),
+                              ),
+                            // Keep the zero key centered in the three-column keypad.
+                            // Money actions require a freshly entered transaction PIN.
+                            const SizedBox.shrink(),
+                            _KeypadButton(
+                              label: '0',
+                              onTap:
+                                  _isWorking ? null : () => _handleDigit('0'),
+                            ),
+                            _KeypadIconButton(
+                              icon: Icons.backspace_outlined,
+                              enabled: !_isWorking,
+                              onTap: _isWorking ? null : _handleDelete,
+                            ),
+                          ],
+                        ),
+                      ],
                     ),
                   ),
                 ),
-                if (_error != null) ...[
-                  const SizedBox(height: AppSpacing.md),
-                  Text(
-                    _error!,
-                    style: AppTextStyles.bodyS.copyWith(color: AppColors.error),
-                    textAlign: TextAlign.center,
-                  ),
-                ],
-                const SizedBox(height: AppSpacing.md),
-                if (_isWorking) ...[
-                  Semantics(
-                      liveRegion: true,
-                      child: const Text('Checking your PIN…')),
-                  const SizedBox(height: AppSpacing.sm),
-                  const LinearProgressIndicator(minHeight: 3),
-                ],
-                const SizedBox(height: AppSpacing.md),
-                GridView.count(
-                  crossAxisCount: 3,
-                  shrinkWrap: true,
-                  childAspectRatio: isTransferConfirmation
-                      ? (MediaQuery.sizeOf(context).width - AppSpacing.lg * 2) /
-                          3 /
-                          56
-                      : 1.35,
-                  physics: const NeverScrollableScrollPhysics(),
-                  children: [
-                    for (final digit in [
-                      '1',
-                      '2',
-                      '3',
-                      '4',
-                      '5',
-                      '6',
-                      '7',
-                      '8',
-                      '9'
-                    ])
-                      _KeypadButton(
-                        label: digit,
-                        onTap: _isWorking ? null : () => _handleDigit(digit),
-                      ),
-                    // Keep the zero key centered in the three-column keypad.
-                    // Money actions require a freshly entered transaction PIN.
-                    const SizedBox.shrink(),
-                    _KeypadButton(
-                      label: '0',
-                      onTap: _isWorking ? null : () => _handleDigit('0'),
-                    ),
-                    _KeypadIconButton(
-                      icon: Icons.backspace_outlined,
-                      enabled: !_isWorking,
-                      onTap: _isWorking ? null : _handleDelete,
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
+              ),
+            )));
   }
 }
 
@@ -817,7 +855,7 @@ String? _extractDioMessage(dynamic data) {
   return null;
 }
 
-enum PinScreenMode { create, verify, reset }
+enum PinScreenMode { create, verify, reset, collect }
 
 class _SecurityActionPanel extends StatelessWidget {
   final String title;
@@ -867,7 +905,7 @@ class _SecurityActionPanel extends StatelessWidget {
               child: FilledButton(
                 onPressed: onTap,
                 style: FilledButton.styleFrom(
-                  minimumSize: const Size(double.infinity, 50),
+                  minimumSize: const Size(double.infinity, 56),
                   backgroundColor: AppColors.primary,
                   foregroundColor: Colors.white,
                 ),
@@ -1013,8 +1051,8 @@ class _PinDot extends StatelessWidget {
     return AnimatedContainer(
       duration: const Duration(milliseconds: 160),
       margin: const EdgeInsets.symmetric(horizontal: AppSpacing.xs),
-      width: 48,
-      height: 48,
+      width: 32,
+      height: 40,
       decoration: BoxDecoration(
         shape: BoxShape.circle,
         color: filled ? AppColors.surfaceVariant : AppColors.inputFill,

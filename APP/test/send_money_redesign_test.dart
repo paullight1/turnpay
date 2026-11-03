@@ -355,8 +355,13 @@ void main() {
       await tester.pump();
     }
     await tester.pumpAndSettle();
-    expect(find.text('Incorrect PIN. Try again.'), findsOneWidget);
+    expect(find.text('Incorrect transaction PIN. Try again.'), findsOneWidget);
     expect(bundle.adapter.internalTransferMutationCount, 0);
+    await tester.ensureVisible(find.widgetWithText(OutlinedButton, 'Retry'));
+    await tester.tap(find.widgetWithText(OutlinedButton, 'Retry'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Continue'));
+    await tester.pumpAndSettle();
     for (final digit in ['2', '4', '6', '8']) {
       await tester.ensureVisible(find.text(digit));
       await tester.tap(find.text(digit));

@@ -94,6 +94,20 @@ void main() {
     expect(find.bySemanticsLabel('Create PIN'), findsOneWidget);
   });
 
+  testWidgets(
+      'security settings separate app unlock and show transaction reset hold',
+      (tester) async {
+    await tester.pumpWidget(MaterialApp(
+        home: TransactionSecurityScreen(
+            securityService: _FakeSecurityService(), authService: _HeldPin())));
+    await tester.pumpAndSettle();
+    expect(find.text('Payments temporarily paused'), findsOneWidget);
+    expect(find.textContaining('Payments resume at'), findsOneWidget);
+    expect(find.bySemanticsLabel('Create app-unlock PIN'), findsOneWidget);
+    expect(find.bySemanticsLabel('Change transaction PIN'), findsOneWidget);
+    expect(find.text('Current behavior'), findsNothing);
+  });
+
   testWidgets('transaction PIN entry keeps biometric action unavailable',
       (tester) async {
     tester.view.physicalSize = const Size(1080, 2400);
@@ -118,4 +132,15 @@ void main() {
     expect(find.text('Approve this money action before submission.'),
         findsOneWidget);
   });
+}
+
+class _HeldPin extends AuthService {
+  @override
+  Future<TransactionPinServerStatus> getTransactionPinStatus() async =>
+      TransactionPinServerStatus(
+          configured: true,
+          pinLength: 4,
+          resetHoldUntil:
+              DateTime.now().toUtc().add(const Duration(minutes: 40)),
+          locked: false);
 }

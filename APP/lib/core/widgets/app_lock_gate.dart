@@ -215,7 +215,7 @@ class _AppLockGateState extends ConsumerState<AppLockGate>
         return;
       }
 
-      final shouldLock = config != null && config.hasPin;
+      final shouldLock = config != null && config.hasAppLock;
       var shouldOfferBiometricSetup = false;
       if (shouldLock) {
         shouldOfferBiometricSetup = config.canUseBiometrics &&
@@ -324,7 +324,7 @@ class _AppLockGateState extends ConsumerState<AppLockGate>
         !_isForeground ||
         !_ready ||
         _locked ||
-        _config?.hasPin != true ||
+        _config?.hasAppLock != true ||
         _lastActivityAt == null) {
       return;
     }
@@ -357,7 +357,7 @@ class _AppLockGateState extends ConsumerState<AppLockGate>
   }
 
   void _lockForInactivity() {
-    if (!mounted || _locked || !_ready || _config?.hasPin != true) return;
+    if (!mounted || _locked || !_ready || _config?.hasAppLock != true) return;
     _inactivityTimer?.cancel();
     _inactivityTimer = null;
     setState(() {
@@ -834,178 +834,208 @@ class _LockOverlay extends StatelessWidget {
     return Material(
       color: AppColors.background,
       child: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(
-            AppSpacing.lg,
-            AppSpacing.lg,
-            AppSpacing.lg,
-            AppSpacing.xl,
-          ),
-          child: Column(
-            children: [
-              Align(
-                alignment: Alignment.centerRight,
-                child: TextButton(
-                  onPressed: verifying ? null : onLogout,
-                  child: Text(
-                    'Log out',
-                    style: AppTextStyles.labelM.copyWith(
-                      color: AppColors.textSecondary,
-                    ),
-                  ),
-                ),
-              ),
-              const Spacer(),
-              Icon(
-                Icons.lock_outline_rounded,
-                color: AppColors.primary,
-                size: 54,
-              ),
-              const SizedBox(height: AppSpacing.md),
-              Text(
-                'Unlock TrustPay',
-                style: AppTextStyles.headingXL,
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: AppSpacing.sm),
-              Text(
-                config == null
-                    ? 'App security could not be verified. Log out and try again.'
-                    : allowBiometric
-                        ? 'Use ${config!.biometricLabel} or enter your transaction PIN.'
-                        : 'Enter your transaction PIN to continue.',
-                style: AppTextStyles.bodyM,
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: AppSpacing.xl),
-              if (usingAccountPassword)
-                TextField(
-                  key: const ValueKey('app-lock-account-password'),
-                  autofocus: true,
-                  obscureText: true,
-                  enabled: !verifying,
-                  textInputAction: TextInputAction.done,
-                  onChanged: onPasswordChanged,
-                  onSubmitted: (_) => onPasswordSubmit(),
-                  decoration: const InputDecoration(
-                    labelText: 'Account password',
-                    hintText: 'Enter your account password',
-                  ),
-                )
-              else
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: List.generate(
-                    pinLength,
-                    (index) => Container(
-                      width: 16,
-                      height: 16,
-                      margin: const EdgeInsets.symmetric(horizontal: 6),
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: index < pinLengthEntered
-                            ? AppColors.primary
-                            : AppColors.border,
+        child: LayoutBuilder(
+            builder: (context, constraints) => SingleChildScrollView(
+                  child: ConstrainedBox(
+                    constraints:
+                        BoxConstraints(minHeight: constraints.maxHeight),
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(
+                        AppSpacing.lg,
+                        AppSpacing.lg,
+                        AppSpacing.lg,
+                        AppSpacing.xl,
+                      ),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Align(
+                            alignment: Alignment.centerRight,
+                            child: TextButton(
+                              onPressed: verifying ? null : onLogout,
+                              child: Text(
+                                'Log out',
+                                style: AppTextStyles.labelM.copyWith(
+                                  color: AppColors.textSecondary,
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 24),
+                          Icon(
+                            Icons.lock_outline_rounded,
+                            color: AppColors.primary,
+                            size: 54,
+                          ),
+                          const SizedBox(height: AppSpacing.md),
+                          Text(
+                            'Unlock TrustPay',
+                            style: AppTextStyles.headingXL,
+                            textAlign: TextAlign.center,
+                          ),
+                          const SizedBox(height: AppSpacing.sm),
+                          Text(
+                            config == null
+                                ? 'App security could not be verified. Log out and try again.'
+                                : allowBiometric
+                                    ? (config!.hasPin
+                                        ? 'Use ${config!.biometricLabel} or enter your app-unlock PIN.'
+                                        : 'Use your phone security to unlock TrustPay.')
+                                    : (config!.hasPin
+                                        ? 'Enter your app-unlock PIN to continue.'
+                                        : 'Phone security is unavailable. Use your account password to unlock.'),
+                            style: AppTextStyles.bodyM,
+                            textAlign: TextAlign.center,
+                          ),
+                          const SizedBox(height: AppSpacing.xl),
+                          if (usingAccountPassword)
+                            TextField(
+                              key: const ValueKey('app-lock-account-password'),
+                              autofocus: true,
+                              obscureText: true,
+                              enabled: !verifying,
+                              textInputAction: TextInputAction.done,
+                              onChanged: onPasswordChanged,
+                              onSubmitted: (_) => onPasswordSubmit(),
+                              decoration: const InputDecoration(
+                                labelText: 'Account password',
+                                hintText: 'Enter your account password',
+                              ),
+                            )
+                          else if (config?.hasPin == true)
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: List.generate(
+                                pinLength,
+                                (index) => Container(
+                                  width: 16,
+                                  height: 16,
+                                  margin:
+                                      const EdgeInsets.symmetric(horizontal: 6),
+                                  decoration: BoxDecoration(
+                                    shape: BoxShape.circle,
+                                    color: index < pinLengthEntered
+                                        ? AppColors.primary
+                                        : AppColors.border,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          if (error != null) ...[
+                            const SizedBox(height: AppSpacing.md),
+                            Text(
+                              error!,
+                              style: AppTextStyles.bodyS
+                                  .copyWith(color: AppColors.error),
+                              textAlign: TextAlign.center,
+                            ),
+                          ],
+                          if (verifying) ...[
+                            const SizedBox(height: AppSpacing.md),
+                            const SizedBox(
+                              width: 22,
+                              height: 22,
+                              child:
+                                  CircularProgressIndicator(strokeWidth: 2.4),
+                            ),
+                            const SizedBox(height: AppSpacing.xs),
+                            Text(
+                              usingAccountPassword
+                                  ? 'Signing in securely…'
+                                  : 'Checking your PIN securely…',
+                              style: AppTextStyles.caption,
+                              textAlign: TextAlign.center,
+                            ),
+                          ],
+                          if (usingAccountPassword) ...[
+                            const SizedBox(height: AppSpacing.lg),
+                            SizedBox(
+                              width: double.infinity,
+                              child: FilledButton(
+                                onPressed: verifying || accountPassword.isEmpty
+                                    ? null
+                                    : onPasswordSubmit,
+                                child: const Text('Unlock'),
+                              ),
+                            ),
+                          ],
+                          const SizedBox(height: 24),
+                          if (!usingAccountPassword && config?.hasPin == true)
+                            GridView.count(
+                              crossAxisCount: 3,
+                              shrinkWrap: true,
+                              childAspectRatio: 1.5,
+                              physics: const NeverScrollableScrollPhysics(),
+                              children: [
+                                for (final digit in const [
+                                  '1',
+                                  '2',
+                                  '3',
+                                  '4',
+                                  '5',
+                                  '6',
+                                  '7',
+                                  '8',
+                                  '9'
+                                ])
+                                  _LockKeyButton(
+                                    label: digit,
+                                    enabled: !verifying,
+                                    onTap: () => onDigit(digit),
+                                  ),
+                                _LockIconButton(
+                                  icon: allowBiometric
+                                      ? biometricIcon
+                                      : Icons.circle_outlined,
+                                  enabled: allowBiometric && !verifying,
+                                  onTap: onBiometric,
+                                  tooltip: allowBiometric
+                                      ? 'Unlock with ${config!.biometricLabel}'
+                                      : null,
+                                ),
+                                _LockKeyButton(
+                                  label: '0',
+                                  enabled: !verifying,
+                                  onTap: () => onDigit('0'),
+                                ),
+                                _LockIconButton(
+                                  icon: Icons.backspace_outlined,
+                                  enabled: !verifying && pinLengthEntered > 0,
+                                  onTap: onDelete,
+                                ),
+                              ],
+                            ),
+                          if (!usingAccountPassword &&
+                              config?.hasPin != true &&
+                              allowBiometric)
+                            SizedBox(
+                                width: double.infinity,
+                                child: FilledButton.icon(
+                                  onPressed: verifying ? null : onBiometric,
+                                  style: FilledButton.styleFrom(
+                                      minimumSize: const Size.fromHeight(56)),
+                                  icon:
+                                      const Icon(Icons.phonelink_lock_rounded),
+                                  label: const Text('Use phone security'),
+                                )),
+                          TextButton(
+                            onPressed: verifying ? null : onTogglePassword,
+                            child: Text(
+                              usingAccountPassword
+                                  ? (config?.hasPin == true
+                                      ? 'Use app-unlock PIN'
+                                      : 'Use phone security')
+                                  : 'Use account password',
+                              style: AppTextStyles.labelM.copyWith(
+                                color: AppColors.primary,
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                   ),
-                ),
-              if (error != null) ...[
-                const SizedBox(height: AppSpacing.md),
-                Text(
-                  error!,
-                  style: AppTextStyles.bodyS.copyWith(color: AppColors.error),
-                  textAlign: TextAlign.center,
-                ),
-              ],
-              if (verifying) ...[
-                const SizedBox(height: AppSpacing.md),
-                const SizedBox(
-                  width: 22,
-                  height: 22,
-                  child: CircularProgressIndicator(strokeWidth: 2.4),
-                ),
-                const SizedBox(height: AppSpacing.xs),
-                Text(
-                  usingAccountPassword
-                      ? 'Signing in securely…'
-                      : 'Checking your PIN securely…',
-                  style: AppTextStyles.caption,
-                  textAlign: TextAlign.center,
-                ),
-              ],
-              if (usingAccountPassword) ...[
-                const SizedBox(height: AppSpacing.lg),
-                SizedBox(
-                  width: double.infinity,
-                  child: FilledButton(
-                    onPressed: verifying || accountPassword.isEmpty
-                        ? null
-                        : onPasswordSubmit,
-                    child: const Text('Unlock'),
-                  ),
-                ),
-              ],
-              const Spacer(),
-              if (!usingAccountPassword)
-                GridView.count(
-                  crossAxisCount: 3,
-                  shrinkWrap: true,
-                  childAspectRatio: 1.5,
-                  physics: const NeverScrollableScrollPhysics(),
-                  children: [
-                    for (final digit in const [
-                      '1',
-                      '2',
-                      '3',
-                      '4',
-                      '5',
-                      '6',
-                      '7',
-                      '8',
-                      '9'
-                    ])
-                      _LockKeyButton(
-                        label: digit,
-                        enabled: !verifying,
-                        onTap: () => onDigit(digit),
-                      ),
-                    _LockIconButton(
-                      icon: allowBiometric
-                          ? biometricIcon
-                          : Icons.circle_outlined,
-                      enabled: allowBiometric && !verifying,
-                      onTap: onBiometric,
-                      tooltip: allowBiometric
-                          ? 'Unlock with ${config!.biometricLabel}'
-                          : null,
-                    ),
-                    _LockKeyButton(
-                      label: '0',
-                      enabled: !verifying,
-                      onTap: () => onDigit('0'),
-                    ),
-                    _LockIconButton(
-                      icon: Icons.backspace_outlined,
-                      enabled: !verifying && pinLengthEntered > 0,
-                      onTap: onDelete,
-                    ),
-                  ],
-                ),
-              TextButton(
-                onPressed: verifying ? null : onTogglePassword,
-                child: Text(
-                  usingAccountPassword
-                      ? 'Use transaction PIN'
-                      : 'Use account password',
-                  style: AppTextStyles.labelM.copyWith(
-                    color: AppColors.primary,
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
+                )),
       ),
     );
   }
