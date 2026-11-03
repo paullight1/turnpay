@@ -221,7 +221,7 @@ export class RateService implements OnModuleInit {
     // short market-feed freshness window applies only to API mode.
     return {
       rate,
-      inputRate: inputRate as number,
+      inputRate,
       quoteBasis,
       markup,
       isStale: false,

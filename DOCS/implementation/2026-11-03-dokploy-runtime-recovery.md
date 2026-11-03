@@ -33,3 +33,6 @@ Dokploy deployed `577bda01ea40546c9ce152ecaa3addfdbae13f92` successfully, and th
 The two existing prices imply a crossed spread (87 NGN per GHS in one direction versus about 90.09 NGN per GHS in the other). The owner was notified to review these business prices before accepting live exchanges. No replacement price or market feed was substituted.
 
 The restarted preview exposed a separate bootstrap routing warning when opening directly at `/#/home`. A widget regression reproduced it. The temporary startup shell now uses MaterialApp's builder instead of owning a Navigator, leaving deep links to the application router. Both startup tests pass, including initialization failure/retry. This does not change authentication or transaction authorization.
+
+
+The wider GitHub backend check found one unnecessary `as number` assertion in the new rate result. It was removed without changing emitted JavaScript, and scoped ESLint passed. This is a CI lint correction rather than a runtime behavior change.
