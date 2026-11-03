@@ -4,6 +4,7 @@ import {
   Injectable,
   NotFoundException,
   ServiceUnavailableException,
+  Optional,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Decimal } from '@prisma/client/runtime/library';
@@ -15,6 +16,7 @@ import { BankingService } from '../banking/banking.service';
 import { allocateDepositReference } from '../common/services/deposit-allocation';
 import { isKycTierAtLeast } from '../common/utils/kyc-tier';
 import { fromMinorUnit, toMinorUnit } from './utils/provider-amount';
+import { AccountNotificationsService } from '../notifications/account-notifications.service';
 
 type Payment = {
   reference: string;
@@ -49,6 +51,8 @@ export class PaystackFundingService {
     private readonly paystack: PaystackClient,
     private readonly config: ConfigService,
     private readonly banking: BankingService,
+    @Optional()
+    private readonly accountNotifications?: AccountNotificationsService,
   ) {}
 
   capabilities() {
@@ -377,6 +381,11 @@ export class PaystackFundingService {
             },
           },
         });
+        await this.accountNotifications?.depositReceived(
+          tx,
+          transaction.userId,
+          transaction.id,
+        );
       });
       return { reference, status: 'SUCCESS' };
     }

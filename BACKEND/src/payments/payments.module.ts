@@ -18,9 +18,11 @@ import { BankingModule } from '../banking/banking.module';
 import { ExchangeModule } from '../exchange/exchange.module';
 import { ReconciliationModule } from '../common/services/reconciliation.module';
 import { WebhookInboxService } from './webhooks/webhook-inbox.service';
+import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
   imports: [
+    NotificationsModule,
     ProviderExchangeModule,
     KoraModule,
     PaystackModule,

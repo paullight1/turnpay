@@ -7,6 +7,7 @@ import { WebhookController } from '../src/payments/webhooks/payment-webhook.cont
 import { PaymentWebhookProcessorService } from '../src/payments/webhooks/payment-webhook.processor';
 import { WebhookInboxService } from '../src/payments/webhooks/webhook-inbox.service';
 import { LedgerService } from '../src/wallets/ledger.service';
+import { AccountNotificationsService } from '../src/notifications/account-notifications.service';
 import { createFinancialTestPrisma } from './support/transfer-fixtures';
 
 describe('Monnify webhook financial E2E (real PostgreSQL)', () => {
@@ -122,6 +123,22 @@ describe('Monnify webhook financial E2E (real PostgreSQL)', () => {
       audits: 1,
     });
     await expect(walletBalance(prisma, fixture)).resolves.toBe('25.00');
+    await expect(
+      prisma.emailOutbox.count({
+        where: {
+          userId: fixture.userId,
+          eventType: 'DEPOSIT_RECEIVED',
+        },
+      }),
+    ).resolves.toBe(1);
+    await expect(
+      prisma.paymentNotification.count({
+        where: {
+          audience: `USER:${fixture.userId}`,
+          eventKey: { startsWith: 'wallet:deposit-received:' },
+        },
+      }),
+    ).resolves.toBe(1);
   });
 
   it('retries a processing failure and reports reconciliation drift without changing money', async () => {
@@ -202,6 +219,9 @@ describe('Monnify webhook financial E2E (real PostgreSQL)', () => {
       {} as never,
       config as never,
       logger as never,
+      undefined,
+      undefined,
+      new AccountNotificationsService(),
     );
     const controller = new WebhookController(
       paymentService as never,
@@ -310,6 +330,9 @@ async function cleanupFixture(
   await prisma.virtualAccount.deleteMany({ where: { userId: fixture.userId } });
   await prisma.wallet.deleteMany({ where: { userId: fixture.userId } });
   await prisma.user.delete({ where: { id: fixture.userId } });
+  await prisma.paymentNotification.deleteMany({
+    where: { audience: `USER:${fixture.userId}` },
+  });
 }
 
 async function financialCounts(

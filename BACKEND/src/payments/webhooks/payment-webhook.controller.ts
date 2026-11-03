@@ -9,6 +9,7 @@ import {
   HttpCode,
   Post,
   Req,
+  Optional,
 } from '@nestjs/common';
 import { plainToInstance } from 'class-transformer';
 import { validateSync, ValidationError } from 'class-validator';
@@ -27,6 +28,7 @@ import {
   PaymentWebhookInboxDto,
 } from './dto/payment-webhook.dto';
 import { WebhookInboxService } from './webhook-inbox.service';
+import { PaymentWebhookProcessorService } from './payment-webhook.processor';
 
 @Controller('webhooks')
 export class WebhookController {
@@ -36,6 +38,7 @@ export class WebhookController {
     private readonly configService: ConfigService,
     private readonly logger: PinoLogger,
     private readonly prisma: PrismaService,
+    @Optional() private readonly processor?: PaymentWebhookProcessorService,
   ) {}
 
   // Browser/support probes use GET (or HEAD). They only describe the route;
@@ -205,6 +208,7 @@ export class WebhookController {
     }
 
     const accepted = await this.webhookInbox.accept(event);
+    this.processor?.wake();
     if (accepted.duplicate) {
       this.logger.info(
         {

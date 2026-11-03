@@ -23,6 +23,8 @@ type InboxEventRecord = Pick<
 
 @Injectable()
 export class PaymentWebhookProcessorService {
+  private inFlight?: Promise<void>;
+  private wakeScheduled = false;
   constructor(
     private readonly inbox: WebhookInboxService,
     private readonly paymentService: PaymentService,
@@ -41,7 +43,7 @@ export class PaymentWebhookProcessorService {
     private readonly adverseFunding?: PaystackAdverseFundingService,
   ) {}
 
-  @Cron(CronExpression.EVERY_MINUTE)
+  @Cron(CronExpression.EVERY_5_SECONDS)
   async processScheduledEvents() {
     await this.processDueEvents();
   }
@@ -51,7 +53,36 @@ export class PaymentWebhookProcessorService {
     await this.inbox.recoverStaleClaims(300);
   }
 
-  async processDueEvents(limit = 25) {
+  /** Wake only after durable acceptance; never hold the webhook response open. */
+  wake() {
+    if (this.wakeScheduled) return;
+    this.wakeScheduled = true;
+    setImmediate(() => {
+      this.wakeScheduled = false;
+      void this.processDueEvents().catch(() => {
+        this.logger.error(
+          'Payment webhook worker wake failed; scheduled recovery remains enabled',
+        );
+      });
+    });
+  }
+
+  processDueEvents(limit = 25): Promise<void> {
+    if (this.inFlight) return this.inFlight;
+    const work = this.runDueEvents(limit);
+    this.inFlight = work;
+    void work.then(
+      () => {
+        if (this.inFlight === work) this.inFlight = undefined;
+      },
+      () => {
+        if (this.inFlight === work) this.inFlight = undefined;
+      },
+    );
+    return work;
+  }
+
+  private async runDueEvents(limit: number) {
     const events = (await this.inbox.findDueEvents(
       limit,
     )) as InboxEventRecord[];

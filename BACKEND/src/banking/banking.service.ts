@@ -799,6 +799,11 @@ export class BankingService {
           },
         });
 
+        await this.accountNotifications?.depositReceived(
+          tx,
+          virtualAccount.userId,
+          transaction.id,
+        );
         return { received: true, processed: true };
       });
 

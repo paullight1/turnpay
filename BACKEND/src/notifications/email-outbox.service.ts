@@ -193,6 +193,12 @@ export function renderAccountEmail(eventType: string): {
   html: string;
 } | null {
   switch (eventType) {
+    case 'DEPOSIT_RECEIVED':
+      return {
+        subject: 'Your TrustPay deposit is confirmed',
+        text: 'Your deposit has been credited to your TrustPay wallet. Open TrustPay to view your updated balance and transaction receipt. Never share your PIN or OTP to receive money.',
+        html: '<!doctype html><html lang="en"><head><meta name="viewport" content="width=device-width, initial-scale=1"><title>TrustPay deposit confirmed</title></head><body style="margin:0;background:#f5f6fa;font-family:Arial,sans-serif;color:#17202f"><main style="max-width:520px;margin:32px auto;padding:32px;background:#fff;border-radius:16px"><p style="color:#e7472a;font-weight:700;font-size:24px">TrustPay</p><h1 style="font-size:26px">Your deposit is confirmed</h1><p style="font-size:16px;line-height:1.6">Your deposit has been credited to your TrustPay wallet.</p><p style="font-size:16px;line-height:1.6">Open TrustPay to view your updated balance and transaction receipt.</p><p style="font-size:14px;line-height:1.6;color:#596273">Never share your PIN or OTP to receive money.</p></main></body></html>',
+      };
     case 'BVN_VERIFIED':
       return {
         subject: 'Your BVN is verified',
@@ -221,7 +227,7 @@ export class TransactionalEmailOutboxService {
     private readonly logger: PinoLogger,
   ) {}
 
-  @Cron(CronExpression.EVERY_MINUTE)
+  @Cron(CronExpression.EVERY_5_SECONDS)
   async processPendingEmails(): Promise<EmailDispatchSummary> {
     return this.dispatchPendingEmails();
   }

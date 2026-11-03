@@ -1,7 +1,10 @@
 import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 
-export type AccountNotificationEventType = 'BVN_VERIFIED' | 'ACCOUNT_READY';
+export type AccountNotificationEventType =
+  | 'BVN_VERIFIED'
+  | 'ACCOUNT_READY'
+  | 'DEPOSIT_RECEIVED';
 
 /**
  * Writes account lifecycle notifications into the caller's transaction.
@@ -10,6 +13,21 @@ export type AccountNotificationEventType = 'BVN_VERIFIED' | 'ACCOUNT_READY';
  */
 @Injectable()
 export class AccountNotificationsService {
+  async depositReceived(
+    tx: Prisma.TransactionClient,
+    userId: string,
+    transactionId: string,
+  ): Promise<void> {
+    await this.enqueue(
+      tx,
+      userId,
+      transactionId,
+      'wallet:deposit-received',
+      'DEPOSIT_RECEIVED',
+      'Deposit credited to your wallet',
+    );
+  }
+
   async bvnVerified(
     tx: Prisma.TransactionClient,
     userId: string,
