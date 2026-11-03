@@ -13,6 +13,18 @@ class HomeDataService {
 
   final ApiClient _apiClient;
 
+  /// Lightweight, uncached reads for foreground balance updates.
+  Future<List<HomeWallet>> fetchWalletBalances() async {
+    final response = await _apiClient.client
+        .get('/api/wallets', options: _freshRequestOptions());
+    if (response.data is! List) {
+      throw const FormatException('Invalid wallet balances response.');
+    }
+    return (response.data as List)
+        .map((item) => HomeWallet.fromJson(_requiredMap(item, 'wallet')))
+        .toList();
+  }
+
   Future<KycOverview> fetchKycOverview() =>
       KycService(apiClient: _apiClient).fetchOverview();
 

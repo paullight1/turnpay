@@ -47,6 +47,9 @@ class _HomeScreenState extends State<HomeScreen>
   bool _foreground = true;
   bool _routeVisible = true;
   Timer? _notificationPollTimer;
+  Timer? _balancePollTimer;
+  bool _balancePollInFlight = false;
+  HomeDashboardData? _lastDashboard;
   Future<void>? _notificationCountInFlight;
   ModalRoute<dynamic>? _subscribedRoute;
 
@@ -54,9 +57,10 @@ class _HomeScreenState extends State<HomeScreen>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _dashboardFuture = widget.homeDataService.fetchDashboard();
+    _dashboardFuture = _loadDashboard();
     _refreshNotificationCount();
     _scheduleNotificationPoll();
+    _scheduleBalancePoll();
     // Re-fetch balances whenever a money action completes elsewhere in the
     // app so the dashboard never shows stale figures.
     walletRefreshSignal.addListener(_refreshDashboard);
@@ -65,6 +69,7 @@ class _HomeScreenState extends State<HomeScreen>
   @override
   void dispose() {
     _notificationPollTimer?.cancel();
+    _balancePollTimer?.cancel();
     _notificationPollTimer = null;
     if (_subscribedRoute != null) {
       appRouteObserver.unsubscribe(this);
@@ -79,11 +84,17 @@ class _HomeScreenState extends State<HomeScreen>
   void didChangeAppLifecycleState(AppLifecycleState state) {
     _foreground = state == AppLifecycleState.resumed;
     if (_foreground) {
+      if (_notificationPollingEnabled) {
+        unawaited(_pollBalances());
+      }
       if (_notificationPollingEnabled) _refreshNotificationCount();
       _scheduleNotificationPoll();
+      _scheduleBalancePoll();
     } else {
       _notificationPollTimer?.cancel();
       _notificationPollTimer = null;
+      _balancePollTimer?.cancel();
+      _balancePollTimer = null;
     }
   }
 
@@ -102,11 +113,15 @@ class _HomeScreenState extends State<HomeScreen>
     super.didUpdateWidget(oldWidget);
     if (oldWidget.isHomeTabActive == widget.isHomeTabActive) return;
     if (widget.isHomeTabActive) {
+      unawaited(_pollBalances());
       _refreshNotificationCount();
       _scheduleNotificationPoll();
+      _scheduleBalancePoll();
     } else {
       _notificationPollTimer?.cancel();
       _notificationPollTimer = null;
+      _balancePollTimer?.cancel();
+      _balancePollTimer = null;
     }
   }
 
@@ -114,18 +129,23 @@ class _HomeScreenState extends State<HomeScreen>
   void didPush() {
     _routeVisible = true;
     _scheduleNotificationPoll();
+    _scheduleBalancePoll();
   }
 
   @override
   void didPopNext() {
     _routeVisible = true;
+    unawaited(_pollBalances());
     if (_notificationPollingEnabled) _refreshNotificationCount();
     _scheduleNotificationPoll();
+    _scheduleBalancePoll();
   }
 
   @override
   void didPushNext() {
     _routeVisible = false;
+    _balancePollTimer?.cancel();
+    _balancePollTimer = null;
     _notificationPollTimer?.cancel();
     _notificationPollTimer = null;
   }
@@ -133,6 +153,8 @@ class _HomeScreenState extends State<HomeScreen>
   @override
   void didPop() {
     _routeVisible = false;
+    _balancePollTimer?.cancel();
+    _balancePollTimer = null;
     _notificationPollTimer?.cancel();
     _notificationPollTimer = null;
   }
@@ -161,15 +183,60 @@ class _HomeScreenState extends State<HomeScreen>
     setState(() => _showBalances = !_showBalances);
   }
 
-  Future<void> _refreshDashboard() async {
+  Future<HomeDashboardData> _loadDashboard() async {
+    final data = await widget.homeDataService.fetchDashboard();
+    _lastDashboard = data;
+    return data;
+  }
+
+  void _scheduleBalancePoll() {
+    if (!_notificationPollingEnabled || _balancePollTimer != null) return;
+    _balancePollTimer = Timer(const Duration(seconds: 5), () async {
+      _balancePollTimer = null;
+      if (!_notificationPollingEnabled) return;
+      await _pollBalances();
+      _scheduleBalancePoll();
+    });
+  }
+
+  Future<void> _pollBalances() async {
+    if (_balancePollInFlight || _refreshing || _lastDashboard == null) return;
+    _balancePollInFlight = true;
+    try {
+      final wallets = await widget.homeDataService.fetchWalletBalances();
+      if (!_notificationPollingEnabled || _refreshing) return;
+      final previous = _lastDashboard!.wallets;
+      final changed = wallets.length != previous.length ||
+          wallets.any((wallet) => !previous.any((old) =>
+              old.id == wallet.id &&
+              old.currency == wallet.currency &&
+              old.balanceDecimalString == wallet.balanceDecimalString));
+      if (changed) await _refreshDashboard(background: true);
+    } catch (_) {
+      // Keep the last confirmed balance during a temporary poll outage.
+      // Manual refresh still exposes actionable errors.
+    } finally {
+      _balancePollInFlight = false;
+    }
+  }
+
+  Future<void> _refreshDashboard({bool background = false}) async {
     if (_refreshing || !mounted) return;
     if (_notificationPollingEnabled) _refreshNotificationCount();
-    setState(() {
-      _refreshing = true;
-      _dashboardFuture = widget.homeDataService.fetchDashboard();
-    });
+    final request = _loadDashboard();
+    _refreshing = true;
+    if (!background) {
+      setState(() {
+        _dashboardFuture = request;
+      });
+    }
     try {
-      await _dashboardFuture;
+      final data = await request;
+      if (background && mounted) {
+        setState(() {
+          _dashboardFuture = Future.value(data);
+        });
+      }
     } catch (_) {
       // The builder presents the failed refresh rather than hiding it.
     } finally {
@@ -240,67 +307,77 @@ class _HomeScreenState extends State<HomeScreen>
               color: AppColors.primary,
               backgroundColor: AppColors.surface,
               onRefresh: _refreshDashboard,
-              child: ListView(
-                physics: const AlwaysScrollableScrollPhysics(
-                  parent: BouncingScrollPhysics(),
+              child: ScrollConfiguration(
+                behavior: ScrollConfiguration.of(context).copyWith(
+                  dragDevices: const {
+                    PointerDeviceKind.touch,
+                    PointerDeviceKind.mouse,
+                    PointerDeviceKind.trackpad,
+                    PointerDeviceKind.stylus,
+                  },
                 ),
-                padding: const EdgeInsets.fromLTRB(
-                  AppSpacing.lg,
-                  AppSpacing.md,
-                  AppSpacing.lg,
-                  88,
-                ),
-                children: [
-                  if (_refreshing) ...[
-                    const LinearProgressIndicator(minHeight: 2),
-                    const Text('Updating balances…'),
-                  ],
-                  _HomeTopBar(
-                    user: data.user,
-                    notificationCount: _unreadNotificationCount,
-                    onNotifications: _openNotifications,
+                child: ListView(
+                  physics: const AlwaysScrollableScrollPhysics(
+                    parent: BouncingScrollPhysics(),
                   ),
-                  const SizedBox(height: AppSpacing.md),
-                  _BalancePanel(
-                    data: data,
-                    showBalances: _showBalances,
-                    onToggleBalances: _toggleBalances,
-                    onSend: hasNgnAccount
-                        ? () => context.push(AppRoutes.send)
-                        : () => context.push(AppRoutes.receiveMoney),
+                  padding: const EdgeInsets.fromLTRB(
+                    AppSpacing.lg,
+                    AppSpacing.md,
+                    AppSpacing.lg,
+                    88,
                   ),
-                  if (data.virtualAccounts.isEmpty ||
-                      !_hasActiveAccount(data.virtualAccounts, 'NGN')) ...[
+                  children: [
+                    if (_refreshing) ...[
+                      const LinearProgressIndicator(minHeight: 2),
+                      const Text('Updating balances…'),
+                    ],
+                    _HomeTopBar(
+                      user: data.user,
+                      notificationCount: _unreadNotificationCount,
+                      onNotifications: _openNotifications,
+                    ),
                     const SizedBox(height: AppSpacing.md),
-                    _AccountSetupBanner(
-                      awaitingVerification:
-                          data.user.kycStatus.toUpperCase() == 'SUBMITTED',
-                      onRequest: () => context.push(
-                          data.user.kycStatus.toUpperCase() == 'SUBMITTED'
-                              ? AppRoutes.virtualAccount
-                              : AppRoutes.receiveMoney),
+                    _BalancePanel(
+                      data: data,
+                      showBalances: _showBalances,
+                      onToggleBalances: _toggleBalances,
+                      onSend: hasNgnAccount
+                          ? () => context.push(AppRoutes.send)
+                          : () => context.push(AppRoutes.receiveMoney),
                     ),
-                  ],
-                  const SizedBox(height: AppSpacing.lg),
-                  const _QuickActionsGrid(),
-                  const SizedBox(height: AppSpacing.lg),
-                  if (data.user.kycStatus.toUpperCase() == 'VERIFIED')
-                    const _PromoBanner()
-                  else
-                    _KycStatusBanner(
-                      status: data.user.kycStatus,
-                    ),
-                  if (data.beneficiaries.isNotEmpty) ...[
+                    if (data.virtualAccounts.isEmpty ||
+                        !_hasActiveAccount(data.virtualAccounts, 'NGN')) ...[
+                      const SizedBox(height: AppSpacing.md),
+                      _AccountSetupBanner(
+                        awaitingVerification:
+                            data.user.kycStatus.toUpperCase() == 'SUBMITTED',
+                        onRequest: () => context.push(
+                            data.user.kycStatus.toUpperCase() == 'SUBMITTED'
+                                ? AppRoutes.virtualAccount
+                                : AppRoutes.receiveMoney),
+                      ),
+                    ],
                     const SizedBox(height: AppSpacing.lg),
-                    _BeneficiaryStrip(
-                      beneficiaries: data.beneficiaries,
+                    const _QuickActionsGrid(),
+                    const SizedBox(height: AppSpacing.lg),
+                    if (data.user.kycStatus.toUpperCase() == 'VERIFIED')
+                      const _PromoBanner()
+                    else
+                      _KycStatusBanner(
+                        status: data.user.kycStatus,
+                      ),
+                    if (data.beneficiaries.isNotEmpty) ...[
+                      const SizedBox(height: AppSpacing.lg),
+                      _BeneficiaryStrip(
+                        beneficiaries: data.beneficiaries,
+                      ),
+                    ],
+                    const SizedBox(height: AppSpacing.lg),
+                    _RecentTransactionsSection(
+                      transactions: data.transactions,
                     ),
                   ],
-                  const SizedBox(height: AppSpacing.lg),
-                  _RecentTransactionsSection(
-                    transactions: data.transactions,
-                  ),
-                ],
+                ),
               ),
             );
           },

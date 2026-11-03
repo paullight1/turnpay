@@ -1,3 +1,6 @@
+import 'dart:async';
+
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
@@ -86,6 +89,114 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(find.text('Recent Deposits'), findsOneWidget);
+  });
+
+  testWidgets('verified setup retry reveals the account with one click',
+      (tester) async {
+    final bundle = buildTrustPayTestBundle(
+      includeVirtualAccounts: false,
+      virtualAccountProvisioningStatus: 'ACTION_REQUIRED',
+    );
+    await tester.pumpWidget(MaterialApp(
+      home: ReceiveMoneyScreen(
+        walletService: bundle.walletService,
+        homeDataService: bundle.homeDataService,
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Try account setup again'));
+    await tester.pumpAndSettle();
+
+    expect(
+      bundle.adapter.requestedUris
+          .where((uri) => uri.path == '/api/banking/accounts/provision'),
+      hasLength(1),
+    );
+    expect(find.text('Copy account number'), findsOneWidget);
+    expect(find.text('Authorize setup'), findsNothing);
+    expect(find.text('Receiving account'), findsNothing);
+  });
+
+  testWidgets('account setup retry cannot submit twice while preparing',
+      (tester) async {
+    final bundle = buildTrustPayTestBundle(
+      includeVirtualAccounts: false,
+      virtualAccountProvisioningStatus: 'ACTION_REQUIRED',
+    );
+    final release = Completer<void>();
+    var calls = 0;
+    bundle.dio.interceptors.add(InterceptorsWrapper(
+      onRequest: (options, handler) async {
+        if (options.path == '/api/banking/accounts/provision') {
+          calls++;
+          await release.future;
+        }
+        handler.next(options);
+      },
+    ));
+    await tester.pumpWidget(MaterialApp(
+      home: ReceiveMoneyScreen(
+        walletService: bundle.walletService,
+        homeDataService: bundle.homeDataService,
+      ),
+    ));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Try account setup again'));
+    await tester.pump();
+    final button = tester.widget<FilledButton>(
+        find.widgetWithText(FilledButton, 'Preparing account…'));
+    expect(button.onPressed, isNull);
+    await tester.tap(find.text('Preparing account…'));
+    await tester.pump();
+    release.complete();
+    await tester.pumpAndSettle();
+    expect(calls, 1);
+    expect(find.text('Copy account number'), findsOneWidget);
+  });
+
+  testWidgets('uncertain account setup retry keeps its original attempt key',
+      (tester) async {
+    final bundle = buildTrustPayTestBundle(
+      includeVirtualAccounts: false,
+      virtualAccountProvisioningStatus: 'ACTION_REQUIRED',
+    );
+    final keys = <String>[];
+    bundle.dio.interceptors.add(InterceptorsWrapper(
+      onRequest: (options, handler) {
+        if (options.path == '/api/banking/accounts/provision') {
+          keys.add(options.headers['Idempotency-Key'] as String);
+          if (keys.length == 1) {
+            handler.reject(DioException(
+              requestOptions: options,
+              type: DioExceptionType.connectionTimeout,
+            ));
+            return;
+          }
+        }
+        handler.next(options);
+      },
+    ));
+    await tester.pumpWidget(MaterialApp(
+      home: ReceiveMoneyScreen(
+        walletService: bundle.walletService,
+        homeDataService: bundle.homeDataService,
+      ),
+    ));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Try account setup again'));
+    await tester.pumpAndSettle();
+    expect(find.text('Copy account number'), findsNothing);
+    expect(
+        find.text(
+            'Could not confirm your account setup. Refresh status or try again.'),
+        findsOneWidget);
+    await tester.tap(find.text('Try account setup again'));
+    await tester.pumpAndSettle();
+    expect(keys, hasLength(2));
+    expect(keys.first, isNotEmpty);
+    expect(keys.last, keys.first);
+    expect(find.text('Copy account number'), findsOneWidget);
   });
 
   testWidgets('verified account setup failure has one safe retry path',

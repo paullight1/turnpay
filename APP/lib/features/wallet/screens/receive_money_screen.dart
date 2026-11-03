@@ -3,8 +3,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:go_router/go_router.dart';
+import 'package:dio/dio.dart';
 
 import '../../../core/router/app_router.dart';
+import '../../../core/state/wallet_refresh_signal.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/haptics.dart';
 import '../../../core/widgets/micro_interactions.dart';
@@ -13,6 +15,7 @@ import '../../../core/widgets/tp_empty_state.dart';
 import '../../../core/widgets/tp_page_header.dart';
 import '../../../core/widgets/tp_snackbar.dart';
 import '../../../services/home_data_service.dart';
+import '../../../services/api_client.dart';
 import '../../../services/kyc_service.dart';
 import '../../../services/wallet_service.dart';
 import '../widgets/account_setup_presenter.dart';
@@ -38,6 +41,9 @@ class _ReceiveMoneyScreenState extends State<ReceiveMoneyScreen> {
   late Future<HomeVirtualAccountProvisioning> _provisioningFuture;
   late Future<KycOverview?> _kycFuture;
   late Future<List<DepositRecord>> _depositsFuture;
+  final _setupAttempt = MoneyAttemptIdempotency();
+  bool _retryingSetup = false;
+  String? _setupError;
 
   @override
   void initState() {
@@ -93,8 +99,48 @@ class _ReceiveMoneyScreenState extends State<ReceiveMoneyScreen> {
     if (mounted) _refresh();
   }
 
-  void _refresh() {
+  Future<void> _retryAccountSetup() async {
+    if (_retryingSetup) return;
     setState(() {
+      _retryingSetup = true;
+      _setupError = null;
+    });
+    try {
+      // This action is offered only for an existing, consented setup request
+      // with verified BVN. New requests retain their explicit consent flow.
+      final account = await widget.homeDataService.provisionVirtualAccount(
+        consentAccepted: true,
+        idempotencyKey: _setupAttempt.keyFor('paystack-receiving-account|NGN'),
+      );
+      _setupAttempt.markFinalOutcome();
+      if (account.status.toUpperCase() == 'ACTIVE') {
+        walletRefreshSignal.bump();
+      }
+    } catch (error) {
+      if (error is DioException &&
+          const [400, 401, 403, 404, 422]
+              .contains(error.response?.statusCode)) {
+        _setupAttempt.markFinalOutcome();
+      }
+      if (mounted) {
+        _setupError =
+            'Could not confirm your account setup. Refresh status or try again.';
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _retryingSetup = false;
+          // Reconcile uncertain outcomes and reveal only server-issued details.
+          _loadData();
+        });
+      }
+    }
+  }
+
+  void _refresh() {
+    if (_retryingSetup) return;
+    setState(() {
+      _setupError = null;
       _loadData();
     });
   }
@@ -211,8 +257,12 @@ class _ReceiveMoneyScreenState extends State<ReceiveMoneyScreen> {
                                 provisioning?.isWaitingForKyc == true,
                             bvnVerified: bvnVerified,
                             actionRequired: actionRequired,
+                            isRetrying: _retryingSetup,
+                            error: _setupError,
                             onRefresh: _refresh,
-                            onRetry: _openAccountSetup,
+                            onRetry: bvnVerified
+                                ? _retryAccountSetup
+                                : _openAccountSetup,
                           ),
                         );
                       },
@@ -871,6 +921,8 @@ class _PaystackProvisioningCard extends StatelessWidget {
   final bool actionRequired;
   final bool waitingForKyc;
   final bool? bvnVerified;
+  final bool isRetrying;
+  final String? error;
   final VoidCallback onRefresh;
   final VoidCallback onRetry;
 
@@ -878,6 +930,8 @@ class _PaystackProvisioningCard extends StatelessWidget {
     required this.actionRequired,
     this.waitingForKyc = false,
     this.bvnVerified,
+    this.isRetrying = false,
+    this.error,
     required this.onRefresh,
     required this.onRetry,
   });
@@ -928,29 +982,44 @@ class _PaystackProvisioningCard extends StatelessWidget {
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: AppSpacing.lg),
+            if (error != null) ...[
+              Text(error!,
+                  style: AppTextStyles.bodyS.copyWith(color: AppColors.error),
+                  textAlign: TextAlign.center),
+              const SizedBox(height: AppSpacing.md),
+            ],
             Wrap(
               alignment: WrapAlignment.center,
               spacing: AppSpacing.sm,
               runSpacing: AppSpacing.sm,
               children: [
                 OutlinedButton.icon(
-                  onPressed: onRefresh,
+                  onPressed: isRetrying ? null : onRefresh,
                   icon: const Icon(Icons.refresh_rounded),
                   label: const Text('Refresh status'),
                 ),
                 if (waitingForKyc)
                   FilledButton.icon(
-                    onPressed: onRetry,
+                    onPressed: isRetrying ? null : onRetry,
                     icon: const Icon(Icons.arrow_forward_rounded),
-                    label: Text(bvnVerified == true
-                        ? 'Continue setup'
-                        : 'View account setup'),
+                    label: Text(isRetrying
+                        ? 'Preparing account…'
+                        : bvnVerified == true
+                            ? 'Continue setup'
+                            : 'View account setup'),
                   ),
                 if (actionRequired)
                   FilledButton.icon(
-                    onPressed: onRetry,
-                    icon: const Icon(Icons.refresh_rounded),
-                    label: const Text('Try account setup again'),
+                    onPressed: isRetrying ? null : onRetry,
+                    icon: isRetrying
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2))
+                        : const Icon(Icons.refresh_rounded),
+                    label: Text(isRetrying
+                        ? 'Preparing account…'
+                        : 'Try account setup again'),
                   ),
               ],
             ),
