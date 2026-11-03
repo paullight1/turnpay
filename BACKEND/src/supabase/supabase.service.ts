@@ -91,14 +91,69 @@ export class SupabaseService {
    * Auth server for projects using symmetric JWT signing.
    */
   async getVerifiedProviderSessionId(accessToken: string) {
-    const { data, error } = await this.authClient.auth.getClaims(accessToken);
-    const sessionId = data?.claims?.session_id;
+    this.assertJwtEnvelopeIsWellFormed(accessToken);
+    try {
+      const { data, error } = await this.authClient.auth.getClaims(accessToken);
+      const sessionId = data?.claims?.session_id;
 
-    if (error || typeof sessionId !== 'string' || sessionId.length === 0) {
+      if (error || typeof sessionId !== 'string' || sessionId.length === 0) {
+        throw new UnauthorizedException(
+          'Session expired. Please sign in again.',
+        );
+      }
+
+      return sessionId;
+    } catch (error) {
+      // auth-js throws ordinary Errors for these JWT claim failures instead
+      // of returning AuthError. Preserve 401 so clients can refresh the token.
+      // Unexpected transport/runtime failures must not sign the customer out.
+      if (
+        error instanceof Error &&
+        (error.message === 'JWT has expired' ||
+          error.message === 'Missing exp claim' ||
+          error.message === 'Invalid alg claim')
+      ) {
+        throw new UnauthorizedException(
+          'Session expired. Please sign in again.',
+        );
+      }
+      throw error;
+    }
+  }
+
+  private assertJwtEnvelopeIsWellFormed(token: string) {
+    // Reject malformed input before SDK JSON/property access can throw a 500.
+    // Decoded claims never authenticate anyone; the SDK must still verify them.
+    try {
+      const parts = token.split('.');
+      if (
+        parts.length !== 3 ||
+        parts.some((part) => !/^[A-Za-z0-9_-]+$/.test(part))
+      ) {
+        throw new Error('Invalid JWT structure');
+      }
+      const parseObject = (part: string): Record<string, unknown> => {
+        const parsed: unknown = JSON.parse(
+          Buffer.from(part, 'base64url').toString('utf8'),
+        );
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+          throw new Error('Invalid JWT object');
+        }
+        return parsed as Record<string, unknown>;
+      };
+      const header = parseObject(parts[0]);
+      const claims = parseObject(parts[1]);
+      if (
+        typeof header.alg !== 'string' ||
+        !header.alg ||
+        typeof claims.exp !== 'number' ||
+        !Number.isFinite(claims.exp)
+      ) {
+        throw new Error('Invalid JWT claims');
+      }
+    } catch {
       throw new UnauthorizedException('Session expired. Please sign in again.');
     }
-
-    return sessionId;
   }
 
   /**

@@ -179,7 +179,10 @@ test.describe("web session hardening", () => {
     await expect(page).toHaveURL(/\/admin/);
     await expect.poll(() => readStoredSession(page)).toBeNull();
 
-    await page.getByRole("button", { name: /sign out/i }).click();
+    const accountMenu = page.locator('[data-slot="dropdown-menu-trigger"]').last();
+    await expect(accountMenu).toBeVisible();
+    await accountMenu.click();
+    await page.getByRole("menuitem", { name: "Sign Out", exact: true }).click();
     await expect(page).toHaveURL(/\/staff/);
   });
 });

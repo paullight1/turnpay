@@ -729,3 +729,8 @@ Admin rate reads and writes now reject reversed NGN/GHS rate units under the cur
 ### 2026-11-02 approved-provider CI alignment
 
 The deployment manifest gate now recognises the owner-approved Ninja NIN adapter while requiring the pinned live endpoint, explicit boolean enable flag and one server-only sync:false secret slot without inline values. Legacy key naming and all other provider/OTP/financial deployment restrictions remain checked. Two simulated e2e fixtures were updated to the current canonical business:v2 request hash; no production idempotency logic or stored replay record was changed. Manifest portability/negative fixtures and both 16-test replay suites passed.
+
+
+### 2026-11-03 Dokploy expired-token recovery
+
+A synthetic expired JWT reproduced HTTP500 on the active Dokploy backend. The Supabase SDK throws ordinary Errors for expired/missing expiry claims; known claim rejections now return401 so the client can refresh normally. Malformed token envelopes are rejected before SDK parsing; decoded claims never grant authentication. Signature and provider-session verification, account-state checks and all financial gates remain intact. Unexpected runtime failures retain their original classification. Twenty-three focused authentication tests, scoped lint and an isolated reviewed-release backend build passed. CI browser configuration now exercises the retained QA-only customer surface in development mode while the separate production build remains required. No market rate, secret, customer identity outcome or financial record was changed.

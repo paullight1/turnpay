@@ -1,3 +1,4 @@
+import { UnauthorizedException } from '@nestjs/common';
 import { SupabaseService } from './supabase.service';
 
 describe('SupabaseService recovery identity repair', () => {
@@ -115,6 +116,67 @@ describe('SupabaseService provider session operations', () => {
     }),
   };
   const logger = { info: jest.fn(), warn: jest.fn() };
+
+  it.each([
+    { sub: 'synthetic-user', session_id: 'synthetic-session', exp: 1 },
+    { sub: 'synthetic-user', session_id: 'synthetic-session' },
+  ])(
+    'maps SDK JWT expiry/claim exceptions to an authentication rejection: %j',
+    async (claims) => {
+      const service = new SupabaseService(
+        config as never,
+        {} as never,
+        logger as never,
+      );
+      const encode = (value: unknown) =>
+        Buffer.from(JSON.stringify(value)).toString('base64url');
+      const token = `${encode({ alg: 'HS256', typ: 'JWT' })}.${encode(claims)}.${Buffer.alloc(32).toString('base64url')}`;
+      // Exercise the installed SDK: it throws ordinary Error objects for these
+      // inputs before making any provider request.
+      await expect(
+        service.getVerifiedProviderSessionId(token),
+      ).rejects.toBeInstanceOf(UnauthorizedException);
+    },
+  );
+
+  it.each([
+    ['{', JSON.stringify({ exp: 9999999999 })],
+    [JSON.stringify({ alg: 'HS256' }), '{'],
+    [JSON.stringify({ alg: 'HS256' }), 'null'],
+    [JSON.stringify({ alg: 1 }), JSON.stringify({ exp: 9999999999 })],
+  ])(
+    'rejects malformed token JSON before calling the provider',
+    async (header, payload) => {
+      const service = new SupabaseService(
+        config as never,
+        {} as never,
+        logger as never,
+      );
+      const encode = (value: string) =>
+        Buffer.from(value).toString('base64url');
+      const token = `${encode(header)}.${encode(payload)}.${Buffer.alloc(32).toString('base64url')}`;
+      await expect(
+        service.getVerifiedProviderSessionId(token),
+      ).rejects.toBeInstanceOf(UnauthorizedException);
+    },
+  );
+
+  it('keeps unexpected verification failures distinct from rejected credentials', async () => {
+    const service = new SupabaseService(
+      config as never,
+      {} as never,
+      logger as never,
+    );
+    const failure = new Error('verification transport unavailable');
+    service.authClient = {
+      auth: { getClaims: jest.fn().mockRejectedValue(failure) },
+    } as never;
+    await expect(
+      service.getVerifiedProviderSessionId(
+        `${Buffer.from(JSON.stringify({ alg: 'HS256' })).toString('base64url')}.${Buffer.from(JSON.stringify({ exp: 9999999999 })).toString('base64url')}.${Buffer.alloc(32).toString('base64url')}`,
+      ),
+    ).rejects.toBe(failure);
+  });
 
   it('revokes the provider session with the explicit access token', async () => {
     const service = new SupabaseService(

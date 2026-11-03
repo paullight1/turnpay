@@ -124,9 +124,11 @@ export default defineConfig({
             },
           },
           {
-            command: process.env.CI
-              ? `npm run start -- --hostname ${webHost} --port ${webPort}`
-              : `npm run dev -- --webpack --hostname ${webHost} --port ${webPort}`,
+            // The retained customer pages are deliberately available only in
+            // non-production mode. The separate build step still validates
+            // the production bundle; run browser E2E against the dev server
+            // so the QA-only bypass cannot be mistaken for a production path.
+            command: `npm run dev -- --webpack --hostname ${webHost} --port ${webPort}`,
             url: webServerUrl,
             reuseExistingServer,
             timeout: 180000,
