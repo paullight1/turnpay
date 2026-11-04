@@ -1,15 +1,86 @@
 import { PaystackVirtualAccountProvider } from './paystack-virtual-account.provider';
 import { ConfigService } from '@nestjs/config';
+import { BadRequestException } from '@nestjs/common';
 
 describe('Paystack banking adapter', () => {
   const request = jest.fn();
+  const approval = { enabled: true, prepare: jest.fn() };
   const provider = () =>
     new PaystackVirtualAccountProvider(
       { configured: true, request } as never,
       new ConfigService(),
       {} as never,
+      approval as never,
     );
-  beforeEach(() => request.mockReset());
+  beforeEach(() => {
+    request.mockReset();
+    approval.prepare.mockReset();
+  });
+  it('commits the approval binding before dispatch and fails closed if it cannot', async () => {
+    request.mockResolvedValueOnce({ recipient_code: 'RCP_test' });
+    approval.prepare.mockRejectedValueOnce(new Error('reservation mismatch'));
+    await expect(
+      provider().initiateTransfer({
+        amount: '50.00',
+        reference: 'wd_test_reference',
+        bankCode: '058',
+        accountNumber: '0123456789',
+        accountName: 'Recipient',
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(approval.prepare).toHaveBeenCalledWith(
+      expect.objectContaining({
+        recipient: 'RCP_test',
+        amount: 5000,
+        currency: 'NGN',
+        source: 'balance',
+      }),
+    );
+  });
+  it('classifies preparation timeouts as unsent, without hiding an ambiguous transfer POST', async () => {
+    request.mockRejectedValueOnce(new Error('recipient timeout'));
+    await expect(
+      provider().initiateTransfer({
+        amount: '50',
+        reference: 'wd_test_reference',
+        bankCode: '058',
+        accountNumber: '0123456789',
+        accountName: 'Recipient',
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    request.mockReset();
+    const uncertain = new Error('transfer POST timeout');
+    request
+      .mockResolvedValueOnce({ recipient_code: 'RCP_test' })
+      .mockRejectedValueOnce(uncertain);
+    await expect(
+      provider().initiateTransfer({
+        amount: '50',
+        reference: 'wd_test_reference',
+        bankCode: '058',
+        accountNumber: '0123456789',
+        accountName: 'Recipient',
+      }),
+    ).rejects.toBe(uncertain);
+  });
+  it('does not submit transfers when server approval is disabled', async () => {
+    const bank = new PaystackVirtualAccountProvider(
+      { configured: true, request } as never,
+      new ConfigService(),
+      {} as never,
+    );
+    await expect(
+      bank.initiateTransfer({
+        amount: '50',
+        reference: 'wd_test_reference',
+        bankCode: '058',
+        accountNumber: '0123456789',
+        accountName: 'Recipient',
+      }),
+    ).rejects.toThrow('approval');
+    expect(request).not.toHaveBeenCalled();
+  });
   it('submits exact kobo and a lowercase stable transfer reference', async () => {
     request
       .mockResolvedValueOnce({ recipient_code: 'RCP_test' })

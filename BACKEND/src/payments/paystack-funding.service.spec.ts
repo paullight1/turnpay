@@ -47,6 +47,26 @@ describe('verified Paystack funding', () => {
     customer: { customer_code: 'CUS_fixture' },
   };
   let service: PaystackFundingService;
+  it.each([false, true])(
+    'allows recipient preparation while execution requires automatic approval (%s)',
+    (enabled) => {
+      const capabilities = new PaystackFundingService(
+        prisma as never,
+        ledger as never,
+        { configured: true } as never,
+        new ConfigService({
+          BANKING_PROVIDER_PRIMARY: 'paystack',
+          WITHDRAWALS_ENABLED: true,
+          PAYSTACK_TRANSFER_APPROVAL_ENABLED: enabled,
+        }),
+        {} as never,
+      ).capabilities();
+      expect(capabilities).toMatchObject({
+        bankTransferPreparation: true,
+        withdrawals: enabled,
+      });
+    },
+  );
   it.each([true, false])(
     'reports the actual internal transfer switch (%s), independently of Paystack',
     (enabled) => {

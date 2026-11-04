@@ -1063,6 +1063,7 @@ class PaystackCapabilities {
   final bool checkout;
   final bool virtualAccounts;
   final bool withdrawals;
+  final bool bankTransferPreparation;
   final bool internalTransfers;
   final bool identityVerification;
   final bool manualDocumentReview;
@@ -1078,6 +1079,7 @@ class PaystackCapabilities {
     required this.checkout,
     required this.virtualAccounts,
     required this.withdrawals,
+    this.bankTransferPreparation = false,
     this.internalTransfers = false,
     required this.identityVerification,
     required this.manualDocumentReview,
@@ -1096,6 +1098,11 @@ class PaystackCapabilities {
       checkout: json['checkout'] == true,
       virtualAccounts: json['virtualAccounts'] == true,
       withdrawals: json['withdrawals'] == true,
+      bankTransferPreparation: json['bankTransferPreparation'] == true ||
+          (json['bankTransferPreparation'] == null &&
+              json['configured'] == true &&
+              '${json['provider']}'.toLowerCase() == 'paystack') ||
+          json['withdrawals'] == true,
       internalTransfers: json['internalTransfers'] == true,
       identityVerification: json['identityVerification'] == true,
       manualDocumentReview: json['manualDocumentReview'] == true,

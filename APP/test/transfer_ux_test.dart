@@ -105,6 +105,57 @@ Future<void> snapshot(WidgetTester tester, GlobalKey key, String name) async {
 }
 
 void main() {
+  testWidgets(
+      'older Paystack servers allow recipient preparation without enabling withdrawals',
+      (tester) async {
+    await renderTransfer(tester, intercept: (options, handler) {
+      if (options.path == '/api/payments/capabilities') {
+        handler.resolve(Response(requestOptions: options, data: {
+          'provider': 'paystack',
+          'configured': true,
+          'withdrawals': false
+        }));
+      } else {
+        handler.next(options);
+      }
+    });
+    expect(find.text('Continue to bank details'), findsOneWidget);
+  });
+  testWidgets(
+      'recipient preparation works before bank transfers are activated without enabling payment',
+      (tester) async {
+    final bundle = await renderTransfer(tester, intercept: (options, handler) {
+      if (options.path == '/api/payments/capabilities') {
+        handler.resolve(Response(requestOptions: options, data: {
+          'configured': true,
+          'bankTransferPreparation': true,
+          'withdrawals': false
+        }));
+      } else {
+        handler.next(options);
+      }
+    });
+    expect(find.text('Continue to bank details'), findsOneWidget);
+    await bankDetails(tester);
+    await tester.enterText(field('Account number'), '0123456789');
+    await tester.pump(const Duration(milliseconds: 600));
+    await tester.pumpAndSettle();
+    expect(find.text('Recipient confirmed'), findsOneWidget);
+    expect(
+        find.text(
+            'Bank transfers are being prepared. You can check your recipient details now.'),
+        findsOneWidget);
+    expect(
+        tester
+            .widget<FilledButton>(find.widgetWithText(
+                FilledButton, 'Transfers temporarily unavailable'))
+            .onPressed,
+        isNull);
+    expect(
+        bundle.adapter.requestedUris
+            .any((u) => u.path == '/api/payments/withdraw'),
+        isFalse);
+  });
   setUpAll(() async {
     GoogleFonts.config.allowRuntimeFetching = false;
     await GoogleFonts.pendingFonts([AppTheme.light.textTheme]);

@@ -1,10 +1,12 @@
 import { PaystackVirtualAccountProvider } from '../banking/providers/paystack-virtual-account.provider';
+import { PaystackTransferApprovalService } from '../paystack/paystack-transfer-approval.service';
 import {
   BadRequestException,
   ForbiddenException,
   Injectable,
   NotFoundException,
   Optional,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
@@ -79,6 +81,8 @@ export class PaymentService {
     private readonly transactionPin: TransactionPinService,
     @Optional() settlementHold?: SettlementHoldService,
     @Optional() private readonly paystackBanks?: PaystackVirtualAccountProvider,
+    @Optional()
+    private readonly paystackApproval?: PaystackTransferApprovalService,
   ) {
     // Keep direct construction fail-closed. Production DI supplies the
     // shared service; fixtures that omit it still exercise the persisted
@@ -192,6 +196,7 @@ export class PaymentService {
     if (
       provider === 'paystack' &&
       (!this.paystackBanks?.configured ||
+        this.paystackBanks?.automaticApprovalReady === false ||
         this.configService.get<boolean>('WITHDRAWALS_ENABLED', true) === false)
     )
       throw new BadRequestException('Paystack withdrawals are unavailable');
@@ -1344,6 +1349,10 @@ export class PaymentService {
     userId: string,
     withdrawal: WithdrawalRecord,
   ): Promise<WithdrawalRecord> {
+    // A definite pre-dispatch rejection has no provider transfer to query.
+    // Keep refunded terminal receipts readable instead of surfacing a provider
+    // "reference not found" error or attempting another submission.
+    if (['FAILED', 'REVERSED'].includes(withdrawal.status)) return withdrawal;
     const latestAttempt = withdrawal.transferAttempts[0];
     if (!latestAttempt) {
       return withdrawal;
@@ -1363,13 +1372,45 @@ export class PaymentService {
 
     if (String(latestAttempt.provider) === 'KORA') return withdrawal;
     if (latestAttempt.provider === 'PAYSTACK') {
-      await this.processPaystackTransfer({
-        provider: 'paystack',
-        eventType: 'transfer.reconcile',
-        providerReference: withdrawal.reference,
-        providerStatus: 'pending',
-        rawPayload: {},
-      });
+      try {
+        await this.processPaystackTransfer({
+          provider: 'paystack',
+          eventType: 'transfer.reconcile',
+          providerReference: withdrawal.reference,
+          providerStatus: 'pending',
+          rawPayload: {},
+        });
+      } catch (error) {
+        const cause =
+          error instanceof BadRequestException ? error.cause : undefined;
+        const notFound =
+          !!cause &&
+          typeof cause === 'object' &&
+          'providerStatusCode' in cause &&
+          cause.providerStatusCode === 404;
+        if (notFound) {
+          // Confirmed absent + expired + never approved is safe to cancel.
+          // The intent is checked again under the refund's row lock so a
+          // concurrent callback cannot race the compensating credit.
+          await this.releaseRejectedPaystackWithdrawal(
+            userId,
+            withdrawal.currency as 'NGN' | 'GHS',
+            withdrawal.amount,
+            {
+              id: withdrawal.id,
+              reference: withdrawal.reference,
+              transferAttemptId: latestAttempt.id,
+            },
+            true,
+          );
+        } else if (error instanceof ServiceUnavailableException) {
+          this.logger.warn(
+            { reference: withdrawal.reference },
+            'Transfer verification unavailable; funds remain reserved',
+          );
+          return withdrawal;
+        } else throw error;
+      }
       return (
         (await this.loadWithdrawal(userId, withdrawal.reference)) ?? withdrawal
       );
@@ -1622,6 +1663,7 @@ export class PaymentService {
     delete safeMetadata.bvn;
     delete safeMetadata.nin;
     delete safeMetadata.signature;
+    delete safeMetadata.transferApproval;
     delete safeMetadata.token;
 
     return safeMetadata;
@@ -1712,8 +1754,20 @@ export class PaymentService {
     currency: 'NGN' | 'GHS',
     amount: Decimal,
     record: { id: string; reference: string; transferAttemptId: string },
+    requireExpiredApproval = false,
   ) {
     return this.prisma.$transaction(async (tx) => {
+      if (requireExpiredApproval) {
+        if (!this.paystackApproval) return false;
+        await tx.$queryRaw`SELECT id FROM transactions WHERE id = ${record.id} FOR UPDATE`;
+        if (
+          !(await this.paystackApproval.isExpiredUnapproved(
+            record.reference,
+            tx,
+          ))
+        )
+          return false;
+      }
       const changed = await tx.transaction.updateMany({
         where: { id: record.id, status: 'PENDING' },
         data: { status: 'FAILED' },
@@ -1723,7 +1777,9 @@ export class PaymentService {
         where: { id: record.transferAttemptId },
         data: {
           status: 'FAILED',
-          providerStatus: 'REJECTED_BEFORE_ACCEPTANCE',
+          providerStatus: requireExpiredApproval
+            ? 'EXPIRED_UNAPPROVED'
+            : 'REJECTED_BEFORE_ACCEPTANCE',
           lastCheckedAt: new Date(),
         },
       });
@@ -1748,7 +1804,9 @@ export class PaymentService {
       });
       await tx.auditLog.create({
         data: {
-          action: 'PAYSTACK_WITHDRAWAL_REJECTED',
+          action: requireExpiredApproval
+            ? 'PAYSTACK_UNAPPROVED_WITHDRAWAL_EXPIRED'
+            : 'PAYSTACK_WITHDRAWAL_REJECTED',
           targetType: 'Transaction',
           targetId: record.id,
           reference: record.reference,
@@ -1756,8 +1814,9 @@ export class PaymentService {
             userId,
             amount: amount.toFixed(2),
             currency,
-            reason:
-              'Submission was rejected before acceptance or blocked by reconciliation',
+            reason: requireExpiredApproval
+              ? 'Expired unapproved intent; authenticated provider lookup confirmed no transfer exists'
+              : 'Submission was rejected before acceptance or blocked by reconciliation',
           },
         },
       });

@@ -2,12 +2,14 @@ import {
   BadRequestException,
   ForbiddenException,
   Injectable,
+  Optional,
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Decimal } from '@prisma/client/runtime/library';
 import { PrismaService } from '../../prisma/prisma.service';
 import { PaystackClient } from '../../paystack/paystack.client';
+import { PaystackTransferApprovalService } from '../../paystack/paystack-transfer-approval.service';
 import { toMinorUnit } from '../../payments/utils/provider-amount';
 import {
   ProviderVirtualAccount,
@@ -39,10 +41,15 @@ export class PaystackVirtualAccountProvider {
     private readonly client: PaystackClient,
     private readonly config: ConfigService,
     private readonly prisma: PrismaService,
+    @Optional() private readonly approval?: PaystackTransferApprovalService,
   ) {}
 
   get configured() {
     return this.client.configured;
+  }
+
+  get automaticApprovalReady() {
+    return this.approval?.enabled === true;
   }
 
   async provisionVirtualAccount(
@@ -232,29 +239,63 @@ export class PaystackVirtualAccountProvider {
     const amount = toMinorUnit(new Decimal(input.amount));
     if (!/^[a-z0-9_-]{16,50}$/.test(input.reference))
       throw new BadRequestException('Invalid transfer reference');
-    const recipient = await this.client.request<{ recipient_code: string }>(
-      'POST',
-      '/transferrecipient',
-      {
-        type: 'nuban',
-        name: input.accountName,
-        account_number: input.accountNumber,
-        bank_code: input.bankCode,
-        currency: 'NGN',
-      },
-    );
-    if (!recipient.recipient_code)
-      throw new ServiceUnavailableException(
-        'Transfer recipient could not be confirmed',
+    if (!this.approval?.enabled)
+      throw new BadRequestException(
+        'Bank transfer server approval is not ready',
       );
-    const raw = await this.client.request<Data>('POST', '/transfer', {
-      source: 'balance',
-      amount,
-      reference: input.reference,
-      recipient: recipient.recipient_code,
-      reason: input.narration || 'TRUSTPAY withdrawal',
-      currency: 'NGN',
-    });
+    let payload: {
+      source: string;
+      amount: number;
+      reference: string;
+      recipient: string;
+      reason: string;
+      currency: string;
+    };
+    try {
+      const recipient = await this.client.request<{ recipient_code: string }>(
+        'POST',
+        '/transferrecipient',
+        {
+          type: 'nuban',
+          name: input.accountName,
+          account_number: input.accountNumber,
+          bank_code: input.bankCode,
+          currency: 'NGN',
+        },
+      );
+      if (!recipient.recipient_code)
+        throw new ServiceUnavailableException(
+          'Transfer recipient could not be confirmed',
+        );
+      payload = {
+        source: 'balance',
+        amount,
+        reference: input.reference,
+        recipient: recipient.recipient_code,
+        reason: input.narration || 'TRUSTPAY withdrawal',
+        currency: 'NGN',
+      };
+      await this.approval.prepare(payload);
+    } catch {
+      // No transfer POST has been attempted: releasing the local reservation is
+      // safe. Errors after the dispatch below remain ambiguous and reserved.
+      throw new BadRequestException(
+        'Bank transfer could not be prepared. Please try again.',
+      );
+    }
+    let raw: Data;
+    try {
+      raw = await this.client.request<Data>('POST', '/transfer', payload);
+    } catch (error) {
+      // Even a 409/4xx can follow an accepted request (duplicate reference).
+      // Never let the caller classify a dispatched HTTP error as unsent and
+      // return the customer's funds while the external payout may proceed.
+      if (error instanceof BadRequestException)
+        throw new ServiceUnavailableException(
+          'Transfer confirmation is pending. Check its status before trying again.',
+        );
+      throw error;
+    }
     return {
       reference: input.reference,
       transactionReference: input.reference,

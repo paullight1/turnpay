@@ -963,7 +963,8 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
   Widget _buildTransferScaffold(BuildContext context) {
     final bank = widget.kind == MoneyActionKind.withdraw;
     final available = bank
-        ? _paymentCapabilities?.withdrawals
+        ? (_paymentCapabilities?.bankTransferPreparation == true ||
+            _paymentCapabilities?.withdrawals == true)
         : _paymentCapabilities?.internalTransfers;
     if (_isLoadingPaymentCapabilities ||
         _paymentCapabilities == null ||
@@ -1024,7 +1025,11 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
                                 ? (bank
                                     ? 'Continue to bank details'
                                     : 'Continue to recipient')
-                                : 'Review transfer'),
+                                : bank &&
+                                        _paymentCapabilities?.withdrawals !=
+                                            true
+                                    ? 'Transfers temporarily unavailable'
+                                    : 'Review transfer'),
               )),
         ),
       ),
@@ -1046,6 +1051,11 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
                   : 'Step 1 of 2 · Choose an amount to send.',
               style: AppTextStyles.bodyS),
           const SizedBox(height: 16),
+          if (bank && details && _paymentCapabilities?.withdrawals != true) ...[
+            const Text(
+                'Bank transfers are being prepared. You can check your recipient details now.'),
+            const SizedBox(height: 16),
+          ],
           if (_relevantUnresolvedPaymentAttempts.isNotEmpty) ...[
             _PaymentRecoveryPanel(
                 attempts: _relevantUnresolvedPaymentAttempts,

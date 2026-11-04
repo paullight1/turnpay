@@ -70,8 +70,13 @@ export class PaystackFundingService {
       checkoutMinimumAmount: '50.00',
       virtualAccounts:
         enabled('BANKING_ENABLED') && enabled('VIRTUAL_ACCOUNTS_ENABLED'),
+      bankTransferPreparation:
+        configured &&
+        this.config.get<string>('BANKING_PROVIDER_PRIMARY', 'paystack') ===
+          'paystack',
       withdrawals:
         enabled('WITHDRAWALS_ENABLED') &&
+        this.automaticApprovalEnabled() &&
         this.config.get<string>('BANKING_PROVIDER_PRIMARY', 'paystack') ===
           'paystack',
       internalTransfers:
@@ -445,9 +450,20 @@ export class PaystackFundingService {
         banks.status === 'fulfilled' || balance.status === 'fulfilled',
       virtualAccountProviders: banks.status === 'fulfilled' ? banks.value : [],
       balanceAccess: balance.status === 'fulfilled',
+      automaticApproval: {
+        enabled: this.automaticApprovalEnabled(),
+        endpoint: '/api/webhooks/paystack/transfer-approval',
+        mode: 'SERVER_RESERVATION',
+        dashboardSettingsVerified: false,
+      },
       transferApproval:
         'Confirm merchant dashboard settings; no payout was initiated',
     };
+  }
+
+  private automaticApprovalEnabled() {
+    const flag = this.config.get<unknown>('PAYSTACK_TRANSFER_APPROVAL_ENABLED');
+    return flag === true || flag === 'true';
   }
 
   private record(value: unknown): Record<string, unknown> {
