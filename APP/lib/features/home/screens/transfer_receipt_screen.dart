@@ -80,6 +80,7 @@ class TransferReceiptData {
     final partyMap =
         counterpartyMap.isNotEmpty ? counterpartyMap : recipientMap;
     final maskedIdentifier = _receiptString(partyMap['maskedIdentifier']);
+    final displayName = _receiptString(partyMap['displayName']);
     final avatarInitials = _receiptString(partyMap['avatarInitials']);
 
     final rawStatus = _receiptString(json['status']).toUpperCase();
@@ -101,7 +102,11 @@ class TransferReceiptData {
       amount: amount,
       fee: fee,
       // Never fall back to an unmasked identifier from a provider payload.
-      counterparty: maskedIdentifier.isEmpty ? 'Recipient' : maskedIdentifier,
+      counterparty: displayName.isNotEmpty
+          ? displayName
+          : maskedIdentifier.isEmpty
+              ? 'TrustPay user'
+              : maskedIdentifier,
       avatarInitials: avatarInitials.isEmpty ? null : avatarInitials,
       note: _receiptString(json['note']),
       createdAt: _receiptDateTime(json['createdAt']),

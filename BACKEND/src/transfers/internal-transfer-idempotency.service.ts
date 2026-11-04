@@ -14,6 +14,7 @@ export type InternalTransferResponse = {
   senderTransactionReference: string;
   senderBalanceAfter: string;
   recipient: {
+    displayName?: string;
     maskedIdentifier: string;
     avatarInitials: string;
   };
@@ -35,6 +36,9 @@ export class InternalTransferIdempotencyService {
 
   fingerprint(dto: InternalTransferDto) {
     const businessRequest = {
+      ...(dto.recipientAccountNumber
+        ? { recipientAccountNumber: dto.recipientAccountNumber }
+        : {}),
       recipientId: dto.recipientId?.trim() || null,
       recipientEmail: dto.recipientEmail?.trim().toLowerCase() || null,
       recipientPhone: dto.recipientPhone?.trim() || null,

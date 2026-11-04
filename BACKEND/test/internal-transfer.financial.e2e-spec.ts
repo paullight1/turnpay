@@ -83,6 +83,113 @@ describe('Internal transfer financial E2E (real PostgreSQL)', () => {
     ).toBe(1);
   });
 
+  it('sends by active account number and email between two users with named receipts and exact balances', async () => {
+    if (!fixture) throw new Error('Financial fixture was not created');
+    const { transfers } = createRealTransferServices(prisma);
+    const sender = fixture.users.sender;
+    const recipient = fixture.users.recipientA;
+    const accountNumber = '0123456789';
+    await prisma.virtualAccount.create({
+      data: {
+        userId: recipient.id,
+        provider: 'PAYSTACK',
+        accountNumber,
+        accountNumberMasked: '******6789',
+        accountName: 'Financial recipientA',
+        bankName: 'Fixture Bank',
+        currency: 'NGN',
+        status: 'ACTIVE',
+      },
+    });
+    const preview = await transfers.previewRecipient(sender.id, {
+      recipientAccountNumber: accountNumber,
+    });
+    expect(preview.found).toBe(true);
+    const byAccount = {
+      recipientAccountNumber: accountNumber,
+      amount: '50.00',
+      currency: 'NGN' as const,
+    };
+    const context = fixture.context('account-number');
+    const result = await transfers.sendInternalTransfer(
+      sender.id,
+      byAccount,
+      context,
+    );
+    expect(
+      await transfers.sendInternalTransfer(sender.id, byAccount, context),
+    ).toEqual(result);
+    await expect(
+      transfers.sendInternalTransfer(
+        sender.id,
+        {
+          ...byAccount,
+          recipientAccountNumber: '0123456780',
+        },
+        context,
+      ),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect((await walletBalance(prisma, sender.id, 'NGN')).toFixed(2)).toBe(
+      '950.00',
+    );
+    expect((await walletBalance(prisma, recipient.id, 'NGN')).toFixed(2)).toBe(
+      '150.00',
+    );
+    const received = await transfers.getInternalTransferByReference(
+      recipient.id,
+      result.reference,
+    );
+    expect(received.direction).toBe('IN');
+    expect(received.counterparty.displayName).toBe('Financial sender');
+    expect(received.status).toBe('SUCCESS');
+    await transfers.sendInternalTransfer(
+      recipient.id,
+      {
+        recipientEmail: sender.email,
+        amount: '20.00',
+        currency: 'NGN',
+      },
+      fixture.context('email-return'),
+    );
+    expect((await walletBalance(prisma, sender.id, 'NGN')).toFixed(2)).toBe(
+      '970.00',
+    );
+    expect((await walletBalance(prisma, recipient.id, 'NGN')).toFixed(2)).toBe(
+      '130.00',
+    );
+    await expect(
+      transfers.sendInternalTransfer(
+        sender.id,
+        {
+          ...byAccount,
+          recipientEmail: recipient.email,
+        },
+        fixture.context('ambiguous-recipient'),
+      ),
+    ).rejects.toThrow('exactly one');
+    await prisma.virtualAccount.updateMany({
+      where: { userId: recipient.id },
+      data: { status: 'PENDING' },
+    });
+    expect(
+      (
+        await transfers.previewRecipient(sender.id, {
+          recipientAccountNumber: accountNumber,
+        })
+      ).found,
+    ).toBe(false);
+    await expect(
+      transfers.sendInternalTransfer(
+        sender.id,
+        byAccount,
+        fixture.context('inactive-account'),
+      ),
+    ).rejects.toThrow();
+    expect((await walletBalance(prisma, sender.id, 'NGN')).toFixed(2)).toBe(
+      '970.00',
+    );
+  });
+
   it('rolls back every financial row on insufficient balance', async () => {
     const isolated = await createFinancialTransferFixture(prisma, {
       senderBalance: '10.00',

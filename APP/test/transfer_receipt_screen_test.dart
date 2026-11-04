@@ -18,6 +18,22 @@ void main() {
     FlutterSecureStorage.setMockInitialValues({});
   });
 
+  test('incoming receipt identifies the sender by the saved name', () {
+    final receipt = TransferReceiptData.fromJson({
+      'reference': 'TRF-NAMED',
+      'direction': 'IN',
+      'status': 'SUCCESS',
+      'amount': '50.00',
+      'currency': 'NGN',
+      'counterparty': {
+        'displayName': 'Ada Okoli',
+        'maskedIdentifier': 'a***@example.com'
+      },
+    });
+    expect(receipt.counterparty, 'Ada Okoli');
+    expect(receipt.direction, 'IN');
+  });
+
   test('parses the POST receipt with exact money and masked recipient data',
       () {
     final receipt = TransferReceiptData.fromJson({

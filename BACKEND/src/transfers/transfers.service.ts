@@ -18,7 +18,7 @@ import {
 
 type RecipientIdentifiers = Pick<
   InternalTransferDto,
-  'recipientId' | 'recipientEmail' | 'recipientPhone'
+  'recipientId' | 'recipientEmail' | 'recipientPhone' | 'recipientAccountNumber'
 >;
 
 const RECIPIENT_PREVIEW_MIN_DELAY_MS = 120;
@@ -74,6 +74,7 @@ export class TransfersService {
       id: string;
       email?: string | null;
       phone?: string | null;
+      fullName?: string | null;
       kycStatus: string;
       kycTier?: KYCTier | null;
       isSuspended: boolean;
@@ -111,6 +112,7 @@ export class TransfersService {
           id: true,
           email: true,
           phone: true,
+          fullName: true,
           kycStatus: true,
           kycTier: true,
           isSuspended: true,
@@ -176,6 +178,8 @@ export class TransfersService {
                 direction: 'OUT',
                 transferReference,
                 counterpartyUserId: transferRecipient.id,
+                counterpartyDisplayName:
+                  transferRecipient.fullName?.trim() || 'TrustPay user',
                 counterpartyMaskedIdentifier:
                   this.maskRecipient(transferRecipient),
                 note: dto.note,
@@ -195,6 +199,8 @@ export class TransfersService {
                 direction: 'IN',
                 transferReference,
                 counterpartyUserId: sender.id,
+                counterpartyDisplayName:
+                  sender.fullName?.trim() || 'TrustPay user',
                 counterpartyMaskedIdentifier: this.maskRecipient(sender),
                 note: dto.note,
               },
@@ -248,6 +254,8 @@ export class TransfersService {
             senderTransactionReference: senderReference,
             senderBalanceAfter: senderLedger.balanceAfter.toString(),
             recipient: {
+              displayName:
+                transferRecipient.fullName?.trim() || 'TrustPay user',
               maskedIdentifier: this.maskRecipient(transferRecipient),
               avatarInitials: this.getAvatarInitials(transferRecipient),
             },
@@ -399,6 +407,7 @@ export class TransfersService {
       currency: transfer.currency,
       fee: '0',
       counterparty: {
+        displayName: metadata.counterpartyDisplayName,
         maskedIdentifier: metadata.counterpartyMaskedIdentifier,
       },
       note: metadata.note,
@@ -479,6 +488,7 @@ export class TransfersService {
       dto.recipientId ??
       dto.recipientEmail?.trim().toLowerCase() ??
       dto.recipientPhone?.trim() ??
+      dto.recipientAccountNumber ??
       'invalid-recipient-input'
     );
   }
@@ -495,7 +505,30 @@ export class TransfersService {
     );
   }
 
-  private findRecipient(dto: RecipientIdentifiers) {
+  private async findRecipient(dto: RecipientIdentifiers): Promise<{
+    id: string;
+    email: string;
+    phone: string;
+    fullName: string | null;
+    kycStatus: string;
+    kycTier: KYCTier;
+    isSuspended: boolean;
+  } | null> {
+    if (dto.recipientAccountNumber) {
+      // Only issued active TrustPay NGN receiving accounts identify a member.
+      const account = await this.prisma.virtualAccount.findUnique({
+        where: {
+          provider_accountNumber: {
+            provider: 'PAYSTACK',
+            accountNumber: dto.recipientAccountNumber,
+          },
+        },
+        select: { userId: true, status: true, currency: true },
+      });
+      if (!account || account.status !== 'ACTIVE' || account.currency !== 'NGN')
+        return null;
+      return this.findRecipient({ recipientId: account.userId });
+    }
     const where = dto.recipientId
       ? { id: dto.recipientId }
       : dto.recipientEmail
@@ -521,6 +554,7 @@ export class TransfersService {
       dto.recipientId,
       dto.recipientEmail,
       dto.recipientPhone,
+      dto.recipientAccountNumber,
     ].filter(Boolean);
 
     if (identifiers.length !== 1) {
@@ -665,6 +699,7 @@ export class TransfersService {
   }
 
   private getRecipientIdentifierType(dto: InternalTransferDto) {
+    if (dto.recipientAccountNumber) return 'ACCOUNT_NUMBER';
     if (dto.recipientId) return 'USER_ID';
     if (dto.recipientEmail) return 'EMAIL';
     if (dto.recipientPhone) return 'PHONE';
@@ -672,6 +707,8 @@ export class TransfersService {
   }
 
   private getProvidedRecipientMaskedIdentifier(dto: InternalTransferDto) {
+    if (dto.recipientAccountNumber)
+      return `******${dto.recipientAccountNumber.slice(-4)}`;
     if (dto.recipientEmail) return maskEmail(dto.recipientEmail);
     if (dto.recipientPhone) return maskPhone(dto.recipientPhone);
     if (dto.recipientId) return 'TRUSTPAY user';

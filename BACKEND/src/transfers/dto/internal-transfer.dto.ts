@@ -16,6 +16,11 @@ import {
 const SUPPORTED_CURRENCIES = ['NGN', 'GHS'] as const;
 
 export class InternalTransferDto {
+  @IsOptional()
+  @IsString()
+  @Matches(/^\d{10}$/)
+  recipientAccountNumber?: string;
+
   @ValidateIf(
     (dto: InternalTransferDto) => !dto.recipientEmail && !dto.recipientPhone,
   )
@@ -62,6 +67,11 @@ export class InternalTransferDto {
 }
 
 export class RecipientPreviewDto {
+  @IsOptional()
+  @IsString()
+  @Matches(/^\d{10}$/)
+  recipientAccountNumber?: string;
+
   @ValidateIf(
     (dto: RecipientPreviewDto) => !dto.recipientEmail && !dto.recipientPhone,
   )

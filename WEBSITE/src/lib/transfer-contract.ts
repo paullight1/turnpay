@@ -1,6 +1,7 @@
 export type TransferCurrency = "NGN" | "GHS";
 
 export type RecipientIdentifier =
+  | { recipientAccountNumber: string }
   | { recipientEmail: string }
   | { recipientPhone: string };
 
@@ -55,6 +56,9 @@ function codePointLength(value: string) {
 
 export function parseRecipient(value: string): RecipientIdentifier | null {
   const normalized = value.trim();
+  if (/^\d{10}$/.test(normalized)) {
+    return { recipientAccountNumber: normalized };
+  }
   if (EMAIL_PATTERN.test(normalized)) {
     return { recipientEmail: normalized.toLowerCase() };
   }

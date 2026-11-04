@@ -105,6 +105,32 @@ Future<void> snapshot(WidgetTester tester, GlobalKey key, String name) async {
 }
 
 void main() {
+  testWidgets('TrustPay account number resolves a recipient before review',
+      (tester) async {
+    Map<String, dynamic>? previewPayload;
+    await renderTransfer(tester, kind: MoneyActionKind.send,
+        intercept: (options, handler) {
+      if (options.path == '/api/transfers/recipient/preview') {
+        previewPayload = Map<String, dynamic>.from(options.data as Map);
+        handler.resolve(Response(requestOptions: options, data: {
+          'found': true,
+          'displayName': 'Ada O.',
+          'maskedIdentifier': 'a***@example.com',
+        }));
+      } else {
+        handler.next(options);
+      }
+    });
+    await openTransferRecipient(tester);
+    await tester.enterText(
+        field('TrustPay account number or email'), '0123456789');
+    await tester.pump(const Duration(milliseconds: 600));
+    await tester.pumpAndSettle();
+    expect(previewPayload, {'recipientAccountNumber': '0123456789'});
+    expect(find.textContaining('Ada O.'), findsOneWidget);
+    expect(MoneyActionFormValidator.trustPayRecipientPayload('0123456789'),
+        {'recipientAccountNumber': '0123456789'});
+  });
   testWidgets(
       'older Paystack servers allow recipient preparation without enabling withdrawals',
       (tester) async {
@@ -190,12 +216,14 @@ void main() {
             kind: MoneyActionKind.send, apiClient: bundle.apiClient)));
     await tester.pumpAndSettle();
     await openTransferRecipient(tester);
-    await tester.enterText(field('Recipient email'), 'old@example.com');
+    await tester.enterText(
+        field('TrustPay account number or email'), 'old@example.com');
     await tester.pump(const Duration(milliseconds: 700));
     await tester.pump();
     expect(resolve, isNotNull);
     await openTransferRecipient(tester);
-    await tester.enterText(field('Recipient email'), 'invalid');
+    await tester.enterText(
+        field('TrustPay account number or email'), 'invalid');
     resolve!.resolve(Response(requestOptions: pending!, data: {
       'found': true,
       'displayName': 'Old User',
@@ -441,7 +469,7 @@ void main() {
     await tester.tap(find.text('TrustPay'));
     await tester.pumpAndSettle();
     expect(field('Amount'), findsOneWidget);
-    expect(field('Recipient email'), findsNothing);
+    expect(field('TrustPay account number or email'), findsNothing);
   });
 
   testWidgets('a failed security check unlocks the form without sending money',
@@ -459,7 +487,8 @@ void main() {
     });
     await tester.enterText(field('Amount'), '1000');
     await openTransferRecipient(tester);
-    await tester.enterText(field('Recipient email'), 'tolu@example.com');
+    await tester.enterText(
+        field('TrustPay account number or email'), 'tolu@example.com');
     await tester.pump(const Duration(milliseconds: 600));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Review transfer'));
@@ -692,7 +721,8 @@ void main() {
             scale: small ? 1.5 : 1);
         await tester.enterText(field('Amount'), '1250.50');
         await openTransferRecipient(tester);
-        await tester.enterText(field('Recipient email'), 'tolu@example.com');
+        await tester.enterText(
+            field('TrustPay account number or email'), 'tolu@example.com');
         await tester.pump(const Duration(milliseconds: 600));
         await tester.pumpAndSettle();
         expect(find.text('Tolu A. • t***@example.com'), findsOneWidget);

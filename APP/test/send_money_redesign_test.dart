@@ -162,7 +162,8 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Payment recovery'), findsOneWidget);
     await openTransferRecipient(tester);
-    await tester.enterText(input('Recipient email'), 'tolu@example.com');
+    await tester.enterText(
+        input('TrustPay account number or email'), 'tolu@example.com');
     await tester.pump(const Duration(milliseconds: 700));
     await tester.pumpAndSettle();
     expect(
@@ -205,7 +206,8 @@ void main() {
     await tester.pumpAndSettle();
     await tester.enterText(input('Amount'), '25.50');
     await openTransferRecipient(tester);
-    await tester.enterText(input('Recipient email'), 'tolu@example.com');
+    await tester.enterText(
+        input('TrustPay account number or email'), 'tolu@example.com');
     await tester.pump(const Duration(milliseconds: 700));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Review transfer'));
@@ -338,13 +340,13 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Available ₦450.00'), findsOneWidget);
     expect(input('Amount'), findsOneWidget);
-    expect(input('Recipient email'), findsNothing);
+    expect(input('TrustPay account number or email'), findsNothing);
     await tester.enterText(input('Amount'), '20');
     await tester.pump();
     await tester.tap(find.text('Continue to recipient'));
     await tester.pumpAndSettle();
     expect(input('Amount'), findsNothing);
-    expect(input('Recipient email'), findsOneWidget);
+    expect(input('TrustPay account number or email'), findsOneWidget);
     expect(bundle.adapter.internalTransferMutationCount, 0);
   });
   testWidgets('send amount updates naira and kobo words while typing',
@@ -404,7 +406,8 @@ void main() {
     await tester.pumpAndSettle();
     await tester.enterText(input('Amount'), '25.50');
     await openTransferRecipient(tester);
-    await tester.enterText(input('Recipient email'), 'tolu@example.com');
+    await tester.enterText(
+        input('TrustPay account number or email'), 'tolu@example.com');
     await tester.pump(const Duration(milliseconds: 700));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Review transfer'));
@@ -440,7 +443,8 @@ void main() {
     await tester.pumpAndSettle();
     await tester.enterText(input('Amount'), '25.50');
     await openTransferRecipient(tester);
-    await tester.enterText(input('Recipient email'), 'tolu@example.com');
+    await tester.enterText(
+        input('TrustPay account number or email'), 'tolu@example.com');
     await tester.pump(const Duration(milliseconds: 700));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Review transfer'));
@@ -493,7 +497,8 @@ void main() {
     await tester.pumpAndSettle();
     await tester.enterText(input('Amount'), '25.50');
     await openTransferRecipient(tester);
-    await tester.enterText(input('Recipient email'), 'tolu@example.com');
+    await tester.enterText(
+        input('TrustPay account number or email'), 'tolu@example.com');
     await tester.pump(const Duration(milliseconds: 700));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Review transfer'));

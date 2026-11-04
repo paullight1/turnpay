@@ -47,7 +47,8 @@ void main() {
         (w) => w is TextField && w.decoration?.labelText == 'Amount'));
     expect(
         find.byWidgetPredicate((w) =>
-            w is TextField && w.decoration?.labelText == 'Recipient email'),
+            w is TextField &&
+            w.decoration?.labelText == 'TrustPay account number or email'),
         findsNothing);
     amount.focusNode!.requestFocus();
     await tester.enterText(find.byType(TextField), '20');
@@ -56,7 +57,8 @@ void main() {
     final fields =
         tester.widgetList<TextField>(find.byType(TextField)).toList();
     final recipient = fields.singleWhere(
-      (field) => field.decoration?.labelText == 'Recipient email',
+      (field) =>
+          field.decoration?.labelText == 'TrustPay account number or email',
     );
     final note = fields.singleWhere(
       (field) => field.decoration?.labelText == 'Note optional',

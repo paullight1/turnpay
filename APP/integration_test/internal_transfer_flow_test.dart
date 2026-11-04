@@ -55,7 +55,8 @@ void registerInternalTransferFlowTests({bool useIntegrationBinding = true}) {
         );
     await tester.enterText(field('Amount'), amount);
     await openTransferRecipient(tester);
-    await tester.enterText(field('Recipient email'), 'tolu@example.com');
+    await tester.enterText(
+        field('TrustPay account number or email'), 'tolu@example.com');
     await tester.enterText(field('Note optional'), 'Integration certification');
     await tester.pump(const Duration(milliseconds: 700));
     await tester.pumpAndSettle();

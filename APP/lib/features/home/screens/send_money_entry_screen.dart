@@ -49,7 +49,7 @@ class SendMoneyEntryScreen extends StatelessWidget {
                           _destination(
                               context,
                               'TrustPay',
-                              'Send to a TrustPay user by email',
+                              'Send by TrustPay account number or email',
                               Icons.people_outline_rounded,
                               MoneyActionKind.send),
                           const SizedBox(height: 16),

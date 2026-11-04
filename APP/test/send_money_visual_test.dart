@@ -99,9 +99,10 @@ void main() {
       await tester.pump();
       await _capture(tester, capture, 'amount-${dark ? 'dark' : 'light'}');
       await openTransferRecipient(tester);
-      await tester.ensureVisible(_field('Recipient email'));
+      await tester.ensureVisible(_field('TrustPay account number or email'));
       await openTransferRecipient(tester);
-      await tester.enterText(_field('Recipient email'), 'tolu@example.com');
+      await tester.enterText(
+          _field('TrustPay account number or email'), 'tolu@example.com');
       await tester.pump(const Duration(milliseconds: 700));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Review transfer'));

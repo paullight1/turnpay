@@ -1,5 +1,9 @@
 # TRUSTPAY Security Rules & Guidelines
 
+### 2026-11-04 internal transfers by account number
+
+Account-number lookup uses only issued ACTIVE Paystack NGN virtual accounts owned by TrustPay members. Existing JWT, preview throttling, single-identifier validation, PIN/KYC checks, configured limits, transactional debit/credit and audit controls apply. Account numbers participate in durable request fingerprints without changing historical email/phone fingerprints. New receipts save the counterparty name from the server user record. Verification passed 26 backend unit tests, six disposable PostgreSQL financial tests with two users, and 64 Flutter tests. Live pilot activation and delivery remain pending. No real customer funds were transferred during these checks.
+
 > **MANDATORY**: These rules apply to ALL code written in this project. Every prompt, every PR, every phase must follow these rules. Violations must be flagged and fixed before proceeding.
 
 ---

@@ -299,7 +299,7 @@ export function InternalTransferForm() {
           {moneyGate && <div role="alert" className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950"><p className="font-semibold">{moneyGate.title}</p><p className="mt-1">{moneyGate.message}</p></div>}
           {pinStatus.data.locked && <div role="alert" className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-900">Your transaction PIN is temporarily locked. Try again later.</div>}
           <div className="grid gap-2">
-            <Label htmlFor="transfer-recipient">Recipient email or phone</Label>
+            <Label htmlFor="transfer-recipient">TrustPay account number, email or phone</Label>
             <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
               <Input id="transfer-recipient" autoComplete="off" value={recipient} onChange={(event) => updateRecipient(event.target.value)} aria-describedby={errors.recipient ? "recipient-error" : undefined} aria-invalid={Boolean(errors.recipient)} />
               <Button type="button" variant="outline" onClick={() => void resolveRecipient()} disabled={resolving || !recipient.trim()} className="min-h-11">{resolving ? "Verifying…" : "Verify recipient"}</Button>

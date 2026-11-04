@@ -1159,7 +1159,7 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
               _InputField(
                   controller: _recipientController,
                   enabled: !_transferLocked,
-                  label: 'Recipient email',
+                  label: 'TrustPay account number or email',
                   inputFormatters: [LengthLimitingTextInputFormatter(254)],
                   keyboardType: TextInputType.emailAddress,
                   focusNode: _sendRecipientFocusNode,
@@ -1173,9 +1173,10 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
                       : null,
                   loading: _isResolvingRecipient,
                   error: _recipientResolveError,
-                  idleText: 'Enter a TrustPay email to see the recipient.',
+                  idleText:
+                      'Enter a TrustPay account number or email to see the recipient.',
                   canRetry: !_transferLocked &&
-                      MoneyActionFormValidator.isValidEmail(
+                      MoneyActionFormValidator.isValidTrustPayRecipient(
                           _recipientController.text),
                   onRetry: _resolveRecipientPreview),
               const SizedBox(height: 16),
@@ -1954,7 +1955,8 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
       });
     }
 
-    if (!MoneyActionFormValidator.isValidEmail(_recipientController.text)) {
+    if (!MoneyActionFormValidator.isValidTrustPayRecipient(
+        _recipientController.text)) {
       return;
     }
 
@@ -1968,7 +1970,7 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
   Future<void> _resolveRecipientPreview() async {
     final email = _recipientController.text.trim().toLowerCase();
     if (widget.kind != MoneyActionKind.send ||
-        !MoneyActionFormValidator.isValidEmail(email)) {
+        !MoneyActionFormValidator.isValidTrustPayRecipient(email)) {
       return;
     }
 
@@ -1981,7 +1983,7 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
     try {
       final response = await _apiClient.client.post(
         '/api/transfers/recipient/preview',
-        data: {'recipientEmail': email},
+        data: MoneyActionFormValidator.trustPayRecipientPayload(email),
       );
       if (!mounted || requestId != _recipientResolveRequestId) return;
 
@@ -3693,7 +3695,8 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
         return <String, dynamic>{};
       case MoneyActionKind.send:
         return {
-          'recipientEmail': _recipientController.text.trim(),
+          ...MoneyActionFormValidator.trustPayRecipientPayload(
+              _recipientController.text),
           'amount': amount,
           'currency': _currency,
           if (_noteController.text.trim().isNotEmpty)
@@ -3773,8 +3776,6 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
     final payload = _paymentRequestPayload(amount);
     switch (widget.kind) {
       case MoneyActionKind.send:
-        payload['recipientEmail'] =
-            _recipientController.text.trim().toLowerCase();
         break;
       case MoneyActionKind.withdraw:
         final beneficiary = _activeBeneficiary;
@@ -5281,7 +5282,7 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
           const SizedBox(height: AppSpacing.md),
           _InputField(
             controller: _recipientController,
-            label: 'Recipient email',
+            label: 'TrustPay account number or email',
             keyboardType: TextInputType.emailAddress,
             focusNode: _sendRecipientFocusNode,
             textInputAction: TextInputAction.next,
@@ -5292,7 +5293,7 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
             accountName: _resolvedRecipientLabel,
             isResolving: _isResolvingRecipient,
             error: _recipientResolveError,
-            canResolve: MoneyActionFormValidator.isValidEmail(
+            canResolve: MoneyActionFormValidator.isValidTrustPayRecipient(
               _recipientController.text,
             ),
             onRetry: _resolveRecipientPreview,
@@ -9376,7 +9377,7 @@ _ActionConfig _configFor(MoneyActionKind kind) {
     case MoneyActionKind.send:
       return const _ActionConfig(
         title: 'Send money',
-        subtitle: 'Send to another TrustPay user by email.',
+        subtitle: 'Send by TrustPay account number or email.',
         buttonLabel: 'Send transfer',
         status: 'Verification required',
         icon: Icons.near_me_rounded,
@@ -9494,6 +9495,18 @@ class MoneyActionValidationResult {
 }
 
 class MoneyActionFormValidator {
+  static bool isValidTrustPayRecipient(String value) =>
+      RegExp(r'^\d{10}$').hasMatch(value.trim()) || isValidEmail(value);
+
+  static Map<String, String> trustPayRecipientPayload(String value) {
+    final normalized = value.trim().toLowerCase();
+    return {
+      RegExp(r'^\d{10}$').hasMatch(normalized)
+          ? 'recipientAccountNumber'
+          : 'recipientEmail': normalized
+    };
+  }
+
   static final RegExp _amountPattern = RegExp(r'^\d+(\.\d{1,2})?$');
   static final RegExp _emailPattern = RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$');
   static final RegExp _digitsPattern = RegExp(r'^\d+$');
@@ -9540,8 +9553,8 @@ class MoneyActionFormValidator {
 
     switch (kind) {
       case MoneyActionKind.send:
-        if (!_emailPattern.hasMatch(recipient.trim())) {
-          return 'Enter a valid recipient email.';
+        if (!isValidTrustPayRecipient(recipient)) {
+          return 'Enter a 10-digit TrustPay account number or valid email.';
         }
         return null;
       case MoneyActionKind.withdraw:

@@ -74,7 +74,7 @@ void main() {
       await tester.tap(find.text('TrustPay'));
       await tester.pumpAndSettle();
       expect(field('Amount'), findsOneWidget);
-      expect(field('Recipient email'), findsNothing);
+      expect(field('TrustPay account number or email'), findsNothing);
       expect(find.text('Available ₦125,000.50'), findsOneWidget);
       await tester.enterText(field('Amount'), '20');
       await tester.pumpAndSettle();
@@ -84,8 +84,9 @@ void main() {
       await tester.tap(find.text('Continue to recipient'));
       await tester.pumpAndSettle();
       expect(field('Amount'), findsNothing);
-      expect(field('Recipient email'), findsOneWidget);
-      await tester.enterText(field('Recipient email'), 'tolu@example.com');
+      expect(field('TrustPay account number or email'), findsOneWidget);
+      await tester.enterText(
+          field('TrustPay account number or email'), 'tolu@example.com');
       await tester.pump(const Duration(milliseconds: 700));
       await tester.pumpAndSettle();
       expect(find.text('Recipient confirmed'), findsOneWidget);
