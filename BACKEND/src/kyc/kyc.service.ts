@@ -38,6 +38,7 @@ import type {
 import { KYCTier, KYCType, Prisma } from '@prisma/client';
 import { BankingService } from '../banking/banking.service';
 import { toPaystackRecoveryView } from './paystack-kyc-recovery.types';
+import { PaystackKycRecoveryService } from './paystack-kyc-recovery.service';
 
 const DEFAULT_KYC_DOCUMENT_BUCKET = 'kyc-documents';
 const DEFAULT_ADMIN_DOCUMENT_URL_TTL_SECONDS = 300;
@@ -81,6 +82,7 @@ export class KycService {
     @Optional() private readonly ninjaProvider?: NinjaProvider,
     @Optional()
     private readonly accountNotifications?: AccountNotificationsService,
+    @Optional() private readonly paystackRecovery?: PaystackKycRecoveryService,
   ) {}
 
   async createDocumentUploadUrl(userId: string, dto: CreateKycUploadDto) {
@@ -138,6 +140,15 @@ export class KycService {
     if (provider === 'PAYSTACK') {
       this.assertPaystackIdentityInput(dto);
     }
+    if (
+      dto.retryPending &&
+      (provider !== 'PAYSTACK' ||
+        dto.type !== 'BVN' ||
+        !(await this.paystackRecovery?.reconcile(userId))?.retryAllowed)
+    )
+      throw new ConflictException(
+        'Check your BVN status before retrying. A confirmed stale submission is required.',
+      );
 
     let reservation: {
       document: {
@@ -288,7 +299,7 @@ export class KycService {
                   select: { id: true },
                 })
               : null;
-          if (activeAttempt) {
+          if (activeAttempt && !dto.retryPending) {
             throw new ConflictException(
               'A Paystack identity verification is already in progress',
             );
@@ -296,8 +307,9 @@ export class KycService {
 
           // Paystack identification callbacks carry a customer identity, not
           // an internal attempt id. Once a binding has a fingerprint, a retry
-          // is safe only by reopening the canonical failed verification for
-          // that exact customer/fingerprint. Creating a fresh pending row
+          // reuses the canonical verification for that exact customer and
+          // fingerprint, including explicitly recovered stale submissions.
+          // Creating a fresh pending row
           // would let a delayed callback for the old attempt approve it.
           let reusableAttempt:
             | (Awaited<
@@ -327,7 +339,10 @@ export class KycService {
             reusableAttempt = previousAttempts.find((candidate) => {
               const checks = this.asJsonRecord(candidate.checks);
               return (
-                candidate.status === 'FAILED' &&
+                (candidate.status === 'FAILED' ||
+                  (dto.retryPending === true &&
+                    candidate.id === activeAttempt?.id &&
+                    candidate.status === 'PENDING')) &&
                 checks.customerCode === paystackBinding.customerCode &&
                 checks.validationFingerprint === validationFingerprint
               );
@@ -345,9 +360,51 @@ export class KycService {
             const priorChecks = {
               ...this.asJsonRecord(reusableAttempt.checks),
             };
+            const recovery = this.asJsonRecord(
+              priorChecks.paystackRecovery as Prisma.JsonValue,
+            );
+            if (dto.retryPending) {
+              const checkedAt = Date.parse(
+                typeof recovery.checkedAt === 'string'
+                  ? recovery.checkedAt
+                  : '',
+              );
+              const lastSubmitted = Date.parse(
+                typeof recovery.resubmittedAt === 'string'
+                  ? recovery.resubmittedAt
+                  : reusableAttempt.createdAt.toISOString(),
+              );
+              if (
+                recovery.retryAllowed !== true ||
+                recovery.state !== 'ACTION_REQUIRED' ||
+                recovery.customerIdentified !== false ||
+                recovery.eventHistoryComplete !== true ||
+                recovery.replayEventId ||
+                !Number.isFinite(checkedAt) ||
+                Date.now() - checkedAt > 60_000 ||
+                !Number.isFinite(lastSubmitted) ||
+                Date.now() - lastSubmitted < 86_400_000 ||
+                Number(recovery.resubmissionCount ?? 0) >= 2
+              ) {
+                throw new ConflictException(
+                  'BVN retry is unavailable. Check the current verification status.',
+                );
+              }
+            }
             delete priorChecks.paystackRecovery;
             const retryChecks = {
               ...priorChecks,
+              ...(dto.retryPending
+                ? {
+                    paystackRecovery: {
+                      state: 'AWAITING_PROVIDER',
+                      retryAllowed: false,
+                      resubmissionCount:
+                        Number(recovery.resubmissionCount ?? 0) + 1,
+                      resubmittedAt: consentRecordedAt.toISOString(),
+                    },
+                  }
+                : {}),
               customerCode: paystackBinding!.customerCode,
               validationFingerprint,
               accountSetupConsent: dto.accountSetupConsent === true,
@@ -389,6 +446,7 @@ export class KycService {
                   consentSource: PROVIDER_CONSENT_SOURCE,
                   consentRecordedAt: consentRecordedAt.toISOString(),
                   retry: true,
+                  pendingResubmission: dto.retryPending === true,
                   reusedCanonicalAttempt: true,
                 },
               },

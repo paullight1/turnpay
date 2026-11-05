@@ -487,7 +487,8 @@ class _KycCheckDetailsSheetState extends State<KycCheckDetailsSheet> {
     final recovery = _recovery ?? kycRecoveryFor(_overview, widget.type);
     final canStart = widget.type == 'NIN'
         ? kycCanStartNin(_overview)
-        : !kycPaystackReady(_overview) && !pending;
+        : !kycPaystackReady(_overview) &&
+            (!pending || recovery?.retryAllowed == true);
     final dates = _overview.documents.where((item) =>
         item.type.toUpperCase() == widget.type && item.updatedAt != null);
     return _SheetFrame(
@@ -553,8 +554,11 @@ class _KycCheckDetailsSheetState extends State<KycCheckDetailsSheet> {
             FilledButton(
                 onPressed:
                     _checking ? null : () => widget.onContinue(_overview),
-                child: Text(
-                    widget.type == 'NIN' ? 'Continue to NIN' : 'Verify BVN'))
+                child: Text(widget.type == 'NIN'
+                    ? 'Continue to NIN'
+                    : pending
+                        ? 'Retry BVN verification'
+                        : 'Verify BVN'))
           ],
         ]);
   }

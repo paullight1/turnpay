@@ -1,5 +1,9 @@
 # TRUSTPAY Security Rules & Guidelines
 
+### 2026-11-05 stale BVN retry
+
+An explicit retry requires fresh consent and the original BVN, account, bank and name fingerprint. A fresh Paystack customer/event-history reconciliation must confirm an unidentified customer without a terminal event. Under the existing user row lock, only the canonical pending verification is reused, with a maximum of two resubmissions separated by 24 hours. Retry reservation is persisted before provider dispatch. Timeouts preserve the pending reservation. Signed provider results remain the only automatic identity finalizer. Existing JWT, DTO validation, rate limiting, idempotency and audit controls apply. Focused retry tests cover canonical reuse, changed account rejection, cooldown and count bounds, repeated submission prevention and the customer retry form. Live resubmission requires the account holder to re-enter details privately.
+
 ### 2026-11-04 internal transfers by account number
 
 Account-number lookup uses only issued ACTIVE Paystack NGN virtual accounts owned by TrustPay members. Existing JWT, preview throttling, single-identifier validation, PIN/KYC checks, configured limits, transactional debit/credit and audit controls apply. Account numbers participate in durable request fingerprints without changing historical email/phone fingerprints. New receipts save the counterparty name from the server user record. Verification passed 26 backend unit tests, six disposable PostgreSQL financial tests with two users, and 64 Flutter tests. Live pilot activation and delivery remain pending. No real customer funds were transferred during these checks.

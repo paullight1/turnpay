@@ -47,6 +47,10 @@ export class CreateKycUploadDto {
 }
 
 export class CreateIdentityVerificationDto {
+  @IsOptional()
+  @IsBoolean()
+  retryPending?: boolean;
+
   @IsString()
   @IsOptional()
   @MinLength(1)

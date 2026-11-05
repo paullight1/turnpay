@@ -204,6 +204,7 @@ class KycService {
     String? bankCode,
     String? accountNumber,
     bool accountSetupConsent = false,
+    bool retryPending = false,
   }) async {
     final options = Options(headers: {'Idempotency-Key': idempotencyKey});
     final request = {
@@ -212,6 +213,7 @@ class KycService {
       'idNumber': idNumber,
       'dateOfBirth': dateOfBirth,
       'consentAccepted': consentAccepted,
+      if (retryPending) 'retryPending': true,
       if (bankCode != null && bankCode.trim().isNotEmpty)
         'bankCode': bankCode.trim(),
       if (accountNumber != null && accountNumber.trim().isNotEmpty)

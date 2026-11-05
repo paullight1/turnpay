@@ -183,9 +183,13 @@ export class PaystackKycRecoveryService {
     }
 
     if (events.kind === 'NONE') {
+      const prior = this.readRecovery(pending.checks);
+      const lastSubmission = Math.max(
+        attemptStartedAt(pending).getTime(),
+        Date.parse(prior?.resubmittedAt ?? '') || 0,
+      );
       const stale =
-        now.getTime() - attemptStartedAt(pending).getTime() >=
-        PAYSTACK_RECOVERY_MAX_AGE_MS;
+        now.getTime() - lastSubmission >= PAYSTACK_RECOVERY_MAX_AGE_MS;
       return this.finishState(
         started,
         stale || customerState.identified
@@ -194,6 +198,10 @@ export class PaystackKycRecoveryService {
         {
           customerIdentified: customerState.identified,
           eventHistoryComplete: true,
+          retryAllowed:
+            stale &&
+            !customerState.identified &&
+            (prior?.resubmissionCount ?? 0) < 2,
         },
       );
     }
@@ -685,6 +693,7 @@ export class PaystackKycRecoveryService {
               current.documentId,
               attemptStartedAt(current),
             )),
+          retryAllowed: false,
           ...facts,
           state,
           message: paystackRecoveryMessage(state),
@@ -766,6 +775,16 @@ export class PaystackKycRecoveryService {
       supportReference,
       pendingSince,
       checkedAt,
+      retryAllowed: raw.retryAllowed === true,
+      resubmissionCount:
+        typeof raw.resubmissionCount === 'number' &&
+        Number.isSafeInteger(raw.resubmissionCount) &&
+        raw.resubmissionCount >= 0
+          ? raw.resubmissionCount
+          : 0,
+      ...(asIso(raw.resubmittedAt)
+        ? { resubmittedAt: asIso(raw.resubmittedAt)! }
+        : {}),
       leaseId: asSafeString(raw.leaseId),
       leaseUntil: asIso(raw.leaseUntil),
       cooldownUntil: asIso(raw.cooldownUntil),

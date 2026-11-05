@@ -12,7 +12,7 @@ export interface PaystackKycRecoveryView {
   supportReference: string | null;
   pendingSince: string | null;
   checkedAt: string | null;
-  retryAllowed: false;
+  retryAllowed: boolean;
 }
 
 /** The only JSON key written by the recovery service. */
@@ -43,6 +43,9 @@ export interface PaystackKycRecoveryMetadata {
   replayRequestedAt?: string | null;
   customerIdentified?: boolean;
   eventHistoryComplete?: boolean;
+  retryAllowed?: boolean;
+  resubmissionCount?: number;
+  resubmittedAt?: string;
 }
 
 export const PAYSTACK_RECOVERY_LEASE_MS = 30_000;
@@ -131,11 +134,15 @@ export function toPaystackRecoveryView(
 
   return {
     state,
-    message: MESSAGES[state],
+    message:
+      state === 'ACTION_REQUIRED' && recovery?.retryAllowed === true
+        ? 'Your earlier check has no final result. Re-enter the same BVN and linked bank details to retry verification.'
+        : MESSAGES[state],
     supportReference,
     pendingSince: pendingSinceIso,
     checkedAt,
-    retryAllowed: false,
+    retryAllowed:
+      state === 'ACTION_REQUIRED' && recovery?.retryAllowed === true,
   };
 }
 

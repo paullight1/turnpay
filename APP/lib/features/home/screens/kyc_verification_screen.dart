@@ -741,7 +741,8 @@ class _KycVerificationScreenState extends State<KycVerificationScreen> {
   }) async {
     if (_isSubmitting ||
         _isPaystackValidated(overview) ||
-        _isPaystackValidationPending(overview)) {
+        (_isPaystackValidationPending(overview) &&
+            kycRecoveryFor(overview, 'BVN')?.retryAllowed != true)) {
       return;
     }
     setState(() {
@@ -926,7 +927,8 @@ class _KycVerificationScreenState extends State<KycVerificationScreen> {
   ) async {
     if (_isSubmitting ||
         _isPaystackValidated(overview) ||
-        _isPaystackValidationPending(overview)) {
+        (_isPaystackValidationPending(overview) &&
+            kycRecoveryFor(overview, 'BVN')?.retryAllowed != true)) {
       return;
     }
     final idNumber = _idNumberController.text.trim();
@@ -1010,6 +1012,7 @@ class _KycVerificationScreenState extends State<KycVerificationScreen> {
         bankCode: bankCode,
         accountNumber: accountNumber,
         accountSetupConsent: _accountSetupConsent,
+        retryPending: _isPaystackValidationPending(overview),
         idempotencyKey: _attemptIdempotency.keyFor(
           sha256
               .convert(utf8.encode(jsonEncode([

@@ -71,6 +71,32 @@ Future<void> _captureKyc(
 }
 
 void main() {
+  testWidgets('eligible stale BVN opens a fresh consent form from status',
+      (tester) async {
+    final overview = KycOverview.fromJson({
+      'kycStatus': 'SUBMITTED',
+      'kycTier': 'TIER_0',
+      'provider': 'PAYSTACK',
+      'providerValidationStatus': 'PENDING',
+      'recovery': {'state': 'ACTION_REQUIRED', 'retryAllowed': true},
+      'documents': [
+        {'type': 'BVN', 'status': 'SUBMITTED'}
+      ],
+    });
+    final service = _FakeKycService()..overview = overview;
+    await tester.pumpWidget(MaterialApp(
+        home: KycVerificationScreen(
+            service: service, initialOverview: overview)));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('kyc-status-BVN')));
+    await tester.pumpAndSettle();
+    final retry = find.text('Retry BVN verification');
+    await tester.ensureVisible(retry);
+    await tester.tap(retry);
+    await tester.pumpAndSettle();
+    expect(find.text('TrustPay KYC'), findsOneWidget);
+    expect(service.attemptKeys, isEmpty);
+  });
   setUpAll(() async {
     GoogleFonts.config.allowRuntimeFetching = false;
     if (!const bool.fromEnvironment('KYC_CAPTURE')) return;
@@ -1332,6 +1358,7 @@ class _FakeKycService extends KycService {
 
   @override
   Future<KycVerificationResult> verifyIdentity({
+    bool retryPending = false,
     required String idempotencyKey,
     required String idNumber,
     required String dateOfBirth,

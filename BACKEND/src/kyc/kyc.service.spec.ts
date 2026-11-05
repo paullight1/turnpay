@@ -735,135 +735,191 @@ describe('KycService', () => {
     });
   });
 
-  it('reuses the canonical failed Paystack attempt for a same-identity retry', async () => {
-    kycProviderGateway.provider = 'PAYSTACK';
-    const validationFingerprint = paystackFingerprint();
-    let binding: {
-      customerCode: string;
-      validationFingerprint: string;
-      validationStatus: string;
-    } | null = null;
-    let createdDocument: Record<string, unknown> | undefined;
-    let createdVerification: Record<string, unknown> | undefined;
-    const retryState: { failedAttempt?: Record<string, unknown> } = {};
+  it.each(['FAILED', 'PENDING'])(
+    'reuses the canonical %s Paystack attempt for a same-identity retry',
+    async (status) => {
+      kycProviderGateway.provider = 'PAYSTACK';
+      const validationFingerprint = paystackFingerprint();
+      let binding: {
+        customerCode: string;
+        validationFingerprint: string;
+        validationStatus: string;
+      } | null = null;
+      let createdDocument: Record<string, unknown> | undefined;
+      let createdVerification: Record<string, unknown> | undefined;
+      const retryState: { failedAttempt?: Record<string, unknown> } = {};
 
-    prisma.user.findUnique.mockResolvedValue({
-      fullName: 'Ada Okafor',
-      phone: '+2348012345678',
-      kycStatus: 'PENDING',
-      kycTier: 'TIER_0',
-    });
-    prisma.paystackCustomer.findUnique.mockImplementation(async () => binding);
-    prisma.kycVerification.findFirst.mockResolvedValue(null);
-    prisma.kycVerification.findMany.mockImplementation(async () =>
-      retryState.failedAttempt ? [retryState.failedAttempt] : [],
-    );
-    prisma.kycDocument.create.mockImplementation(async ({ data }) => {
-      createdDocument = { id: data.id, ...data };
-      return createdDocument;
-    });
-    prisma.kycVerification.create.mockImplementation(async ({ data }) => {
-      createdVerification = { id: data.id, ...data };
-      return createdVerification;
-    });
-    prisma.kycDocument.update.mockImplementation(async ({ where, data }) => ({
-      ...(createdDocument ?? {}),
-      id: where.id,
-      ...data,
-    }));
-    prisma.kycVerification.update.mockResolvedValue({});
-    prisma.user.update.mockResolvedValue({});
-    prisma.auditLog.create.mockResolvedValue({});
-
-    kycProviderGateway.verifyIdentity.mockImplementationOnce(async () => {
-      binding = {
-        customerCode: 'CUS_fixture123',
-        validationFingerprint,
-        validationStatus: 'PENDING',
-      };
-      throw new BadRequestException('Paystack rejected the identity');
-    });
-
-    const dto = {
-      country: 'NG' as const,
-      type: 'BVN' as const,
-      idNumber: '12345678901',
-      dateOfBirth: '1990-01-02',
-      bankCode: '058',
-      accountNumber: '0123456789',
-      consentAccepted: true as const,
-      accountSetupConsent: true,
-    };
-
-    await expect(service.verifyIdentity('user-1', dto)).rejects.toThrow(
-      'Paystack rejected the identity',
-    );
-
-    retryState.failedAttempt = {
-      id: createdVerification?.id,
-      documentId: createdDocument?.id,
-      status: 'FAILED',
-      checks: {
-        customerCode: 'CUS_fixture123',
-        validationFingerprint,
-        accountSetupConsent: true,
-        paystackRecovery: { replayEventId: 'old-event', leaseId: 'old-lease' },
-      },
-      document: {
+      prisma.user.findUnique.mockResolvedValue({
+        fullName: 'Ada Okafor',
+        phone: '+2348012345678',
+        kycStatus: 'PENDING',
+        kycTier: 'TIER_0',
+      });
+      prisma.paystackCustomer.findUnique.mockImplementation(
+        async () => binding,
+      );
+      prisma.kycVerification.findFirst.mockResolvedValue(null);
+      prisma.kycVerification.findMany.mockImplementation(async () =>
+        retryState.failedAttempt ? [retryState.failedAttempt] : [],
+      );
+      prisma.kycDocument.create.mockImplementation(async ({ data }) => {
+        createdDocument = { id: data.id, ...data };
+        return createdDocument;
+      });
+      prisma.kycVerification.create.mockImplementation(async ({ data }) => {
+        createdVerification = { id: data.id, ...data };
+        return createdVerification;
+      });
+      prisma.kycDocument.update.mockImplementation(async ({ where, data }) => ({
         ...(createdDocument ?? {}),
-        status: 'REJECTED',
-      },
-    };
-    kycProviderGateway.verifyIdentity.mockResolvedValueOnce({
-      provider: 'PAYSTACK',
-      status: 'PENDING',
-      reference: 'paystack:customer:CUS_fixture123:verification:canonical',
-      checks: {
-        customerCode: 'CUS_fixture123',
-        validationFingerprint,
+        id: where.id,
+        ...data,
+      }));
+      prisma.kycVerification.update.mockResolvedValue({});
+      prisma.user.update.mockResolvedValue({});
+      prisma.auditLog.create.mockResolvedValue({});
+
+      kycProviderGateway.verifyIdentity.mockImplementationOnce(async () => {
+        binding = {
+          customerCode: 'CUS_fixture123',
+          validationFingerprint,
+          validationStatus: 'PENDING',
+        };
+        throw new BadRequestException('Paystack rejected the identity');
+      });
+
+      const dto = {
+        country: 'NG' as const,
+        type: 'BVN' as const,
+        idNumber: '12345678901',
+        dateOfBirth: '1990-01-02',
+        bankCode: '058',
+        accountNumber: '0123456789',
+        consentAccepted: true as const,
         accountSetupConsent: true,
-      },
-      responseHash: 'paystack-retry-hash',
-    });
+      };
 
-    const result = await service.verifyIdentity('user-1', dto);
+      await expect(service.verifyIdentity('user-1', dto)).rejects.toThrow(
+        'Paystack rejected the identity',
+      );
 
-    expect(prisma.kycDocument.create).toHaveBeenCalledTimes(1);
-    expect(prisma.kycVerification.create).toHaveBeenCalledTimes(1);
-    expect(kycProviderGateway.verifyIdentity).toHaveBeenCalledTimes(2);
-    expect(kycProviderGateway.verifyIdentity.mock.calls[1][0].documentId).toBe(
-      createdDocument?.id,
-    );
-    expect(prisma.kycDocument.update).toHaveBeenCalledWith({
-      where: { id: createdDocument?.id },
-      data: expect.objectContaining({ status: 'PENDING' }),
-    });
-    expect(prisma.kycVerification.update).toHaveBeenCalledWith({
-      where: { id: createdVerification?.id },
-      data: expect.objectContaining({ status: 'PENDING' }),
-    });
-    const reopened = prisma.kycVerification.update.mock.calls.find(([input]) =>
-      input.data.reference?.startsWith('pending:'),
-    );
-    expect(reopened[0].data.checks).not.toHaveProperty('paystackRecovery');
-    expect(reopened[0].data.consentRecordedAt).toBeInstanceOf(Date);
-    expect(prisma.auditLog.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({
-        action: 'KYC_CONSENT_RECORDED',
-        targetId: createdVerification?.id,
-        metadata: expect.objectContaining({
-          retry: true,
-          reusedCanonicalAttempt: true,
-        }),
-      }),
-    });
-    expect(result).toEqual(
-      expect.objectContaining({
+      retryState.failedAttempt = {
+        id: createdVerification?.id,
+        documentId: createdDocument?.id,
+        status,
+        createdAt: new Date(Date.now() - 172800000),
+        checks: {
+          customerCode: 'CUS_fixture123',
+          validationFingerprint,
+          accountSetupConsent: true,
+          paystackRecovery:
+            status === 'PENDING'
+              ? {
+                  state: 'ACTION_REQUIRED',
+                  retryAllowed: true,
+                  customerIdentified: false,
+                  eventHistoryComplete: true,
+                  checkedAt: new Date().toISOString(),
+                  resubmissionCount: 0,
+                }
+              : { replayEventId: 'old-event', leaseId: 'old-lease' },
+        },
+        document: {
+          ...(createdDocument ?? {}),
+          status: 'REJECTED',
+        },
+      };
+      kycProviderGateway.verifyIdentity.mockResolvedValueOnce({
         provider: 'PAYSTACK',
-        verificationStatus: 'PENDING',
-      }),
-    );
-  });
+        status: 'PENDING',
+        reference: 'paystack:customer:CUS_fixture123:verification:canonical',
+        checks: {
+          customerCode: 'CUS_fixture123',
+          validationFingerprint,
+          accountSetupConsent: true,
+        },
+        responseHash: 'paystack-retry-hash',
+      });
+
+      if (status === 'PENDING') {
+        prisma.kycVerification.findFirst.mockResolvedValue({
+          id: createdVerification?.id,
+        });
+        service = new KycService(
+          prisma as any,
+          config as any,
+          logger as any,
+          supabase as any,
+          kycProviderGateway as any,
+          bankingService as any,
+          undefined,
+          accountNotifications as any,
+          {
+            reconcile: jest.fn().mockResolvedValue({ retryAllowed: true }),
+          } as any,
+        );
+        await expect(
+          service.verifyIdentity('user-1', {
+            ...dto,
+            accountNumber: '0123456780',
+            retryPending: true,
+          }),
+        ).rejects.toThrow('cannot be changed');
+      }
+      const result = await service.verifyIdentity('user-1', {
+        ...dto,
+        ...(status === 'PENDING' ? { retryPending: true } : {}),
+      });
+
+      expect(prisma.kycDocument.create).toHaveBeenCalledTimes(1);
+      expect(prisma.kycVerification.create).toHaveBeenCalledTimes(1);
+      expect(kycProviderGateway.verifyIdentity).toHaveBeenCalledTimes(2);
+      expect(
+        kycProviderGateway.verifyIdentity.mock.calls[1][0].documentId,
+      ).toBe(createdDocument?.id);
+      expect(prisma.kycDocument.update).toHaveBeenCalledWith({
+        where: { id: createdDocument?.id },
+        data: expect.objectContaining({ status: 'PENDING' }),
+      });
+      expect(prisma.kycVerification.update).toHaveBeenCalledWith({
+        where: { id: createdVerification?.id },
+        data: expect.objectContaining({ status: 'PENDING' }),
+      });
+      const reopened = prisma.kycVerification.update.mock.calls.find(
+        ([input]) => input.data.reference?.startsWith('pending:'),
+      );
+      if (status === 'PENDING') {
+        expect(reopened[0].data.checks.paystackRecovery).toMatchObject({
+          retryAllowed: false,
+          resubmissionCount: 1,
+        });
+        retryState.failedAttempt.checks = reopened[0].data.checks;
+        await expect(
+          service.verifyIdentity('user-1', { ...dto, retryPending: true }),
+        ).rejects.toThrow();
+        expect(kycProviderGateway.verifyIdentity).toHaveBeenCalledTimes(2);
+        prisma.kycVerification.findFirst.mockResolvedValue(null);
+      } else
+        expect(reopened[0].data.checks).not.toHaveProperty('paystackRecovery');
+      expect(reopened[0].data.consentRecordedAt).toBeInstanceOf(Date);
+      expect(prisma.auditLog.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          action: 'KYC_CONSENT_RECORDED',
+          targetId: createdVerification?.id,
+          metadata: expect.objectContaining({
+            retry: true,
+            reusedCanonicalAttempt: true,
+          }),
+        }),
+      });
+      expect(result).toEqual(
+        expect.objectContaining({
+          provider: 'PAYSTACK',
+          verificationStatus: 'PENDING',
+        }),
+      );
+    },
+  );
 
   it('rejects Paystack revalidation after the customer binding is verified', async () => {
     kycProviderGateway.provider = 'PAYSTACK';

@@ -130,6 +130,26 @@ function makeHarness(
 }
 
 describe('PaystackKycRecoveryService', () => {
+  it.each([
+    [undefined, true],
+    [{ resubmissionCount: 2 }, false],
+    [{ resubmissionCount: 1, resubmittedAt: '2026-11-04T10:00:00Z' }, false],
+  ])(
+    'offers a bounded retry only for a stale unidentified request (%j)',
+    async (prior, allowed) => {
+      const { service } = makeHarness({
+        checks: {
+          customerCode: 'CUS_123',
+          validationFingerprint: 'fingerprint-1',
+          ...(prior
+            ? { paystackRecovery: { state: 'ACTION_REQUIRED', ...prior } }
+            : {}),
+        },
+      });
+      jest.useFakeTimers().setSystemTime(new Date('2026-11-04T12:00:00Z'));
+      expect((await service.reconcile('user-1')).retryAllowed).toBe(allowed);
+    },
+  );
   afterEach(() => jest.useRealTimers());
 
   it('projects an unresolved attempt older than 24 hours as action required', () => {
