@@ -6,6 +6,7 @@ import {
 import { KycVerificationProvider } from '@prisma/client';
 import { createHash } from 'crypto';
 import { KycService } from './kyc.service';
+import { encryptSensitiveValue } from '../common/utils/encryption';
 import { KycProviderDefinitiveFailure } from './providers/kyc-provider.gateway';
 
 describe('KycService', () => {
@@ -1359,6 +1360,58 @@ describe('KycService', () => {
       select: { validationStatus: true },
     });
   });
+
+  it.each(['*******8901', undefined, '12345678901'])(
+    'keeps KYC status and retry available when an older identifier cannot be decrypted (mask %s)',
+    async (identifierMasked) => {
+      kycProviderGateway.provider = 'PAYSTACK';
+      prisma.user.findUnique.mockResolvedValue({
+        id: 'user-1',
+        kycStatus: 'SUBMITTED',
+        kycTier: 'TIER_0',
+      });
+      prisma.paystackCustomer.findUnique.mockResolvedValue({
+        validationStatus: 'PENDING',
+      });
+      const encryptedId = `enc:v1:${encryptSensitiveValue('12345678901', 'previous-key')}`;
+      prisma.kycDocument.findMany.mockResolvedValue([
+        {
+          id: 'bvn-legacy',
+          type: 'BVN',
+          status: 'PENDING',
+          idNumber: encryptedId,
+          createdAt: new Date(Date.now() - 25 * 3600000),
+          verifications: [
+            {
+              provider: 'PAYSTACK',
+              status: 'PENDING',
+              checks: {
+                identifierMasked,
+                paystackRecovery: {
+                  state: 'ACTION_REQUIRED',
+                  retryAllowed: true,
+                  checkedAt: new Date().toISOString(),
+                },
+              },
+            },
+          ],
+        },
+      ]);
+
+      const result = await service.getUserKycStatus('user-1');
+
+      expect(result.kycStatus).toBe('SUBMITTED');
+      expect(result.kycTier).toBe('TIER_0');
+      expect(result.documents[0].idNumber).toBe(
+        identifierMasked === '*******8901' ? identifierMasked : null,
+      );
+      expect(result.documents[0].recovery?.retryAllowed).toBe(true);
+      expect(JSON.stringify(result)).not.toContain(encryptedId);
+      expect(JSON.stringify(result)).not.toContain('12345678901');
+      expect(prisma.kycDocument.update).not.toHaveBeenCalled();
+      expect(prisma.user.update).not.toHaveBeenCalled();
+    },
+  );
 
   it('defaults Paystack customer validation status when no binding exists', async () => {
     kycProviderGateway.provider = 'PAYSTACK';

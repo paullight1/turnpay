@@ -1904,13 +1904,31 @@ export class KycService {
     )}`;
   }
 
-  private maskStoredKycId(idNumber?: string | null) {
+  private maskStoredKycId(idNumber?: string | null, recordedMask?: unknown) {
     if (!idNumber) {
       return null;
     }
 
-    const rawValue = this.decryptStoredKycId(idNumber);
-    return this.maskIdentifier(rawValue);
+    // Status reads do not need plaintext. Prefer the mask captured at
+    // submission, and never expose an unmasked/malformed checks value.
+    if (
+      typeof recordedMask === 'string' &&
+      /^\*{4,28}\d{4}$/.test(recordedMask)
+    ) {
+      return recordedMask;
+    }
+    try {
+      return this.maskIdentifier(this.decryptStoredKycId(idNumber));
+    } catch {
+      // An older encryption key or damaged record must not hide the current
+      // provider state or prevent the holder from resubmitting their details.
+      // Keep the original ciphertext intact for controlled key recovery.
+      this.logger.warn(
+        { alertCode: 'KYC_IDENTIFIER_MASK_UNAVAILABLE' },
+        'Stored KYC identifier unavailable for display',
+      );
+      return null;
+    }
   }
 
   private decryptStoredKycId(idNumber: string) {
@@ -1959,7 +1977,10 @@ export class KycService {
 
     return {
       ...safeDocument,
-      idNumber: this.maskStoredKycId(document.idNumber),
+      idNumber: this.maskStoredKycId(
+        document.idNumber,
+        checks?.identifierMasked,
+      ),
       kycTier: document.kycTier ?? document.user?.kycTier,
       provider: latestVerification?.provider,
       verificationStatus: latestVerification?.status,
@@ -2006,6 +2027,12 @@ export class KycService {
     };
     for (const key of SAFE_KYC_REVIEW_CHECK_KEYS) {
       const value = checks?.[key];
+      if (
+        key === 'identifierMasked' &&
+        (typeof value !== 'string' || !/^\*{4,28}\d{4}$/.test(value))
+      ) {
+        continue;
+      }
       if (
         typeof value === 'string' ||
         typeof value === 'boolean' ||
