@@ -133,7 +133,7 @@ void main() {
     expect(find.text('125,000.50'), findsOneWidget);
   });
 
-  testWidgets('wallet calls to action provide 48-pixel tap targets',
+  testWidgets('V1 wallet card shows one full-width Add funds action',
       (tester) async {
     final bundle = buildTrustPayTestBundle();
 
@@ -147,6 +147,11 @@ void main() {
               builder: (context, state) =>
                   HomeScreen(homeDataService: bundle.homeDataService),
             ),
+            GoRoute(
+              path: AppRoutes.receiveMoney,
+              builder: (context, state) =>
+                  const Scaffold(body: Text('Funding account opened')),
+            ),
           ],
         ),
       ),
@@ -154,20 +159,84 @@ void main() {
 
     await tester.pumpAndSettle();
 
-    final sendAction = find.ancestor(
-      of: find.text('Send money').first,
-      matching: find.byType(TapScale),
-    );
-    final receiveAction = find.ancestor(
-      of: find.text('Receive').first,
+    expect(find.text('Send money'), findsNothing);
+    expect(find.text('Receive'), findsNothing);
+    expect(find.textContaining('Quick transfer'), findsNothing);
+
+    final addFundsAction = find.ancestor(
+      of: find.text('Add funds').first,
       matching: find.byType(TapScale),
     );
 
-    expect(tester.getSize(sendAction.first).height, greaterThanOrEqualTo(48));
-    expect(
-      tester.getSize(receiveAction.first).height,
-      greaterThanOrEqualTo(48),
+    final actionSize = tester.getSize(addFundsAction.first);
+    expect(actionSize.height, greaterThanOrEqualTo(48));
+    expect(actionSize.width, greaterThan(220));
+
+    await tester.tap(find.text('Add funds').first);
+    await tester.pumpAndSettle();
+    expect(find.text('Funding account opened'), findsOneWidget);
+  });
+
+  testWidgets('V1 hides the undeveloped Ghana wallet card and picker',
+      (tester) async {
+    final bundle = buildTrustPayTestBundle();
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: HomeScreen(homeDataService: bundle.homeDataService),
+      ),
     );
+    await tester.pumpAndSettle();
+
+    expect(find.text('125,000.50'), findsOneWidget);
+    expect(find.text('3,300.75'), findsNothing);
+    expect(find.byTooltip('Edit currencies'), findsNothing);
+  });
+
+  testWidgets('V1 funding menu does not advertise cedi accounts',
+      (tester) async {
+    final bundle = buildTrustPayTestBundle();
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: MoneyActionScreen(
+          kind: MoneyActionKind.fund,
+          apiClient: bundle.apiClient,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Menu'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Add cedis'), findsNothing);
+    expect(find.text('Contact support'), findsOneWidget);
+  });
+
+  testWidgets('Add funds remains usable on a narrow phone with large text',
+      (tester) async {
+    tester.view.physicalSize = const Size(320, 740);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final bundle = buildTrustPayTestBundle();
+
+    await tester.pumpWidget(
+      MaterialApp(
+        builder: (context, child) => MediaQuery(
+          data: MediaQuery.of(context).copyWith(
+            textScaler: const TextScaler.linear(1.5),
+          ),
+          child: child!,
+        ),
+        home: HomeScreen(homeDataService: bundle.homeDataService),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Add funds'), findsWidgets);
+    expect(find.text('Send money'), findsNothing);
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('only the Nigeria wallet offers account provisioning',
@@ -223,7 +292,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Feature hub'), findsOneWidget);
-    expect(find.text('Explore features'), findsOneWidget);
+    expect(find.text('What can we help with?'), findsOneWidget);
     expect(find.text('Fund wallet'), findsOneWidget);
     await tester.scrollUntilVisible(
       find.text('Coming soon'),

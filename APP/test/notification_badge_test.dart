@@ -30,6 +30,38 @@ void main() {
     expect(find.text('3'), findsOneWidget);
   });
 
+  testWidgets('notification badge stays inside its reserved button frame',
+      (tester) async {
+    tester.view.physicalSize = const Size(430, 932);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final bundle = buildTrustPayTestBundle();
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: HomeScreen(
+          homeDataService: bundle.homeDataService,
+          notificationsService: _UnreadCountService(12),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final frame = tester.getRect(
+      find.byKey(const ValueKey('notification-button-frame')),
+    );
+    final badge = tester.getRect(
+      find.byKey(const ValueKey('notification-count-badge')),
+    );
+    expect(find.text('9+'), findsOneWidget);
+    expect(badge.top, greaterThanOrEqualTo(frame.top));
+    expect(badge.right, lessThanOrEqualTo(frame.right));
+    expect(badge.height, 20);
+    expect(badge.width, greaterThanOrEqualTo(20));
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('home bell refreshes its count on the bounded foreground poll',
       (tester) async {
     final bundle = buildTrustPayTestBundle();

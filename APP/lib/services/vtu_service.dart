@@ -64,6 +64,8 @@ class VtuOrderStatus {
   final String? targetMasked;
   final String? nextRequeryAt;
   final String? purchasedCode;
+  final bool actionRequired;
+  final String? customerAction;
 
   const VtuOrderStatus({
     required this.orderId,
@@ -76,6 +78,8 @@ class VtuOrderStatus {
     required this.targetMasked,
     required this.nextRequeryAt,
     required this.purchasedCode,
+    this.actionRequired = false,
+    this.customerAction,
   });
 
   factory VtuOrderStatus.fromJson(Map<String, dynamic> json) {
@@ -90,6 +94,8 @@ class VtuOrderStatus {
       targetMasked: json['targetMasked'] as String?,
       nextRequeryAt: json['nextRequeryAt'] as String?,
       purchasedCode: json['purchasedCode'] as String?,
+      actionRequired: json['actionRequired'] == true,
+      customerAction: json['customerAction'] as String?,
     );
   }
 }

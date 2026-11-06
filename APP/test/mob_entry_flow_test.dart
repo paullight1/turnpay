@@ -106,7 +106,8 @@ void main() {
 
     await tester.pumpAndSettle();
 
-    expect(find.textContaining('Send money'), findsWidgets);
+    expect(find.textContaining('Send money'), findsNothing);
+    expect(find.textContaining('Swap cedis to naira'), findsWidgets);
     expect(find.text('SKIP'), findsOneWidget);
   });
 
@@ -119,12 +120,13 @@ void main() {
 
     await tester.pump();
 
-    expect(find.textContaining('Send money'), findsWidgets);
+    expect(find.textContaining('Send money'), findsNothing);
+    expect(find.textContaining('Swap cedis to naira'), findsWidgets);
     expect(find.text('SKIP'), findsOneWidget);
 
     await tester.drag(find.byType(PageView), const Offset(-420, 0));
     await tester.pump(const Duration(milliseconds: 600));
 
-    expect(find.textContaining('Swap cedis to naira'), findsWidgets);
+    expect(find.textContaining('Your money'), findsWidgets);
   });
 }

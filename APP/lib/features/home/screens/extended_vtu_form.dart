@@ -381,7 +381,7 @@ class _ExtendedVtuFormState extends State<ExtendedVtuForm> {
                   style: AppTextStyles.bodyM.copyWith(height: 1.9))),
         FilledButton(
             style: FilledButton.styleFrom(
-              minimumSize: const Size.fromHeight(54),
+              minimumSize: const Size.fromHeight(56),
               backgroundColor: AppColors.primary,
               foregroundColor: Colors.white,
             ),

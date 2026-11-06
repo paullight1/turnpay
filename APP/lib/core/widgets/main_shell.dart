@@ -1,12 +1,14 @@
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 
+import '../../core/router/app_router.dart';
 import '../../core/theme/app_theme.dart';
 import '../state/exchange_visibility.dart';
 import '../../features/home/screens/dashboard_detail_screen.dart';
 import '../../features/home/screens/home_screen.dart';
-import '../../features/exchange/screens/kora_exchange_screen.dart';
+import '../../features/home/screens/home_task_screen.dart';
 import '../../features/notifications/services/notifications_service.dart';
 import '../../services/home_data_service.dart';
 import 'micro_interactions.dart';
@@ -35,9 +37,9 @@ const _navItems = [
     activeIcon: Icons.currency_exchange_rounded,
   ),
   _NavItem(
-    label: 'History',
-    icon: Icons.pie_chart_outline_rounded,
-    activeIcon: Icons.pie_chart_rounded,
+    label: 'More',
+    icon: Icons.grid_view_outlined,
+    activeIcon: Icons.grid_view_rounded,
   ),
   _NavItem(
     label: 'Profile',
@@ -63,7 +65,6 @@ class MainShell extends StatefulWidget {
 
 class _MainShellState extends State<MainShell> {
   int _selectedIndex = 0;
-  bool _exchangeVisited = false;
 
   @override
   void initState() {
@@ -79,11 +80,7 @@ class _MainShellState extends State<MainShell> {
   }
 
   void _onExchangePreferenceChanged() {
-    if (!exchangeServicesEnabled.value && _selectedIndex == 1) {
-      setState(() => _selectedIndex = 0);
-    } else {
-      setState(() {});
-    }
+    setState(() {});
   }
 
   @override
@@ -104,14 +101,6 @@ class _MainShellState extends State<MainShell> {
             ),
           ),
         ),
-        if (_exchangeVisited)
-          Offstage(
-            offstage: _selectedIndex != 1,
-            child: TickerMode(
-                enabled: _selectedIndex == 1,
-                child: ExchangeEntryScreen(
-                    showBackButton: false, active: _selectedIndex == 1)),
-          ),
         if (_selectedIndex > 1) _screenFor(_selectedIndex),
       ]),
       bottomNavigationBar: MediaQuery.viewInsetsOf(context).bottom > 0
@@ -120,12 +109,14 @@ class _MainShellState extends State<MainShell> {
               selectedIndex: _selectedIndex,
               exchangeEnabled: exchangeServicesEnabled.value,
               onTap: (i) {
+                if (i == 1) {
+                  FocusManager.instance.primaryFocus?.unfocus();
+                  context.push(AppRoutes.exchange);
+                  return;
+                }
                 if (i == _selectedIndex) return;
                 FocusManager.instance.primaryFocus?.unfocus();
-                setState(() {
-                  _selectedIndex = i;
-                  if (i == 1) _exchangeVisited = true;
-                });
+                setState(() => _selectedIndex = i);
               },
             ),
     );
@@ -133,12 +124,8 @@ class _MainShellState extends State<MainShell> {
 
   Widget _screenFor(int index) {
     switch (index) {
-      case 1:
-        return const ExchangeEntryScreen(showBackButton: false);
       case 2:
-        return DashboardTransactionsScreen(
-          homeDataService: widget.homeDataService,
-        );
+        return const HomeTaskScreen(embedded: true);
       case 3:
         return DashboardProfileScreen(
           homeDataService: widget.homeDataService,

@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
+import '../../../core/config/launch_capabilities.dart';
 import '../../../core/router/app_router.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/widgets/micro_interactions.dart';
@@ -116,19 +117,23 @@ class _WalletDetailScreenState extends State<WalletDetailScreen> {
                           // Action buttons
                           Row(
                             children: [
-                              Expanded(
-                                child: _ActionButton(
-                                  icon: Icons.near_me_rounded,
-                                  label: 'Send Money',
-                                  color: AppColors.primary,
-                                  onTap: () => context.push(AppRoutes.send),
+                              if (LaunchCapabilities.moneyOutEnabled) ...[
+                                Expanded(
+                                  child: _ActionButton(
+                                    icon: Icons.near_me_rounded,
+                                    label: 'Send Money',
+                                    color: AppColors.primary,
+                                    onTap: () => context.push(AppRoutes.send),
+                                  ),
                                 ),
-                              ),
-                              const SizedBox(width: AppSpacing.sm),
+                                const SizedBox(width: AppSpacing.sm),
+                              ],
                               Expanded(
                                 child: _ActionButton(
-                                  icon: Icons.qr_code_2_rounded,
-                                  label: 'Receive Money',
+                                  icon: Icons.add_rounded,
+                                  label: LaunchCapabilities.moneyOutEnabled
+                                      ? 'Receive Money'
+                                      : 'Add funds',
                                   color: AppColors.success,
                                   onTap: () => context.push(
                                     AppRoutes.receiveMoney,
@@ -931,9 +936,9 @@ class _DepositHistoryErrorState extends StatelessWidget {
               side: BorderSide(
                 color: AppColors.primary.withValues(alpha: 0.35),
               ),
-              minimumSize: const Size.fromHeight(44),
+              minimumSize: const Size.fromHeight(56),
               shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(AppRadius.full),
+                borderRadius: BorderRadius.circular(AppRadius.button),
               ),
             ),
           ),

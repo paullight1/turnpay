@@ -18,24 +18,16 @@ class SocialAuthButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     AppColors.watch(context);
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        height: 54,
-        width: double.infinity,
-        decoration: BoxDecoration(
-          color: AppColors.surfaceVariant,
-          borderRadius: BorderRadius.circular(AppRadius.full),
-          border: Border.all(color: AppColors.border, width: 1),
-        ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(icon, color: AppColors.textPrimary, size: 22),
-            const SizedBox(width: AppSpacing.sm),
-            Text(label, style: AppTextStyles.labelM),
-          ],
-        ),
+    return OutlinedButton.icon(
+      onPressed: onTap,
+      icon: Icon(icon, size: 22),
+      label: Text(label, textAlign: TextAlign.center),
+      style: OutlinedButton.styleFrom(
+        backgroundColor: AppColors.surfaceVariant,
+        minimumSize: const Size.fromHeight(56),
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(AppRadius.button)),
+        textStyle: AppTextStyles.labelL.copyWith(fontWeight: FontWeight.w700),
       ),
     );
   }

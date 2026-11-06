@@ -7,6 +7,7 @@ import 'package:go_router/go_router.dart';
 
 import 'package:trustpay_app/core/router/app_router.dart';
 import 'package:trustpay_app/core/state/wallet_refresh_signal.dart';
+import 'package:trustpay_app/core/widgets/micro_interactions.dart';
 import 'package:trustpay_app/features/home/screens/dashboard_detail_screen.dart';
 import 'package:trustpay_app/features/wallet/screens/receive_money_screen.dart';
 import 'package:trustpay_app/features/wallet/screens/virtual_account_screen.dart';
@@ -21,7 +22,7 @@ void main() {
     setMockSecureStorage(refreshToken: 'refresh-token');
   });
 
-  testWidgets('wallet detail renders balance and opens receive money',
+  testWidgets('V1 wallet detail renders one full-width Add funds action',
       (tester) async {
     final bundle = buildTrustPayTestBundle();
 
@@ -63,8 +64,16 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('NGN Wallet'), findsWidgets);
-    expect(find.text('Send Money'), findsOneWidget);
-    expect(find.text('Receive Money'), findsOneWidget);
+    expect(find.text('Send Money'), findsNothing);
+    expect(find.text('Withdraw'), findsNothing);
+    expect(find.text('Add funds'), findsOneWidget);
+    final addFundsAction = find.ancestor(
+      of: find.text('Add funds'),
+      matching: find.byType(TapScale),
+    );
+    final actionSize = tester.getSize(addFundsAction);
+    expect(actionSize.height, greaterThanOrEqualTo(48));
+    expect(actionSize.width, greaterThan(300));
     expect(find.text('Transaction History'), findsOneWidget);
     await tester.drag(
       find.byType(CustomScrollView),
@@ -79,7 +88,7 @@ void main() {
       const Offset(0, 500),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Receive Money'));
+    await tester.tap(find.text('Add funds'));
     await tester.pumpAndSettle();
 
     expect(find.text('Receive Money'), findsWidgets);
@@ -89,6 +98,25 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(find.text('Recent Deposits'), findsOneWidget);
+  });
+
+  testWidgets('V1 receiving menu does not expose the Ghana wallet',
+      (tester) async {
+    final bundle = buildTrustPayTestBundle();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ReceiveMoneyScreen(
+          walletService: bundle.walletService,
+          homeDataService: bundle.homeDataService,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Menu'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Receive cedis'), findsNothing);
+    expect(find.text('Refresh'), findsOneWidget);
   });
 
   testWidgets('verified setup retry reveals the account with one click',

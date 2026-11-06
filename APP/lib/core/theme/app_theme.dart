@@ -240,6 +240,7 @@ class AppRadius {
   static const double lg = 20;
   static const double xl = 28;
   static const double full = 999;
+  static const double button = 8;
 }
 
 class AppSpacing {
@@ -317,27 +318,47 @@ class AppTheme {
         labelStyle: AppTextStyles.bodyM.copyWith(color: palette.textSecondary),
         errorStyle: AppTextStyles.bodyS.copyWith(color: palette.error),
       ),
+      filledButtonTheme: FilledButtonThemeData(
+        style: FilledButton.styleFrom(
+          backgroundColor: palette.primary,
+          foregroundColor: Colors.white,
+          minimumSize: const Size(64, 56),
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+          shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(AppRadius.button)),
+          textStyle: AppTextStyles.labelL.copyWith(fontWeight: FontWeight.w700),
+        ),
+      ),
       elevatedButtonTheme: ElevatedButtonThemeData(
         style: ElevatedButton.styleFrom(
           backgroundColor: palette.primary,
           foregroundColor: Colors.white,
-          minimumSize: const Size(double.infinity, 54),
+          minimumSize: const Size(double.infinity, 56),
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(AppRadius.full),
-          ),
-          textStyle: AppTextStyles.labelL,
+              borderRadius: BorderRadius.circular(AppRadius.button)),
+          textStyle: AppTextStyles.labelL.copyWith(fontWeight: FontWeight.w700),
           elevation: 0,
         ),
       ),
       outlinedButtonTheme: OutlinedButtonThemeData(
         style: OutlinedButton.styleFrom(
           foregroundColor: palette.textPrimary,
-          minimumSize: const Size(double.infinity, 54),
+          minimumSize: const Size(double.infinity, 56),
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(AppRadius.full),
-          ),
+              borderRadius: BorderRadius.circular(AppRadius.button)),
           side: BorderSide(color: palette.border, width: 1.5),
-          textStyle: AppTextStyles.labelL,
+          textStyle: AppTextStyles.labelL.copyWith(fontWeight: FontWeight.w700),
+        ),
+      ),
+      textButtonTheme: TextButtonThemeData(
+        style: TextButton.styleFrom(
+          foregroundColor: palette.primary,
+          minimumSize: const Size(48, 48),
+          textStyle: AppTextStyles.labelM.copyWith(fontWeight: FontWeight.w700),
+          shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(AppRadius.button)),
         ),
       ),
       appBarTheme: AppBarTheme(

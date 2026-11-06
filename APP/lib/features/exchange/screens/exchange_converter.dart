@@ -271,7 +271,7 @@ class _ExchangeConverterState extends State<ExchangeConverter> {
                       return 'A valid exchange rate is required to continue.';
                     }
                     try {
-                      if ((value?.length ?? 0) > 14 ||
+                      if (((value ?? '').replaceAll(',', '').length) > 16 ||
                           MoneyValue.parse((value ?? '').replaceAll(',', ''))
                                   .minorUnits <=
                               BigInt.zero) {

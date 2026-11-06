@@ -7,6 +7,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
+import '../../../core/config/launch_capabilities.dart';
 import '../../../core/router/app_router.dart';
 import '../../../core/money/money_value.dart';
 import '../../../core/state/wallet_refresh_signal.dart';
@@ -366,7 +367,8 @@ class _HomeScreenState extends State<HomeScreen>
                       _KycStatusBanner(
                         status: data.user.kycStatus,
                       ),
-                    if (data.beneficiaries.isNotEmpty) ...[
+                    if (LaunchCapabilities.moneyOutEnabled &&
+                        data.beneficiaries.isNotEmpty) ...[
                       const SizedBox(height: AppSpacing.lg),
                       _BeneficiaryStrip(
                         beneficiaries: data.beneficiaries,
@@ -485,7 +487,14 @@ class _BalancePanel extends StatefulWidget {
 
 class _BalancePanelState extends State<_BalancePanel> {
   static const _storage = FlutterSecureStorage();
-  Set<String> _currencies = {'NGN', 'GHS'};
+  Set<String> _currencies = {
+    'NGN',
+    if (LaunchCapabilities.ghanaCedisWalletEnabled) 'GHS',
+  };
+  Set<String> get _supportedCurrencies => {
+        'NGN',
+        if (LaunchCapabilities.ghanaCedisWalletEnabled) 'GHS',
+      };
   String get _preferenceKey => 'dashboard-currencies-${widget.data.user.id}';
   late final ScrollController _scrollController;
   int _currentPage = 0;
@@ -501,7 +510,8 @@ class _BalancePanelState extends State<_BalancePanel> {
   Future<void> _loadCurrencies() async {
     try {
       final saved = await _storage.read(key: _preferenceKey);
-      final selected = saved?.split(',').where({'NGN', 'GHS'}.contains).toSet();
+      final selected =
+          saved?.split(',').where(_supportedCurrencies.contains).toSet();
       if (mounted && selected != null && selected.isNotEmpty) {
         setState(() => _currencies = selected);
       }
@@ -523,7 +533,7 @@ class _BalancePanelState extends State<_BalancePanel> {
             child: Column(mainAxisSize: MainAxisSize.min, children: [
               Text('Your currencies', style: AppTextStyles.headingM),
               const SizedBox(height: AppSpacing.sm),
-              for (final currency in ['NGN', 'GHS'])
+              for (final currency in _supportedCurrencies)
                 CheckboxListTile(
                   title: Text(currency == 'NGN'
                       ? 'NGN · Nigerian naira'
@@ -606,10 +616,7 @@ class _BalancePanelState extends State<_BalancePanel> {
     AppColors.watch(context);
     final ngnBalance =
         widget.data.walletFor('NGN')?.balanceDecimalString ?? '0.00';
-    final ghsBalance =
-        widget.data.walletFor('GHS')?.balanceDecimalString ?? '0.00';
     final ngnAccount = _accountForCurrency(widget.data.virtualAccounts, 'NGN');
-    final ghsAccount = _accountForCurrency(widget.data.virtualAccounts, 'GHS');
     final pageWidth = MediaQuery.sizeOf(context).width;
 
     final cards = [
@@ -623,16 +630,18 @@ class _BalancePanelState extends State<_BalancePanel> {
           AppColors.primaryLight,
         ],
       ),
-      _BalanceCardData(
-        currency: 'GHS',
-        balanceDecimalString: ghsBalance,
-        account: ghsAccount,
-        colors: const [
-          Color(0xFF0E7490),
-          Color(0xFF0F766E),
-          Color(0xFF34D399),
-        ],
-      ),
+      if (LaunchCapabilities.ghanaCedisWalletEnabled)
+        _BalanceCardData(
+          currency: 'GHS',
+          balanceDecimalString:
+              widget.data.walletFor('GHS')?.balanceDecimalString ?? '0.00',
+          account: _accountForCurrency(widget.data.virtualAccounts, 'GHS'),
+          colors: const [
+            Color(0xFF0E7490),
+            Color(0xFF0F766E),
+            Color(0xFF34D399),
+          ],
+        ),
     ].where((card) => _currencies.contains(card.currency)).toList();
     final cardWidth =
         cards.length == 1 ? pageWidth - (AppSpacing.md * 2) : pageWidth * 0.8;
@@ -643,14 +652,17 @@ class _BalancePanelState extends State<_BalancePanel> {
       children: [
         Row(children: [
           Expanded(child: Text('Your wallets', style: AppTextStyles.labelL)),
-          IconButton(
-            tooltip: 'Edit currencies',
-            onPressed: _editCurrencies,
-            icon: const Icon(Icons.add_rounded),
-          ),
+          if (LaunchCapabilities.ghanaCedisWalletEnabled)
+            IconButton(
+              tooltip: 'Edit currencies',
+              onPressed: _editCurrencies,
+              icon: const Icon(Icons.add_rounded),
+            ),
         ]),
         SizedBox(
-          height: 184,
+          height: (LaunchCapabilities.moneyOutEnabled ? 200 : 190) +
+              (MediaQuery.textScalerOf(context).scale(16) - 16).clamp(0, 48) *
+                  4,
           child: OverflowBox(
             alignment: Alignment.center,
             minWidth: pageWidth,
@@ -891,7 +903,7 @@ class _CurrencyBalanceCard extends StatelessWidget {
                       child: showAccountChip
                           ? Align(
                               alignment: Alignment.centerLeft,
-                              child: canRequestAccount
+                              child: data.currency == 'NGN'
                                   ? TapScale(
                                       onTap: onReceive,
                                       borderRadius: BorderRadius.circular(
@@ -963,25 +975,35 @@ class _CurrencyBalanceCard extends StatelessWidget {
                   ],
                 ),
                 const SizedBox(height: 10),
-                Row(
-                  children: [
-                    Expanded(
-                      child: _BalanceCtaButton(
-                        label: 'Send money',
-                        icon: Icons.near_me_rounded,
-                        onTap: onSend,
+                if (LaunchCapabilities.moneyOutEnabled)
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _BalanceCtaButton(
+                          label: 'Send money',
+                          icon: Icons.near_me_rounded,
+                          onTap: onSend,
+                        ),
                       ),
-                    ),
-                    const SizedBox(width: AppSpacing.sm),
-                    Expanded(
-                      child: _BalanceCtaButton(
-                        label: 'Receive',
-                        icon: Icons.call_received_rounded,
-                        onTap: onReceive,
+                      const SizedBox(width: AppSpacing.sm),
+                      Expanded(
+                        child: _BalanceCtaButton(
+                          label: 'Receive',
+                          icon: Icons.call_received_rounded,
+                          onTap: onReceive,
+                        ),
                       ),
+                    ],
+                  )
+                else
+                  SizedBox(
+                    width: double.infinity,
+                    child: _BalanceCtaButton(
+                      label: 'Add funds',
+                      icon: Icons.add_rounded,
+                      onTap: onReceive,
                     ),
-                  ],
-                ),
+                  ),
               ],
             ),
           ),
@@ -1264,13 +1286,14 @@ class _BalanceCtaButton extends StatelessWidget {
     return TapScale(
       onTap: onTap,
       semanticLabel: label,
-      borderRadius: BorderRadius.circular(15),
+      borderRadius: BorderRadius.circular(AppRadius.button),
       pressedScale: 0.97,
       child: Container(
-        height: 48,
+        constraints: const BoxConstraints(minHeight: 56),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 14),
         decoration: BoxDecoration(
           color: Colors.white.withValues(alpha: 0.13),
-          borderRadius: BorderRadius.circular(15),
+          borderRadius: BorderRadius.circular(AppRadius.button),
           border: Border.all(
             color: Colors.white.withValues(alpha: 0.28),
           ),
@@ -1287,13 +1310,12 @@ class _BalanceCtaButton extends StatelessWidget {
             Flexible(
               child: Text(
                 label,
-                style: AppTextStyles.labelS.copyWith(
+                style: AppTextStyles.labelM.copyWith(
                   color: Colors.white,
                   fontWeight: FontWeight.w900,
                   letterSpacing: 0,
                 ),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.center,
               ),
             ),
           ],
@@ -1550,19 +1572,25 @@ class _QuickActionsGrid extends StatelessWidget {
           ],
         ),
         const SizedBox(height: AppSpacing.md),
-        GridView.builder(
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          itemCount: actions.length,
-          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: 4,
-            crossAxisSpacing: AppSpacing.sm,
-            mainAxisSpacing: AppSpacing.sm,
-            childAspectRatio: 0.82,
-          ),
-          itemBuilder: (context, index) {
-            final action = actions[index];
-            return _QuickActionTile(action: action);
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final largeText = MediaQuery.textScalerOf(context).scale(1) > 1.35;
+            final columns = constraints.maxWidth < 360 || largeText ? 2 : 4;
+            return GridView.builder(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              itemCount: actions.length,
+              gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: columns,
+                crossAxisSpacing: AppSpacing.sm,
+                mainAxisSpacing: AppSpacing.sm,
+                childAspectRatio: columns == 4 ? 0.82 : 1.35,
+              ),
+              itemBuilder: (context, index) {
+                final action = actions[index];
+                return _QuickActionTile(action: action);
+              },
+            );
           },
         ),
       ],
@@ -2062,58 +2090,68 @@ class _IconButton extends StatelessWidget {
             : tooltip,
         borderRadius: BorderRadius.circular(AppRadius.sm),
         pressedScale: 0.94,
-        child: Stack(
-          clipBehavior: Clip.none,
-          children: [
-            Container(
-              width: 44,
-              height: 44,
-              decoration: BoxDecoration(
-                color: AppColors.surface,
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: AppColors.border),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.04),
-                    blurRadius: 18,
-                    offset: const Offset(0, 8),
-                  ),
-                ],
-              ),
-              child: Icon(icon, color: AppColors.textPrimary, size: 20),
-            ),
-            if (badgeCount > 0)
+        child: SizedBox(
+          key: const ValueKey('notification-button-frame'),
+          width: 48,
+          height: 48,
+          child: Stack(
+            children: [
               Positioned(
-                top: -6,
-                right: -6,
-                child: Semantics(
-                  label: '$badgeCount unread notifications',
-                  child: Container(
-                    constraints: const BoxConstraints(minWidth: 20),
-                    height: 20,
-                    padding: const EdgeInsets.symmetric(horizontal: 5),
-                    decoration: BoxDecoration(
-                      color: AppColors.primary,
-                      shape: BoxShape.circle,
-                      border: Border.all(
-                        color: AppColors.background,
-                        width: 1.5,
+                left: 0,
+                bottom: 0,
+                child: Container(
+                  width: 44,
+                  height: 44,
+                  decoration: BoxDecoration(
+                    color: AppColors.surface,
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: AppColors.border),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.04),
+                        blurRadius: 18,
+                        offset: const Offset(0, 8),
                       ),
-                    ),
-                    child: Center(
-                      child: Text(
-                        badgeCount > 9 ? '9+' : '$badgeCount',
-                        style: const TextStyle(
-                          fontSize: 9,
-                          fontWeight: FontWeight.w700,
-                          color: Colors.white,
+                    ],
+                  ),
+                  child: Icon(icon, color: AppColors.textPrimary, size: 20),
+                ),
+              ),
+              if (badgeCount > 0)
+                Positioned(
+                  top: 0,
+                  right: 0,
+                  child: Semantics(
+                    label: '$badgeCount unread notifications',
+                    child: Container(
+                      key: const ValueKey('notification-count-badge'),
+                      constraints: const BoxConstraints(minWidth: 20),
+                      height: 20,
+                      padding: const EdgeInsets.symmetric(horizontal: 5),
+                      decoration: BoxDecoration(
+                        color: AppColors.primary,
+                        borderRadius: BorderRadius.circular(AppRadius.full),
+                        border: Border.all(
+                          color: AppColors.background,
+                          width: 1.5,
+                        ),
+                      ),
+                      child: Center(
+                        child: Text(
+                          badgeCount > 9 ? '9+' : '$badgeCount',
+                          style: const TextStyle(
+                            fontSize: 9,
+                            fontWeight: FontWeight.w800,
+                            color: Colors.white,
+                            height: 1,
+                          ),
                         ),
                       ),
                     ),
                   ),
                 ),
-              ),
-          ],
+            ],
+          ),
         ),
       ),
     );

@@ -5,6 +5,7 @@ import 'package:intl/intl.dart';
 import 'package:go_router/go_router.dart';
 import 'package:dio/dio.dart';
 
+import '../../../core/config/launch_capabilities.dart';
 import '../../../core/router/app_router.dart';
 import '../../../core/state/wallet_refresh_signal.dart';
 import '../../../core/theme/app_theme.dart';
@@ -153,11 +154,12 @@ class _ReceiveMoneyScreenState extends State<ReceiveMoneyScreen> {
       appBar: TpAppHeader(
         label: 'Receive Money',
         menuActions: [
-          TpPageMenuAction(
-              label: 'Receive cedis',
-              icon: Icons.payments_outlined,
-              onTap: () => Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const GhanaMoneyScreen()))),
+          if (LaunchCapabilities.ghanaCedisWalletEnabled)
+            TpPageMenuAction(
+                label: 'Receive cedis',
+                icon: Icons.payments_outlined,
+                onTap: () => Navigator.of(context).push(MaterialPageRoute(
+                    builder: (_) => const GhanaMoneyScreen()))),
           TpPageMenuAction(
             label: 'Refresh',
             icon: Icons.refresh_rounded,
@@ -698,9 +700,9 @@ class _VirtualAccountCard extends StatelessWidget {
                   side: BorderSide(
                     color: AppColors.primary.withValues(alpha: 0.35),
                   ),
-                  minimumSize: const Size.fromHeight(44),
+                  minimumSize: const Size.fromHeight(56),
                   shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(AppRadius.full),
+                    borderRadius: BorderRadius.circular(AppRadius.button),
                   ),
                 ),
               ),
@@ -1172,9 +1174,9 @@ class _DepositsErrorCard extends StatelessWidget {
               side: BorderSide(
                 color: AppColors.primary.withValues(alpha: 0.35),
               ),
-              minimumSize: const Size.fromHeight(44),
+              minimumSize: const Size.fromHeight(56),
               shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(AppRadius.full),
+                borderRadius: BorderRadius.circular(AppRadius.button),
               ),
             ),
           ),

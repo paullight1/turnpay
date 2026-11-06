@@ -42,7 +42,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('Awaiting confirmation'), findsOneWidget);
+    expect(find.text('Awaiting admin review'), findsOneWidget);
     expect(walletRefreshSignal.tick, before);
   });
 }

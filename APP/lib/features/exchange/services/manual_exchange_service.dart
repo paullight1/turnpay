@@ -8,6 +8,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:uuid/uuid.dart';
 
 import '../../../services/api_client.dart';
+import '../../../core/money/money_value.dart';
 import '../../../services/auth_service.dart';
 
 const int manualExchangeMaxProofBytes = 8 * 1024 * 1024;
@@ -77,6 +78,34 @@ class ManualGhanaRecipientResolution {
       operator: operator,
     );
   }
+}
+
+class ManualNigerianBankOption {
+  final String name;
+  final String code;
+
+  const ManualNigerianBankOption({required this.name, required this.code});
+
+  factory ManualNigerianBankOption.fromJson(Map<String, dynamic> json) {
+    final name = _requiredString(json['name'], 'Nigerian bank name');
+    final code = _requiredString(json['code'], 'Nigerian bank code');
+    if (name.length > 120 || !RegExp(r'^\d{3,6}$').hasMatch(code)) {
+      throw const FormatException('Invalid Nigerian bank option.');
+    }
+    return ManualNigerianBankOption(name: name, code: code);
+  }
+}
+
+class ManualNigerianBankResolution {
+  final String accountName;
+  final String accountNumber;
+  final String bankCode;
+
+  const ManualNigerianBankResolution({
+    required this.accountName,
+    required this.accountNumber,
+    required this.bankCode,
+  });
 }
 
 extension ManualSettlementModeX on ManualSettlementMode {
@@ -160,8 +189,9 @@ ManualExchangeOrderStatus manualExchangeOrderStatusFromValue(dynamic value) {
 String manualExchangeStatusLabel(ManualExchangeOrderStatus status) {
   switch (status) {
     case ManualExchangeOrderStatus.awaitingTransfer:
+      return 'Awaiting your transfer';
     case ManualExchangeOrderStatus.awaitingConfirmation:
-      return 'Awaiting confirmation';
+      return 'Awaiting admin review';
     case ManualExchangeOrderStatus.credited:
       return 'Credited to wallet';
     case ManualExchangeOrderStatus.payoutPending:
@@ -186,7 +216,7 @@ String manualExchangeStatusDescription(ManualExchangeOrderStatus status) {
     case ManualExchangeOrderStatus.awaitingTransfer:
       return 'Transfer the exact amount to the receiving account below, then submit your receipt.';
     case ManualExchangeOrderStatus.awaitingConfirmation:
-      return 'Your receipt is with our team. We will confirm the incoming transfer before settlement.';
+      return 'Your receipt is with our team. We’ll check the payment before completing this exchange. Do not make another transfer.';
     case ManualExchangeOrderStatus.credited:
       return 'The confirmed exchange amount has been added to your TrustPay wallet.';
     case ManualExchangeOrderStatus.payoutPending:
@@ -223,6 +253,7 @@ class ManualExchangeConfig {
   final List<String> supportedSourceCurrencies;
   final List<String>? availableSourceCurrencies;
   final Map<String, List<ManualSettlementMode>> settlementOptions;
+  final int deliveryPolicyVersion;
 
   const ManualExchangeConfig({
     required this.enabled,
@@ -230,8 +261,9 @@ class ManualExchangeConfig {
     required this.targetCurrency,
     this.supportedSourceCurrencies = const ['NGN'],
     this.availableSourceCurrencies,
+    this.deliveryPolicyVersion = 2,
     this.settlementOptions = const {
-      'GHS': [ManualSettlementMode.wallet],
+      'GHS': [ManualSettlementMode.bank],
       'NGN': [ManualSettlementMode.momo, ManualSettlementMode.bank]
     },
   });
@@ -239,11 +271,15 @@ class ManualExchangeConfig {
   bool canExchangeFrom(String currency) =>
       enabled &&
       supportedSourceCurrencies.contains(currency) &&
+      deliveryModesFor(currency).isNotEmpty &&
       (availableSourceCurrencies?.contains(currency) ?? true);
 
   List<ManualSettlementMode> deliveryModesFor(String currency) =>
-      List.unmodifiable(
-          settlementOptions[currency] ?? const <ManualSettlementMode>[]);
+      List.unmodifiable((settlementOptions[currency] ??
+              const <ManualSettlementMode>[])
+          .where((mode) =>
+              mode != ManualSettlementMode.wallet &&
+              (currency != 'GHS' || deliveryPolicyVersion == 2)));
 
   factory ManualExchangeConfig.fromJson(Map<String, dynamic> json) {
     Map<String, List<ManualSettlementMode>>? options;
@@ -285,7 +321,13 @@ class ManualExchangeConfig {
         throw const FormatException('Exchange availability could not be read.');
       }
     }
+    final policyVersion = json['deliveryPolicyVersion'];
+    if (policyVersion != null && policyVersion is! int) {
+      throw const FormatException(
+          'Exchange receiving policy could not be read.');
+    }
     return ManualExchangeConfig(
+      deliveryPolicyVersion: policyVersion is int ? policyVersion : 1,
       availableSourceCurrencies:
           available == null ? null : List.unmodifiable(available),
       enabled: _requiredBool(json['enabled'], 'exchange availability'),
@@ -390,6 +432,8 @@ class ManualExchangeOrder {
   final String? payoutClaimedBy;
   final bool hasProof;
   final bool hasPayoutProof;
+  final bool reviewRemindersEnabled;
+  final DateTime? reviewReminderNextAllowedAt;
   final List<ManualExchangeOrderEvent> events;
 
   const ManualExchangeOrder({
@@ -417,6 +461,8 @@ class ManualExchangeOrder {
     required this.payoutClaimedBy,
     required this.hasProof,
     required this.hasPayoutProof,
+    this.reviewRemindersEnabled = false,
+    this.reviewReminderNextAllowedAt,
     required this.events,
   });
 
@@ -492,6 +538,11 @@ class ManualExchangeOrder {
       hasProof: _requiredBool(json['hasProof'], 'proof availability'),
       hasPayoutProof:
           _requiredBool(json['hasPayoutProof'], 'payout proof availability'),
+      reviewRemindersEnabled: json['reviewRemindersEnabled'] == true,
+      reviewReminderNextAllowedAt: json['reviewReminderNextAllowedAt'] == null
+          ? null
+          : _requiredDate(json['reviewReminderNextAllowedAt'],
+              'review reminder availability'),
       events: events.map((event) {
         if (event is! Map) {
           throw const FormatException(
@@ -502,6 +553,16 @@ class ManualExchangeOrder {
       }).toList(growable: false),
     );
   }
+
+  bool get canRequestReviewReminder =>
+      reviewRemindersEnabled &&
+      hasProof &&
+      const [
+        ManualExchangeOrderStatus.awaitingConfirmation,
+        ManualExchangeOrderStatus.payoutPending,
+        ManualExchangeOrderStatus.payoutProcessing,
+        ManualExchangeOrderStatus.payoutSent,
+      ].contains(status);
 
   bool get canSubmitProof =>
       status == ManualExchangeOrderStatus.awaitingTransfer ||
@@ -541,6 +602,30 @@ class ManualExchangeProofFile {
   });
 
   int get fileSize => bytes.length;
+}
+
+class ManualExchangeReminder {
+  final DateTime requestedAt, nextAllowedAt;
+  const ManualExchangeReminder(
+      {required this.requestedAt, required this.nextAllowedAt});
+  factory ManualExchangeReminder.fromJson(Map<String, dynamic> json) =>
+      ManualExchangeReminder(
+        requestedAt: _requiredDate(json['requestedAt'], 'review reminder time'),
+        nextAllowedAt: _requiredDate(
+            json['nextAllowedAt'], 'review reminder availability'),
+      );
+
+  static DateTime? cooldownFromError(Object error) {
+    if (error is! DioException || error.response?.statusCode != 429) {
+      return null;
+    }
+    final data = _mapValue(error.response?.data);
+    // The shared Nest exception filter wraps structured exception fields under
+    // message. Also accept an unwrapped response for compatible deployments.
+    final raw =
+        data['nextAllowedAt'] ?? _mapValue(data['message'])['nextAllowedAt'];
+    return raw is String ? DateTime.tryParse(raw) : null;
+  }
 }
 
 class ManualExchangeAttempt {
@@ -590,6 +675,53 @@ class ManualExchangeAttemptStore {
     FlutterSecureStorage? storage,
     this.accountScopeProvider,
   }) : storage = storage ?? const FlutterSecureStorage();
+
+  Future<void> rememberExchangeOrder(String orderId) async {
+    final scope = await _storageKey();
+    await storage.write(
+        key: '${scope}_latest_exchange',
+        value: _requireText(orderId, 'order id'));
+  }
+
+  Future<String?> latestExchangeOrderId() async {
+    final scope = await _storageKey();
+    return await storage.read(key: '${scope}_receipt_order') ??
+        await storage.read(key: '${scope}_latest_exchange');
+  }
+
+  Future<bool> receiptStepStarted(String orderId) async {
+    final scope = await _storageKey();
+    final order =
+        sha256.convert(utf8.encode(_requireText(orderId, 'order id')));
+    return await storage.read(key: '${scope}_receipt_$order') == 'true';
+  }
+
+  Future<String?> pendingReceiptOrderId() async {
+    final scope = await _storageKey();
+    return storage.read(key: '${scope}_receipt_order');
+  }
+
+  Future<void> markReceiptStepStarted(String orderId) async {
+    final id = _requireText(orderId, 'order id');
+    final scope = await _storageKey();
+    final order = sha256.convert(utf8.encode(id));
+    await _withStorageLock(scope, () async {
+      await storage.write(key: '${scope}_receipt_$order', value: 'true');
+      await storage.write(key: '${scope}_receipt_order', value: id);
+    });
+  }
+
+  Future<void> clearReceiptStep(String orderId) async {
+    final scope = await _storageKey();
+    final order =
+        sha256.convert(utf8.encode(_requireText(orderId, 'order id')));
+    await _withStorageLock(scope, () async {
+      await storage.delete(key: '${scope}_receipt_$order');
+      if (await storage.read(key: '${scope}_receipt_order') == orderId) {
+        await storage.delete(key: '${scope}_receipt_order');
+      }
+    });
+  }
 
   Future<List<ManualExchangeAttempt>> readAttempts() async {
     final storageKey = await _storageKey();
@@ -793,8 +925,46 @@ class ManualExchangeService {
                   status != null && status >= 200 && status < 300,
             ));
 
+  Future<String?> latestExchangeOrderId() =>
+      _attemptStore.latestExchangeOrderId();
+
+  Future<bool> receiptStepStarted(String orderId) =>
+      _attemptStore.receiptStepStarted(orderId);
+  Future<String?> pendingReceiptOrderId() =>
+      _attemptStore.pendingReceiptOrderId();
+  Future<void> markReceiptStepStarted(String orderId) =>
+      _attemptStore.markReceiptStepStarted(orderId);
+  Future<void> clearReceiptStep(String orderId) =>
+      _attemptStore.clearReceiptStep(orderId);
+
   Future<ManualExchangeAttempt?> pendingCreateAttempt() {
     return _attemptStore.pendingCreate();
+  }
+
+  Future<ManualExchangeReminder> requestReviewReminder(String orderId) async {
+    final id = _requireText(orderId, 'order id');
+    final fingerprint = jsonEncode({'orderId': id, 'reason': 'REVIEW'});
+    final key = await _attemptStore.keyFor(
+        action: 'review-reminder', fingerprint: fingerprint, orderId: id);
+    try {
+      final response = await _apiClient.client.post<dynamic>(
+          '/api/exchange/manual-orders/${Uri.encodeComponent(id)}/remind',
+          data: const {'reason': 'REVIEW'},
+          options: Options(headers: {'Idempotency-Key': key}));
+      final reminder =
+          ManualExchangeReminder.fromJson(_mapValue(response.data));
+      await _attemptStore.resolve(
+          action: 'review-reminder', fingerprint: fingerprint, orderId: id);
+      return reminder;
+    } catch (error) {
+      final confirmedCooldown =
+          ManualExchangeReminder.cooldownFromError(error) != null;
+      if (_canResolveAfterServerError(error) || confirmedCooldown) {
+        await _attemptStore.resolve(
+            action: 'review-reminder', fingerprint: fingerprint, orderId: id);
+      }
+      rethrow;
+    }
   }
 
   Future<ManualExchangeConfig> fetchConfig() async {
@@ -864,6 +1034,70 @@ class ManualExchangeService {
           'The name check did not match this recipient. Try again.');
     }
     return resolved;
+  }
+
+  Future<List<ManualNigerianBankOption>> fetchNigerianBanks() async {
+    final response =
+        await _apiClient.client.get<dynamic>('/api/payments/banks');
+    final payload = response.data;
+    final source = payload is List
+        ? payload
+        : payload is Map && payload['banks'] is List
+            ? payload['banks'] as List
+            : payload is Map && payload['data'] is List
+                ? payload['data'] as List
+                : null;
+    if (source == null) {
+      throw const FormatException('Nigerian banks could not be read.');
+    }
+    final banks = source
+        .whereType<Map>()
+        .map((item) =>
+            ManualNigerianBankOption.fromJson(Map<String, dynamic>.from(item)))
+        .toList(growable: false)
+      ..sort((a, b) => a.name.compareTo(b.name));
+    if (banks.isEmpty) {
+      throw const FormatException('No Nigerian bank is available.');
+    }
+    return banks;
+  }
+
+  Future<ManualNigerianBankResolution> resolveNigerianBankAccount({
+    required String accountNumber,
+    required String bankCode,
+  }) async {
+    final normalizedAccount = accountNumber.trim();
+    final normalizedBankCode = bankCode.trim();
+    if (!RegExp(r'^\d{10}$').hasMatch(normalizedAccount)) {
+      throw const FormatException('Enter a ten-digit Nigerian account number.');
+    }
+    if (!RegExp(r'^\d{3,6}$').hasMatch(normalizedBankCode)) {
+      throw const FormatException('Choose an available Nigerian bank.');
+    }
+    final response = await _apiClient.client.post<dynamic>(
+      '/api/payments/banks/resolve',
+      data: {
+        'accountNumber': normalizedAccount,
+        'bankCode': normalizedBankCode,
+      },
+    );
+    final data = _mapValue(response.data);
+    final accountName = _requiredString(data['accountName'], 'account name');
+    final returnedAccount = data['accountNumber'];
+    final returnedBankCode = data['bankCode'];
+    if (accountName.length < 2 ||
+        accountName.length > 120 ||
+        (returnedAccount != null && '$returnedAccount' != normalizedAccount) ||
+        (returnedBankCode != null &&
+            '$returnedBankCode' != normalizedBankCode)) {
+      throw const FormatException(
+          'The account check did not match these bank details. Try again.');
+    }
+    return ManualNigerianBankResolution(
+      accountName: accountName,
+      accountNumber: normalizedAccount,
+      bankCode: normalizedBankCode,
+    );
   }
 
   Future<List<ManualExchangeOrder>> listOrders() async {
@@ -937,6 +1171,12 @@ class ManualExchangeService {
       );
     }
 
+    final pending = await _attemptStore.pendingCreate();
+    final pendingFields =
+        pending == null ? null : jsonDecode(pending.fingerprint) as Map;
+    final useDirectBankContract = sourceCurrency == 'GHS' &&
+        settlementMode == ManualSettlementMode.bank &&
+        (pendingFields == null || pendingFields['deliveryPolicyVersion'] == 2);
     final fields = <String, dynamic>{
       if (sourceCurrency == 'GHS') 'sourceCurrency': sourceCurrency,
       'amount': normalizedAmount,
@@ -953,6 +1193,7 @@ class ManualExchangeService {
           normalizedName != null &&
           normalizedName.isNotEmpty)
         'destinationName': normalizedName,
+      if (useDirectBankContract) 'deliveryPolicyVersion': 2,
     };
     final fingerprint = jsonEncode(fields);
     final idempotencyKey = await _attemptStore.keyFor(
@@ -970,6 +1211,11 @@ class ManualExchangeService {
         },
       );
       final order = ManualExchangeOrder.fromJson(_orderMap(response.data));
+      try {
+        await _attemptStore.rememberExchangeOrder(order.id);
+      } catch (_) {
+        // A server-created order remains reachable in protected exchange history.
+      }
       await _attemptStore.resolve(action: 'create', fingerprint: fingerprint);
       return order;
     } catch (error) {
@@ -1255,14 +1501,18 @@ class ManualExchangeService {
   }
 
   void _validateCreateAmount(String amount) {
-    if (amount.length > 14 ||
+    if (amount.length > 16 ||
         !RegExp(r'^\d+(?:\.\d{1,2})?$').hasMatch(amount)) {
       throw const FormatException(
         'Enter a positive amount with up to two decimal places.',
       );
     }
-    final minorDigits = amount.replaceAll('.', '');
-    final hasPositiveValue = BigInt.parse(minorDigits) > BigInt.zero;
+    final minorUnits = MoneyValue.parse(amount).minorUnits;
+    final hasPositiveValue = minorUnits > BigInt.zero;
+    if (minorUnits > BigInt.parse('999999999999999')) {
+      throw const FormatException(
+          'This amount cannot be recorded at the supported monetary precision.');
+    }
     if (!hasPositiveValue) {
       throw const FormatException(
           'Enter a positive amount with up to two decimal places.');
@@ -1415,6 +1665,7 @@ String _attemptAction(dynamic value) {
     'create',
     'upload-url',
     'proof',
+    'review-reminder',
     'provider-create',
     'kora-account-create',
     'kora-momo-create',

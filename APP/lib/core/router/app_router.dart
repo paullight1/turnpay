@@ -26,6 +26,8 @@ import '../../features/wallet/screens/receive_money_screen.dart';
 import '../../features/transactions/screens/transaction_detail_screen.dart';
 import '../../features/exchange/screens/manual_exchange_order_screen.dart';
 import '../../features/exchange/services/manual_exchange_service.dart';
+import '../../features/wallet/widgets/receiving_account_sheet.dart';
+import '../config/launch_capabilities.dart';
 
 // ─── ROUTE NAMES ──────────────────────────────────────────────────────────────
 class AppRoutes {
@@ -38,7 +40,9 @@ class AppRoutes {
   static const home = '/home';
   static const notifications = '/notifications';
   static const kyc = '/kyc';
-  static const fund = '/fund';
+  static const fund = '/home/fund';
+  static const fundCheckout = '/fund/options';
+  static const receivingAccountSetup = '/receive-money/details';
   static const send = '/send';
   static const sendTrustpay = '/send/trustpay';
   static const sendReceipt = '/send/receipt/:reference';
@@ -56,7 +60,7 @@ class AppRoutes {
   static const electricity = '/electricity';
   static const bills = electricity;
   static const wallets = '/wallets';
-  static const virtualAccount = '/virtual-account';
+  static const virtualAccount = '/home/virtual-account';
   static const activity = '/activity';
   static const vtuOrder = '/vtu/order/:reference';
   static const more = '/more';
@@ -65,8 +69,9 @@ class AppRoutes {
   static const profileSecurity = '/profile/security';
   static const transactionSecurity = '/profile/security/transaction-security';
   static const profileSupport = '/profile/support';
+  static const profileReferrals = '/profile/referrals';
   static const walletDetail = '/wallet/:currency';
-  static const receiveMoney = '/receive-money';
+  static const receiveMoney = '/home/receive-money';
   static const transactionDetail = '/transaction/:reference';
 
   static String vtuOrderFor(String reference) {
@@ -111,6 +116,23 @@ class AppRoutes {
 /// route is visible, then resume when that route is popped.
 final appRouteObserver = RouteObserver<ModalRoute<dynamic>>();
 
+String? v1MoneyOutRedirectFor(String matchedLocation) {
+  if (LaunchCapabilities.moneyOutEnabled) return null;
+  if (matchedLocation == AppRoutes.send ||
+      matchedLocation == AppRoutes.sendTrustpay ||
+      matchedLocation == AppRoutes.sendBank ||
+      matchedLocation == AppRoutes.withdraw ||
+      matchedLocation == AppRoutes.withdrawAuthorize ||
+      matchedLocation.startsWith('/withdraw/authorize/')) {
+    return AppRoutes.home;
+  }
+  return null;
+}
+
+String? _moneyOutRedirect(BuildContext context, GoRouterState state) {
+  return v1MoneyOutRedirectFor(state.matchedLocation);
+}
+
 // ─── ROUTER ───────────────────────────────────────────────────────────────────
 final appRouterProvider = Provider<GoRouter>((ref) {
   return GoRouter(
@@ -121,6 +143,8 @@ final appRouterProvider = Provider<GoRouter>((ref) {
     // session is pushed to the login screen even from a deep-linked route.
     refreshListenable: authStateNotifier,
     redirect: (context, state) {
+      final moneyOutRedirect = v1MoneyOutRedirectFor(state.matchedLocation);
+      if (moneyOutRedirect != null) return moneyOutRedirect;
       if (!authStateNotifier.sessionExpired) return null;
 
       // Already on a screen the user can reach while signed out — stay put.
@@ -150,6 +174,23 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           state,
           MainShell(),
         ),
+        // A cold account deep link must have a real home page underneath the
+        // dismissible sheet, just as it does when opened from the dashboard.
+        routes: [
+          GoRoute(
+              path: 'fund',
+              pageBuilder: (context, state) => AccountSheetPage(
+                  key: state.pageKey,
+                  child: const ReceivingAccountSheet(funding: true))),
+          GoRoute(
+              path: 'virtual-account',
+              pageBuilder: (context, state) => AccountSheetPage(
+                  key: state.pageKey, child: const ReceivingAccountSheet())),
+          GoRoute(
+              path: 'receive-money',
+              pageBuilder: (context, state) => AccountSheetPage(
+                  key: state.pageKey, child: const ReceivingAccountSheet())),
+        ],
       ),
       GoRoute(
         path: AppRoutes.notifications,
@@ -187,6 +228,11 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         ),
       ),
       GoRoute(
+        path: AppRoutes.profileReferrals,
+        pageBuilder: (context, state) => _slideTransition(
+            state, ProfileActionScreen(kind: ProfileActionKind.referrals)),
+      ),
+      GoRoute(
         path: AppRoutes.profileSupport,
         pageBuilder: (context, state) => _slideTransition(
           state,
@@ -197,8 +243,9 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         path: AppRoutes.kyc,
         builder: (context, state) => const KycVerificationScreen(),
       ),
+      GoRoute(path: '/fund', redirect: (context, state) => AppRoutes.fund),
       GoRoute(
-        path: AppRoutes.fund,
+        path: AppRoutes.fundCheckout,
         pageBuilder: (context, state) => _slideTransition(
           state,
           const MoneyActionScreen(kind: MoneyActionKind.fund),
@@ -206,6 +253,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       ),
       GoRoute(
         path: AppRoutes.send,
+        redirect: _moneyOutRedirect,
         pageBuilder: (context, state) => _slideTransition(
           state,
           const SendMoneyEntryScreen(),
@@ -213,6 +261,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       ),
       GoRoute(
         path: AppRoutes.sendTrustpay,
+        redirect: _moneyOutRedirect,
         pageBuilder: (context, state) => _slideTransition(
           state,
           const MoneyActionScreen(kind: MoneyActionKind.send),
@@ -232,6 +281,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       ),
       GoRoute(
         path: AppRoutes.sendBank,
+        redirect: _moneyOutRedirect,
         pageBuilder: (context, state) => _slideTransition(
           state,
           const MoneyActionScreen(kind: MoneyActionKind.withdraw),
@@ -239,6 +289,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       ),
       GoRoute(
         path: AppRoutes.withdraw,
+        redirect: _moneyOutRedirect,
         pageBuilder: (context, state) {
           final prefill = state.extra as WithdrawPrefill?;
           return _slideTransition(
@@ -252,6 +303,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       ),
       GoRoute(
         path: AppRoutes.withdrawAuthorize,
+        redirect: _moneyOutRedirect,
         pageBuilder: (context, state) => _slideTransition(
           state,
           WithdrawalAuthorizationScreen(
@@ -350,12 +402,8 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         ),
       ),
       GoRoute(
-        path: AppRoutes.virtualAccount,
-        pageBuilder: (context, state) => _slideTransition(
-          state,
-          DashboardDetailScreen(kind: DashboardDetailKind.virtualAccount),
-        ),
-      ),
+          path: '/virtual-account',
+          redirect: (context, state) => AppRoutes.virtualAccount),
       GoRoute(
         path: AppRoutes.activity,
         pageBuilder: (context, state) => _slideTransition(
@@ -436,7 +484,10 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         ),
       ),
       GoRoute(
-        path: AppRoutes.receiveMoney,
+          path: '/receive-money',
+          redirect: (context, state) => AppRoutes.receiveMoney),
+      GoRoute(
+        path: AppRoutes.receivingAccountSetup,
         pageBuilder: (context, state) => _slideTransition(
           state,
           ReceiveMoneyScreen(),

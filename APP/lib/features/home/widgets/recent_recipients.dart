@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../core/config/launch_capabilities.dart';
 import '../../../core/router/app_router.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/haptics.dart';
@@ -22,6 +23,9 @@ class RecentRecipients extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     AppColors.watch(context);
+    if (!LaunchCapabilities.moneyOutEnabled) {
+      return const SizedBox.shrink();
+    }
     return _RecentRecipientsContent(homeDataService: homeDataService);
   }
 }

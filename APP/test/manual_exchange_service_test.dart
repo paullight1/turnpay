@@ -37,6 +37,58 @@ void main() {
         throwsA(isA<FormatException>()));
   });
 
+  test('loads Nigerian banks in display order and binds a verified account',
+      () async {
+    final adapter = _NigerianBankAdapter();
+    final dio = Dio(BaseOptions(baseUrl: 'https://manual-exchange.test'))
+      ..httpClientAdapter = adapter;
+    final service = ManualExchangeService(apiClient: ApiClient(dio: dio));
+
+    final banks = await service.fetchNigerianBanks();
+    expect(banks.map((bank) => bank.name), ['Access Bank', 'Zenith Bank']);
+
+    final resolution = await service.resolveNigerianBankAccount(
+      accountNumber: '0123456789',
+      bankCode: '044',
+    );
+    expect(resolution.accountName, 'Ada Lovelace');
+    expect(resolution.accountNumber, '0123456789');
+    expect(resolution.bankCode, '044');
+  });
+
+  test('rejects empty or mismatched Nigerian account resolutions', () async {
+    for (final response in <Map<String, dynamic>>[
+      {
+        'accountName': '',
+        'accountNumber': '0123456789',
+        'bankCode': '044',
+      },
+      {
+        'accountName': 'Wrong account',
+        'accountNumber': '0123456780',
+        'bankCode': '044',
+      },
+      {
+        'accountName': 'Wrong bank',
+        'accountNumber': '0123456789',
+        'bankCode': '058',
+      },
+    ]) {
+      final adapter = _NigerianBankAdapter(resolution: response);
+      final dio = Dio(BaseOptions(baseUrl: 'https://manual-exchange.test'))
+        ..httpClientAdapter = adapter;
+      final service = ManualExchangeService(apiClient: ApiClient(dio: dio));
+
+      await expectLater(
+        service.resolveNigerianBankAccount(
+          accountNumber: '0123456789',
+          bankCode: '044',
+        ),
+        throwsA(isA<FormatException>()),
+      );
+    }
+  });
+
   test('normalizes only valid Ghana MoMo numbers', () {
     expect(normalizeGhanaMobileNumber('024 123 4567'), '233241234567');
     expect(normalizeGhanaMobileNumber('+233241234567'), '233241234567');
@@ -101,7 +153,8 @@ void main() {
         'NGN': ['BANK']
       }
     });
-    expect(config.deliveryModesFor('GHS'), [ManualSettlementMode.wallet]);
+    expect(config.deliveryModesFor('GHS'), isEmpty);
+    expect(config.canExchangeFrom('GHS'), isFalse);
     expect(config.deliveryModesFor('NGN'), [ManualSettlementMode.bank]);
     expect(
         () => ManualExchangeConfig.fromJson({
@@ -139,7 +192,7 @@ void main() {
     });
     expect(configured.canExchangeFrom('NGN'), isTrue);
     expect(configured.canExchangeFrom('GHS'), isFalse);
-    expect(ManualExchangeConfig.fromJson(base).canExchangeFrom('GHS'), isTrue);
+    expect(ManualExchangeConfig.fromJson(base).canExchangeFrom('GHS'), isFalse);
     expect(
         ManualExchangeConfig.fromJson({
           ...base,
@@ -200,6 +253,43 @@ void main() {
     expect(await store.readAttempts(), isEmpty);
   });
 
+  for (final legacy in [false, true]) {
+    test(
+        'reverse bank request uses the new delivery contract while preserving legacy=$legacy retries',
+        () async {
+      final adapter = _ManualExchangeAdapter();
+      final api = ApiClient(
+          dio: Dio(BaseOptions(baseUrl: _ManualExchangeAdapter.baseUrl))
+            ..httpClientAdapter = adapter);
+      final store = ManualExchangeAttemptStore();
+      String? oldKey;
+      if (legacy) {
+        oldKey = await store.keyFor(
+            action: 'create',
+            fingerprint: jsonEncode({
+              'sourceCurrency': 'GHS',
+              'amount': '100.00',
+              'settlementMode': 'BANK',
+              'destinationInstitution': 'Synthetic Nigerian Bank',
+              'destinationAccount': '0123456789',
+              'destinationName': 'Beneficiary',
+            }));
+      }
+      await ManualExchangeService(apiClient: api, attemptStore: store)
+          .createOrder(
+              sourceCurrency: 'GHS',
+              amount: '100.00',
+              settlementMode: ManualSettlementMode.bank,
+              transactionPin: '2468',
+              destinationInstitution: 'Synthetic Nigerian Bank',
+              destinationAccount: '0123456789',
+              destinationName: 'Beneficiary');
+      expect(adapter.createBodies.single['deliveryPolicyVersion'],
+          legacy ? isNull : 2);
+      if (legacy) expect(adapter.createIdempotencyKeys.single, oldKey);
+    });
+  }
+
   test('reopens a server receipt status after a fresh service instance',
       () async {
     final adapter = _ManualExchangeAdapter();
@@ -215,7 +305,7 @@ void main() {
     expect(saved.single.status, ManualExchangeOrderStatus.awaitingConfirmation);
     expect(saved.single.hasProof, isTrue);
     expect(manualExchangeStatusLabel(saved.single.status),
-        'Awaiting confirmation');
+        'Awaiting admin review');
 
     final reopened = ManualExchangeService(apiClient: api);
     final detail = await reopened.getOrder('order-1');
@@ -455,6 +545,7 @@ class _ManualExchangeAdapter implements HttpClientAdapter {
   int createCalls = 0;
   int proofCalls = 0;
   final List<String> createIdempotencyKeys = [];
+  final List<Map<String, dynamic>> createBodies = [];
   final List<String> proofIdempotencyKeys = [];
 
   _ManualExchangeAdapter({
@@ -477,6 +568,7 @@ class _ManualExchangeAdapter implements HttpClientAdapter {
     final method = options.method.toUpperCase();
 
     if (method == 'POST' && path == '/api/exchange/manual-orders') {
+      createBodies.add(Map<String, dynamic>.from(options.data as Map));
       createCalls += 1;
       createIdempotencyKeys.add(
         '${options.headers['Idempotency-Key'] ?? ''}',
@@ -644,5 +736,52 @@ class _GhanaResolveAdapter implements HttpClientAdapter {
         headers: {
           Headers.contentTypeHeader: [Headers.jsonContentType]
         });
+  }
+}
+
+class _NigerianBankAdapter implements HttpClientAdapter {
+  final Map<String, dynamic>? resolution;
+
+  _NigerianBankAdapter({this.resolution});
+
+  @override
+  void close({bool force = false}) {}
+
+  @override
+  Future<ResponseBody> fetch(
+    RequestOptions options,
+    Stream<Uint8List>? requestStream,
+    Future<void>? cancelFuture,
+  ) async {
+    dynamic body;
+    if (options.method == 'GET' && options.path == '/api/payments/banks') {
+      body = [
+        {'name': 'Zenith Bank', 'code': '057', 'slug': 'zenith-bank'},
+        {'name': 'Access Bank', 'code': '044', 'slug': 'access-bank'},
+      ];
+    } else if (options.method == 'POST' &&
+        options.path == '/api/payments/banks/resolve') {
+      body = resolution ??
+          {
+            'accountName': 'Ada Lovelace',
+            'accountNumber': '0123456789',
+            'bankCode': '044',
+          };
+    } else {
+      return ResponseBody.fromString(
+        jsonEncode({'message': 'Unexpected request'}),
+        404,
+        headers: {
+          Headers.contentTypeHeader: [Headers.jsonContentType],
+        },
+      );
+    }
+    return ResponseBody.fromString(
+      jsonEncode(body),
+      200,
+      headers: {
+        Headers.contentTypeHeader: [Headers.jsonContentType],
+      },
+    );
   }
 }

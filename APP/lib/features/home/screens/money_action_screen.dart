@@ -10,6 +10,7 @@ import 'package:dio/dio.dart';
 import 'package:crypto/crypto.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../../core/config/launch_capabilities.dart';
 import '../../../core/router/app_router.dart';
 import '../../../core/money/money_value.dart';
 import '../../../core/money/amount_words.dart';
@@ -723,7 +724,7 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
                                         : _continueToDataPlans)
                                     : _continueToAirtimeAmount,
                     style: FilledButton.styleFrom(
-                        minimumSize: const Size.fromHeight(54),
+                        minimumSize: const Size.fromHeight(56),
                         backgroundColor: AppColors.primaryDark,
                         foregroundColor: Colors.white),
                     child: _isSubmitting
@@ -1010,7 +1011,7 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
                 style: FilledButton.styleFrom(
                     backgroundColor: AppColors.primaryDark,
                     foregroundColor: Colors.white,
-                    minimumSize: const Size.fromHeight(54)),
+                    minimumSize: const Size.fromHeight(56)),
                 child: _isSubmitting && !_isAwaitingTransferApproval
                     ? const SizedBox(
                         width: 20,
@@ -4462,7 +4463,8 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
                                               const GhanaMoneyScreen(
                                                   withdraw: true))))
                             ]
-                          : widget.kind == MoneyActionKind.fund
+                          : widget.kind == MoneyActionKind.fund &&
+                                  LaunchCapabilities.ghanaCedisWalletEnabled
                               ? [
                                   TpPageMenuAction(
                                       label: 'Add cedis',
@@ -4574,7 +4576,7 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
                       style: FilledButton.styleFrom(
                         backgroundColor: AppColors.primary,
                         foregroundColor: Colors.white,
-                        minimumSize: const Size.fromHeight(54),
+                        minimumSize: const Size.fromHeight(56),
                       ),
                       child: const Text('Continue to amount'),
                     ),
@@ -4588,7 +4590,7 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
                       style: FilledButton.styleFrom(
                           backgroundColor: AppColors.primary,
                           foregroundColor: Colors.white,
-                          minimumSize: const Size.fromHeight(54)),
+                          minimumSize: const Size.fromHeight(56)),
                       child: const Text('Continue to payment'),
                     ),
                   ],
@@ -4607,7 +4609,7 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
                       style: FilledButton.styleFrom(
                         backgroundColor: AppColors.primary,
                         foregroundColor: Colors.white,
-                        minimumSize: const Size.fromHeight(54),
+                        minimumSize: const Size.fromHeight(56),
                       ),
                       child: const Text('Continue to bank details'),
                     ),
@@ -5674,7 +5676,7 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
                   style: FilledButton.styleFrom(
                     backgroundColor: AppColors.primary,
                     foregroundColor: Colors.white,
-                    minimumSize: const Size.fromHeight(54),
+                    minimumSize: const Size.fromHeight(56),
                   ),
                   child: _isVerifyingCard
                       ? const TrustPayLottie(
@@ -5719,7 +5721,7 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
                 style: FilledButton.styleFrom(
                   backgroundColor: AppColors.primary,
                   foregroundColor: Colors.white,
-                  minimumSize: const Size.fromHeight(54),
+                  minimumSize: const Size.fromHeight(56),
                 ),
                 child: const Text('Continue to card details'),
               ),
@@ -5869,7 +5871,7 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
                 style: FilledButton.styleFrom(
                   backgroundColor: AppColors.primary,
                   foregroundColor: Colors.white,
-                  minimumSize: const Size.fromHeight(54),
+                  minimumSize: const Size.fromHeight(56),
                 ),
                 child: _isVerifyingMeter
                     ? const TrustPayLottie(
@@ -5895,7 +5897,7 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
       style: FilledButton.styleFrom(
         backgroundColor: AppColors.primary,
         foregroundColor: Colors.white,
-        minimumSize: const Size.fromHeight(54),
+        minimumSize: const Size.fromHeight(56),
       ),
       child: _isSubmitting
           ? TrustPayLottie(
