@@ -21,6 +21,7 @@ export const MANUAL_ACTIONS = [
   'HANDOVER_PAYOUT',
   'MARK_SENT',
   'RECORD_CEDIS_SENT',
+  'RECORD_PAYOUT_SENT',
   'COMPLETE',
 ] as const;
 export const MANUAL_PAYOUT_OUTCOMES = [
@@ -36,7 +37,7 @@ export type ManualPayoutOutcome = (typeof MANUAL_PAYOUT_OUTCOMES)[number];
 
 /** New manual orders follow the approved delivery contract; old orders keep their stored mode. */
 export function manualDeliveryOptions(source: 'NGN' | 'GHS'): SettlementMode[] {
-  return source === 'GHS' ? ['WALLET'] : ['MOMO', 'BANK'];
+  return source === 'GHS' ? ['BANK'] : ['MOMO', 'BANK'];
 }
 export function assertManualDelivery(
   source: 'NGN' | 'GHS',
@@ -45,7 +46,7 @@ export function assertManualDelivery(
   if (!manualDeliveryOptions(source).includes(mode))
     throw new BadRequestException(
       source === 'GHS'
-        ? 'Cedis to naira is paid into your TrustPay naira wallet. Choose TrustPay wallet.'
+        ? 'Naira is sent to your chosen Nigerian bank account. Choose a receiving bank.'
         : 'Cedis are sent to a bank or MoMo account. Choose a receiving bank or mobile money.',
     );
 }
@@ -69,7 +70,10 @@ export function nextManualExchangeStatus(
       return 'PAYOUT_PROCESSING';
     if (status === 'PAYOUT_PROCESSING' && action === 'MARK_SENT')
       return 'PAYOUT_SENT';
-    if (status === 'PAYOUT_PROCESSING' && action === 'RECORD_CEDIS_SENT')
+    if (
+      status === 'PAYOUT_PROCESSING' &&
+      ['RECORD_CEDIS_SENT', 'RECORD_PAYOUT_SENT'].includes(action)
+    )
       return 'COMPLETED';
     if (status === 'PAYOUT_SENT' && action === 'COMPLETE') return 'COMPLETED';
   }
@@ -115,7 +119,7 @@ export function quoteManualExchange(
   if (
     !amount.isFinite() ||
     amount.lte(0) ||
-    amount.gt('10000000') ||
+    amount.gt('9999999999999.99') ||
     !baseRate.isFinite() ||
     baseRate.lte(0) ||
     !markup.isFinite() ||
@@ -128,6 +132,11 @@ export function quoteManualExchange(
     .mul(new Decimal(1).minus(markup.div(100)))
     .toDecimalPlaces(6, Decimal.ROUND_DOWN);
   const target = amount.mul(rate).toDecimalPlaces(2, Decimal.ROUND_DOWN);
+  // Storage representability, not a commercial transaction or daily limit.
+  if (target.gt('9999999999999.99') || rate.gt('999999999999.999999'))
+    throw new BadRequestException(
+      'This amount or rate cannot be recorded at the supported monetary precision',
+    );
   if (target.lte(0))
     throw new BadRequestException('Amount is too small for this exchange');
   return {

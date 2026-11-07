@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Get,
+  Header,
   Headers,
   Param,
   ParseUUIDPipe,
@@ -19,6 +20,7 @@ import {
   AttachManualProofDto,
   CreateManualExchangeDto,
   ManualExchangeQueryDto,
+  ManualExchangeReminderDto,
   ManualQueueQueryDto,
   ManualProofReadDto,
   ManualProofUploadDto,
@@ -58,11 +60,39 @@ export class ManualExchangeController {
   @Get() list(@CurrentUser() user: { userId: string }) {
     return this.service.list(user.userId);
   }
+  @Get('recovery/created')
+  @Header('Cache-Control', 'no-store')
+  recoverCreated(
+    @CurrentUser() user: { userId: string },
+    @Headers('idempotency-key') key: string,
+  ) {
+    return this.service.recoverCreated(user.userId, key);
+  }
   @Get(':id') get(
     @Param('id', ParseUUIDPipe) id: string,
     @CurrentUser() user: { userId: string },
   ) {
     return this.service.get(id, user.userId);
+  }
+  @Post(':id/remind')
+  @Throttle({ default: { limit: 5, ttl: 600000 } })
+  remind(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: { userId: string },
+    @Body() dto: ManualExchangeReminderDto,
+    @Headers('idempotency-key') key: string,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    return this.service.remind(
+      id,
+      user.userId,
+      dto,
+      key,
+      createRequestAuditContext(request, {
+        actorId: user.userId,
+        idempotencyKey: key,
+      }),
+    );
   }
   @Post(':id/upload-url')
   @Throttle({ default: { limit: 5, ttl: 600000 } })

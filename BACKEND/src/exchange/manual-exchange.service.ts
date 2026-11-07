@@ -1,15 +1,20 @@
-import { TierOneLimitsService } from '../common/services/tier-one-limits.service';
 import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
+  HttpException,
+  HttpStatus,
   Injectable,
   NotFoundException,
   Optional,
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { ManualExchangeOrder, Prisma } from '@prisma/client';
+import {
+  ManualExchangeOrder,
+  ManualExchangeSettlement,
+  Prisma,
+} from '@prisma/client';
 import { Decimal } from '@prisma/client/runtime/library';
 import { createHash, randomUUID } from 'crypto';
 import { PinoLogger } from 'nestjs-pino';
@@ -24,6 +29,7 @@ import { RateService } from './providers/rate.service';
 import {
   AttachManualProofDto,
   CreateManualExchangeDto,
+  ManualExchangeReminderDto,
   ManualProofUploadDto,
   ReviewManualExchangeDto,
 } from './dto/manual-exchange.dto';
@@ -54,6 +60,14 @@ const proofOpen = [
   'AWAITING_CONFIRMATION',
   'NEEDS_MORE_INFO',
 ];
+const reviewReminderStatuses = [
+  'AWAITING_CONFIRMATION',
+  'PAYOUT_PENDING',
+  'PAYOUT_PROCESSING',
+  'PAYOUT_SENT',
+] as const;
+const reviewReminderEvents = ['PROOF', 'REVIEW_REMINDER'] as const;
+const REVIEW_REMINDER_COOLDOWN_MS = 10 * 60 * 1000;
 
 @Injectable()
 export class ManualExchangeService {
@@ -92,7 +106,9 @@ export class ManualExchangeService {
       targetCurrency: sourceCurrency === 'GHS' ? 'NGN' : 'GHS',
       availableSourceCurrencies,
       supportedSourceCurrencies: ['GHS', 'NGN'],
-      deliveryPolicyVersion: 1,
+      deliveryPolicyVersion: 2,
+      exchangeLimitPolicy: 'UNLIMITED',
+      reviewRemindersEnabled: true,
       settlementOptions: {
         GHS: manualDeliveryOptions('GHS'),
         NGN: manualDeliveryOptions('NGN'),
@@ -117,6 +133,7 @@ export class ManualExchangeService {
   }
   private async eligible(
     userId: string,
+    settlementMode?: ManualExchangeSettlement,
     tx: Prisma.TransactionClient | PrismaService = this.prisma,
   ) {
     const user = await tx.user.findUnique({
@@ -126,11 +143,12 @@ export class ManualExchangeService {
     if (!user) throw new NotFoundException('Account not found');
     if (user.isSuspended) throw new ForbiddenException('Account is suspended');
     if (
-      user.kycStatus !== 'VERIFIED' ||
-      !isKycTierAtLeast(user.kycTier, 'TIER_1')
+      settlementMode === 'WALLET' &&
+      (user.kycStatus !== 'VERIFIED' ||
+        !isKycTierAtLeast(user.kycTier, 'TIER_1'))
     )
       throw new ForbiddenException(
-        'Verify your BVN to activate Tier 1 before exchanging',
+        'Verify your identity before crediting your wallet',
       );
   }
   private collection(currency: 'NGN' | 'GHS' = 'NGN') {
@@ -162,9 +180,9 @@ export class ManualExchangeService {
     key: string,
     auditContext?: RequestAuditContext,
   ) {
-    this.requireEnabled();
     const sourceCurrency = dto.sourceCurrency ?? 'NGN';
     const targetCurrency = sourceCurrency === 'NGN' ? 'GHS' : 'NGN';
+    // Replaying a committed order only returns its existing instructions.
     await this.eligible(userId);
     await this.pin.verifyRequired(userId, dto.transactionPin);
     const keyHash = this.key(key);
@@ -175,6 +193,9 @@ export class ManualExchangeService {
       destinationInstitution: dto.destinationInstitution,
       destinationAccount: dto.destinationAccount,
       destinationName: dto.destinationName,
+      ...(dto.deliveryPolicyVersion !== undefined
+        ? { deliveryPolicyVersion: dto.deliveryPolicyVersion }
+        : {}),
     };
     const fingerprint = requestHash(business);
     const existing = await this.prisma.manualExchangeOrder.findUnique({
@@ -188,7 +209,19 @@ export class ManualExchangeService {
         );
       return this.present(existing);
     }
+    this.requireEnabled();
     assertManualDelivery(sourceCurrency, dto.settlementMode);
+    if (sourceCurrency === 'GHS' && dto.deliveryPolicyVersion !== 2)
+      throw new BadRequestException(
+        'Update your app to choose a Nigerian bank account for this exchange',
+      );
+    if (
+      sourceCurrency === 'GHS' &&
+      !/^\d{10}$/.test(dto.destinationAccount ?? '')
+    )
+      throw new BadRequestException(
+        'Enter a ten-digit Nigerian bank account number',
+      );
     if (
       dto.settlementMode === 'WALLET' &&
       !(await this.prisma.wallet.findUnique({
@@ -233,16 +266,25 @@ export class ManualExchangeService {
     try {
       const result = await this.prisma.$transaction(
         async (tx) => {
-          await this.eligible(userId, tx);
-          await new TierOneLimitsService(this.config).checkExternalExchange(
-            tx,
-            {
-              userId,
-              currency: sourceCurrency,
-              amount: new Decimal(quote.amount),
-              source: 'MANUAL_EXCHANGE',
-            },
-          );
+          // Serialize duplicate attempts and recheck eligibility without requiring a wallet.
+          await tx.$queryRaw`SELECT "id" FROM "users" WHERE "id" = ${userId} FOR UPDATE`;
+          await this.eligible(userId, dto.settlementMode, tx);
+          const replay = await tx.manualExchangeOrder.findUnique({
+            where: { userId_createKeyHash: { userId, createKeyHash: keyHash } },
+            include,
+          });
+          if (replay) {
+            if (replay.createRequestHash !== fingerprint)
+              throw new ConflictException(
+                'Attempt already used for different exchange details',
+              );
+            return replay;
+          }
+          // Use database time for the order and expiry, independent of app-server clock drift.
+          const [clock] = await tx.$queryRaw<
+            Array<{ now: Date }>
+          >`SELECT clock_timestamp() AS "now"`;
+          const createdAt = clock.now;
           const transaction = await tx.transaction.create({
             data: {
               userId,
@@ -251,6 +293,7 @@ export class ManualExchangeService {
               amount: quote.amount,
               fee: quote.fee,
               reference,
+              createdAt,
               metadata: {
                 flow: 'MANUAL_EXCHANGE',
                 ...auditContext,
@@ -271,7 +314,7 @@ export class ManualExchangeService {
               payoutWorkflow:
                 sourceCurrency === 'NGN' && dto.settlementMode !== 'WALLET'
                   ? 'ADMIN_CEDIS'
-                  : 'LEGACY',
+                  : 'ADMIN_EXTERNAL',
               ...quote,
               sourceCurrency,
               targetCurrency,
@@ -279,7 +322,8 @@ export class ManualExchangeService {
               destinationInstitution: dto.destinationInstitution?.trim(),
               destinationAccount: dto.destinationAccount?.trim(),
               destinationName: dto.destinationName?.trim(),
-              expiresAt: new Date(Date.now() + 30 * 60 * 1000),
+              createdAt,
+              expiresAt: new Date(createdAt.getTime() + 30 * 60 * 1000),
               events: {
                 create: {
                   actorId: userId,
@@ -287,6 +331,7 @@ export class ManualExchangeService {
                   keyHash,
                   requestHash: fingerprint,
                   status: 'AWAITING_TRANSFER',
+                  createdAt,
                   reason: 'Exchange instructions created',
                 },
               },
@@ -316,6 +361,16 @@ export class ManualExchangeService {
       throw error;
     }
   }
+  async recoverCreated(userId: string, key: string) {
+    const createKeyHash = this.key(key);
+    const order = await this.prisma.manualExchangeOrder.findUnique({
+      where: { userId_createKeyHash: { userId, createKeyHash } },
+      include,
+    });
+    if (!order) throw new NotFoundException('Exchange request not found');
+    return this.present(order);
+  }
+
   async queue(input: { status?: ManualStatus; cursor?: string } = {}) {
     const { rows, groups } = await this.prisma.$transaction(
       async (tx) => {
@@ -390,6 +445,114 @@ export class ManualExchangeService {
   async get(id: string, userId: string) {
     return this.present(await this.find(id, userId));
   }
+
+  /**
+   * The customer can nudge operations only after submitting proof and while
+   * the order is waiting for an admin decision. This deliberately does not
+   * change any financial or payout field; the version bump is the optimistic
+   * claim that serializes competing reminder requests on the order row.
+   */
+  async remind(
+    id: string,
+    userId: string,
+    dto: ManualExchangeReminderDto,
+    key: string,
+    auditContext?: RequestAuditContext,
+  ) {
+    const keyHash = this.key(key);
+    const fingerprint = requestHash(dto);
+    const result = await this.mutate(async (tx) => {
+      const row = await this.find(id, userId, tx);
+      const replay = await this.replay(
+        tx,
+        id,
+        userId,
+        'REVIEW_REMINDER',
+        keyHash,
+        fingerprint,
+      );
+      if (replay) return this.reviewReminderResponse(replay.createdAt);
+
+      if (!row.proofKey)
+        throw new ConflictException(
+          'Submit transfer proof before requesting an exchange review reminder',
+        );
+      if (!(reviewReminderStatuses as readonly string[]).includes(row.status))
+        throw new ConflictException(
+          'A review reminder is not available in this exchange state',
+        );
+
+      const nextAllowedAt = this.reviewReminderNextAllowedAt(row);
+      if (nextAllowedAt)
+        throw new HttpException(
+          {
+            message: 'Please wait before requesting another review reminder',
+            nextAllowedAt: nextAllowedAt.toISOString(),
+          },
+          HttpStatus.TOO_MANY_REQUESTS,
+        );
+
+      await this.claimVersion(tx, row, { status: row.status });
+      const event = await this.event(
+        tx,
+        row.id,
+        userId,
+        'REVIEW_REMINDER',
+        keyHash,
+        fingerprint,
+        row.status,
+        dto.reason,
+      );
+      await tx.paymentNotification.create({
+        data: {
+          eventKey: `manual-exchange:${row.id}:review-reminder:${keyHash}`,
+          audience: 'ADMIN',
+          orderId: row.id,
+          title: `Exchange review requested again: ${row.reference}.`,
+        },
+      });
+      return this.reviewReminderResponse(event.createdAt);
+    });
+
+    this.logger?.info?.(
+      {
+        orderId: id,
+        userId,
+        event: 'manual_exchange_review_reminder',
+        requestedAt: result.requestedAt,
+        nextAllowedAt: result.nextAllowedAt,
+        ...auditContext,
+      },
+      'Manual exchange review reminder requested',
+    );
+    return result;
+  }
+
+  private reviewReminderResponse(requestedAt: Date) {
+    const requestedAtIso = new Date(requestedAt).toISOString();
+    return {
+      requestedAt: requestedAtIso,
+      nextAllowedAt: new Date(
+        new Date(requestedAt).getTime() + REVIEW_REMINDER_COOLDOWN_MS,
+      ).toISOString(),
+    };
+  }
+
+  private reviewReminderNextAllowedAt(row: Pick<Order, 'events'>) {
+    const latest = row.events
+      .filter((event) =>
+        (reviewReminderEvents as readonly string[]).includes(event.action),
+      )
+      .reduce<
+        (typeof row.events)[number] | null
+      >((current, event) => (!current || event.createdAt > current.createdAt ? event : current), null);
+    if (!latest) return null;
+    const nextAllowedAt = new Date(
+      latest.createdAt.getTime() + REVIEW_REMINDER_COOLDOWN_MS,
+    );
+    return nextAllowedAt > new Date() ? nextAllowedAt : null;
+  }
+
   private bucket() {
     return this.config.get<string>(
       'EXCHANGE_RECEIPT_BUCKET',
@@ -662,7 +825,11 @@ export class ManualExchangeService {
       )
     )
       return this.present(await this.find(id), true);
-    if (dto.action === 'MARK_SENT' || dto.action === 'RECORD_CEDIS_SENT') {
+    if (
+      ['MARK_SENT', 'RECORD_CEDIS_SENT', 'RECORD_PAYOUT_SENT'].includes(
+        dto.action,
+      )
+    ) {
       if (!dto.payoutProofObjectKey)
         throw new BadRequestException('Payout evidence is required');
       await this.verifyProof(id, adminId, dto.payoutProofObjectKey, 'PAYOUT');
@@ -691,6 +858,8 @@ export class ManualExchangeService {
         );
     }
     return this.mutate(async (tx) => {
+      // Serialize review and committed replay before evaluating a new transition.
+      await tx.$queryRaw`SELECT "id" FROM "manual_exchange_orders" WHERE "id" = ${id} FOR UPDATE`;
       const row = await this.find(id, undefined, tx);
       if (await this.replay(tx, id, adminId, dto.action, keyHash, fingerprint))
         return this.present(row, true);
@@ -713,10 +882,46 @@ export class ManualExchangeService {
         );
       if (
         row.payoutWorkflow === 'ADMIN_CEDIS' &&
-        ['MARK_SENT', 'COMPLETE'].includes(dto.action)
+        (dto.action === 'MARK_SENT' ||
+          (dto.action === 'COMPLETE' && row.status !== 'PAYOUT_SENT'))
       )
         throw new ConflictException(
           'Use Confirm cedis sent with the actual cedi amount for this order',
+        );
+      if (
+        dto.action === 'COMPLETE' &&
+        row.payoutWorkflow !== 'LEGACY' &&
+        (!row.payoutReference ||
+          !row.payoutProofKey ||
+          !row.payoutClaimedBy ||
+          !row.events.some(
+            (event) =>
+              event.action === 'HANDOVER_PAYOUT' &&
+              event.status === 'PAYOUT_SENT',
+          ))
+      )
+        throw new ConflictException(
+          'Complete only an independently verified already-sent payout handover',
+        );
+      if (dto.action === 'RECORD_PAYOUT_SENT') {
+        if (
+          row.payoutWorkflow !== 'ADMIN_EXTERNAL' ||
+          row.settlementMode === 'WALLET'
+        )
+          throw new BadRequestException(
+            'This action records only a direct-account exchange payout',
+          );
+        if (!this.exactPayoutAmount(dto.payoutAmount, row.targetAmount))
+          throw new BadRequestException(
+            'The amount sent must match the frozen payout amount',
+          );
+      }
+      if (
+        row.payoutWorkflow === 'ADMIN_EXTERNAL' &&
+        ['MARK_SENT', 'RECORD_CEDIS_SENT'].includes(dto.action)
+      )
+        throw new ConflictException(
+          'Record the actual payout with its exact amount and protected evidence',
         );
       let next: ManualStatus;
       const update: Prisma.ManualExchangeOrderUpdateManyMutationInput = {
@@ -744,7 +949,7 @@ export class ManualExchangeService {
           outcome,
         );
         if (outcome !== 'ALREADY_SENT') {
-          await this.eligible(row.userId, tx);
+          await this.eligible(row.userId, row.settlementMode, tx);
           const credential = await tx.transactionPinCredential.findUnique({
             where: { userId: row.userId },
             select: { resetHoldUntil: true },
@@ -790,7 +995,7 @@ export class ManualExchangeService {
       }
       if (dto.action === 'CREDIT_WALLET' || dto.action === 'CONFIRM_DEPOSIT') {
         this.requireEnabled();
-        await this.eligible(row.userId, tx);
+        await this.eligible(row.userId, row.settlementMode, tx);
         if (!row.proofKey)
           throw new ConflictException('Customer proof is required');
         if (row.expiresAt < new Date() && dto.acceptExpiredQuote !== true)
@@ -814,7 +1019,7 @@ export class ManualExchangeService {
         update.depositReference = reference;
       }
       if (dto.action === 'CLAIM_PAYOUT') {
-        await this.eligible(row.userId, tx);
+        await this.eligible(row.userId, row.settlementMode, tx);
         const credential = await tx.transactionPinCredential.findUnique({
           where: { userId: row.userId },
           select: { resetHoldUntil: true },
@@ -839,7 +1044,11 @@ export class ManualExchangeService {
           );
         update.payoutClaimedBy = adminId;
       }
-      if (dto.action === 'MARK_SENT' || dto.action === 'RECORD_CEDIS_SENT') {
+      if (
+        ['MARK_SENT', 'RECORD_CEDIS_SENT', 'RECORD_PAYOUT_SENT'].includes(
+          dto.action,
+        )
+      ) {
         if (row.payoutClaimedBy !== adminId)
           throw new ForbiddenException(
             'Only the assigned payout operator can record this payment',
@@ -857,12 +1066,15 @@ export class ManualExchangeService {
           },
           tx,
         );
-        if (dto.action === 'RECORD_CEDIS_SENT')
+        if (
+          dto.action === 'RECORD_CEDIS_SENT' ||
+          dto.action === 'RECORD_PAYOUT_SENT'
+        )
           await this.settlementHold.assertSettlementAllowed(
             {
               operation: 'MANUAL_EXCHANGE',
               scope: 'MANUAL_EXCHANGE',
-              currency: 'GHS',
+              currency: row.targetCurrency,
               provider: 'MANUAL_ADMIN',
               reference: row.reference,
             },
@@ -1096,6 +1308,9 @@ export class ManualExchangeService {
       payoutClaimedBy: row.payoutClaimedBy,
       hasProof: !!row.proofKey,
       hasPayoutProof: !!row.payoutProofKey,
+      reviewRemindersEnabled: true,
+      reviewReminderNextAllowedAt:
+        this.reviewReminderNextAllowedAt(row)?.toISOString() ?? null,
       events: row.events.map((event) => ({
         status: event.status,
         reason: event.reason,

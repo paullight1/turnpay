@@ -8,6 +8,7 @@ import { allocateDepositReference } from '../src/common/services/deposit-allocat
 import { Decimal } from '@prisma/client/runtime/library';
 import { ManualExchangeReconciliationService } from '../src/exchange/manual-exchange-reconciliation.service';
 import { LedgerService } from '../src/wallets/ledger.service';
+import { TierOneLimitsService } from '../src/common/services/tier-one-limits.service';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { RateService } from '../src/exchange/providers/rate.service';
 import { TransactionPinService } from '../src/common/services/transaction-pin.service';
@@ -125,12 +126,18 @@ describe('manual exchange financial boundaries (real PostgreSQL)', () => {
   const admin = () => fixture.users.approverAdminA.id;
   const otherAdmin = () => fixture.users.approverAdminB.id;
   // Seed pre-policy rows explicitly: production never reclassifies historical customer choices.
-  async function seedLegacyWallet(key: string) {
+  async function seedLegacyWallet(key: string, source: 'NGN' | 'GHS' = 'NGN') {
+    const target = source === 'NGN' ? 'GHS' : 'NGN';
+    const targetAmount = source === 'NGN' ? '2.00' : '10000.00';
     const hash = (text: string) =>
       createHash('sha256').update(text).digest('hex');
     const keyHash = hash(key),
       fingerprint = hash(
-        JSON.stringify({ amount: '100.00', settlementMode: 'WALLET' }),
+        JSON.stringify({
+          ...(source === 'GHS' ? { sourceCurrency: source } : {}),
+          amount: '100.00',
+          settlementMode: 'WALLET',
+        }),
       );
     try {
       await prisma.$transaction(async (tx) => {
@@ -147,15 +154,15 @@ describe('manual exchange financial boundaries (real PostgreSQL)', () => {
           data: {
             userId: user(),
             type: 'EXCHANGE',
-            currency: 'NGN',
+            currency: source,
             amount: '100.00',
             fee: '0.00',
             reference,
             metadata: {
               flow: 'MANUAL_EXCHANGE',
               settlementMode: 'WALLET',
-              targetCurrency: 'GHS',
-              targetAmount: '2.00',
+              targetCurrency: target,
+              targetAmount,
             },
           },
         });
@@ -168,18 +175,18 @@ describe('manual exchange financial boundaries (real PostgreSQL)', () => {
             createRequestHash: fingerprint,
             settlementMode: 'WALLET',
             payoutWorkflow: 'LEGACY',
-            sourceCurrency: 'NGN',
-            targetCurrency: 'GHS',
+            sourceCurrency: source,
+            targetCurrency: target,
             amount: '100.00',
-            targetAmount: '2.00',
-            rate: '0.020000',
+            targetAmount,
+            rate: source === 'NGN' ? '0.020000' : '100.000000',
             fee: '0.00',
             collectionAccount: {
-              bankName: 'Test Bank',
+              bankName: source === 'GHS' ? 'Test MoMo' : 'Test Bank',
               accountName: 'Test Collection',
               accountNumber: '0001112223',
               version: 'test-v1',
-              currency: 'NGN',
+              currency: source,
             },
             expiresAt: new Date(Date.now() + 1800000),
             events: {
@@ -202,6 +209,19 @@ describe('manual exchange financial boundaries (real PostgreSQL)', () => {
       )
         throw error;
     }
+  }
+  async function legacyReverse(key = randomUUID()) {
+    await seedLegacyWallet(key, 'GHS');
+    return service.create(
+      user(),
+      {
+        sourceCurrency: 'GHS',
+        amount: '100.00',
+        settlementMode: 'WALLET',
+        transactionPin: '2468',
+      },
+      key,
+    );
   }
   async function order(mode: SettlementMode = 'WALLET', key = randomUUID()) {
     if (mode === 'WALLET') await seedLegacyWallet(key);
@@ -254,6 +274,328 @@ describe('manual exchange financial boundaries (real PostgreSQL)', () => {
       })
     ).balance;
   }
+
+  const bankOrder = (amount = '100.00') => ({
+    deliveryPolicyVersion: 2 as const,
+    sourceCurrency: 'GHS' as const,
+    settlementMode: 'BANK' as const,
+    amount,
+    destinationInstitution: 'Synthetic Nigerian Bank',
+    destinationAccount: '0123456789',
+    destinationName: 'Synthetic Beneficiary',
+    transactionPin: '2468',
+  });
+
+  it('refuses an old client reverse-bank request before collecting money', async () => {
+    const oldClient = { ...bankOrder(), deliveryPolicyVersion: undefined };
+    await expect(
+      service.create(user(), oldClient, randomUUID()),
+    ).rejects.toThrow('Update');
+    expect(
+      await prisma.manualExchangeOrder.count({ where: { userId: user() } }),
+    ).toBe(0);
+  });
+
+  it('recovers a historical bank attempt before the client-version and availability gates', async () => {
+    const key = randomUUID();
+    const created = await service.create(user(), bankOrder(), key);
+    const oldClient = { ...bankOrder(), deliveryPolicyVersion: undefined };
+    await prisma.manualExchangeOrder.update({
+      where: { id: created.id },
+      data: {
+        payoutWorkflow: 'LEGACY',
+        createRequestHash: createHash('sha256')
+          .update(
+            '{"sourceCurrency":"GHS","amount":"100.00","settlementMode":"BANK","destinationInstitution":"Synthetic Nigerian Bank","destinationAccount":"0123456789","destinationName":"Synthetic Beneficiary"}',
+          )
+          .digest('hex'),
+      },
+    });
+    config.set('MANUAL_EXCHANGE_ENABLED', 'false');
+    try {
+      const replay = await service.create(user(), oldClient, key);
+      expect(replay.id).toBe(created.id);
+      expect(replay.payoutWorkflow).toBe('LEGACY');
+    } finally {
+      config.set('MANUAL_EXCHANGE_ENABLED', 'true');
+    }
+  });
+
+  it('does not charge direct exchange against subsequent wallet spending', async () => {
+    await prisma.user.update({
+      where: { id: user() },
+      data: { kycTier: 'TIER_1' },
+    });
+    await service.create(
+      user(),
+      {
+        ...bankOrder('1000000.00'),
+        sourceCurrency: 'NGN',
+        settlementMode: 'MOMO',
+      },
+      randomUUID(),
+    );
+    const ledger = new LedgerService(
+      prisma as PrismaService,
+      undefined,
+      new TierOneLimitsService(
+        new ConfigService({
+          TIER_ONE_NGN_PER_TRANSACTION: '100',
+          TIER_ONE_NGN_DAILY: '200',
+          TIER_ONE_NGN_MAX_BALANCE: '3000',
+        }),
+      ),
+    );
+    const debit = () =>
+      prisma.$transaction(async (tx) => {
+        const reference = 'VTU-' + randomUUID();
+        const transaction = await tx.transaction.create({
+          data: {
+            userId: user(),
+            reference,
+            type: 'AIRTIME',
+            currency: 'NGN',
+            amount: '50.00',
+          },
+        });
+        return ledger.debitWallet(
+          {
+            userId: user(),
+            currency: 'NGN',
+            amount: new Decimal(50),
+            transactionId: transaction.id,
+            reference,
+            source: 'VTU_PURCHASE',
+          },
+          tx,
+        );
+      });
+    for (let i = 0; i < 4; i++) await debit();
+    await expect(debit()).rejects.toThrow('daily');
+    expect(
+      (
+        await prisma.wallet.findUniqueOrThrow({
+          where: { userId_currency: { userId: user(), currency: 'NGN' } },
+        })
+      ).balance.toFixed(2),
+    ).toBe('800.00');
+  });
+
+  it('records order time and expiry from the database even if the app server clock is wrong', async () => {
+    const [{ now }] = await prisma.$queryRaw<
+      Array<{ now: Date }>
+    >`SELECT clock_timestamp() AS "now"`;
+    try {
+      jest.useFakeTimers({
+        now: Date.now() + 2 * 86400000,
+        doNotFake: [
+          'hrtime',
+          'performance',
+          'nextTick',
+          'queueMicrotask',
+          'setImmediate',
+          'clearImmediate',
+          'setTimeout',
+          'clearTimeout',
+          'setInterval',
+          'clearInterval',
+        ],
+      });
+      const created = await service.create(user(), bankOrder(), randomUUID());
+      expect(
+        Math.abs(created.createdAt.getTime() - now.getTime()),
+      ).toBeLessThan(5000);
+      expect(created.expiresAt.getTime() - created.createdAt.getTime()).toBe(
+        1800000,
+      );
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('settles cedis directly to a Nigerian bank for an unverified customer without a wallet tier', async () => {
+    await prisma.user.update({
+      where: { id: user() },
+      data: { kycTier: 'TIER_0', kycStatus: 'PENDING' },
+    });
+    await prisma.wallet.deleteMany({ where: { userId: user() } });
+    const key = randomUUID();
+    const created = await service.create(user(), bankOrder(), key);
+    expect(created).toMatchObject({
+      settlementMode: 'BANK',
+      payoutWorkflow: 'ADMIN_EXTERNAL',
+      targetAmount: '10000.00',
+      status: 'AWAITING_TRANSFER',
+      collectionAccount: { currency: 'GHS', bankName: 'Test MoMo' },
+    });
+    expect((await service.recoverCreated(user(), key)).id).toBe(created.id);
+    await expect(
+      service.recoverCreated(fixture.users.recipientA.id, key),
+    ).rejects.toThrow('Exchange request not found');
+    expect((await service.create(user(), bankOrder(), key)).id).toBe(
+      created.id,
+    );
+    await attach(created.id);
+    expect((await service.get(created.id, user())).status).toBe(
+      'AWAITING_CONFIRMATION',
+    );
+    const second = await service.create(
+      user(),
+      bankOrder('200.00'),
+      randomUUID(),
+    );
+    expect(second.id).not.toBe(created.id);
+    expect(second.status).toBe('AWAITING_TRANSFER');
+    expect((await service.get(created.id, user())).status).toBe(
+      'AWAITING_CONFIRMATION',
+    );
+    const receipt = {
+      ...confirm('GHS-DEP-' + randomUUID()),
+      action: 'CONFIRM_DEPOSIT' as const,
+    };
+    await service.review(created.id, admin(), receipt, randomUUID());
+    expect((await service.get(created.id, user())).status).toBe(
+      'PAYOUT_PENDING',
+    );
+    await expect(
+      service.review(
+        created.id,
+        admin(),
+        { ...receipt, action: 'CREDIT_WALLET' },
+        randomUUID(),
+      ),
+    ).rejects.toThrow();
+    await service.review(
+      created.id,
+      admin(),
+      {
+        action: 'CLAIM_PAYOUT',
+        reason: 'Taking ownership of verified naira payout',
+      },
+      randomUUID(),
+    );
+    const upload = await service.uploadUrl(
+      created.id,
+      admin(),
+      {
+        fileName: 'payout.pdf',
+        contentType: 'application/pdf',
+        fileSize: pdf.length,
+      },
+      randomUUID(),
+      true,
+    );
+    objects.set(upload.objectKey, pdf);
+    const payout = {
+      action: 'RECORD_PAYOUT_SENT' as const,
+      payoutReference: 'NGN-OUT-' + randomUUID(),
+      payoutAmount: '10000.00',
+      payoutProofObjectKey: upload.objectKey,
+      reason: 'Verified the completed naira bank transfer and beneficiary',
+    };
+    await expect(
+      service.review(created.id, otherAdmin(), payout, randomUUID()),
+    ).rejects.toThrow();
+    await expect(
+      service.review(
+        created.id,
+        admin(),
+        { ...payout, payoutAmount: '9999.99' },
+        randomUUID(),
+      ),
+    ).rejects.toThrow();
+    await expect(
+      service.review(
+        created.id,
+        admin(),
+        { ...payout, action: 'MARK_SENT' },
+        randomUUID(),
+      ),
+    ).rejects.toThrow();
+    const reviewKey = randomUUID();
+    await Promise.all([
+      service.review(created.id, admin(), payout, reviewKey),
+      service.review(created.id, admin(), payout, reviewKey),
+    ]);
+    expect((await service.get(created.id, user())).status).toBe('COMPLETED');
+    expect(await prisma.wallet.count({ where: { userId: user() } })).toBe(0);
+    const row = await prisma.manualExchangeOrder.findUniqueOrThrow({
+      where: { id: created.id },
+    });
+    expect(
+      await prisma.ledgerEntry.count({
+        where: { transactionId: row.transactionId },
+      }),
+    ).toBe(0);
+    expect(
+      (
+        await prisma.transaction.findUniqueOrThrow({
+          where: { id: row.transactionId },
+        })
+      ).status,
+    ).toBe('SUCCESS');
+  });
+
+  it('accepts repeated large direct exchanges with no daily cap while deduplicating concurrent retries', async () => {
+    const key = randomUUID();
+    const [first, replay, second] = await Promise.all([
+      service.create(user(), bankOrder('25000000.00'), key),
+      service.create(user(), bankOrder('25000000.00'), key),
+      service.create(user(), bankOrder('25000000.00'), randomUUID()),
+    ]);
+    expect(first.id).toBe(replay.id);
+    expect(second.id).not.toBe(first.id);
+    expect(first.targetAmount).toBe('2500000000.00');
+    expect(
+      await prisma.manualExchangeOrder.count({ where: { userId: user() } }),
+    ).toBe(2);
+  });
+
+  it.each(['012345678', '01234567890', '+1234567890'])(
+    'rejects malformed Nigerian beneficiary %s before instructions',
+    async (destinationAccount) => {
+      await expect(
+        service.create(
+          user(),
+          { ...bankOrder(), destinationAccount },
+          randomUUID(),
+        ),
+      ).rejects.toThrow();
+      expect(
+        await prisma.manualExchangeOrder.count({ where: { userId: user() } }),
+      ).toBe(0);
+    },
+  );
+
+  it('accepts large amounts in both directions for a verified Tier 1 customer without a wallet', async () => {
+    await prisma.user.update({
+      where: { id: user() },
+      data: { kycTier: 'TIER_1' },
+    });
+    await prisma.wallet.deleteMany({ where: { userId: user() } });
+    const ngn = await service.create(
+      user(),
+      {
+        ...bankOrder('250000000000.00'),
+        sourceCurrency: 'NGN',
+        settlementMode: 'MOMO',
+        destinationInstitution: 'Synthetic Ghana MoMo',
+        destinationAccount: '0240000000',
+      },
+      randomUUID(),
+    );
+    const ghs = await service.create(
+      user(),
+      bankOrder('25000000.00'),
+      randomUUID(),
+    );
+    expect(ngn.amount).toBe('250000000000.00');
+    expect(ghs.amount).toBe('25000000.00');
+    expect(await prisma.wallet.count({ where: { userId: user() } })).toBe(0);
+    expect(
+      await prisma.manualExchangeOrder.count({ where: { userId: user() } }),
+    ).toBe(2);
+  });
 
   it.each([
     ['NGN', 'WALLET'],
@@ -462,7 +804,7 @@ describe('manual exchange financial boundaries (real PostgreSQL)', () => {
       await prisma.manualExchangeOrder.count({ where: { status: 'REJECTED' } }),
     );
   });
-  it('creates a new cedi request once and credits naira once across concurrent admins', async () => {
+  it('replays a historical cedi request and credits naira once across concurrent admins', async () => {
     const key = randomUUID(),
       dto = {
         sourceCurrency: 'GHS' as const,
@@ -470,6 +812,7 @@ describe('manual exchange financial boundaries (real PostgreSQL)', () => {
         settlementMode: 'WALLET' as const,
         transactionPin: '2468',
       };
+    await seedLegacyWallet(key, 'GHS');
     const created = await Promise.all([
       service.create(user(), dto, key),
       service.create(user(), dto, key),
@@ -658,16 +1001,7 @@ describe('manual exchange financial boundaries (real PostgreSQL)', () => {
     expect(await (inbox as any).countUnread(user(), `USER:${user()}`)).toBe(0);
   });
   it('rolls back wallet credit and approval if its durable notification cannot be saved, then retries once', async () => {
-    const created = await service.create(
-      user(),
-      {
-        sourceCurrency: 'GHS',
-        amount: '100.00',
-        settlementMode: 'WALLET',
-        transactionPin: '2468',
-      },
-      randomUUID(),
-    );
+    const created = await legacyReverse(randomUUID());
     await attach(created.id);
     const before = await prisma.wallet.findUniqueOrThrow({
       where: { userId_currency: { userId: user(), currency: 'NGN' } },
@@ -740,19 +1074,7 @@ describe('manual exchange financial boundaries (real PostgreSQL)', () => {
         data: { updatedAt: new Date(Date.now() - 7 * 86400000) },
       });
       service = makeService(undefined, rates);
-      const before = await prisma.wallet.findUniqueOrThrow({
-        where: { userId_currency: { userId: user(), currency: 'NGN' } },
-      });
-      const created = await service.create(
-        user(),
-        {
-          sourceCurrency: 'GHS',
-          amount: '100.00',
-          settlementMode: 'WALLET',
-          transactionPin: '2468',
-        },
-        randomUUID(),
-      );
+      const created = await service.create(user(), bankOrder(), randomUUID());
       expect(created.targetAmount).toBe('10000.00');
       await rates.setManualRate(
         'GHS',
@@ -764,14 +1086,24 @@ describe('manual exchange financial boundaries (real PostgreSQL)', () => {
       );
       expect((await rates.getRate('GHS', 'NGN')).rate).toBe(125.5);
       await attach(created.id);
-      const review = confirm('ADMIN-RATE-' + randomUUID());
+      const review = {
+        ...confirm('ADMIN-RATE-' + randomUUID()),
+        action: 'CONFIRM_DEPOSIT' as const,
+      };
       const key = randomUUID();
       await service.review(created.id, admin(), review, key);
       await service.review(created.id, admin(), review, key);
-      const after = await prisma.wallet.findUniqueOrThrow({
-        where: { userId_currency: { userId: user(), currency: 'NGN' } },
+      const frozen = await service.get(created.id, user());
+      expect(frozen.targetAmount).toBe('10000.00');
+      expect(frozen.status).toBe('PAYOUT_PENDING');
+      const row = await prisma.manualExchangeOrder.findUniqueOrThrow({
+        where: { id: created.id },
       });
-      expect(after.balance.minus(before.balance).toFixed(2)).toBe('10000.00');
+      expect(
+        await prisma.ledgerEntry.count({
+          where: { transactionId: row.transactionId },
+        }),
+      ).toBe(0);
       expect(
         await prisma.auditLog.count({
           where: {
@@ -799,21 +1131,12 @@ describe('manual exchange financial boundaries (real PostgreSQL)', () => {
     }
   });
 
-  it('freezes GHS collection and credits NGN exactly once for reverse exchange', async () => {
+  it('preserves historical GHS collection and credits NGN exactly once on replay', async () => {
     const before = await prisma.wallet.findUniqueOrThrow({
       where: { userId_currency: { userId: user(), currency: 'NGN' } },
     });
     const key = randomUUID();
-    const created = await service.create(
-      user(),
-      {
-        sourceCurrency: 'GHS',
-        amount: '100.00',
-        settlementMode: 'WALLET',
-        transactionPin: '2468',
-      },
-      key,
-    );
+    const created = await legacyReverse(key);
     expect(created.sourceCurrency).toBe('GHS');
     expect(created.targetCurrency).toBe('NGN');
     expect(created.collectionAccount).toMatchObject({
@@ -883,7 +1206,7 @@ describe('manual exchange financial boundaries (real PostgreSQL)', () => {
       code: 'WALLET_CREDIT_MISMATCH',
     });
   });
-  it('rejects existing wallet funding and provider-event references, and requires the destination wallet before instructions', async () => {
+  it('rejects existing wallet funding and provider-event references, and rejects new wallet settlement before instructions', async () => {
     const created = await order();
     await attach(created.id);
     const reference = 'FUND-' + randomUUID();
@@ -936,7 +1259,7 @@ describe('manual exchange financial boundaries (real PostgreSQL)', () => {
         },
         randomUUID(),
       ),
-    ).rejects.toThrow('Set up your NGN wallet');
+    ).rejects.toThrow('Choose a receiving bank');
   });
   it('makes webhook funding and manual approval compete for one global deposit allocation', async () => {
     const created = await order();
@@ -1020,6 +1343,20 @@ describe('manual exchange financial boundaries (real PostgreSQL)', () => {
     ]);
     expect(results[0].id).toBe(results[1].id);
     expect(results[0].targetAmount).toBe('2.00');
+    await prisma.user.update({
+      where: { id: user() },
+      data: { kycTier: 'TIER_0', kycStatus: 'PENDING' },
+    });
+    expect((await order('WALLET', key)).id).toBe(results[0].id);
+    await attach(results[0].id);
+    await expect(
+      service.review(
+        results[0].id,
+        admin(),
+        confirm('DEP-' + randomUUID()),
+        randomUUID(),
+      ),
+    ).rejects.toThrow('Verify your identity before crediting your wallet');
     expect((await balance()).toFixed(2)).toBe('1000.00');
     await expect(order('BANK', key)).rejects.toThrow(
       'different exchange details',
@@ -1399,6 +1736,19 @@ describe('manual exchange financial boundaries (real PostgreSQL)', () => {
         randomUUID(),
       ),
     ).rejects.toThrow();
+    const completeKey = randomUUID();
+    const complete = {
+      action: 'COMPLETE' as const,
+      reason: 'Independently verified the already-sent payment settled',
+    };
+    expect(
+      (await service.review(created.id, otherAdmin(), complete, completeKey))
+        .status,
+    ).toBe('COMPLETED');
+    expect(
+      (await service.review(created.id, otherAdmin(), complete, completeKey))
+        .status,
+    ).toBe('COMPLETED');
   });
   it('refuses an unknown payout outcome without changing the original owner', async () => {
     const created = await order('MOMO');

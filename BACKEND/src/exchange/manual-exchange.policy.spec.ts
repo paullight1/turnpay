@@ -9,15 +9,15 @@ import {
 
 describe('manual exchange policy', () => {
   it('matches the approved delivery method for each new direction', () => {
-    expect(manualDeliveryOptions('GHS')).toEqual(['WALLET']);
+    expect(manualDeliveryOptions('GHS')).toEqual(['BANK']);
     expect(manualDeliveryOptions('NGN')).toEqual(['MOMO', 'BANK']);
-    expect(() => assertManualDelivery('GHS', 'BANK')).toThrow(
+    expect(() => assertManualDelivery('GHS', 'WALLET')).toThrow(
       BadRequestException,
     );
     expect(() => assertManualDelivery('NGN', 'WALLET')).toThrow(
       BadRequestException,
     );
-    expect(() => assertManualDelivery('GHS', 'WALLET')).not.toThrow();
+    expect(() => assertManualDelivery('GHS', 'BANK')).not.toThrow();
     expect(() => assertManualDelivery('NGN', 'MOMO')).not.toThrow();
   });
   it('credits only wallet orders and keeps external confirmation pending', () => {
@@ -119,12 +119,23 @@ describe('manual exchange policy', () => {
     expect(quote.rate).toBe('0.012036');
     expect(quote.targetAmount).toBe('1.20');
     expect(quote.fee).toBe('0.00');
-    for (const amount of ['0', '-1', '1.001', 'Infinity', '10000000.01']) {
+    for (const amount of ['0', '-1', '1.001', 'Infinity', '10000000000000']) {
       expect(() => quoteManualExchange(amount, '0.012345', '2.5')).toThrow(
         BadRequestException,
       );
     }
     expect(() => quoteManualExchange('10', '1', '100')).toThrow(
+      BadRequestException,
+    );
+  });
+  it('quotes large exchanges without a product amount cap while rejecting amounts that cannot be stored exactly', () => {
+    expect(quoteManualExchange('25000000.01', '0.02', '0').targetAmount).toBe(
+      '500000.00',
+    );
+    expect(quoteManualExchange('9999999999999.99', '1', '0').amount).toBe(
+      '9999999999999.99',
+    );
+    expect(() => quoteManualExchange('9999999999999.99', '100', '0')).toThrow(
       BadRequestException,
     );
   });

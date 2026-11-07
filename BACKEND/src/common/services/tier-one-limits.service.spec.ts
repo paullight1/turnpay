@@ -82,7 +82,7 @@ describe('TierOneLimitsService', () => {
       response: expect.objectContaining({ code: 'KYC_LIMIT_EXCEEDED' }),
     });
   });
-  it('combines wallet spending and direct exchange reservations under the same lock', async () => {
+  it('combines wallet spending and historical wallet exchange reservations under the same lock', async () => {
     const { service, tx } = setup();
     tx.ledgerEntry.aggregate.mockResolvedValue({
       _sum: { amount: new Decimal(100) },

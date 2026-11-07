@@ -31,6 +31,17 @@ function configuration(values: Record<string, unknown>) {
   ).configuration();
 }
 describe('manual exchange receiving-account readiness', () => {
+  it('offers both configured directions with no product limits or wallet policy configuration', () => {
+    expect(
+      configuration({ MANUAL_EXCHANGE_ENABLED: true, ...ngn, ...ghs }),
+    ).toMatchObject({
+      availableSourceCurrencies: ['GHS', 'NGN'],
+      deliveryPolicyVersion: 2,
+      settlementOptions: { GHS: ['BANK'] },
+      exchangeLimitPolicy: 'UNLIMITED',
+      reviewRemindersEnabled: true,
+    });
+  });
   it('offers only the direction with complete receiving details without exposing account data', () => {
     const result = configuration({ MANUAL_EXCHANGE_ENABLED: true, ...ngn });
     expect(result).toMatchObject({

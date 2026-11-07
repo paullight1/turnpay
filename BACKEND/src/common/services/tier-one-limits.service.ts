@@ -193,6 +193,8 @@ export class TierOneLimitsService {
       tx.manualExchangeOrder.aggregate({
         where: {
           userId: input.userId,
+          // Direct bank/MoMo exchange has a separate externally funded budget.
+          settlementMode: 'WALLET',
           sourceCurrency: input.currency,
           status: { not: 'REJECTED' },
           createdAt: { gte: day },

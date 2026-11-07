@@ -1,4 +1,8 @@
-import { INestApplication, ValidationPipe } from '@nestjs/common';
+import {
+  BadRequestException,
+  INestApplication,
+  ValidationPipe,
+} from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
 import request from 'supertest';
@@ -20,6 +24,25 @@ describe('manual exchange HTTP authorization and validation', () => {
       .fn()
       .mockResolvedValue({ items: [], nextCursor: null, counts: {} }),
     create: jest.fn().mockResolvedValue({ id: 'order' }),
+    remind: jest
+      .fn()
+      .mockImplementation(
+        (
+          _id: string,
+          _userId: string,
+          _dto: unknown,
+          key: string | undefined,
+        ) => {
+          if (!key)
+            throw new BadRequestException(
+              'A valid Idempotency-Key is required',
+            );
+          return {
+            requestedAt: '2026-11-04T10:06:00.000Z',
+            nextAllowedAt: '2026-11-04T10:16:00.000Z',
+          };
+        },
+      ),
     review: jest.fn(),
     uploadHandoverUrl: jest.fn(),
   };
@@ -166,5 +189,60 @@ describe('manual exchange HTTP authorization and validation', () => {
       })
       .expect(400);
     expect(service.review).not.toHaveBeenCalled();
+  });
+
+  it('protects the customer reminder route, parses UUIDs, validates the closed DTO and requires its idempotency key', async () => {
+    const id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+    await request(app.getHttpServer())
+      .post(`/api/exchange/manual-orders/${id}/remind`)
+      .send({ reason: 'REVIEW' })
+      .expect(401);
+    expect(service.remind).not.toHaveBeenCalled();
+
+    await request(app.getHttpServer())
+      .post('/api/exchange/manual-orders/not-a-uuid/remind')
+      .set('Authorization', 'Bearer synthetic')
+      .set('Idempotency-Key', 'controller-reminder-key-1')
+      .send({ reason: 'REVIEW' })
+      .expect(400);
+    expect(service.remind).not.toHaveBeenCalled();
+
+    await request(app.getHttpServer())
+      .post(`/api/exchange/manual-orders/${id}/remind`)
+      .set('Authorization', 'Bearer synthetic')
+      .send({ reason: 'REVIEW' })
+      .expect(400);
+
+    await request(app.getHttpServer())
+      .post(`/api/exchange/manual-orders/${id}/remind`)
+      .set('Authorization', 'Bearer synthetic')
+      .set('Idempotency-Key', 'controller-reminder-key-1')
+      .send({ reason: 'NOT_REVIEW' })
+      .expect(400);
+
+    await request(app.getHttpServer())
+      .post(`/api/exchange/manual-orders/${id}/remind`)
+      .set('Authorization', 'Bearer synthetic')
+      .set('Idempotency-Key', 'controller-reminder-key-2')
+      .send({ reason: 'REVIEW', status: 'COMPLETED' })
+      .expect(400);
+
+    await request(app.getHttpServer())
+      .post(`/api/exchange/manual-orders/${id}/remind`)
+      .set('Authorization', 'Bearer synthetic')
+      .set('Idempotency-Key', 'controller-reminder-key-3')
+      .send({ reason: 'REVIEW' })
+      .expect(201)
+      .expect({
+        requestedAt: '2026-11-04T10:06:00.000Z',
+        nextAllowedAt: '2026-11-04T10:16:00.000Z',
+      });
+    expect(service.remind).toHaveBeenCalledWith(
+      id,
+      'customer',
+      { reason: 'REVIEW' },
+      'controller-reminder-key-3',
+      expect.objectContaining({ actorId: 'customer' }),
+    );
   });
 });
