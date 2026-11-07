@@ -16,6 +16,7 @@ type AdminSession = {
 };
 
 type AdminOrder = {
+  payoutWorkflow?: "LEGACY" | "ADMIN_CEDIS" | "ADMIN_EXTERNAL";
   id: string;
   reference: string;
   status: string;
@@ -400,6 +401,7 @@ async function installAdminManualExchangeMocks(page: Page) {
             : body.action === "MARK_SENT"
               ? "PAYOUT_SENT"
               : body.action === "COMPLETE" ||
+                  body.action === "RECORD_PAYOUT_SENT" ||
                   body.action === "RECORD_CEDIS_SENT"
                 ? "COMPLETED"
                 : body.action === "REQUEST_INFO"
@@ -421,6 +423,7 @@ async function installAdminManualExchangeMocks(page: Page) {
             : order.payoutClaimedBy,
       hasPayoutProof:
         body.action === "MARK_SENT" ||
+        body.action === "RECORD_PAYOUT_SENT" ||
         body.action === "RECORD_CEDIS_SENT" ||
         body.action === "HANDOVER_PAYOUT"
           ? true
@@ -1105,7 +1108,7 @@ test.describe("Admin manual exchange queue", () => {
       .getByRole("button", { name: "Start cedi transfer", exact: true })
       .click();
     await expect(
-      page.getByRole("table").getByText("Payout Being Processed"),
+      row.getByText("Payout Being Processed", { exact: true }),
     ).toBeVisible();
     await page
       .getByRole("button", { name: "I sent the cedis", exact: true })
@@ -1132,7 +1135,7 @@ test.describe("Admin manual exchange queue", () => {
     await form
       .getByRole("button", { name: "Confirm cedis sent", exact: true })
       .click();
-    await expect(page.getByRole("table").getByText("Completed")).toBeVisible();
+    await expect(row.getByText("Completed", { exact: true })).toBeVisible();
     const state = getTestState(page).manualExchangeTestState;
     const requests = state.reviewRequests.filter(
       (r) => r.body.action === "RECORD_CEDIS_SENT",
@@ -1199,6 +1202,101 @@ test.describe("Admin manual exchange queue", () => {
       payoutProofObjectKey: "manual-exchange/payout-proof-001.pdf",
     });
   });
+  test("records a direct naira bank payout with its exact amount and protected evidence", async ({
+    page,
+  }) => {
+    const state = getTestState(page).manualExchangeTestState;
+    Object.assign(
+      state
+        .getOrders()
+        .find((order) => order.reference === "MX-CEDI-WALLET-001")!,
+      {
+        settlementMode: "BANK",
+        payoutWorkflow: "ADMIN_EXTERNAL",
+        status: "PAYOUT_PENDING",
+        amount: "10000000000.00",
+        targetAmount: "1000000000000.00",
+        destinationInstitution: "Synthetic Nigerian Bank",
+        destinationAccount: "0123456789",
+        destinationAccountMasked: "***6789",
+        destinationName: "Synthetic Beneficiary",
+      },
+    );
+    await page.reload();
+    const row = page.getByRole("row").filter({ hasText: "MX-CEDI-WALLET-001" });
+    await expect(
+      page.getByText(
+        "Verify incoming payments, send the quoted amount to the recorded bank or MoMo account, then record the completed payment here.",
+      ),
+    ).toBeVisible();
+    await row
+      .getByRole("button", { name: /Review MX-CEDI-WALLET-001/ })
+      .click();
+    await expect(
+      page
+        .getByRole("definition")
+        .filter({ hasText: "Synthetic Nigerian Bank" }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Start naira transfer", exact: true }),
+    ).toBeVisible();
+    await page
+      .getByRole("button", { name: "Start naira transfer", exact: true })
+      .click();
+    let form = page.locator("form");
+    await form
+      .getByLabel("Reason")
+      .fill("Taking ownership of the verified bank payout.");
+    await form
+      .getByRole("button", { name: "Start naira transfer", exact: true })
+      .click();
+    await page
+      .getByRole("button", { name: "I sent the naira", exact: true })
+      .click();
+    form = page.locator("form");
+    await form.locator("#manual-payout-proof").setInputFiles({
+      name: "payout-proof.pdf",
+      mimeType: "application/pdf",
+      buffer: Buffer.from("synthetic private evidence"),
+    });
+    await form
+      .getByRole("button", { name: "Upload proof", exact: true })
+      .click();
+    await expect(
+      form.getByText("Proof uploaded and ready to attach"),
+    ).toBeVisible();
+    await form.getByLabel("Naira actually sent").fill("1000000000000.00");
+    await form.locator("#manual-payout-reference").fill("NGN-BANK-PAYOUT-001");
+    await form
+      .getByLabel("Reason")
+      .fill("Verified completed naira payment to the recorded beneficiary.");
+    await form
+      .getByRole("button", { name: "Confirm naira sent", exact: true })
+      .click();
+    await expect(row.getByText("Completed", { exact: true })).toBeVisible();
+    const requests = state.reviewRequests.filter(
+      (r) => r.body.action === "RECORD_PAYOUT_SENT",
+    );
+    expect(requests).toHaveLength(1);
+    expect(requests[0].body).toMatchObject({
+      payoutAmount: "1000000000000.00",
+      payoutReference: "NGN-BANK-PAYOUT-001",
+      payoutProofObjectKey: "manual-exchange/payout-proof-001.pdf",
+    });
+    expect(requests[0].idempotencyKey).toBeTruthy();
+    expect(state.getUploadHeaders()?.authorization).toBeUndefined();
+    await expect(
+      page.getByRole("button", {
+        name: "Confirm cedis & credit naira",
+        exact: true,
+      }),
+    ).toHaveCount(0);
+    await page.screenshot({
+      path: screenshotPath("admin-direct-naira-payout.png"),
+      fullPage: true,
+    });
+  });
+
   test("confirms received cedis and credits the frozen naira wallet amount", async ({
     page,
   }) => {

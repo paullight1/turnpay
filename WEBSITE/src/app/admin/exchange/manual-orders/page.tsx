@@ -115,7 +115,7 @@ const amountSchema = z
   .string()
   .trim()
   .regex(/^\d+(?:\.\d{1,2})?$/, "Enter a valid amount with up to 2 decimals")
-  .max(14, "Amount must be 14 characters or fewer")
+  .max(16, "Amount must be 16 characters or fewer")
   .refine(
     (value) =>
       value
@@ -134,6 +134,7 @@ type ActionPanel =
   | "HANDOVER_PAYOUT"
   | "MARK_SENT"
   | "RECORD_CEDIS_SENT"
+  | "RECORD_PAYOUT_SENT"
   | "COMPLETE";
 
 type AttemptIdentity = {
@@ -241,7 +242,9 @@ function actionLabel(
     case "CONFIRM_DEPOSIT":
       return order?.sourceCurrency === "NGN" && order.targetCurrency === "GHS"
         ? "Confirm naira received"
-        : "Confirm deposit and queue payout";
+        : order?.sourceCurrency === "GHS"
+          ? "Confirm cedis received"
+          : "Confirm deposit and queue payout";
     case "REQUEST_INFO":
       return "Request more information";
     case "REJECT":
@@ -249,13 +252,17 @@ function actionLabel(
     case "CLAIM_PAYOUT":
       return order?.targetCurrency === "GHS"
         ? "Start cedi transfer"
-        : "Claim payout";
+        : order?.payoutWorkflow === "ADMIN_EXTERNAL"
+          ? "Start naira transfer"
+          : "Claim payout";
     case "HANDOVER_PAYOUT":
       return "Handover payout under supervision";
     case "MARK_SENT":
       return "Mark payout as sent";
     case "RECORD_CEDIS_SENT":
       return "Confirm cedis sent";
+    case "RECORD_PAYOUT_SENT":
+      return "Confirm naira sent";
     case "COMPLETE":
       return "Complete settlement";
   }
@@ -279,6 +286,8 @@ function reviewSuccessMessage(action: AdminManualExchangeReviewAction) {
       return "Payout marked as sent";
     case "RECORD_CEDIS_SENT":
       return "Cedi transfer recorded and exchange completed";
+    case "RECORD_PAYOUT_SENT":
+      return "Naira transfer recorded and exchange completed";
     case "COMPLETE":
       return "Settlement completed";
   }
@@ -365,8 +374,9 @@ export default function AdminManualExchangeOrdersPage() {
   const [payoutReference, setPayoutReference] = useState("");
   const [payoutAmount, setPayoutAmount] = useState("");
   const [handoverToAdminId, setHandoverToAdminId] = useState("");
-  const [payoutOutcome, setPayoutOutcome] =
-    useState<AdminManualExchangePayoutOutcome | "">("");
+  const [payoutOutcome, setPayoutOutcome] = useState<
+    AdminManualExchangePayoutOutcome | ""
+  >("");
   const [payoutProofFile, setPayoutProofFile] = useState<File | null>(null);
   const [payoutProofObjectKey, setPayoutProofObjectKey] = useState<
     string | null
@@ -378,8 +388,7 @@ export default function AdminManualExchangeOrdersPage() {
   const attemptKeysRef = useRef<Map<string, string>>(new Map());
   const deepLinkAttemptRef = useRef<string | null>(null);
   const deepLinkLastIdRef = useRef<string | null | undefined>(undefined);
-  const [deepLinkState, setDeepLinkState] =
-    useState<DeepLinkState>("idle");
+  const [deepLinkState, setDeepLinkState] = useState<DeepLinkState>("idle");
   const deepLinkedOrderId = searchParams.get("orderId");
 
   const isAdmin = hasAdminAccess(user) || hasAdminAccess(profile);
@@ -508,7 +517,8 @@ export default function AdminManualExchangeOrdersPage() {
   const selectedOrder =
     orders.find((order) => order.id === selectedOrderId) ?? null;
   const handoverAdmins = (adminDirectoryQuery.data ?? []).filter(
-    (admin) => !admin.isSuspended && admin.id !== selectedOrder?.payoutClaimedBy,
+    (admin) =>
+      !admin.isSuspended && admin.id !== selectedOrder?.payoutClaimedBy,
   );
 
   const queueCounts = useMemo(() => {
@@ -589,10 +599,7 @@ export default function AdminManualExchangeOrdersPage() {
 
     // Older orders can be beyond the first cursor page. Keep following the
     // existing queue cursor until the requested order is found.
-    if (
-      hasNextManualOrdersPage &&
-      !isFetchingNextManualOrdersPage
-    ) {
+    if (hasNextManualOrdersPage && !isFetchingNextManualOrdersPage) {
       void fetchNextManualOrdersPage();
       return;
     }
@@ -645,7 +652,8 @@ export default function AdminManualExchangeOrdersPage() {
         "Could not save the manual exchange action",
       );
       setFormError(message);
-      toast.error(message);
+      // The inline alert keeps the failure visible without covering the retry
+      // controls on small viewports.
     },
   });
 
@@ -759,7 +767,11 @@ export default function AdminManualExchangeOrdersPage() {
       }
     }
 
-    if (actionPanel === "MARK_SENT" || actionPanel === "RECORD_CEDIS_SENT") {
+    if (
+      actionPanel === "MARK_SENT" ||
+      actionPanel === "RECORD_CEDIS_SENT" ||
+      actionPanel === "RECORD_PAYOUT_SENT"
+    ) {
       const payoutResult = referenceSchema.safeParse(payoutReference);
       if (!payoutResult.success) {
         setFormError(
@@ -773,10 +785,13 @@ export default function AdminManualExchangeOrdersPage() {
         );
         return;
       }
-      if (actionPanel === "RECORD_CEDIS_SENT") {
+      if (
+        actionPanel === "RECORD_CEDIS_SENT" ||
+        actionPanel === "RECORD_PAYOUT_SENT"
+      ) {
         const amount = amountSchema.safeParse(payoutAmount);
         if (!amount.success) {
-          setFormError("Enter the actual cedi amount sent.");
+          setFormError("Enter the actual amount sent.");
           return;
         }
         input.payoutAmount = amount.data;
@@ -787,7 +802,9 @@ export default function AdminManualExchangeOrdersPage() {
 
     if (actionPanel === "HANDOVER_PAYOUT") {
       if (!handoverToAdminId) {
-        setFormError("Choose an active administrator to receive this payout claim");
+        setFormError(
+          "Choose an active administrator to receive this payout claim",
+        );
         return;
       }
       if (!payoutOutcome) {
@@ -931,8 +948,8 @@ export default function AdminManualExchangeOrdersPage() {
               </Badge>
             </div>
             <p className="mt-1 text-sm text-muted-foreground">
-              Confirm received cedis to credit a naira wallet. For cedi payouts,
-              make the transfer yourself and record it here.
+              Verify incoming payments, send the quoted amount to the recorded
+              bank or MoMo account, then record the completed payment here.
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -1198,8 +1215,8 @@ export default function AdminManualExchangeOrdersPage() {
                       data-testid="manual-order-deeplink-not-found"
                     >
                       We could not find this exchange request in the admin
-                      queue. It may have been removed or you may not have
-                      access to it.
+                      queue. It may have been removed or you may not have access
+                      to it.
                     </p>
                   </>
                 ) : deepLinkedOrderId && deepLinkState === "error" ? (
@@ -1491,6 +1508,14 @@ export default function AdminManualExchangeOrdersPage() {
                           page error.
                         </p>
                       )}
+                    {selectedOrder.payoutWorkflow === "ADMIN_EXTERNAL" && (
+                      <p className="text-sm text-muted-foreground">
+                        Claim this order before paying. Send the exact naira
+                        amount to the recorded Nigerian bank beneficiary through
+                        your business bank, then record the completed transfer
+                        below. Do not send again after a page error.
+                      </p>
+                    )}
                     <div className="flex flex-wrap gap-2">
                       {canReviewDeposit && (
                         <>
@@ -1536,7 +1561,9 @@ export default function AdminManualExchangeOrdersPage() {
                         >
                           {selectedOrder.targetCurrency === "GHS"
                             ? "Start cedi transfer"
-                            : "Claim payout"}
+                            : selectedOrder.payoutWorkflow === "ADMIN_EXTERNAL"
+                              ? "Start naira transfer"
+                              : "Claim payout"}
                         </Button>
                       )}
                       {selectedOrder.status === "PAYOUT_PROCESSING" &&
@@ -1567,7 +1594,10 @@ export default function AdminManualExchangeOrdersPage() {
                               selectedOrder.sourceCurrency === "NGN" &&
                                 selectedOrder.targetCurrency === "GHS"
                                 ? "RECORD_CEDIS_SENT"
-                                : "MARK_SENT",
+                                : selectedOrder.payoutWorkflow ===
+                                    "ADMIN_EXTERNAL"
+                                  ? "RECORD_PAYOUT_SENT"
+                                  : "MARK_SENT",
                             )
                           }
                           disabled={reviewDisabled}
@@ -1575,7 +1605,9 @@ export default function AdminManualExchangeOrdersPage() {
                           {selectedOrder.sourceCurrency === "NGN" &&
                           selectedOrder.targetCurrency === "GHS"
                             ? "I sent the cedis"
-                            : "Mark sent"}
+                            : selectedOrder.payoutWorkflow === "ADMIN_EXTERNAL"
+                              ? "I sent the naira"
+                              : "Mark sent"}
                         </Button>
                       )}
                       {canComplete && (
@@ -1757,16 +1789,20 @@ export default function AdminManualExchangeOrdersPage() {
 
                       {(actionPanel === "MARK_SENT" ||
                         actionPanel === "RECORD_CEDIS_SENT" ||
+                        actionPanel === "RECORD_PAYOUT_SENT" ||
                         actionPanel === "HANDOVER_PAYOUT") && (
                         <div className="space-y-4">
-                          {actionPanel === "RECORD_CEDIS_SENT" && (
+                          {(actionPanel === "RECORD_CEDIS_SENT" ||
+                            actionPanel === "RECORD_PAYOUT_SENT") && (
                             <div className="space-y-2">
                               <p className="text-sm text-muted-foreground">
                                 Record the completed transfer to this recipient.
                                 This button does not send money.
                               </p>
                               <Label htmlFor="manual-payout-amount">
-                                Cedis actually sent
+                                {actionPanel === "RECORD_PAYOUT_SENT"
+                                  ? "Naira actually sent"
+                                  : "Cedis actually sent"}
                               </Label>
                               <Input
                                 id="manual-payout-amount"
@@ -1775,7 +1811,7 @@ export default function AdminManualExchangeOrdersPage() {
                                   setPayoutAmount(event.target.value)
                                 }
                                 inputMode="decimal"
-                                maxLength={14}
+                                maxLength={16}
                                 placeholder={selectedOrder.targetAmount}
                                 disabled={reviewDisabled}
                               />
@@ -1821,7 +1857,7 @@ export default function AdminManualExchangeOrdersPage() {
                                     setPayoutAmount(event.target.value)
                                   }
                                   inputMode="decimal"
-                                  maxLength={14}
+                                  maxLength={16}
                                   placeholder={selectedOrder.targetAmount}
                                   disabled={reviewDisabled}
                                 />

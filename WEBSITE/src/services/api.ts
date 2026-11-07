@@ -490,7 +490,7 @@ export type AdminManualExchangeOrder = {
   reference: string;
   status: string;
   settlementMode: ManualExchangeSettlementMode;
-  payoutWorkflow?: "LEGACY" | "ADMIN_CEDIS";
+  payoutWorkflow?: "LEGACY" | "ADMIN_CEDIS" | "ADMIN_EXTERNAL";
   sourceCurrency: string;
   targetCurrency: string;
   amount: string;
@@ -537,6 +537,7 @@ export type AdminManualExchangeReviewAction =
   | "HANDOVER_PAYOUT"
   | "MARK_SENT"
   | "RECORD_CEDIS_SENT"
+  | "RECORD_PAYOUT_SENT"
   | "COMPLETE";
 
 export type AdminManualExchangePayoutOutcome =
