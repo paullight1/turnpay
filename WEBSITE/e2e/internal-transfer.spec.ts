@@ -59,19 +59,9 @@ async function installTransferHarness(
   const sendKeys: string[] = [];
   const setPinKeys: string[] = [];
 
-  await page.route("**/api/auth/login", async (route) => {
-    expect(parseBody(route)).toMatchObject({ email: profile.email });
-    await route.fulfill({ status: 200, json: { user: profile, session, authMode: "local" } });
-  });
-  await page.route("**/api/auth/session", async (route) => {
-    await route.fulfill({
-      status: 200,
-      ...(route.request().method() === "POST" ? {
-        headers: { "set-cookie": `supabase.auth.token=${encodedSessionCookie()}; Path=/; HttpOnly; SameSite=Lax` },
-      } : {}),
-      json: { session: clientSession, csrfToken: "csrf-transfer" },
-    });
-  });
+  await page.route("**/api/auth/session", (route) =>
+    route.fulfill({ json: { session: clientSession, csrfToken: "csrf-transfer" } }),
+  );
   await page.route("**/api/auth/bootstrap", (route) => route.fulfill({ status: 200, json: { user: profile, wallets: [] } }));
   await page.route("**/api/wallets", (route) => route.fulfill({ status: 200, json: [
     { id: "wallet-ngn", currency: "NGN", balance: "250000.00" },
@@ -128,7 +118,7 @@ async function installTransferHarness(
 }
 
 async function completeTransferForm(page: Page) {
-  await page.getByLabel("Recipient email or phone").fill("recipient@example.com");
+  await page.getByRole("textbox", { name: "TrustPay account number, email or phone" }).fill("recipient@example.com");
   await page.getByRole("button", { name: "Verify recipient" }).click();
   await expect(page.getByText("r*******t@example.com")).toBeVisible();
   await page.getByLabel("Amount").fill("1250.50");
@@ -167,7 +157,7 @@ test.describe("TrustPay internal transfer", () => {
   test("rejects invalid money strings and a note over 120 code points before submission", async ({ page }) => {
     const harness = await installTransferHarness(page);
     await page.goto("/dashboard/send");
-    await page.getByLabel("Recipient email or phone").fill("recipient@example.com");
+    await page.getByRole("textbox", { name: "TrustPay account number, email or phone" }).fill("recipient@example.com");
     await page.getByRole("button", { name: "Verify recipient" }).click();
     await page.getByLabel("Transaction PIN").fill("1234");
     for (const invalid of ["-1", "1e3", "10.001"]) {
