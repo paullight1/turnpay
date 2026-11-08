@@ -40,6 +40,8 @@ async function installTransferHarness(
   page: Page,
   options: { pinConfigured?: boolean; behavior?: SendBehavior } = {},
 ): Promise<TransferHarness> {
+  const cookieUrl = test.info().project.use.baseURL;
+  if (!cookieUrl) throw new Error("Playwright baseURL is required");
   const e2eAuthToken = process.env.TRUSTPAY_E2E_AUTH_BYPASS_TOKEN;
   if (!e2eAuthToken) throw new Error("Missing local E2E authentication token");
   await page.setExtraHTTPHeaders({ "x-trustpay-e2e-auth": e2eAuthToken });
@@ -47,8 +49,7 @@ async function installTransferHarness(
     {
       name: "trustpay.e2e-auth",
       value: e2eAuthToken,
-      domain: "127.0.0.1",
-      path: "/",
+      url: cookieUrl,
       httpOnly: true,
       sameSite: "Lax",
     },
@@ -114,12 +115,15 @@ async function installTransferHarness(
     amount: "1250.50", currency: "NGN", fee: "0", counterparty: { maskedIdentifier: "r*******t@example.com" },
     note: "Lunch settlement", createdAt: "2026-09-01T12:00:00.000Z",
   } }));
-  await page.goto("/login");
-  await page.getByLabel("Email").fill(profile.email);
-  await page.locator("#password").fill("testpassword123");
-  await page.getByRole("button", { name: "Sign in" }).click();
-  await expect(page).toHaveURL(/\/dashboard$/, { timeout: 15_000 });
-
+  // Customer login is mobile-only. Seed the retained, non-production QA
+  // session directly; the local token/header still gates these old pages.
+  await page.context().addCookies([{
+    name: "supabase.auth.token",
+    value: encodedSessionCookie(),
+    url: cookieUrl,
+    httpOnly: true,
+    sameSite: "Lax",
+  }]);
   return { sendKeys, setPinKeys };
 }
 
@@ -133,6 +137,7 @@ async function completeTransferForm(page: Page) {
 }
 
 test.describe("TrustPay internal transfer", () => {
+  test.skip(Boolean(process.env.PLAYWRIGHT_EXTERNAL_SERVER_URL), "Retained customer flows require the local non-production QA server");
   test("masks the recipient, reviews exact totals, and renders the final receipt", async ({ page }) => {
     await installTransferHarness(page);
     await page.goto("/dashboard/send");

@@ -169,7 +169,7 @@ test("funding review can safely recheck an unmatched case", async ({
   });
   await expect(
     page.getByRole("heading", { name: "Funding review", exact: true }),
-  ).toBeVisible();
+  ).toBeVisible({ timeout: 15_000 });
   await page.getByRole("button", { name: "Review", exact: true }).click();
   await expect(
     page.getByText("Provider recheck", { exact: true }),

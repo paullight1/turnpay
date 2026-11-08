@@ -634,7 +634,7 @@ export default function AdminManualExchangeOrdersPage() {
       await queryClient.invalidateQueries({
         queryKey: ["admin-manual-exchange-orders"],
       });
-      toast.success(reviewSuccessMessage(variables.input.action));
+      toast.success(reviewSuccessMessage(variables.input.action), { closeButton: true });
     },
     onError: (error: unknown, variables) => {
       const status = getErrorStatus(error);
@@ -703,7 +703,7 @@ export default function AdminManualExchangeOrdersPage() {
     onSuccess: ({ objectKey }) => {
       setPayoutProofObjectKey(objectKey);
       setFormError(null);
-      toast.success("Payout proof uploaded securely");
+      toast.success("Payout proof uploaded securely", { closeButton: true });
     },
     onError: (error: unknown) => {
       const message = getErrorMessage(error, "Could not upload payout proof");

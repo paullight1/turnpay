@@ -139,7 +139,7 @@ test.describe("web session hardening", () => {
       TEST_USER.email,
     );
 
-    await page.goto("/login");
+    await page.goto("/staff");
     await page.getByLabel(/email/i).fill(TEST_USER.email);
     await page.getByLabel(/^password$/i).fill(TEST_USER.password);
     const sessionResponse = page.waitForResponse(

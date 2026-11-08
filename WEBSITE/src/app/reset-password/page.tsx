@@ -14,7 +14,7 @@ import {
 import { AuthShell } from "@/components/auth/auth-shell";
 import { toast } from "sonner";
 import { Eye, EyeOff, Loader2 } from "lucide-react";
-import { createRecoveryClient } from "@/lib/supabase";
+import { createRecoveryClient, isSupabaseConfigured } from "@/lib/supabase";
 import { getErrorMessage } from "@/lib/errors";
 import { useHydrated } from "@/lib/use-hydrated";
 
@@ -30,13 +30,21 @@ function ResetPasswordContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const recoveryCode = searchParams.get("code");
-  const recoveryClient = useMemo(() => createRecoveryClient(), []);
+  const recoveryClient = useMemo(
+    () => (isSupabaseConfigured ? createRecoveryClient() : null),
+    [],
+  );
 
   useEffect(() => {
     let isMounted = true;
 
     const prepareRecoverySession = async () => {
       try {
+        if (!recoveryClient) {
+          throw new Error(
+            "Password recovery is currently unavailable. Please contact support.",
+          );
+        }
         if (recoveryCode) {
           const { error } =
             await recoveryClient.auth.exchangeCodeForSession(recoveryCode);
@@ -76,6 +84,11 @@ function ResetPasswordContent() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    if (!recoveryClient || !isRecoveryReady) {
+      toast.error("Password reset link is invalid or expired");
+      return;
+    }
 
     if (password !== confirmPassword) {
       toast.error("Passwords do not match");
@@ -122,7 +135,7 @@ function ResetPasswordContent() {
       <CardContent>
         {recoveryError ? (
           <div className="space-y-4 text-center">
-            <p className="text-sm text-destructive">{recoveryError}</p>
+            <p role="alert" className="text-sm text-destructive">{recoveryError}</p>
             <Button
               type="button"
               className="w-full"
