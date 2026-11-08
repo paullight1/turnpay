@@ -291,8 +291,12 @@ jobs:
 
           bundle_path='build/app/outputs/bundle/release/app-release.aab'
           [[ -s "$bundle_path" ]] || fail 'Flutter did not produce an Android App Bundle'
-          if ! jarsigner -verify -strict "$bundle_path" >/dev/null 2>&1; then
-            fail 'Android App Bundle is not signed'
+          if ! signature_result=$(jarsigner -J-Duser.language=en -J-Duser.country=US \
+            -verify -strict -keystore "$keystore_path" \
+            -storepass:env ANDROID_KEYSTORE_PASSWORD \
+            "$bundle_path" "$ANDROID_KEY_ALIAS" 2>&1) ||
+            ! grep -Fxq 'jar verified.' <<< "$signature_result"; then
+            fail 'Android App Bundle signature verification failed for the configured upload key'
           fi
           [[ -d build/symbols/android ]] || fail 'Android obfuscation symbols are missing'
           find build/symbols/android -type f -print -quit | grep -q . ||
