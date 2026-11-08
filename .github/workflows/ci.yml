@@ -17,6 +17,7 @@ jobs:
         run: |
           ./scripts/check-production-manifests.sh
           sh ./scripts/check-production-manifests.test.sh
+          python3 ./scripts/check-android-backup-rules.py
 
       - name: Install secret-scanning dependency
         run: sudo apt-get update && sudo apt-get install -y ripgrep

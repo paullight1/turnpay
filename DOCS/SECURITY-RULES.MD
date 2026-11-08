@@ -432,6 +432,8 @@ async handleMonnifyWebhook(
 
 **13.7** Never log sensitive data in production — use conditional logging based on build flavor.
 
+**13.8** Exclude Android secure-storage preferences and their recovery copies from cloud backup and device-to-device transfer. Apply the exclusions on Android 11 and earlier and on Android 12 and later.
+
 ---
 
 ## 14. Deployment & Infrastructure
