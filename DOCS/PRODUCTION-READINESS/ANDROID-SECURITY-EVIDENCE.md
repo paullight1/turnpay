@@ -20,6 +20,27 @@ and the rollback and renewal alert procedures. If the managed TLS service
 cannot supply a known next leaf, resolve the TLS architecture before enabling
 production pinning. Never install an unverified backup fingerprint.
 
+### TrustPay API rotation decision
+
+On 8 November 2026, public DNS for the API resolved to the Contabo host
+used by Dokploy, and the live leaf was issued by Let's Encrypt (YR2).
+Its observed DER SHA-256 was
+`f4f883630b926da81724301c12a760a9f8e67feaa906382ee26ba22cd201bf8e`,
+with expiry on 31 January 2027 at 13:12:36 UTC. Recheck before signing.
+
+Confirm the actual certificate resolver in Dokploy. Dokploy supports importing
+a custom certificate into Traefik. The TLS operator can evaluate issuing a
+replacement leaf for the same hostname via DNS-01 before cutover, without
+changing the serving certificate. First rehearse serving each leaf on an
+isolated endpoint with the API hostname and normal chain and hostname
+validation. Verify that the approved leaf is the one Traefik will serve at
+cutover and that automatic renewal cannot switch it unexpectedly.
+Record how future rotations will reach existing app installs before the
+last pinned leaf expires. Keep private keys in the TLS operator's custody.
+
+References: [Dokploy certificate configuration](https://docs.dokploy.com/docs/core/certificates)
+and [Let's Encrypt challenge types](https://letsencrypt.org/docs/challenge-types/).
+
 ## Physical Android checks
 
 Use a release build from the candidate commit. Record pass or fail with
