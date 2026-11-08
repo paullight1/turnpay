@@ -331,7 +331,7 @@ jobs:
   ios-release:
     name: Build signed iOS IPA
     needs: preflight
-    if: needs.preflight.result == 'success'
+    if: needs.preflight.result == 'success' && inputs.release_environment == 'staging'
     runs-on: macos-14
     environment:
       name: mobile-${{ inputs.release_environment }}

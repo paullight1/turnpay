@@ -1,75 +1,39 @@
 import { test, expect } from '@playwright/test';
 
-test.describe('TrustPay Landing Page', () => {
-  test('keeps a headline visible through every hero slide handoff', async ({ page }) => {
+test.describe('TrustPay public website', () => {
+  test('homepage explains the app and its everyday services', async ({ page }) => {
     await page.goto('/');
-
-    const minimumHeadlineOpacity = await page.evaluate(() => {
-      const headlines = Array.from(
-        document.querySelectorAll<HTMLElement>('.trustpay-hero-copy'),
-      );
-      const animations = document
-        .getAnimations()
-        .filter(
-          (animation) =>
-            animation instanceof CSSAnimation &&
-            animation.animationName === 'trustpay-hero-copy',
-        );
-
-      animations.forEach((animation) => animation.pause());
-
-      return [0, 5_000, 10_000].reduce((minimumOpacity, handoffTime) => {
-        animations.forEach((animation) => {
-          animation.currentTime = handoffTime;
-        });
-
-        const visibleOpacity = Math.max(
-          ...headlines.map((headline) =>
-            Number.parseFloat(getComputedStyle(headline).opacity),
-          ),
-        );
-
-        return Math.min(minimumOpacity, visibleOpacity);
-      }, 1);
-    });
-
-    expect(minimumHeadlineOpacity).toBeGreaterThanOrEqual(0.98);
+    await expect(page).toHaveTitle(/TrustPay/i);
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText('Everyday payments. One simple app.');
+    for (const name of ['Airtime & data', 'Bills & utilities', 'Payment records']) {
+      await expect(page.getByRole('heading', { name, exact: true })).toBeVisible();
+    }
   });
 
-  test('stacks full-width hero actions on narrow mobile screens', async ({ page }) => {
-    await page.setViewportSize({ width: 375, height: 812 });
+  test('download action explains availability and can be dismissed', async ({ page }) => {
     await page.goto('/');
-
-    const primaryAction = page.getByRole('link', { name: /Get Started Free/i });
-    const secondaryAction = page.getByRole('link', { name: /View Rates/i });
-    const [primaryBox, secondaryBox] = await Promise.all([
-      primaryAction.boundingBox(),
-      secondaryAction.boundingBox(),
-    ]);
-
-    expect(primaryBox).not.toBeNull();
-    expect(secondaryBox).not.toBeNull();
-    expect(primaryBox!.width).toBeGreaterThanOrEqual(340);
-    expect(secondaryBox!.width).toBeGreaterThanOrEqual(340);
-    expect(secondaryBox!.y).toBeGreaterThan(primaryBox!.y + primaryBox!.height);
+    await page.getByRole('button', { name: 'Download the app', exact: true }).first().click();
+    const dialog = page.getByRole('dialog', { name: 'The TrustPay app is coming soon' });
+    await expect(dialog).toBeVisible();
+    await dialog.getByRole('button', { name: 'Got it', exact: true }).click();
+    await expect(dialog).toBeHidden();
   });
 
-  test('does not reserve empty space below the mobile hero headline', async ({ page }) => {
-    await page.setViewportSize({ width: 398, height: 814 });
+  test('menu links navigate to the current service sections', async ({ page }) => {
     await page.goto('/');
+    await page.getByRole('button', { name: 'Open menu', exact: true }).click();
+    const menu = page.getByRole('navigation', { name: 'Main menu' });
+    await expect(menu).toBeVisible();
+    await expect(menu.getByRole('link', { name: 'Services', exact: true })).toHaveAttribute('href', '#services');
+    await menu.getByRole('link', { name: 'Services', exact: true }).click();
+    await expect(page).toHaveURL(/#services$/);
+    await expect(menu).toBeHidden();
+  });
 
-    const headlineGap = await page.evaluate(() => {
-      const headline = document.querySelector<HTMLElement>('.trustpay-hero-copy');
-      const description = headline?.parentElement?.nextElementSibling;
-      if (!(description instanceof HTMLElement) || !headline) return null;
-
-      return description.getBoundingClientRect().top -
-        headline.getBoundingClientRect().bottom;
-    });
-
-    expect(headlineGap).not.toBeNull();
-    expect(headlineGap!).toBeGreaterThanOrEqual(12);
-    expect(headlineGap!).toBeLessThanOrEqual(40);
+  test('FAQ discloses that the app is coming soon', async ({ page }) => {
+    await page.goto('/');
+    await page.locator('summary').filter({ hasText: 'When will the TrustPay app be available?' }).click();
+    await expect(page.getByText('The app is coming soon to iOS and Android.', { exact: false })).toBeVisible();
   });
 
   test('keeps legal copy readable on light page surfaces', async ({ page }) => {
@@ -108,111 +72,60 @@ test.describe('TrustPay Landing Page', () => {
     expect(Math.min(...contrastRatios)).toBeGreaterThanOrEqual(4.5);
   });
 
-  test('should load homepage', async ({ page }) => {
+  test('mobile menu can open and close', async ({ page }) => {
+    await page.setViewportSize({ width: 375, height: 667 });
     await page.goto('/');
-    await expect(page).toHaveTitle(/TrustPay/i);
-    await expect(page.getByRole('link', { name: /TrustPay home/i })).toBeVisible();
-    if ((page.viewportSize()?.width ?? 1280) < 768) {
-      await page.locator('summary[aria-label="Open menu"]').click();
-      await expect(
-        page.getByRole('navigation', { name: /Mobile navigation/i }),
-      ).toBeVisible();
-    } else {
-      await expect(
-        page.getByRole('navigation', { name: /Main navigation/i }),
-      ).toBeVisible();
-    }
-    await expect(page.locator('.trustpay-hero-copy').first()).toHaveText(
-      'Exchange Naira and Cedis in Minutes.',
-    );
-    await expect(page.getByRole('link', { name: /Get Started Free/i })).toBeVisible();
-    await expect(page.getByRole('link', { name: /View Rates/i })).toBeVisible();
+    await page.getByRole('button', { name: 'Open menu', exact: true }).click();
+    await expect(page.getByRole('navigation', { name: 'Main menu' })).toBeVisible();
+    await page.getByRole('button', { name: 'Close menu', exact: true }).click();
+    await expect(page.getByRole('navigation', { name: 'Main menu' })).toHaveCount(0);
   });
 
-  test('should navigate to exchange', async ({ page }) => {
+  test('mobile homepage and primary action fit the viewport', async ({ page }) => {
+    await page.setViewportSize({ width: 375, height: 667 });
     await page.goto('/');
-    await expect(page.locator('a[href="/exchange"]')).toHaveAttribute('href', '/exchange');
-    await page.goto('/exchange');
-    await expect(page).toHaveURL(/\/exchange/);
-  });
-
-  test('should expose the get started CTA', async ({ page }) => {
-    await page.goto('/');
-    await expect(page.getByRole('link', { name: /Get Started Free/i })).toHaveAttribute('href', /wa\.me/);
+    const action = page.getByRole('button', { name: 'Download the app', exact: true }).first();
+    await expect(action).toBeVisible();
+    const box = await action.boundingBox();
+    expect(box).not.toBeNull();
+    expect(box!.height).toBeGreaterThanOrEqual(44);
+    expect(box!.x).toBeGreaterThanOrEqual(0);
+    expect(box!.x + box!.width).toBeLessThanOrEqual(375);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   });
 });
 
-test.describe('TrustPay Authentication', () => {
-  test('login page renders correctly', async ({ page }) => {
+test.describe('TrustPay authentication boundaries', () => {
+  test('legacy login routes to staff sign-in', async ({ page }) => {
     await page.goto('/login');
-    await expect(
-      page.locator('[data-slot="card-title"]').filter({ hasText: /^Sign in$/i }),
-    ).toBeVisible();
-    await expect(page.locator('a[href="/"]').first()).toBeVisible();
+    await expect(page).toHaveURL(/\/staff$/);
     await expect(page.getByLabel(/email/i)).toBeVisible();
-    await expect(page.locator('#password')).toBeVisible();
-    await expect(page.getByRole('button', { name: /sign in/i })).toBeVisible();
-    await expect(page.getByRole('link', { name: /forgot password\?/i })).toBeVisible();
+    await expect(page.getByLabel(/^password$/i)).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Sign in to admin', exact: true })).toBeVisible();
   });
 
-  test('register page renders correctly', async ({ page }) => {
+  test('legacy registration routes customers to the mobile download page', async ({ page }) => {
     await page.goto('/register');
-    await expect(
-      page.locator('[data-slot="card-title"]').filter({ hasText: /^Account owner$/i }),
-    ).toBeVisible();
-    await expect(page.getByText(/^Step 1 of 4$/i)).toBeVisible();
-    await expect(page.getByLabel(/full name/i)).toBeVisible();
-    await expect(page.getByLabel(/^email$/i)).toBeVisible();
-    await expect(page.getByLabel(/phone number/i)).toBeVisible();
-
-    await page.getByLabel(/full name/i).fill('Test User');
-    await page.getByLabel(/^email$/i).fill('test@trustpay.app');
-    await page.getByLabel(/phone number/i).fill('+2348012345678');
-    const continueButton = page.getByRole('button', { name: /continue/i });
-    await expect(continueButton).toBeEnabled();
-    await continueButton.click();
-
-    await expect(
-      page.locator('[data-slot="card-title"]').filter({ hasText: /^Sign-in password$/i }),
-    ).toBeVisible();
-    await expect(page.locator('#password')).toBeVisible();
+    await expect(page).toHaveURL(/\/download$/);
+    await expect(page.getByRole('heading', { name: 'Download TrustPay' })).toBeVisible();
+    await expect(page.locator('form')).toHaveCount(0);
   });
 
-  test('forgot password page renders correctly', async ({ page }) => {
+  test('forgot password page renders an accessible email form', async ({ page }) => {
     await page.goto('/forgot-password');
-    await expect(
-      page.locator('[data-slot="card-title"]').filter({ hasText: /^Reset access$/i }),
-    ).toBeVisible();
     await expect(page.getByLabel(/email/i)).toBeVisible();
   });
-});
 
-test.describe('TrustPay Dashboard', () => {
-  test('dashboard redirects to login when not authenticated', async ({ page }) => {
+  test('anonymous customer bookmarks go to the mobile download page', async ({ page, context }) => {
+    await context.setExtraHTTPHeaders({});
     await page.goto('/dashboard');
-    await expect(page).toHaveURL(/login/);
+    await expect(page).toHaveURL(/\/download$/);
   });
-});
 
-test.describe('TrustPay Admin', () => {
-  test('admin redirects to login when not authenticated', async ({ page }) => {
+  test('anonymous admin access requires staff sign-in', async ({ page, context }) => {
+    await context.setExtraHTTPHeaders({});
     await page.goto('/admin');
-    await expect(page).toHaveURL(/login/);
-  });
-});
-
-test.describe('TrustPay Mobile Responsive', () => {
-  test('mobile navigation works', async ({ page }) => {
-    await page.setViewportSize({ width: 375, height: 667 });
-    await page.goto('/dashboard');
-
-    // Should redirect to login since not authenticated
-    await expect(page).toHaveURL(/login/);
-  });
-
-  test('homepage is responsive', async ({ page }) => {
-    await page.setViewportSize({ width: 375, height: 667 });
-    await page.goto('/');
-    await expect(page.getByRole('link', { name: /TrustPay home/i })).toBeVisible();
+    await expect(page).toHaveURL(/\/staff(?:\?|$)/);
+    await expect(page.getByRole('button', { name: 'Sign in to admin', exact: true })).toBeVisible();
   });
 });

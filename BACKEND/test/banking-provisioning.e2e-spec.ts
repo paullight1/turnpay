@@ -172,7 +172,7 @@ describe('Banking — Virtual Account Provisioning (e2e simulated)', () => {
     };
 
     const context = makeContext({
-      idempotencyKey: 'provision-001',
+      idempotencyKey: 'provision-key-001-test',
       path: '/api/banking/accounts/provision',
       body: requestBody,
     });
@@ -181,6 +181,8 @@ describe('Banking — Virtual Account Provisioning (e2e simulated)', () => {
       bankingController.provisionVirtualAccount(
         { userId: 'user-tier2-verified' },
         requestBody,
+        undefined,
+        'provision-key-001-test',
       ),
     );
 
@@ -213,7 +215,7 @@ describe('Banking — Virtual Account Provisioning (e2e simulated)', () => {
       });
 
     const context = makeContext({
-      idempotencyKey: 'provision-002',
+      idempotencyKey: 'provision-key-002-test',
       path: '/api/banking/accounts/provision',
       body: requestBody,
     });
@@ -222,6 +224,8 @@ describe('Banking — Virtual Account Provisioning (e2e simulated)', () => {
       bankingController.provisionVirtualAccount(
         { userId: 'user-tier2-verified' },
         requestBody,
+        undefined,
+        'provision-key-002-test',
       ),
     );
 
@@ -229,6 +233,8 @@ describe('Banking — Virtual Account Provisioning (e2e simulated)', () => {
       bankingController.provisionVirtualAccount(
         { userId: 'user-tier2-verified' },
         requestBody,
+        undefined,
+        'provision-key-002-test',
       ),
     );
 
@@ -253,7 +259,7 @@ describe('Banking — Virtual Account Provisioning (e2e simulated)', () => {
     };
 
     const context = makeContext({
-      idempotencyKey: 'provision-003',
+      idempotencyKey: 'provision-key-003-test',
       path: '/api/banking/accounts/provision',
       body: requestBody,
       userId: 'user-unverified',
@@ -264,6 +270,8 @@ describe('Banking — Virtual Account Provisioning (e2e simulated)', () => {
         bankingController.provisionVirtualAccount(
           { userId: 'user-unverified' },
           requestBody,
+          undefined,
+          'provision-key-003-test',
         ),
       ),
     ).rejects.toThrow();
@@ -271,7 +279,7 @@ describe('Banking — Virtual Account Provisioning (e2e simulated)', () => {
     expect(mockBankingService.provisionVirtualAccount).toHaveBeenCalledWith(
       'user-unverified',
       requestBody,
-      undefined,
+      'provision-key-003-test',
     );
   });
 

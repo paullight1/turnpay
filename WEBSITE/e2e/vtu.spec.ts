@@ -15,12 +15,14 @@ function encodedSessionCookie() {
 }
 
 async function installHarness(page: Page) {
+  const cookieUrl = test.info().project.use.baseURL;
+  if (!cookieUrl) throw new Error("Playwright baseURL is required");
+  await page.context().setExtraHTTPHeaders({});
   await page.context().addCookies([
     {
       name: "supabase.auth.token",
       value: encodedSessionCookie(),
-      domain: "127.0.0.1",
-      path: "/",
+      url: cookieUrl,
       httpOnly: true,
       sameSite: "Lax",
     },

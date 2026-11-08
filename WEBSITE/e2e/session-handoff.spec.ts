@@ -128,7 +128,7 @@ test("failed secure persistence cannot expose an authenticated admin profile", a
   const user = {
     id: "synthetic-staff",
     email: "staff-test@trustpayhq.com",
-    role: "authenticated",
+    role: "ADMIN",
     app_metadata: {},
     user_metadata: {},
     aud: "authenticated",
@@ -141,7 +141,7 @@ test("failed secure persistence cannot expose an authenticated admin profile", a
   await page.route("**/api/auth/login", (route) =>
     route.fulfill({
       json: {
-        authMode: "supabase",
+        authMode: "local",
         user,
         session: {
           access_token: token,
@@ -174,9 +174,13 @@ test("failed secure persistence cannot expose an authenticated admin profile", a
   await page
     .getByLabel("Password", { exact: true })
     .fill("SyntheticPassword123");
+  const failedPersistence = page.waitForResponse(
+    response => response.url().endsWith("/api/auth/session") && response.request().method() === "POST",
+  );
   await page
     .getByRole("button", { name: "Sign in to admin", exact: true })
     .click();
+  expect((await failedPersistence).status()).toBe(400);
   await expect(
     page.getByRole("alert").filter({ hasText: "secure session" }),
   ).toBeVisible();

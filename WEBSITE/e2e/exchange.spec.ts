@@ -65,7 +65,7 @@ test.describe("Customer web exchange policy", () => {
     // Use a clean context instead of the shared E2E fixture context so this
     // test exercises the real customer-token verification path, not the local
     // protected-route bypass used by admin UI tests.
-    const context = await browser.newContext({ baseURL });
+    const context = await browser.newContext({ baseURL, extraHTTPHeaders: {} });
     const page = await context.newPage();
     const exchangeRequests: string[] = [];
 

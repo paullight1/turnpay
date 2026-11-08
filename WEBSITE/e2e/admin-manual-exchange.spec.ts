@@ -493,6 +493,12 @@ function getTestState(page: Page) {
   };
 }
 
+async function dismissPayoutToast(page: Page, message: string) {
+  const toast = page.locator("[data-sonner-toast]").filter({ hasText: message });
+  await toast.getByRole("button", { name: "Close toast" }).click();
+  await expect(toast).toBeHidden();
+}
+
 test.describe("Admin manual exchange queue", () => {
   test.beforeEach(async ({ page }) => {
     await installAdminManualExchangeMocks(page);
@@ -1110,6 +1116,7 @@ test.describe("Admin manual exchange queue", () => {
     await expect(
       row.getByText("Payout Being Processed", { exact: true }),
     ).toBeVisible();
+    await dismissPayoutToast(page, "Payout claimed for this admin");
     await page
       .getByRole("button", { name: "I sent the cedis", exact: true })
       .click();
@@ -1132,6 +1139,7 @@ test.describe("Admin manual exchange queue", () => {
       .fill(
         "Matched the completed cedi transfer to the recipient and statement.",
       );
+    await dismissPayoutToast(page, "Payout proof uploaded securely");
     await form
       .getByRole("button", { name: "Confirm cedis sent", exact: true })
       .click();
@@ -1184,6 +1192,7 @@ test.describe("Admin manual exchange queue", () => {
       .fill(
         "Supervisor checked the bank statement and confirmed no payout was sent.",
       );
+    await dismissPayoutToast(page, "Payout proof uploaded securely");
     await form
       .getByRole("button", {
         name: "Handover payout under supervision",
@@ -1250,6 +1259,7 @@ test.describe("Admin manual exchange queue", () => {
     await form
       .getByRole("button", { name: "Start naira transfer", exact: true })
       .click();
+    await dismissPayoutToast(page, "Payout claimed for this admin");
     await page
       .getByRole("button", { name: "I sent the naira", exact: true })
       .click();
@@ -1270,6 +1280,7 @@ test.describe("Admin manual exchange queue", () => {
     await form
       .getByLabel("Reason")
       .fill("Verified completed naira payment to the recorded beneficiary.");
+    await dismissPayoutToast(page, "Payout proof uploaded securely");
     await form
       .getByRole("button", { name: "Confirm naira sent", exact: true })
       .click();

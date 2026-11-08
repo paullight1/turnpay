@@ -40,6 +40,8 @@ async function installTransferHarness(
   page: Page,
   options: { pinConfigured?: boolean; behavior?: SendBehavior } = {},
 ): Promise<TransferHarness> {
+  const cookieUrl = test.info().project.use.baseURL;
+  if (!cookieUrl) throw new Error("Playwright baseURL is required");
   const e2eAuthToken = process.env.TRUSTPAY_E2E_AUTH_BYPASS_TOKEN;
   if (!e2eAuthToken) throw new Error("Missing local E2E authentication token");
   await page.setExtraHTTPHeaders({ "x-trustpay-e2e-auth": e2eAuthToken });
@@ -47,8 +49,7 @@ async function installTransferHarness(
     {
       name: "trustpay.e2e-auth",
       value: e2eAuthToken,
-      domain: "127.0.0.1",
-      path: "/",
+      url: cookieUrl,
       httpOnly: true,
       sameSite: "Lax",
     },
@@ -58,19 +59,9 @@ async function installTransferHarness(
   const sendKeys: string[] = [];
   const setPinKeys: string[] = [];
 
-  await page.route("**/api/auth/login", async (route) => {
-    expect(parseBody(route)).toMatchObject({ email: profile.email });
-    await route.fulfill({ status: 200, json: { user: profile, session, authMode: "local" } });
-  });
-  await page.route("**/api/auth/session", async (route) => {
-    await route.fulfill({
-      status: 200,
-      ...(route.request().method() === "POST" ? {
-        headers: { "set-cookie": `supabase.auth.token=${encodedSessionCookie()}; Path=/; HttpOnly; SameSite=Lax` },
-      } : {}),
-      json: { session: clientSession, csrfToken: "csrf-transfer" },
-    });
-  });
+  await page.route("**/api/auth/session", (route) =>
+    route.fulfill({ json: { session: clientSession, csrfToken: "csrf-transfer" } }),
+  );
   await page.route("**/api/auth/bootstrap", (route) => route.fulfill({ status: 200, json: { user: profile, wallets: [] } }));
   await page.route("**/api/wallets", (route) => route.fulfill({ status: 200, json: [
     { id: "wallet-ngn", currency: "NGN", balance: "250000.00" },
@@ -114,17 +105,20 @@ async function installTransferHarness(
     amount: "1250.50", currency: "NGN", fee: "0", counterparty: { maskedIdentifier: "r*******t@example.com" },
     note: "Lunch settlement", createdAt: "2026-09-01T12:00:00.000Z",
   } }));
-  await page.goto("/login");
-  await page.getByLabel("Email").fill(profile.email);
-  await page.locator("#password").fill("testpassword123");
-  await page.getByRole("button", { name: "Sign in" }).click();
-  await expect(page).toHaveURL(/\/dashboard$/, { timeout: 15_000 });
-
+  // Customer login is mobile-only. Seed the retained, non-production QA
+  // session directly; the local token/header still gates these old pages.
+  await page.context().addCookies([{
+    name: "supabase.auth.token",
+    value: encodedSessionCookie(),
+    url: cookieUrl,
+    httpOnly: true,
+    sameSite: "Lax",
+  }]);
   return { sendKeys, setPinKeys };
 }
 
 async function completeTransferForm(page: Page) {
-  await page.getByLabel("Recipient email or phone").fill("recipient@example.com");
+  await page.getByRole("textbox", { name: "TrustPay account number, email or phone" }).fill("recipient@example.com");
   await page.getByRole("button", { name: "Verify recipient" }).click();
   await expect(page.getByText("r*******t@example.com")).toBeVisible();
   await page.getByLabel("Amount").fill("1250.50");
@@ -133,6 +127,7 @@ async function completeTransferForm(page: Page) {
 }
 
 test.describe("TrustPay internal transfer", () => {
+  test.skip(Boolean(process.env.PLAYWRIGHT_EXTERNAL_SERVER_URL), "Retained customer flows require the local non-production QA server");
   test("masks the recipient, reviews exact totals, and renders the final receipt", async ({ page }) => {
     await installTransferHarness(page);
     await page.goto("/dashboard/send");
@@ -162,7 +157,7 @@ test.describe("TrustPay internal transfer", () => {
   test("rejects invalid money strings and a note over 120 code points before submission", async ({ page }) => {
     const harness = await installTransferHarness(page);
     await page.goto("/dashboard/send");
-    await page.getByLabel("Recipient email or phone").fill("recipient@example.com");
+    await page.getByRole("textbox", { name: "TrustPay account number, email or phone" }).fill("recipient@example.com");
     await page.getByRole("button", { name: "Verify recipient" }).click();
     await page.getByLabel("Transaction PIN").fill("1234");
     for (const invalid of ["-1", "1e3", "10.001"]) {

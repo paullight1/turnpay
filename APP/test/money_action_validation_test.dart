@@ -56,7 +56,7 @@ void main() {
         recipient: 'not-an-email',
       );
 
-      expect(error, 'Enter a valid recipient email.');
+      expect(error, 'Enter a 10-digit TrustPay account number or valid email.');
     });
 
     test('requires withdrawal account fields before submission', () {
