@@ -741,7 +741,7 @@ export class ManualExchangeService {
       await this.claimVersion(tx, row, {
         status: 'AWAITING_CONFIRMATION',
         proofKey: dto.objectKey,
-        bankReference: dto.bankReference,
+        bankReference: dto.bankReference ?? null,
         reviewReason:
           row.expiresAt < new Date()
             ? 'Transfer instructions expired. Your receipt requires review; quoted terms have not changed.'

@@ -73,9 +73,10 @@ export class AttachManualProofDto {
   @Transform(({ value }: { value: unknown }) =>
     typeof value === 'string' ? value.trim().toUpperCase() : value,
   )
+  @IsOptional()
   @IsString()
   @Matches(/^[A-Z0-9._-]{4,100}$/)
-  bankReference!: string;
+  bankReference?: string;
 }
 
 /**

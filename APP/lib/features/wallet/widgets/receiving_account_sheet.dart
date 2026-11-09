@@ -6,6 +6,7 @@ import '../../../core/router/app_router.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../services/wallet_service.dart';
 import '../../auth/widgets/tp_button.dart';
+import 'account_setup_presenter.dart';
 
 /// Read-only account details. Provisioning retains the existing consent flow.
 class ReceivingAccountSheet extends StatefulWidget {
@@ -31,8 +32,12 @@ class _ReceivingAccountSheetState extends State<ReceivingAccountSheet> {
 
   Future<void> _copy(String number) async {
     try {
-      await Clipboard.setData(ClipboardData(text: number));
-      if (mounted) setState(() => _copied = true);
+      await Clipboard.setData(ClipboardData(text: number.trim()));
+      if (!mounted) return;
+      setState(() => _copied = true);
+      ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+        const SnackBar(content: Text('Account number copied')),
+      );
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.maybeOf(context)?.showSnackBar(const SnackBar(
@@ -145,7 +150,7 @@ class _ReceivingAccountSheetState extends State<ReceivingAccountSheet> {
                                     'View your setup status or complete verification to request your account.',
                                     style: AppTextStyles.bodyM,
                                     textAlign: TextAlign.center),
-                                const SizedBox(height: 24),
+                                const SizedBox(height: 16),
                                 TpButton(
                                     label: 'View account setup',
                                     onTap: () => context
@@ -156,22 +161,6 @@ class _ReceivingAccountSheetState extends State<ReceivingAccountSheet> {
                         return Column(
                             crossAxisAlignment: CrossAxisAlignment.stretch,
                             children: [
-                              _AccountLine(
-                                  icon: Icons.credit_card_outlined,
-                                  label: 'Account number',
-                                  value: account.accountNumber,
-                                  prominent: true),
-                              const SizedBox(height: 24),
-                              _AccountLine(
-                                  icon: Icons.account_balance_outlined,
-                                  label: 'Bank name',
-                                  value: account.bankName),
-                              const SizedBox(height: 24),
-                              _AccountLine(
-                                  icon: Icons.person_outline_rounded,
-                                  label: 'Account name',
-                                  value: account.accountName),
-                              const SizedBox(height: 28),
                               Container(
                                   padding: const EdgeInsets.all(16),
                                   decoration: BoxDecoration(
@@ -182,21 +171,45 @@ class _ReceivingAccountSheetState extends State<ReceivingAccountSheet> {
                                       crossAxisAlignment:
                                           CrossAxisAlignment.start,
                                       children: [
-                                        Icon(Icons.verified_user_outlined,
+                                        Icon(Icons.info_outline_rounded,
                                             color: AppColors.primary, size: 22),
                                         const SizedBox(width: 12),
                                         Expanded(
                                             child: Text(
-                                                'Use these details for NGN bank transfers. Your wallet updates after the payment is confirmed.',
+                                                AccountSetupCopy
+                                                    .walletFundingPurpose,
                                                 style: AppTextStyles.bodyS)),
                                       ])),
-                              const SizedBox(height: 24),
-                              TpButton(
-                                  label: _copied
-                                      ? 'Account number copied'
-                                      : 'Copy account number',
-                                  onTap: () => _copy(account.accountNumber)),
-                              const SizedBox(height: 12),
+                              const SizedBox(height: 16),
+                              _AccountLine(
+                                  icon: Icons.credit_card_outlined,
+                                  label: 'Account number',
+                                  value: account.accountNumber,
+                                  prominent: true,
+                                  trailing: IconButton(
+                                    style: IconButton.styleFrom(
+                                      minimumSize: const Size.square(48),
+                                    ),
+                                    tooltip: _copied
+                                        ? 'Account number copied'
+                                        : 'Copy account number',
+                                    icon: Icon(_copied
+                                        ? Icons.check_rounded
+                                        : Icons.copy_rounded),
+                                    onPressed: () =>
+                                        _copy(account.accountNumber),
+                                  )),
+                              const SizedBox(height: 16),
+                              _AccountLine(
+                                  icon: Icons.account_balance_outlined,
+                                  label: 'Bank name',
+                                  value: account.bankName),
+                              const SizedBox(height: 16),
+                              _AccountLine(
+                                  icon: Icons.person_outline_rounded,
+                                  label: 'Account name',
+                                  value: account.accountName),
+                              const SizedBox(height: 28),
                               OutlinedButton(
                                   onPressed: () => context
                                       .push(AppRoutes.receivingAccountSetup),
@@ -224,22 +237,26 @@ class _AccountLine extends StatelessWidget {
   final IconData icon;
   final String label, value;
   final bool prominent;
+  final Widget? trailing;
   const _AccountLine(
       {required this.icon,
       required this.label,
       required this.value,
-      this.prominent = false});
+      this.prominent = false,
+      this.trailing});
   @override
   Widget build(BuildContext context) =>
       Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Container(
-            width: 42,
-            height: 42,
-            decoration: BoxDecoration(
-                color: AppColors.primary.withValues(alpha: .08),
-                borderRadius: BorderRadius.circular(10)),
-            child: Icon(icon, color: AppColors.primary, size: 22)),
-        const SizedBox(width: 16),
+        if (!prominent) ...[
+          Container(
+              width: 42,
+              height: 42,
+              decoration: BoxDecoration(
+                  color: AppColors.primary.withValues(alpha: .08),
+                  borderRadius: BorderRadius.circular(10)),
+              child: Icon(icon, color: AppColors.primary, size: 22)),
+          const SizedBox(width: 16),
+        ],
         Expanded(
             child:
                 Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -251,6 +268,7 @@ class _AccountLine extends StatelessWidget {
                       .copyWith(fontWeight: FontWeight.w800, letterSpacing: .5)
                   : AppTextStyles.labelL),
         ])),
+        if (trailing != null) trailing!,
       ]);
 }
 

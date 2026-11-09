@@ -122,6 +122,8 @@ void main() {
               bytes: Uint8List.fromList([137, 80, 78, 71])),
         )));
     await tester.pumpAndSettle();
+    expect(find.text('Bank reference (optional)'), findsOneWidget);
+    expect(find.widgetWithText(TextFormField, 'Bank reference'), findsNothing);
     await tester.enterText(
         find.widgetWithText(TextFormField, 'Name on receipt'), 'Alex Morgan');
     await tester.ensureVisible(find.text('Upload receipt'));
@@ -130,8 +132,25 @@ void main() {
     await tester.ensureVisible(find.byType(CheckboxListTile));
     await tester.tap(find.byType(CheckboxListTile));
     await tester.pumpAndSettle();
-    await tester.ensureVisible(find.text('Confirm payment & submit receipt'));
-    await tester.tap(find.text('Confirm payment & submit receipt'));
+    final referenceToggle = find.text('Bank reference (optional)');
+    await tester.ensureVisible(referenceToggle);
+    await tester.tap(referenceToggle);
+    await tester.pumpAndSettle();
+    final reference = find.widgetWithText(TextFormField, 'Bank reference');
+    await tester.enterText(reference, 'invalid reference');
+    final submit = find.text('Confirm payment & submit receipt');
+    await tester.ensureVisible(submit);
+    await tester.tap(submit);
+    await tester.pumpAndSettle();
+    expect(
+        find.text(
+            'Check the bank reference or clear it to submit without one.'),
+        findsOneWidget);
+    expect(service.submittedIds, isEmpty);
+
+    await tester.enterText(reference, '');
+    await tester.ensureVisible(submit);
+    await tester.tap(submit);
     await tester.pumpAndSettle();
     await tester.pump(const Duration(seconds: 15));
     await tester.pumpAndSettle();

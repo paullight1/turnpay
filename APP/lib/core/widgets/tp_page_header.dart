@@ -99,10 +99,7 @@ class TpPageHeader extends StatelessWidget {
         maxWidth: width,
         minHeight: 58,
         maxHeight: 58,
-        child: Transform.translate(
-          offset: const Offset(0, -AppSpacing.md),
-          child: header,
-        ),
+        child: header,
       ),
     );
   }

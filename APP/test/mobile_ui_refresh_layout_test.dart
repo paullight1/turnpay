@@ -145,7 +145,7 @@ void main() {
         final action = switch (surface) {
           'exchange' => find.text('Get started'),
           'profile' => find.text('Log Out'),
-          _ => find.text('Copy account number'),
+          _ => find.byTooltip('Copy account number'),
         };
         if (surface == 'profile') {
           await tester.scrollUntilVisible(action, 250,
@@ -155,15 +155,16 @@ void main() {
         }
         await tester.pumpAndSettle();
         expect(tester.takeException(), isNull);
-        expect(
-            tester
-                .getSize(find
-                    .ancestor(
-                        of: action,
-                        matching: find.bySubtype<ButtonStyleButton>())
-                    .first)
-                .height,
-            greaterThanOrEqualTo(56));
+        final button = surface == 'account'
+            ? action
+            : find
+                .ancestor(
+                  of: action,
+                  matching: find.bySubtype<ButtonStyleButton>(),
+                )
+                .first;
+        expect(tester.getSize(button).height,
+            greaterThanOrEqualTo(surface == 'account' ? 48 : 56));
         await tester.pumpWidget(const SizedBox());
       });
     }

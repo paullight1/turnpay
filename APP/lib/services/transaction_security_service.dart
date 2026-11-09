@@ -88,8 +88,7 @@ class TransactionSecurityService {
     String biometricLabel = 'Biometric app unlock';
 
     try {
-      canAuthenticate = await _localAuth.canCheckBiometrics ||
-          await _localAuth.isDeviceSupported();
+      canAuthenticate = await _localAuth.isDeviceSupported();
       final available = await _localAuth
           .getAvailableBiometrics()
           .catchError((_) => <BiometricType>[]);

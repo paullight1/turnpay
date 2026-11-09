@@ -5,6 +5,10 @@
 class AccountSetupCopy {
   const AccountSetupCopy._();
 
+  static const walletFundingPurpose =
+      'Use this account to fund your wallet for airtime, data and other bills. '
+      'For currency exchange, use the separate transfer details shown in Exchange.';
+
   static const actionRequiredTitle =
       "We couldn't finish setting up your account";
 

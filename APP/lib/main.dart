@@ -47,15 +47,9 @@ void main() {
           DeviceOrientation.portraitDown,
         ]);
 
-        // Enable edge-to-edge display for immersive design
-        SystemChrome.setSystemUIOverlayStyle(
-          const SystemUiOverlayStyle(
-            statusBarColor: Colors.transparent,
-            statusBarIconBrightness: Brightness.light,
-            systemNavigationBarColor: Colors.transparent,
-            systemNavigationBarIconBrightness: Brightness.light,
-          ),
-        );
+        final brightness =
+            WidgetsBinding.instance.platformDispatcher.platformBrightness;
+        SystemChrome.setSystemUIOverlayStyle(_overlayStyle(brightness));
 
         SystemChrome.setEnabledSystemUIMode(
           SystemUiMode.edgeToEdge,
@@ -153,25 +147,45 @@ class TrustPayApp extends ConsumerWidget {
         AppColors.applyBrightness(brightness);
 
         if (!kIsWeb) {
-          final isLight = brightness == Brightness.light;
-          SystemChrome.setSystemUIOverlayStyle(
-            SystemUiOverlayStyle(
-              statusBarColor: Colors.transparent,
-              statusBarBrightness: isLight ? Brightness.light : Brightness.dark,
-              statusBarIconBrightness:
-                  isLight ? Brightness.dark : Brightness.light,
-              systemNavigationBarColor: Colors.transparent,
-              systemNavigationBarIconBrightness:
-                  isLight ? Brightness.dark : Brightness.light,
-            ),
-          );
+          SystemChrome.setSystemUIOverlayStyle(_overlayStyle(brightness));
         }
 
-        return KeyboardVisibilityGuard(
-          child: AppLockGate(child: child ?? const SizedBox.shrink()),
+        return ColoredBox(
+          color: Theme.of(context).scaffoldBackgroundColor,
+          child: SafeArea(
+            bottom: false,
+            child: LayoutBuilder(
+              builder: (context, constraints) => MediaQuery(
+                data: MediaQuery.of(context).copyWith(
+                  size: Size(
+                    constraints.maxWidth,
+                    MediaQuery.sizeOf(context).height,
+                  ),
+                ),
+                child: KeyboardVisibilityGuard(
+                  child: AppLockGate(
+                    navigatorKey: router.routerDelegate.navigatorKey,
+                    child: child ?? const SizedBox.shrink(),
+                  ),
+                ),
+              ),
+            ),
+          ),
         );
       },
       debugShowCheckedModeBanner: false,
     );
   }
+}
+
+SystemUiOverlayStyle _overlayStyle(Brightness brightness) {
+  final icons =
+      brightness == Brightness.light ? Brightness.dark : Brightness.light;
+  return SystemUiOverlayStyle(
+    statusBarColor: Colors.transparent,
+    statusBarBrightness: brightness,
+    statusBarIconBrightness: icons,
+    systemNavigationBarColor: Colors.transparent,
+    systemNavigationBarIconBrightness: icons,
+  );
 }

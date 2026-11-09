@@ -24,6 +24,7 @@ describe('manual exchange HTTP authorization and validation', () => {
       .fn()
       .mockResolvedValue({ items: [], nextCursor: null, counts: {} }),
     create: jest.fn().mockResolvedValue({ id: 'order' }),
+    attach: jest.fn().mockResolvedValue({ id: 'order' }),
     remind: jest
       .fn()
       .mockImplementation(
@@ -119,6 +120,28 @@ describe('manual exchange HTTP authorization and validation', () => {
       .set('Authorization', 'Bearer synthetic')
       .expect(200);
   });
+  it('accepts a receipt without a bank reference and validates a supplied reference', async () => {
+    const orderId = '55d32578-25d4-4d7a-9175-879bc6cf6e3c';
+    const url = `/api/exchange/manual-orders/${orderId}/proof`;
+    const body = { objectKey: 'private/order/receipt.pdf' };
+    const key = '58a5b574-ec2f-4da8-9ac9-30e48bd498e7';
+    await request(app.getHttpServer())
+      .post(url)
+      .set('Authorization', 'Bearer synthetic')
+      .set('Idempotency-Key', key)
+      .send(body)
+      .expect(201);
+    expect(service.attach).toHaveBeenCalledWith(orderId, 'customer', body, key);
+
+    await request(app.getHttpServer())
+      .post(url)
+      .set('Authorization', 'Bearer synthetic')
+      .set('Idempotency-Key', key)
+      .send({ ...body, bankReference: 'invalid reference' })
+      .expect(400);
+    expect(service.attach).toHaveBeenCalledTimes(1);
+  });
+
   it('protects and validates the paginated admin queue', async () => {
     await request(app.getHttpServer())
       .get('/api/admin/exchange/manual-orders/queue')
