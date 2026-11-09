@@ -42,8 +42,8 @@ class _ExchangeEntryScreenState extends State<ExchangeEntryScreen> {
   Future<Map<String, dynamic>> _entry() async {
     final config = await _service.config();
     final providerPending = await _service.pendingAttempt() != null;
-    final pendingCreate = await _manual.pendingCreateAttempt();
-    final manualPending = pendingCreate != null;
+    final manualPending = (await _manual.pendingCreateAttempts())
+        .any((attempt) => attempt.action == 'create');
     return {
       ...config,
       'hasPending': providerPending,

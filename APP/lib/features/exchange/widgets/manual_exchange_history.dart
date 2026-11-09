@@ -25,7 +25,7 @@ class ManualExchangeHistory extends StatelessWidget {
   Widget build(BuildContext context) {
     AppColors.watch(context);
     return Padding(
-        padding: EdgeInsets.only(top: compact ? 20 : 28),
+        padding: EdgeInsets.only(top: compact ? AppSpacing.md : 28),
         child:
             Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           Row(children: [
@@ -40,7 +40,7 @@ class ManualExchangeHistory extends StatelessWidget {
           ]),
           Text(
               compact
-                  ? 'Continue or track an earlier request without pausing a new exchange.'
+                  ? 'Pick up an exchange or check where it stands.'
                   : 'Open a previous exchange to continue or check its progress. You can start another exchange while one is under review.',
               style: AppTextStyles.bodyS),
           SizedBox(height: compact ? 12 : 16),
@@ -70,55 +70,17 @@ class ManualExchangeHistory extends StatelessWidget {
                     decoration: BoxDecoration(
                         color: AppColors.surface,
                         borderRadius: BorderRadius.circular(14)),
-                    child: Row(children: [
-                      Icon(Icons.history_rounded, color: AppColors.textHint),
-                      const SizedBox(width: 12),
-                      Expanded(
-                          child: Text('Loading exchange history…',
-                              style: AppTextStyles.bodyM)),
-                    ]),
+                    child: Semantics(
+                      liveRegion: true,
+                      child: Text('Loading exchange history…',
+                          style: AppTextStyles.bodyM),
+                    ),
                   );
                 }
                 final rows = snapshot.data!;
                 if (rows.isEmpty) {
                   if (recovery != null) return const SizedBox.shrink();
-                  return Container(
-                      padding: EdgeInsets.all(compact ? 16 : 24),
-                      decoration: BoxDecoration(
-                          color: AppColors.surface,
-                          border: Border.all(color: AppColors.border),
-                          borderRadius: BorderRadius.circular(14)),
-                      child: compact
-                          ? Row(children: [
-                              Icon(Icons.receipt_long_outlined,
-                                  color: AppColors.textHint, size: 26),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                  child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                    Text('No exchanges yet',
-                                        style: AppTextStyles.labelM.copyWith(
-                                            fontWeight: FontWeight.w700)),
-                                    const SizedBox(height: 3),
-                                    Text(
-                                        'Your requests and review updates will appear here.',
-                                        style: AppTextStyles.bodyS),
-                                  ])),
-                            ])
-                          : Column(children: [
-                              Icon(Icons.receipt_long_outlined,
-                                  color: AppColors.textHint, size: 32),
-                              const SizedBox(height: 12),
-                              Text('No exchanges yet',
-                                  style: AppTextStyles.labelL),
-                              const SizedBox(height: 8),
-                              Text(
-                                  'Your transfers, receipts and review updates will appear here.',
-                                  style: AppTextStyles.bodyS,
-                                  textAlign: TextAlign.center),
-                            ]));
+                  return const _EmptyExchangeHistory();
                 }
                 final visibleRows = maxItems == null
                     ? rows
@@ -144,6 +106,68 @@ class ManualExchangeHistory extends StatelessWidget {
                 ]);
               }),
         ]));
+  }
+}
+
+class _EmptyExchangeHistory extends StatelessWidget {
+  const _EmptyExchangeHistory();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(AppSpacing.lg),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        border: Border.all(color: AppColors.border),
+        borderRadius: BorderRadius.circular(AppRadius.lg),
+      ),
+      child: Column(
+        children: [
+          Container(
+            width: 52,
+            height: 52,
+            decoration: BoxDecoration(
+              color: AppColors.primary.withValues(alpha: .09),
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: Icon(Icons.receipt_long_outlined, color: AppColors.primary),
+          ),
+          const SizedBox(height: AppSpacing.md),
+          Text('No exchanges yet',
+              style: AppTextStyles.headingM, textAlign: TextAlign.center),
+          const SizedBox(height: AppSpacing.xs),
+          Text(
+            'Choose a direction above to get started. Come back here to resume an exchange or check its status.',
+            style: AppTextStyles.bodyS,
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: AppSpacing.md),
+          Wrap(
+            alignment: WrapAlignment.center,
+            spacing: AppSpacing.sm,
+            runSpacing: AppSpacing.sm,
+            children: [
+              for (final label in [
+                'Transfer details',
+                'Receipts',
+                'Status updates'
+              ])
+                DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: AppColors.surfaceVariant,
+                    borderRadius: BorderRadius.circular(AppRadius.full),
+                  ),
+                  child: Padding(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    child: Text(label, style: AppTextStyles.labelS),
+                  ),
+                ),
+            ],
+          ),
+        ],
+      ),
+    );
   }
 }
 

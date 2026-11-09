@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:dio/dio.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -39,11 +40,15 @@ class _ManualExchangeOrderScreenState extends State<ManualExchangeOrderScreen>
     with WidgetsBindingObserver {
   late final ManualExchangeService _service;
   late Future<ManualExchangeOrder> _orderFuture;
+  final _receiptNameController = TextEditingController();
   final _bankReferenceController = TextEditingController();
   final _scrollController = ScrollController();
 
   ManualExchangeOrder? _order;
   ManualExchangeProofFile? _selectedFile;
+  CancelToken? _receiptScan;
+  ManualReceiptDetails? _suggestions;
+  String? _scanMessage;
   Timer? _pollTimer;
   bool _isRefreshing = false;
   bool _isSubmittingProof = false;
@@ -68,6 +73,8 @@ class _ManualExchangeOrderScreenState extends State<ManualExchangeOrderScreen>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _pollTimer?.cancel();
+    _receiptScan?.cancel();
+    _receiptNameController.dispose();
     _bankReferenceController.dispose();
     _scrollController.dispose();
     super.dispose();
@@ -147,6 +154,11 @@ class _ManualExchangeOrderScreenState extends State<ManualExchangeOrderScreen>
     _paymentConfirmed = false;
     _selectedFile = null;
     _proofMessage = null;
+    _receiptScan?.cancel();
+    _receiptScan = null;
+    _suggestions = null;
+    _scanMessage = null;
+    _receiptNameController.clear();
     _bankReferenceController.clear();
     unawaited(
         _service.clearReceiptStep(refreshed.id).catchError((Object _) {}));
@@ -262,10 +274,7 @@ class _ManualExchangeOrderScreenState extends State<ManualExchangeOrderScreen>
             'Choose a JPEG, PNG, WebP, or PDF receipt up to 8 MiB.');
         return;
       }
-      setState(() {
-        _selectedFile = file;
-        _proofMessage = null;
-      });
+      await _selectReceipt(file);
       return;
     }
     final result = await FilePicker.pickFiles(
@@ -298,13 +307,58 @@ class _ManualExchangeOrderScreenState extends State<ManualExchangeOrderScreen>
       return;
     }
 
+    await _selectReceipt(ManualExchangeProofFile(
+      fileName: selected.name,
+      contentType: contentType,
+      bytes: bytes,
+    ));
+  }
+
+  Future<void> _selectReceipt(ManualExchangeProofFile file) async {
+    if (_isSubmittingProof) return;
+    final order = _order;
+    final token = order?.supportsReceiptName == true ? CancelToken() : null;
+    _receiptScan?.cancel();
+    if (_receiptNameController.text == _suggestions?.receiptName) {
+      _receiptNameController.clear();
+    }
+    if (_bankReferenceController.text == _suggestions?.bankReference) {
+      _bankReferenceController.clear();
+    }
     setState(() {
-      _selectedFile = ManualExchangeProofFile(
-        fileName: selected.name,
-        contentType: contentType,
-        bytes: bytes,
-      );
+      _selectedFile = file;
       _proofMessage = null;
+      _receiptScan = token;
+      _suggestions = null;
+      _scanMessage = null;
+    });
+    if (token == null || order == null) return;
+
+    ManualReceiptDetails? details;
+    try {
+      details = await _service.scanReceipt(
+        orderId: order.id,
+        file: file,
+        cancelToken: token,
+      );
+    } catch (_) {
+      // Keep the selected receipt available for manual entry.
+    }
+    if (!mounted || token.isCancelled || !identical(_receiptScan, token)) {
+      return;
+    }
+    final name =
+        _receiptNameController.text.isEmpty ? details?.receiptName : null;
+    final reference =
+        _bankReferenceController.text.isEmpty ? details?.bankReference : null;
+    setState(() {
+      if (name != null) _receiptNameController.text = name;
+      if (reference != null) _bankReferenceController.text = reference;
+      _suggestions = (receiptName: name, bankReference: reference);
+      _receiptScan = null;
+      _scanMessage = name == null && reference == null
+          ? 'You can enter the receipt details manually.'
+          : 'Check the suggested details against your receipt.';
     });
   }
 
@@ -317,18 +371,25 @@ class _ManualExchangeOrderScreenState extends State<ManualExchangeOrderScreen>
     }
     final file = _selectedFile;
     final bankReference = _bankReferenceController.text.trim();
+    final receiptName = _receiptNameController.text.trim();
     if (file == null) {
-      setState(() => _proofMessage = 'Choose your transfer receipt first.');
+      setState(() => _proofMessage = 'Upload your transfer receipt first.');
       return;
     }
-    if (bankReference.isEmpty) {
+    if (order.supportsReceiptName && receiptName.isEmpty) {
+      setState(() => _proofMessage = 'Enter the name shown on your receipt.');
+      return;
+    }
+    if (!order.supportsReceiptName && bankReference.isEmpty) {
       setState(
           () => _proofMessage = 'Enter the bank reference for your transfer.');
       return;
     }
 
     FocusManager.instance.primaryFocus?.unfocus();
+    _receiptScan?.cancel();
     setState(() {
+      _receiptScan = null;
       _isSubmittingProof = true;
       _reconcileInitialReceipt = false;
       _proofMessage = null;
@@ -339,6 +400,7 @@ class _ManualExchangeOrderScreenState extends State<ManualExchangeOrderScreen>
         orderId: order.id,
         file: file,
         bankReference: bankReference,
+        receiptName: order.supportsReceiptName ? receiptName : null,
       );
       if (!mounted) return;
       setState(() {
@@ -347,7 +409,10 @@ class _ManualExchangeOrderScreenState extends State<ManualExchangeOrderScreen>
         _selectedFile = null;
         _showReceiptStep = false;
         _paymentConfirmed = false;
+        _receiptNameController.clear();
         _bankReferenceController.clear();
+        _suggestions = null;
+        _scanMessage = null;
         _proofMessage = null;
       });
       _scrollToTop();
@@ -496,6 +561,7 @@ class _ManualExchangeOrderScreenState extends State<ManualExchangeOrderScreen>
                           _ReceiptCard(
                             order: order,
                             selectedFile: _selectedFile,
+                            receiptNameController: _receiptNameController,
                             bankReferenceController: _bankReferenceController,
                             isSubmitting: _isSubmittingProof,
                             isOpeningProof: _isOpeningProof,
@@ -504,6 +570,9 @@ class _ManualExchangeOrderScreenState extends State<ManualExchangeOrderScreen>
                                 setState(() => _paymentConfirmed = value),
                             editable: _showReceiptStep && order.canSubmitProof,
                             message: _proofMessage,
+                            scanMessage: _receiptScan != null
+                                ? 'Reading receipt…'
+                                : _scanMessage,
                             onPick: _pickReceipt,
                             onSubmit: () => _submitReceipt(order),
                             onOpenReceipt: () => _openReceipt(order),
@@ -648,7 +717,7 @@ class _CollectionAccountCard extends StatelessWidget {
           ),
           const SizedBox(height: AppSpacing.xs),
           Text(
-            'Transfer the exact amount from your bank and include the unique payment reference.',
+            'Include the payment reference when sending from your bank or mobile money app.',
             style: AppTextStyles.bodyM,
           ),
           const SizedBox(height: 20),
@@ -656,15 +725,42 @@ class _CollectionAccountCard extends StatelessWidget {
               style: AppTextStyles.displayMedium
                   .copyWith(fontWeight: FontWeight.w800)),
           const SizedBox(height: 20),
-          _CopyValueRow(label: 'Bank', value: account.bankName, onCopy: onCopy),
-          _CopyValueRow(
-              label: 'Account name',
-              value: account.accountName,
-              onCopy: onCopy),
-          _CopyValueRow(
-              label: 'Account number',
-              value: account.accountNumber,
-              onCopy: onCopy),
+          DecoratedBox(
+            decoration: BoxDecoration(
+              color: AppColors.surface,
+              border: Border.all(color: AppColors.border),
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 6, 8, 6),
+              child: Column(
+                children: [
+                  _CopyValueRow(
+                    label: 'Account number',
+                    value: account.accountNumber,
+                    valueStyle: AppTextStyles.headingL
+                        .copyWith(fontWeight: FontWeight.w800),
+                    onCopy: onCopy,
+                  ),
+                  const Divider(height: 1),
+                  _CopyValueRow(
+                    label: 'Account name',
+                    value: account.accountName,
+                    valueStyle: AppTextStyles.labelL,
+                    onCopy: onCopy,
+                  ),
+                  const Divider(height: 1),
+                  _CopyValueRow(
+                    label: 'Bank or mobile money',
+                    value: account.bankName,
+                    valueStyle: AppTextStyles.labelL,
+                    onCopy: onCopy,
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: AppSpacing.xs),
           _CopyValueRow(
               label: 'Currency', value: account.currency, onCopy: onCopy),
           _CopyValueRow(
@@ -686,27 +782,35 @@ class _CollectionAccountCard extends StatelessWidget {
 class _CopyValueRow extends StatelessWidget {
   final String label;
   final String value;
+  final TextStyle? valueStyle;
   final Future<void> Function(String value, String label) onCopy;
 
   const _CopyValueRow({
     required this.label,
     required this.value,
     required this.onCopy,
+    this.valueStyle,
   });
 
   @override
   Widget build(BuildContext context) {
     AppColors.watch(context);
     return Padding(
-      padding: const EdgeInsets.only(top: AppSpacing.sm),
+      padding: const EdgeInsets.symmetric(vertical: AppSpacing.xs),
       child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          SizedBox(width: 104, child: Text(label, style: AppTextStyles.bodyS)),
-          Expanded(child: Text(value, style: AppTextStyles.labelM)),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(label, style: AppTextStyles.bodyS),
+                Text(value, style: valueStyle ?? AppTextStyles.labelM),
+              ],
+            ),
+          ),
+          const SizedBox(width: AppSpacing.xs),
           IconButton(
             tooltip: 'Copy $label',
-            visualDensity: VisualDensity.compact,
             onPressed: value.isEmpty ? null : () => onCopy(value, label),
             icon: const Icon(Icons.copy_rounded, size: 18),
           ),
@@ -777,12 +881,14 @@ class _DestinationCard extends StatelessWidget {
 class _ReceiptCard extends StatelessWidget {
   final ManualExchangeOrder order;
   final ManualExchangeProofFile? selectedFile;
+  final TextEditingController receiptNameController;
   final TextEditingController bankReferenceController;
   final bool isSubmitting;
   final bool isOpeningProof;
   final bool paymentConfirmed, editable;
   final ValueChanged<bool> onPaymentConfirmed;
   final String? message;
+  final String? scanMessage;
   final VoidCallback onPick;
   final VoidCallback onSubmit;
   final VoidCallback onOpenReceipt;
@@ -790,6 +896,7 @@ class _ReceiptCard extends StatelessWidget {
   const _ReceiptCard({
     required this.order,
     required this.selectedFile,
+    required this.receiptNameController,
     required this.bankReferenceController,
     required this.isSubmitting,
     required this.isOpeningProof,
@@ -797,6 +904,7 @@ class _ReceiptCard extends StatelessWidget {
     required this.editable,
     required this.onPaymentConfirmed,
     required this.message,
+    required this.scanMessage,
     required this.onPick,
     required this.onSubmit,
     required this.onOpenReceipt,
@@ -827,7 +935,7 @@ class _ReceiptCard extends StatelessWidget {
           Text(
             order.hasProof
                 ? 'Your receipt is attached to this order for review.'
-                : 'Upload the receipt for this exchange. If you reopened the app, select the same receipt again. Your payment will be checked by our team.',
+                : 'Upload proof of payment so our team can verify your transfer.',
             style: AppTextStyles.bodyM,
           ),
           if (order.hasProof) ...[
@@ -851,26 +959,44 @@ class _ReceiptCard extends StatelessWidget {
           ],
           if (canSubmit) ...[
             const SizedBox(height: AppSpacing.lg),
-            TextFormField(
-              controller: bankReferenceController,
-              enabled: !isSubmitting,
-              textInputAction: TextInputAction.done,
-              decoration: const InputDecoration(
-                labelText: 'Bank reference',
-                hintText: 'Enter the reference on your transfer receipt',
-              ),
-            ),
-            const SizedBox(height: AppSpacing.md),
             OutlinedButton.icon(
               onPressed: isSubmitting ? null : onPick,
               icon: const Icon(Icons.attach_file_rounded),
               label: Text(
-                  selectedFile == null ? 'Choose receipt' : 'Change receipt'),
+                  selectedFile == null ? 'Upload receipt' : 'Change receipt'),
             ),
             if (selectedFile != null) ...[
               const SizedBox(height: AppSpacing.sm),
               _SelectedFile(file: selectedFile!),
             ],
+            if (scanMessage != null) ...[
+              const SizedBox(height: AppSpacing.sm),
+              Semantics(
+                liveRegion: true,
+                child: Text(scanMessage!, style: AppTextStyles.bodyS),
+              ),
+            ],
+            const SizedBox(height: AppSpacing.md),
+            if (order.supportsReceiptName) ...[
+              TextFormField(
+                controller: receiptNameController,
+                enabled: !isSubmitting,
+                textCapitalization: TextCapitalization.words,
+                textInputAction: TextInputAction.next,
+                decoration: const InputDecoration(labelText: 'Name on receipt'),
+              ),
+              const SizedBox(height: AppSpacing.sm),
+            ],
+            TextFormField(
+              controller: bankReferenceController,
+              enabled: !isSubmitting,
+              textInputAction: TextInputAction.done,
+              decoration: InputDecoration(
+                labelText: order.supportsReceiptName
+                    ? 'Bank reference (optional)'
+                    : 'Bank reference',
+              ),
+            ),
             if (message != null) ...[
               const SizedBox(height: AppSpacing.sm),
               _InfoMessage(message: message!, error: true),

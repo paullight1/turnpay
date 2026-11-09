@@ -158,6 +158,33 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('receipt refresh retains details and blocks duplicate reads',
+      (tester) async {
+    final response = Completer<VtuOrderStatus>();
+    final service = _FakeVtuService(
+      initial: _order(orderStatus: 'PENDING', transactionStatus: 'PENDING'),
+      requery: () => response.future,
+    );
+    await tester.pumpWidget(MaterialApp(
+        theme: AppTheme.light,
+        home: VtuOrderDetailScreen(
+            reference: 'VTU-EXAMPLE-REFERENCE', vtuService: service)));
+    await tester.pumpAndSettle();
+    service.readOverride = () => response.future;
+    await tester.tap(find.byTooltip('Menu'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Refresh'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.text('Checking payment status…'), findsOneWidget);
+    expect(find.text('Payment summary'), findsOneWidget);
+    expect(service.readCalls, 2);
+    response.complete(service.initial);
+    await tester.pumpAndSettle();
+    expect(find.text('Still confirming your payment'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
   for (final theme in <ThemeData>[AppTheme.light, AppTheme.dark]) {
     testWidgets('renders at 320px with large text in ${theme.brightness.name}',
         (tester) async {
@@ -240,12 +267,17 @@ class _FakeVtuService extends VtuService {
   final VtuOrderStatus initial;
   final Future<VtuOrderStatus> Function() requery;
   int requeryCalls = 0;
+  int readCalls = 0;
+  Future<VtuOrderStatus> Function()? readOverride;
 
   _FakeVtuService({required this.initial, required this.requery})
       : super(apiClient: ApiClient(dio: Dio()));
 
   @override
-  Future<VtuOrderStatus> getOrderStatus(String reference) async => initial;
+  Future<VtuOrderStatus> getOrderStatus(String reference) async {
+    readCalls++;
+    return readOverride == null ? initial : await readOverride!();
+  }
 
   @override
   Future<VtuOrderStatus> requeryOrder(

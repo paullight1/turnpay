@@ -1,9 +1,11 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
@@ -280,6 +282,12 @@ class _HomeScreenState extends State<HomeScreen>
   @override
   Widget build(BuildContext context) {
     AppColors.watch(context);
+    final viewportWidth = MediaQuery.sizeOf(context).width -
+        MediaQuery.paddingOf(context).horizontal;
+    final gutter = math.max(
+      viewportWidth < 360 ? AppSpacing.md : AppSpacing.lg,
+      (viewportWidth - 640) / 2,
+    );
     return Scaffold(
       backgroundColor: AppColors.background,
       body: SafeArea(
@@ -321,11 +329,11 @@ class _HomeScreenState extends State<HomeScreen>
                   physics: const AlwaysScrollableScrollPhysics(
                     parent: BouncingScrollPhysics(),
                   ),
-                  padding: const EdgeInsets.fromLTRB(
+                  padding: EdgeInsets.fromLTRB(
+                    gutter,
                     AppSpacing.lg,
-                    AppSpacing.md,
-                    AppSpacing.lg,
-                    88,
+                    gutter,
+                    88 + AppSpacing.md,
                   ),
                   children: [
                     if (_refreshing) ...[
@@ -337,7 +345,7 @@ class _HomeScreenState extends State<HomeScreen>
                       notificationCount: _unreadNotificationCount,
                       onNotifications: _openNotifications,
                     ),
-                    const SizedBox(height: AppSpacing.md),
+                    const SizedBox(height: AppSpacing.xl),
                     _BalancePanel(
                       data: data,
                       showBalances: _showBalances,
@@ -358,9 +366,9 @@ class _HomeScreenState extends State<HomeScreen>
                                 : AppRoutes.receiveMoney),
                       ),
                     ],
-                    const SizedBox(height: AppSpacing.lg),
-                    const _QuickActionsGrid(),
-                    const SizedBox(height: AppSpacing.lg),
+                    const SizedBox(height: AppSpacing.xl),
+                    const _VtuShortcuts(),
+                    const SizedBox(height: AppSpacing.xl),
                     if (data.user.kycStatus.toUpperCase() == 'VERIFIED')
                       const _PromoBanner()
                     else
@@ -374,7 +382,7 @@ class _HomeScreenState extends State<HomeScreen>
                         beneficiaries: data.beneficiaries,
                       ),
                     ],
-                    const SizedBox(height: AppSpacing.lg),
+                    const SizedBox(height: AppSpacing.xl),
                     _RecentTransactionsSection(
                       transactions: data.transactions,
                     ),
@@ -435,6 +443,7 @@ class _HomeTopBar extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(_greeting(), style: AppTextStyles.bodyM),
+              const SizedBox(height: AppSpacing.xs),
               Text(
                 _compactName(user.displayName),
                 style: AppTextStyles.headingM.copyWith(
@@ -447,6 +456,7 @@ class _HomeTopBar extends StatelessWidget {
             ],
           ),
         ),
+        const SizedBox(width: AppSpacing.md),
         _IconButton(
           icon: Icons.notifications_none_rounded,
           tooltip: 'Notifications',
@@ -624,11 +634,6 @@ class _BalancePanelState extends State<_BalancePanel> {
         currency: 'NGN',
         balanceDecimalString: ngnBalance,
         account: ngnAccount,
-        colors: [
-          AppColors.primaryDark,
-          AppColors.primary,
-          AppColors.primaryLight,
-        ],
       ),
       if (LaunchCapabilities.ghanaCedisWalletEnabled)
         _BalanceCardData(
@@ -636,74 +641,73 @@ class _BalancePanelState extends State<_BalancePanel> {
           balanceDecimalString:
               widget.data.walletFor('GHS')?.balanceDecimalString ?? '0.00',
           account: _accountForCurrency(widget.data.virtualAccounts, 'GHS'),
-          colors: const [
-            Color(0xFF0E7490),
-            Color(0xFF0F766E),
-            Color(0xFF34D399),
-          ],
         ),
     ].where((card) => _currencies.contains(card.currency)).toList();
     final cardWidth =
         cards.length == 1 ? pageWidth - (AppSpacing.md * 2) : pageWidth * 0.8;
     _cardExtent = cardWidth + AppSpacing.sm;
 
+    Widget balanceSummary(_BalanceCardData card) => _CurrencyBalanceSummary(
+          data: card,
+          showBalances: widget.showBalances,
+          onToggleBalances: widget.onToggleBalances,
+          onSend: card.currency == 'GHS' && card.account == null
+              ? () =>
+                  showTpSnackbar(context, 'Ghana accounts are unavailable now.')
+              : widget.onSend,
+          onReceive: card.currency == 'GHS' && card.account == null
+              ? () =>
+                  showTpSnackbar(context, 'Ghana accounts are unavailable now.')
+              : () => context.push(AppRoutes.receiveMoney),
+        );
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Row(children: [
-          Expanded(child: Text('Your wallets', style: AppTextStyles.labelL)),
-          if (LaunchCapabilities.ghanaCedisWalletEnabled)
-            IconButton(
+        if (LaunchCapabilities.ghanaCedisWalletEnabled)
+          Align(
+            alignment: Alignment.centerRight,
+            child: IconButton(
               tooltip: 'Edit currencies',
               onPressed: _editCurrencies,
               icon: const Icon(Icons.add_rounded),
             ),
-        ]),
-        SizedBox(
-          height: (LaunchCapabilities.moneyOutEnabled ? 200 : 190) +
-              (MediaQuery.textScalerOf(context).scale(16) - 16).clamp(0, 48) *
-                  4,
-          child: OverflowBox(
-            alignment: Alignment.center,
-            minWidth: pageWidth,
-            maxWidth: pageWidth,
-            child: ScrollConfiguration(
-              behavior: const _CarouselScrollBehavior(),
-              child: ListView.separated(
-                controller: _scrollController,
-                scrollDirection: Axis.horizontal,
-                physics: const BouncingScrollPhysics(),
-                padding: const EdgeInsets.only(
-                  left: AppSpacing.md,
-                  right: AppSpacing.md,
+          ),
+        if (cards.length == 1)
+          balanceSummary(cards.single)
+        else
+          SizedBox(
+            height: 220 +
+                (MediaQuery.textScalerOf(context).scale(16) - 16).clamp(0, 48) *
+                    4,
+            child: OverflowBox(
+              alignment: Alignment.center,
+              minWidth: pageWidth,
+              maxWidth: pageWidth,
+              child: ScrollConfiguration(
+                behavior: const _CarouselScrollBehavior(),
+                child: ListView.separated(
+                  controller: _scrollController,
+                  scrollDirection: Axis.horizontal,
+                  physics: const BouncingScrollPhysics(),
+                  padding: const EdgeInsets.only(
+                    left: AppSpacing.md,
+                    right: AppSpacing.md,
+                  ),
+                  itemCount: cards.length,
+                  separatorBuilder: (_, __) => const SizedBox(
+                    width: AppSpacing.sm,
+                  ),
+                  itemBuilder: (context, index) {
+                    return SizedBox(
+                      width: cardWidth,
+                      child: balanceSummary(cards[index]),
+                    );
+                  },
                 ),
-                itemCount: cards.length,
-                separatorBuilder: (_, __) => const SizedBox(
-                  width: AppSpacing.sm,
-                ),
-                itemBuilder: (context, index) {
-                  final card = cards[index];
-                  return SizedBox(
-                    width: cardWidth,
-                    child: _CurrencyBalanceCard(
-                      data: card,
-                      showBalances: widget.showBalances,
-                      onToggleBalances: widget.onToggleBalances,
-                      onSend: card.currency == 'GHS' && card.account == null
-                          ? () => showTpSnackbar(
-                              context, 'Ghana accounts are unavailable now.')
-                          : widget.onSend,
-                      onReceive: card.currency == 'GHS' && card.account == null
-                          ? () => showTpSnackbar(
-                              context, 'Ghana accounts are unavailable now.')
-                          : () => context.push(AppRoutes.receiveMoney),
-                    ),
-                  );
-                },
               ),
             ),
           ),
-        ),
         if (cards.length > 1) ...[
           const SizedBox(height: AppSpacing.xs),
           Row(
@@ -749,13 +753,11 @@ class _BalanceCardData {
   final String currency;
   final String balanceDecimalString;
   final HomeVirtualAccount? account;
-  final List<Color> colors;
 
   const _BalanceCardData({
     required this.currency,
     required this.balanceDecimalString,
     required this.account,
-    required this.colors,
   });
 }
 
@@ -792,14 +794,14 @@ class _AccountSetupBanner extends StatelessWidget {
   }
 }
 
-class _CurrencyBalanceCard extends StatelessWidget {
+class _CurrencyBalanceSummary extends StatelessWidget {
   final _BalanceCardData data;
   final bool showBalances;
   final VoidCallback onToggleBalances;
   final VoidCallback onSend;
   final VoidCallback onReceive;
 
-  const _CurrencyBalanceCard({
+  const _CurrencyBalanceSummary({
     required this.data,
     required this.showBalances,
     required this.onToggleBalances,
@@ -812,203 +814,165 @@ class _CurrencyBalanceCard extends StatelessWidget {
     AppColors.watch(context);
     final visibleAmount =
         showBalances ? _walletCardAmount(data.balanceDecimalString) : '******';
+    final canRequestAccount = data.currency == 'NGN' &&
+        (data.account?.accountNumber.trim().isEmpty ?? true);
     final accountNumber = data.account?.accountNumber.trim() ?? '';
-    final canRequestAccount = data.currency == 'NGN' && accountNumber.isEmpty;
-    final showAccountChip =
-        accountNumber.isNotEmpty || canRequestAccount || data.currency == 'GHS';
-    final accountChipLabel = accountNumber.isNotEmpty
-        ? _formatAccountNumber(accountNumber)
-        : canRequestAccount
-            ? 'Request account'
-            : 'Account unavailable';
-    final accountChip = Container(
-      constraints: const BoxConstraints(maxWidth: 198, minHeight: 34),
-      padding: const EdgeInsets.symmetric(
-        horizontal: AppSpacing.sm,
-        vertical: 6,
-      ),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.16),
-        borderRadius: BorderRadius.circular(AppRadius.full),
-        border: Border.all(
-          color: Colors.white.withValues(alpha: 0.16),
-        ),
-      ),
-      child: Text(
-        accountChipLabel,
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-        style: AppTextStyles.labelS.copyWith(
-          color: Colors.white,
-          fontWeight: FontWeight.w900,
-        ),
-      ),
-    );
+    final accountLabel = accountNumber.length > 4
+        ? '•••• ${accountNumber.substring(accountNumber.length - 4)}'
+        : '••••';
 
-    return Container(
-      clipBehavior: Clip.antiAlias,
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(20),
-        boxShadow: [
-          BoxShadow(
-            color: data.colors.first.withValues(alpha: 0.24),
-            blurRadius: 18,
-            offset: const Offset(0, 10),
-          ),
-        ],
-      ),
-      child: Stack(
-        children: [
-          Positioned.fill(
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: data.colors,
-                ),
-                borderRadius: BorderRadius.circular(20),
-              ),
-            ),
-          ),
-          Positioned.fill(
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [
-                    Colors.white.withValues(alpha: 0.12),
-                    Colors.transparent,
-                    Colors.black.withValues(alpha: 0.14),
-                  ],
-                ),
-              ),
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(
-              14,
-              14,
-              14,
-              12,
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Expanded(
-                      child: showAccountChip
-                          ? Align(
-                              alignment: Alignment.centerLeft,
-                              child: data.currency == 'NGN'
-                                  ? TapScale(
-                                      onTap: onReceive,
-                                      borderRadius: BorderRadius.circular(
-                                        AppRadius.full,
-                                      ),
-                                      child: accountChip,
-                                    )
-                                  : accountChip,
-                            )
-                          : const SizedBox.shrink(),
-                    ),
-                    const SizedBox(width: AppSpacing.sm),
-                    TapScale(
-                      onTap: onToggleBalances,
-                      borderRadius: BorderRadius.circular(12),
-                      child: Container(
-                        width: 38,
-                        height: 38,
-                        decoration: BoxDecoration(
-                          color: Colors.white.withValues(alpha: 0.16),
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(
-                            color: Colors.white.withValues(alpha: 0.18),
-                          ),
-                        ),
-                        child: Icon(
-                          showBalances
-                              ? Icons.visibility_outlined
-                              : Icons.visibility_off_outlined,
-                          color: Colors.white.withValues(alpha: 0.92),
-                          size: 18,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: AppSpacing.sm),
-                Text(
-                  'Available balance',
-                  style: AppTextStyles.caption.copyWith(
-                    color: Colors.white.withValues(alpha: 0.74),
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    Text(
-                      data.currency,
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: Row(
+                children: [
+                  Flexible(
+                    child: Text(
+                      'Available balance',
                       style: AppTextStyles.labelM.copyWith(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w800,
+                        color: AppColors.textSecondary,
                       ),
-                    ),
-                    const SizedBox(width: AppSpacing.xs),
-                    Flexible(
-                      child: AnimatedValueText(
-                        value: visibleAmount,
-                        style: AppTextStyles.displayMedium.copyWith(
-                          color: Colors.white,
-                          fontSize: 32,
-                          height: 0.98,
-                          letterSpacing: 0,
-                          fontWeight: FontWeight.w900,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 10),
-                if (LaunchCapabilities.moneyOutEnabled)
-                  Row(
-                    children: [
-                      Expanded(
-                        child: _BalanceCtaButton(
-                          label: 'Send money',
-                          icon: Icons.near_me_rounded,
-                          onTap: onSend,
-                        ),
-                      ),
-                      const SizedBox(width: AppSpacing.sm),
-                      Expanded(
-                        child: _BalanceCtaButton(
-                          label: 'Receive',
-                          icon: Icons.call_received_rounded,
-                          onTap: onReceive,
-                        ),
-                      ),
-                    ],
-                  )
-                else
-                  SizedBox(
-                    width: double.infinity,
-                    child: _BalanceCtaButton(
-                      label: 'Add funds',
-                      icon: Icons.add_rounded,
-                      onTap: onReceive,
                     ),
                   ),
-              ],
+                  IconButton(
+                    tooltip: showBalances ? 'Hide balance' : 'Show balance',
+                    onPressed: onToggleBalances,
+                    iconSize: 16,
+                    color: AppColors.textSecondary,
+                    constraints:
+                        const BoxConstraints(minWidth: 44, minHeight: 44),
+                    icon: Icon(showBalances
+                        ? Icons.visibility_outlined
+                        : Icons.visibility_off_outlined),
+                  ),
+                ],
+              ),
             ),
+            if (data.currency == 'NGN') const SizedBox(width: AppSpacing.sm),
+            if (data.currency == 'NGN')
+              Expanded(
+                child: Align(
+                  alignment: Alignment.centerRight,
+                  child: Tooltip(
+                    message: canRequestAccount
+                        ? 'Set up your receiving account'
+                        : 'View receiving account',
+                    child: TextButton(
+                      onPressed: onReceive,
+                      style: TextButton.styleFrom(
+                        backgroundColor: AppColors.surfaceVariant,
+                        foregroundColor: AppColors.textSecondary,
+                        textStyle: AppTextStyles.labelS,
+                      ),
+                      child: Text(
+                        canRequestAccount ? 'Request account' : accountLabel,
+                        textAlign: TextAlign.center,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ),
+        const SizedBox(height: AppSpacing.xs),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.baseline,
+          textBaseline: TextBaseline.alphabetic,
+          children: [
+            Text(
+              data.currency,
+              style: AppTextStyles.labelM.copyWith(
+                color: AppColors.textSecondary,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            const SizedBox(width: AppSpacing.sm),
+            Flexible(
+              child: AnimatedValueText(
+                value: visibleAmount,
+                style: AppTextStyles.displayMedium.copyWith(
+                  color: AppColors.textPrimary,
+                  fontSize: 42,
+                  height: 1,
+                  letterSpacing: 0,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: AppSpacing.lg),
+        if (LaunchCapabilities.moneyOutEnabled)
+          Row(
+            children: [
+              Expanded(
+                child: _BalanceCtaButton(
+                  label: 'Send money',
+                  icon: Icons.near_me_rounded,
+                  onTap: onSend,
+                  primary: true,
+                ),
+              ),
+              const SizedBox(width: AppSpacing.sm),
+              Expanded(
+                child: _BalanceCtaButton(
+                  label: 'Receive',
+                  icon: Icons.call_received_rounded,
+                  onTap: onReceive,
+                ),
+              ),
+            ],
+          )
+        else
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final stackActions = constraints.maxWidth < 310 ||
+                  MediaQuery.textScalerOf(context).scale(14) > 18;
+              final actionGap = stackActions ? AppSpacing.sm : 12.0;
+              final addFunds = _BalanceCtaButton(
+                label: 'Add funds',
+                icon: Icons.add_rounded,
+                onTap: onReceive,
+                primary: true,
+              );
+              final secondaryActions = [
+                Expanded(
+                  child: _BalanceCtaButton(
+                    label: 'History',
+                    icon: Icons.history_rounded,
+                    onTap: () => context.push(AppRoutes.activity),
+                  ),
+                ),
+                SizedBox(width: actionGap),
+                _BalanceCtaButton(
+                  label: 'More',
+                  icon: Icons.grid_view_rounded,
+                  onTap: () => context.push(AppRoutes.more),
+                ),
+              ];
+              if (stackActions) {
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    addFunds,
+                    const SizedBox(height: AppSpacing.sm),
+                    Row(children: secondaryActions),
+                  ],
+                );
+              }
+              return Row(
+                children: [
+                  Expanded(child: addFunds),
+                  SizedBox(width: actionGap),
+                  ...secondaryActions,
+                ],
+              );
+            },
           ),
-        ],
-      ),
+      ],
     );
   }
 }
@@ -1273,46 +1237,54 @@ class _BalanceCtaButton extends StatelessWidget {
   final String label;
   final IconData icon;
   final VoidCallback onTap;
+  final bool primary;
 
   const _BalanceCtaButton({
     required this.label,
     required this.icon,
     required this.onTap,
+    this.primary = false,
   });
 
   @override
   Widget build(BuildContext context) {
     AppColors.watch(context);
+    final tint = primary ? AppColors.primary : AppColors.textSecondary;
+    final fill = primary
+        ? Color.alphaBlend(tint.withValues(alpha: 0.11), AppColors.surface)
+        : AppColors.surfaceVariant;
     return TapScale(
       onTap: onTap,
       semanticLabel: label,
-      borderRadius: BorderRadius.circular(AppRadius.button),
+      borderRadius: BorderRadius.circular(AppRadius.full),
       pressedScale: 0.97,
       child: Container(
-        constraints: const BoxConstraints(minHeight: 56),
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 14),
+        constraints: const BoxConstraints(minHeight: 48),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
         decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: 0.13),
-          borderRadius: BorderRadius.circular(AppRadius.button),
-          border: Border.all(
-            color: Colors.white.withValues(alpha: 0.28),
-          ),
+          color: fill,
+          borderRadius: BorderRadius.circular(AppRadius.full),
         ),
         child: Row(
+          mainAxisSize: MainAxisSize.min,
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(
-              icon,
-              color: Colors.white,
-              size: 18,
+            Container(
+              width: 26,
+              height: 26,
+              decoration: BoxDecoration(
+                color: tint.withValues(alpha: 0.12),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(icon, color: AppColors.textPrimary, size: 14),
             ),
             const SizedBox(width: AppSpacing.xs),
             Flexible(
               child: Text(
                 label,
-                style: AppTextStyles.labelM.copyWith(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w900,
+                style: AppTextStyles.labelS.copyWith(
+                  color: AppColors.textPrimary,
+                  fontWeight: FontWeight.w700,
                   letterSpacing: 0,
                 ),
                 textAlign: TextAlign.center,
@@ -1391,6 +1363,60 @@ class _KycStatusBanner extends StatelessWidget {
   }
 }
 
+class _VtuShortcuts extends StatelessWidget {
+  const _VtuShortcuts();
+
+  static const _services = [
+    ('Airtime', 'airtime', AppRoutes.airtime, Color(0xFF2563EB)),
+    ('Data', 'data', AppRoutes.data, Color(0xFF0F766E)),
+    ('Electricity', 'electricity', AppRoutes.electricity, Color(0xFFD97706)),
+    ('Cable TV', 'cable-tv', AppRoutes.cable, Color(0xFFDB2777)),
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    AppColors.watch(context);
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      spacing: AppSpacing.sm,
+      children: [
+        for (final (label, asset, route, color) in _services)
+          Expanded(
+            child: TextButton(
+              onPressed: () => context.push(route),
+              style: TextButton.styleFrom(
+                padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 4),
+                foregroundColor: AppColors.textPrimary,
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    width: 56,
+                    height: 56,
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: color.withValues(alpha: 0.12),
+                      shape: BoxShape.circle,
+                    ),
+                    child: SvgPicture.asset(
+                      'assets/icons/feature-$asset.svg',
+                      colorFilter: ColorFilter.mode(color, BlendMode.srcIn),
+                      excludeFromSemantics: true,
+                    ),
+                  ),
+                  const SizedBox(height: AppSpacing.sm),
+                  Text(label,
+                      style: AppTextStyles.labelS, textAlign: TextAlign.center),
+                ],
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
 class _PromoBanner extends StatelessWidget {
   const _PromoBanner();
 
@@ -1423,7 +1449,7 @@ class _PromoBanner extends StatelessWidget {
           ),
         ),
         child: Container(
-          padding: const EdgeInsets.all(AppSpacing.md),
+          padding: const EdgeInsets.all(AppSpacing.lg),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(16),
             gradient: LinearGradient(
@@ -1485,191 +1511,6 @@ class _PromoBanner extends StatelessWidget {
         ),
       ),
     );
-  }
-}
-
-class _QuickActionsGrid extends StatelessWidget {
-  const _QuickActionsGrid();
-
-  @override
-  Widget build(BuildContext context) {
-    AppColors.watch(context);
-    final actions = [
-      const _ActionItem(
-        'Airtime',
-        Icons.signal_cellular_alt_rounded,
-        AppRoutes.airtime,
-        Color(0xFF2563EB),
-      ),
-      const _ActionItem(
-        'Data',
-        Icons.wifi_rounded,
-        AppRoutes.data,
-        Color(0xFF0F766E),
-      ),
-      const _ActionItem(
-        'Electricity',
-        Icons.electrical_services_rounded,
-        AppRoutes.electricity,
-        Color(0xFFD97706),
-      ),
-      const _ActionItem(
-        'Cable TV',
-        Icons.live_tv_rounded,
-        AppRoutes.cable,
-        Color(0xFFDB2777),
-      ),
-    ];
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Expanded(
-              child: Text(
-                'Top services',
-                style: AppTextStyles.headingL.copyWith(
-                  color: AppColors.textPrimary,
-                  fontWeight: FontWeight.w900,
-                ),
-              ),
-            ),
-            TapScale(
-              onTap: () => context.push(AppRoutes.more),
-              semanticLabel: 'More services',
-              borderRadius: BorderRadius.circular(AppRadius.full),
-              child: Container(
-                height: 36,
-                padding: const EdgeInsets.symmetric(
-                  horizontal: AppSpacing.sm,
-                ),
-                decoration: BoxDecoration(
-                  color: AppColors.surfaceVariant,
-                  borderRadius: BorderRadius.circular(AppRadius.full),
-                  border: Border.all(color: AppColors.border),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      'More',
-                      style: AppTextStyles.labelS.copyWith(
-                        color: AppColors.textPrimary,
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                    const SizedBox(width: 4),
-                    Icon(
-                      Icons.arrow_forward_rounded,
-                      size: 16,
-                      color: AppColors.primary,
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: AppSpacing.md),
-        LayoutBuilder(
-          builder: (context, constraints) {
-            final largeText = MediaQuery.textScalerOf(context).scale(1) > 1.35;
-            final columns = constraints.maxWidth < 360 || largeText ? 2 : 4;
-            return GridView.builder(
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              itemCount: actions.length,
-              gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: columns,
-                crossAxisSpacing: AppSpacing.sm,
-                mainAxisSpacing: AppSpacing.sm,
-                childAspectRatio: columns == 4 ? 0.82 : 1.35,
-              ),
-              itemBuilder: (context, index) {
-                final action = actions[index];
-                return _QuickActionTile(action: action);
-              },
-            );
-          },
-        ),
-      ],
-    );
-  }
-}
-
-class _QuickActionTile extends StatelessWidget {
-  final _ActionItem action;
-
-  const _QuickActionTile({required this.action});
-
-  @override
-  Widget build(BuildContext context) {
-    AppColors.watch(context);
-    return TapScale(
-      onTap: () => _openAction(context),
-      semanticLabel: action.label,
-      borderRadius: BorderRadius.circular(20),
-      pressedScale: 0.96,
-      child: Container(
-        width: double.infinity,
-        padding: const EdgeInsets.symmetric(
-          horizontal: 4,
-          vertical: AppSpacing.sm,
-        ),
-        decoration: BoxDecoration(
-          color: AppColors.surface,
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: AppColors.border),
-          boxShadow: [
-            BoxShadow(
-              color: action.color.withValues(alpha: 0.07),
-              blurRadius: 16,
-              offset: const Offset(0, 8),
-            ),
-          ],
-        ),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Container(
-              width: 46,
-              height: 46,
-              decoration: BoxDecoration(
-                color: action.color.withValues(alpha: 0.11),
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(
-                  color: action.color.withValues(alpha: 0.18),
-                  width: 1,
-                ),
-              ),
-              child: Icon(
-                action.icon,
-                color: action.color,
-                size: 24,
-              ),
-            ),
-            const SizedBox(height: 7),
-            Text(
-              action.label,
-              style: AppTextStyles.labelS.copyWith(
-                color: AppColors.textPrimary,
-                fontSize: 11.5,
-                fontWeight: FontWeight.w800,
-                height: 1.1,
-              ),
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              textAlign: TextAlign.center,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  void _openAction(BuildContext context) {
-    context.push(action.route);
   }
 }
 
@@ -1890,7 +1731,7 @@ class _RecentTransactionsSection extends StatelessWidget {
           actionLabel: 'View more',
           route: AppRoutes.activity,
         ),
-        const SizedBox(height: AppSpacing.sm),
+        const SizedBox(height: AppSpacing.md),
         if (items.isEmpty)
           Container(
             width: double.infinity,
@@ -1952,7 +1793,7 @@ class _ActivityList extends StatelessWidget {
             Divider(
               height: 1,
               color: AppColors.divider,
-              indent: 52,
+              indent: 40 + AppSpacing.md,
             ),
         ],
       ],
@@ -1972,7 +1813,7 @@ class _ActivityRow extends StatelessWidget {
       onTap: () => context.push(item.route),
       borderRadius: BorderRadius.circular(12),
       child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
+        padding: const EdgeInsets.symmetric(vertical: 12),
         child: Row(
           children: [
             Container(
@@ -1998,7 +1839,7 @@ class _ActivityRow extends StatelessWidget {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
-                  const SizedBox(height: 2),
+                  const SizedBox(height: AppSpacing.xs),
                   Text(
                     item.detail,
                     style: AppTextStyles.bodyS.copyWith(
@@ -2048,6 +1889,7 @@ class _SectionTitle extends StatelessWidget {
             ),
           ),
         ),
+        const SizedBox(width: AppSpacing.md),
         TapScale(
           onTap: route == null ? null : () => context.push(route!),
           borderRadius: BorderRadius.circular(AppRadius.full),
@@ -2156,20 +1998,6 @@ class _IconButton extends StatelessWidget {
       ),
     );
   }
-}
-
-class _ActionItem {
-  final String label;
-  final IconData icon;
-  final String route;
-  final Color color;
-
-  const _ActionItem(
-    this.label,
-    this.icon,
-    this.route,
-    this.color,
-  );
 }
 
 class _ActivityItem {
@@ -2297,7 +2125,7 @@ _ActivityItem _activityFromTransaction(HomeTransaction transaction) {
     detail: '$amount - $date',
     icon: _transactionIcon(transaction.type),
     color: _transactionColor(transaction.status),
-    route: AppRoutes.activity,
+    route: AppRoutes.receiptFor(transaction.type, transaction.reference),
   );
 }
 

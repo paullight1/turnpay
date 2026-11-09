@@ -74,6 +74,22 @@ class AppRoutes {
   static const receiveMoney = '/home/receive-money';
   static const transactionDetail = '/transaction/:reference';
 
+  static String receiptFor(String type, String reference) {
+    switch (type.toUpperCase()) {
+      case 'AIRTIME':
+      case 'DATA':
+      case 'CABLE':
+      case 'ELECTRICITY':
+        return vtuOrderFor(reference);
+      case 'INTERNAL_TRANSFER':
+        return sendReceiptFor(reference);
+      case 'WITHDRAW':
+        return withdrawReceiptFor(reference);
+      default:
+        return transactionDetailFor(reference);
+    }
+  }
+
   static String vtuOrderFor(String reference) {
     return '/vtu/order/${Uri.encodeComponent(reference)}';
   }

@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:intl/intl.dart';
 
 import '../../../core/theme/app_theme.dart';
 import '../../../services/vtu_service.dart';
+import 'receipt_download_button.dart';
 
 /// The only outcomes that are safe to show as final on the order detail page.
 ///
@@ -149,10 +151,10 @@ class VtuOrderDetailView extends StatelessWidget {
         if (needsSupport && onRefreshDetails != null) ...[
           const SizedBox(height: AppSpacing.sm),
           OutlinedButton.icon(
-              onPressed: onRefreshDetails,
+              onPressed: isChecking ? null : onRefreshDetails,
               style: _secondaryButtonStyle(),
               icon: const Icon(Icons.refresh_rounded),
-              label: const Text('Refresh details')),
+              label: Text(isChecking ? 'Refreshing…' : 'Refresh details')),
         ],
         if (onHistory != null || onSupport != null) ...[
           const SizedBox(height: AppSpacing.sm),
@@ -173,6 +175,29 @@ class VtuOrderDetailView extends StatelessWidget {
             ),
           ],
         ],
+        const SizedBox(height: AppSpacing.md),
+        ReceiptDownloadButton(
+          enabled: !isChecking,
+          details: {
+            'Status': switch (resolution) {
+              VtuOrderResolution.confirming =>
+                'Pending - confirmation required',
+              VtuOrderResolution.success => 'Confirmed',
+              VtuOrderResolution.failed => 'Failed',
+              VtuOrderResolution.reversed => 'Reversed',
+            },
+            if (_hasText(order.type)) 'Service': order.type!,
+            'Amount': _money(order.currency, order.amount),
+            if (_hasText(order.fee)) 'Fee': _money(order.currency, order.fee!),
+            if (_hasText(order.totalDebit))
+              'Total debited': _money(order.currency, order.totalDebit!),
+            'Provider': _displayProvider(order.provider),
+            'Reference': order.reference,
+            if (order.createdAt != null)
+              'Date (UTC)': DateFormat('d MMM yyyy, HH:mm')
+                  .format(order.createdAt!.toUtc()),
+          },
+        ),
         const SizedBox(height: AppSpacing.md),
         Text(
           needsSupport
@@ -215,9 +240,9 @@ class VtuOrderDetailView extends StatelessWidget {
       case VtuOrderResolution.success:
         return 'Your payment has been confirmed.';
       case VtuOrderResolution.failed:
-        return 'This VTU order was not completed. Check your activity for the final record.';
+        return 'This payment failed. The amount and any fees have been returned to your wallet.';
       case VtuOrderResolution.reversed:
-        return 'This VTU order was reversed. Check your activity for the final record.';
+        return 'The amount and any fees have been returned to your wallet.';
       case VtuOrderResolution.confirming:
         return 'Your payment is being confirmed. We’ll update this page when the final result is available. Don’t repeat this purchase while it’s unresolved.';
     }
@@ -241,39 +266,28 @@ class VtuOrderLoadingView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     AppColors.watch(context);
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(AppSpacing.lg),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(AppRadius.lg),
-        border: Border.all(color: AppColors.border),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
+    return Semantics(
+      label: 'Loading payment receipt',
+      liveRegion: true,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          SizedBox(
-            width: 24,
-            height: 24,
-            child: CircularProgressIndicator(
-              strokeWidth: 2.5,
-              color: AppColors.primary,
+          LinearProgressIndicator(color: AppColors.primary),
+          const SizedBox(height: AppSpacing.md),
+          Text('Loading payment details', style: AppTextStyles.headingM),
+          const SizedBox(height: AppSpacing.xs),
+          Text('Fetching the latest status for this order.',
+              style: AppTextStyles.bodyM),
+          const SizedBox(height: AppSpacing.lg),
+          for (final height in [180.0, 130.0, 64.0])
+            Container(
+              height: height,
+              margin: const EdgeInsets.only(bottom: AppSpacing.md),
+              decoration: BoxDecoration(
+                color: AppColors.surfaceVariant,
+                borderRadius: BorderRadius.circular(AppRadius.lg),
+              ),
             ),
-          ),
-          const SizedBox(width: AppSpacing.md),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('Loading payment details', style: AppTextStyles.headingM),
-                const SizedBox(height: AppSpacing.xs),
-                Text(
-                  'Fetching the latest status for this order.',
-                  style: AppTextStyles.bodyM,
-                ),
-              ],
-            ),
-          ),
         ],
       ),
     );
@@ -359,53 +373,33 @@ class _StatusHero extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          Text('PAYMENT RECEIPT', style: AppTextStyles.labelS),
+          const SizedBox(height: AppSpacing.md),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(_money(order.currency, order.amount),
+                style: AppTextStyles.headingXL),
+          ),
+          const SizedBox(height: AppSpacing.lg),
           Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Container(
-                width: 52,
-                height: 52,
-                decoration: BoxDecoration(
-                  color: tone.background,
-                  shape: BoxShape.circle,
-                ),
-                child: isChecking
-                    ? Padding(
-                        padding: const EdgeInsets.all(15),
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2.4,
-                          color: tone.foreground,
-                        ),
-                      )
-                    : Icon(tone.icon, color: tone.foreground, size: 27),
-              ),
-              const SizedBox(width: AppSpacing.md),
+              Icon(tone.icon, color: tone.foreground, size: 24),
+              const SizedBox(width: AppSpacing.sm),
               Expanded(
                 child: Semantics(
                   liveRegion: true,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(headline, style: AppTextStyles.headingL),
-                      const SizedBox(height: AppSpacing.xs),
-                      Text(explanation, style: AppTextStyles.bodyM),
-                    ],
-                  ),
+                  child: Text(headline, style: AppTextStyles.headingM),
                 ),
               ),
             ],
           ),
-          const SizedBox(height: AppSpacing.lg),
-          Text('Amount', style: AppTextStyles.labelS),
-          const SizedBox(height: AppSpacing.xs),
-          FittedBox(
-            fit: BoxFit.scaleDown,
-            alignment: Alignment.centerLeft,
-            child: Text(
-              _money(order.currency, order.amount),
-              style: AppTextStyles.headingXL,
-            ),
-          ),
+          const SizedBox(height: AppSpacing.sm),
+          Text(explanation, style: AppTextStyles.bodyM),
+          if (isChecking) ...[
+            const SizedBox(height: AppSpacing.md),
+            LinearProgressIndicator(color: tone.foreground),
+          ],
           if (_hasText(order.targetMasked)) ...[
             const SizedBox(height: AppSpacing.md),
             Row(
@@ -444,10 +438,25 @@ class _PaymentSummary extends StatelessWidget {
         children: [
           Text('Payment summary', style: AppTextStyles.headingM),
           const SizedBox(height: AppSpacing.sm),
+          if (_hasText(order.type))
+            _SummaryRow(
+                label: 'Service', value: order.type!.replaceAll('_', ' ')),
+          if (order.createdAt != null)
+            _SummaryRow(
+                label: 'Date',
+                value: DateFormat('d MMM yyyy, HH:mm')
+                    .format(order.createdAt!.toLocal())),
           _SummaryRow(
               label: 'Provider', value: _displayProvider(order.provider)),
           _SummaryRow(
               label: 'Amount', value: _money(order.currency, order.amount)),
+          if (_hasText(order.fee))
+            _SummaryRow(
+                label: 'Fee', value: _money(order.currency, order.fee!)),
+          if (_hasText(order.totalDebit))
+            _SummaryRow(
+                label: 'Total debited',
+                value: _money(order.currency, order.totalDebit!)),
           if (_hasText(order.targetMasked))
             _SummaryRow(label: 'Recipient', value: order.targetMasked!),
         ],

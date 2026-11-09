@@ -66,6 +66,10 @@ class VtuOrderStatus {
   final String? purchasedCode;
   final bool actionRequired;
   final String? customerAction;
+  final String? type;
+  final String? fee;
+  final String? totalDebit;
+  final DateTime? createdAt;
 
   const VtuOrderStatus({
     required this.orderId,
@@ -80,6 +84,10 @@ class VtuOrderStatus {
     required this.purchasedCode,
     this.actionRequired = false,
     this.customerAction,
+    this.type,
+    this.fee,
+    this.totalDebit,
+    this.createdAt,
   });
 
   factory VtuOrderStatus.fromJson(Map<String, dynamic> json) {
@@ -96,6 +104,10 @@ class VtuOrderStatus {
       purchasedCode: json['purchasedCode'] as String?,
       actionRequired: json['actionRequired'] == true,
       customerAction: json['customerAction'] as String?,
+      type: json['type'] as String?,
+      fee: json['fee']?.toString(),
+      totalDebit: json['totalDebit']?.toString(),
+      createdAt: DateTime.tryParse(json['createdAt']?.toString() ?? ''),
     );
   }
 }

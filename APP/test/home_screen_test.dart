@@ -83,7 +83,12 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.textContaining('Good '), findsOneWidget);
-    expect(find.text('Top services'), findsOneWidget);
+    expect(find.text('Top services'), findsNothing);
+    expect(find.text('Your wallets'), findsNothing);
+    expect(find.text('•••• 6789'), findsOneWidget);
+    for (final label in ['Airtime', 'Data', 'Electricity', 'Cable TV']) {
+      expect(find.widgetWithText(TextButton, label), findsOneWidget);
+    }
     expect(find.text('Ada Lovelace'), findsWidgets);
 
     await tester.tap(find.byIcon(Icons.visibility_outlined).first);
@@ -133,7 +138,7 @@ void main() {
     expect(find.text('125,000.50'), findsOneWidget);
   });
 
-  testWidgets('V1 wallet card shows one full-width Add funds action',
+  testWidgets('V1 wallet card opens funding, history, and more',
       (tester) async {
     final bundle = buildTrustPayTestBundle();
 
@@ -151,6 +156,15 @@ void main() {
               path: AppRoutes.receiveMoney,
               builder: (context, state) =>
                   const Scaffold(body: Text('Funding account opened')),
+            ),
+            GoRoute(
+              path: AppRoutes.activity,
+              builder: (_, __) =>
+                  const Scaffold(body: Text('Wallet history opened')),
+            ),
+            GoRoute(
+              path: AppRoutes.more,
+              builder: (_, __) => const Scaffold(body: Text('Services opened')),
             ),
           ],
         ),
@@ -170,7 +184,21 @@ void main() {
 
     final actionSize = tester.getSize(addFundsAction.first);
     expect(actionSize.height, greaterThanOrEqualTo(48));
-    expect(actionSize.width, greaterThan(220));
+    final history = find.text('History');
+    expect(history, findsOneWidget);
+    final more = find.text('More').first;
+
+    await tester.tap(history);
+    await tester.pumpAndSettle();
+    expect(find.text('Wallet history opened'), findsOneWidget);
+    tester.state<NavigatorState>(find.byType(Navigator).first).pop();
+    await tester.pumpAndSettle();
+
+    await tester.tap(more);
+    await tester.pumpAndSettle();
+    expect(find.text('Services opened'), findsOneWidget);
+    tester.state<NavigatorState>(find.byType(Navigator).first).pop();
+    await tester.pumpAndSettle();
 
     await tester.tap(find.text('Add funds').first);
     await tester.pumpAndSettle();
@@ -263,7 +291,7 @@ void main() {
     expect(find.text('Request account'), findsOneWidget);
   });
 
-  testWidgets('home screen opens the feature hub from quick actions',
+  testWidgets('home screen opens the feature hub from the wallet actions',
       (tester) async {
     final bundle = buildTrustPayTestBundle();
 

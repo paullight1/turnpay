@@ -50,13 +50,23 @@ void main() {
       expect(exchangeAmountInWords('0', 'NGN'), isNull);
     });
 
-    test('requires send recipient email before submission', () {
+    test('rejects a recipient without a TrustPay account number or email', () {
       final error = MoneyActionFormValidator.validateFields(
         kind: MoneyActionKind.send,
         recipient: 'not-an-email',
       );
 
       expect(error, 'Enter a 10-digit TrustPay account number or valid email.');
+    });
+
+    test('accepts a 10-digit TrustPay recipient account number', () {
+      expect(
+        MoneyActionFormValidator.validateFields(
+          kind: MoneyActionKind.send,
+          recipient: '0123456789',
+        ),
+        isNull,
+      );
     });
 
     test('requires withdrawal account fields before submission', () {

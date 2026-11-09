@@ -10,8 +10,11 @@ import 'package:uuid/uuid.dart';
 import '../../../services/api_client.dart';
 import '../../../core/money/money_value.dart';
 import '../../../services/auth_service.dart';
+import 'receipt_scan_images.dart';
 
 const int manualExchangeMaxProofBytes = 8 * 1024 * 1024;
+
+typedef ManualReceiptDetails = ({String? receiptName, String? bankReference});
 
 enum ManualSettlementMode { wallet, bank, momo }
 
@@ -80,6 +83,8 @@ class ManualGhanaRecipientResolution {
   }
 }
 
+final _nigerianBankCode = RegExp(r'^[A-Za-z0-9_-]{1,32}$');
+
 class ManualNigerianBankOption {
   final String name;
   final String code;
@@ -89,7 +94,7 @@ class ManualNigerianBankOption {
   factory ManualNigerianBankOption.fromJson(Map<String, dynamic> json) {
     final name = _requiredString(json['name'], 'Nigerian bank name');
     final code = _requiredString(json['code'], 'Nigerian bank code');
-    if (name.length > 120 || !RegExp(r'^\d{3,6}$').hasMatch(code)) {
+    if (name.length > 120 || !_nigerianBankCode.hasMatch(code)) {
       throw const FormatException('Invalid Nigerian bank option.');
     }
     return ManualNigerianBankOption(name: name, code: code);
@@ -426,6 +431,8 @@ class ManualExchangeOrder {
   final String? destinationInstitution;
   final String? destinationAccountMasked;
   final String? destinationName;
+  final String? receiptName;
+  final bool supportsReceiptName;
   final String? bankReference;
   final String? depositReference;
   final String? payoutReference;
@@ -455,6 +462,8 @@ class ManualExchangeOrder {
     required this.destinationInstitution,
     required this.destinationAccountMasked,
     required this.destinationName,
+    this.receiptName,
+    this.supportsReceiptName = false,
     required this.bankReference,
     required this.depositReference,
     required this.payoutReference,
@@ -528,6 +537,8 @@ class ManualExchangeOrder {
       ),
       destinationName:
           _nullableString(json['destinationName'], 'destination name'),
+      receiptName: _nullableString(json['receiptName'], 'name on receipt'),
+      supportsReceiptName: json.containsKey('receiptName'),
       bankReference: _nullableString(json['bankReference'], 'bank reference'),
       depositReference:
           _nullableString(json['depositReference'], 'deposit reference'),
@@ -731,15 +742,9 @@ class ManualExchangeAttemptStore {
     );
   }
 
-  Future<ManualExchangeAttempt?> pendingCreate() async {
-    final storageKey = await _storageKey();
-    return _withStorageLock(storageKey, () async {
-      final attempts = (await _readAttempts(storageKey)).toList();
-      for (final attempt in attempts) {
-        if (attempt.action == 'create') return attempt;
-      }
-      return null;
-    });
+  Future<List<ManualExchangeAttempt>> pendingCreates() async {
+    final attempts = await readAttempts();
+    return attempts.where((attempt) => attempt.action == 'create').toList();
   }
 
   Future<List<ManualExchangeAttempt>> readForOrder({
@@ -778,11 +783,8 @@ class ManualExchangeAttemptStore {
       });
       if (match.isNotEmpty) return match.first.key;
 
-      // A create request represents a user-confirmed financial intent. Until
-      // its server outcome is known, a replacement amount or destination must
-      // not create a second intent in the same account journal.
-      if ((normalizedAction == 'create' ||
-              normalizedAction.endsWith('-create')) &&
+      // Provider-specific flows still recover one outstanding create at a time.
+      if (normalizedAction.endsWith('-create') &&
           attempts.any((attempt) => attempt.action == normalizedAction)) {
         throw const FormatException(
           'A previous exchange attempt is still pending. Retry it before starting another exchange.',
@@ -937,9 +939,31 @@ class ManualExchangeService {
   Future<void> clearReceiptStep(String orderId) =>
       _attemptStore.clearReceiptStep(orderId);
 
-  Future<ManualExchangeAttempt?> pendingCreateAttempt() {
-    return _attemptStore.pendingCreate();
+  Future<List<ManualExchangeAttempt>> pendingCreateAttempts() async =>
+      (await _attemptStore.readAttempts())
+          .where((attempt) =>
+              attempt.action == 'create' || attempt.action == 'draft')
+          .toList();
+
+  Future<void> saveAmountDraft(String currency, String amount,
+      {ManualExchangeAttempt? previous}) async {
+    _currencyValue(currency, fieldName: 'source currency');
+    _validateCreateAmount(amount);
+    final previousDetails =
+        previous == null ? null : _mapValue(jsonDecode(previous.fingerprint));
+    final fingerprint = jsonEncode({
+      'sourceCurrency': currency,
+      'amount': amount,
+      'draftId': previousDetails?['draftId'] ?? const Uuid().v4(),
+    });
+    await _attemptStore.keyFor(action: 'draft', fingerprint: fingerprint);
+    if (previous != null && previous.fingerprint != fingerprint) {
+      await removeAmountDraft(previous);
+    }
   }
+
+  Future<void> removeAmountDraft(ManualExchangeAttempt attempt) =>
+      _attemptStore.resolve(action: 'draft', fingerprint: attempt.fingerprint);
 
   Future<ManualExchangeReminder> requestReviewReminder(String orderId) async {
     final id = _requireText(orderId, 'order id');
@@ -1050,12 +1074,15 @@ class ManualExchangeService {
     if (source == null) {
       throw const FormatException('Nigerian banks could not be read.');
     }
-    final banks = source
-        .whereType<Map>()
-        .map((item) =>
-            ManualNigerianBankOption.fromJson(Map<String, dynamic>.from(item)))
-        .toList(growable: false)
-      ..sort((a, b) => a.name.compareTo(b.name));
+    final banks = <ManualNigerianBankOption>[];
+    for (final item in source.whereType<Map<String, dynamic>>()) {
+      try {
+        banks.add(ManualNigerianBankOption.fromJson(item));
+      } on FormatException {
+        // An unusable entry should not hide the rest of the directory.
+      }
+    }
+    banks.sort((a, b) => a.name.compareTo(b.name));
     if (banks.isEmpty) {
       throw const FormatException('No Nigerian bank is available.');
     }
@@ -1071,7 +1098,7 @@ class ManualExchangeService {
     if (!RegExp(r'^\d{10}$').hasMatch(normalizedAccount)) {
       throw const FormatException('Enter a ten-digit Nigerian account number.');
     }
-    if (!RegExp(r'^\d{3,6}$').hasMatch(normalizedBankCode)) {
+    if (!_nigerianBankCode.hasMatch(normalizedBankCode)) {
       throw const FormatException('Choose an available Nigerian bank.');
     }
     final response = await _apiClient.client.post<dynamic>(
@@ -1135,6 +1162,25 @@ class ManualExchangeService {
 
   Future<ManualExchangeOrder> fetchOrder(String orderId) => getOrder(orderId);
 
+  Future<ManualExchangeOrder?> recoverCreatedOrder(
+      ManualExchangeAttempt attempt) async {
+    final ManualExchangeOrder order;
+    try {
+      final response = await _apiClient.client.get<dynamic>(
+        '/api/exchange/manual-orders/recovery/created',
+        options: Options(headers: {'Idempotency-Key': attempt.key}),
+      );
+      order = ManualExchangeOrder.fromJson(_orderMap(response.data));
+    } on DioException catch (error) {
+      // Older APIs and requests that have not committed both return 404.
+      if (error.response?.statusCode == 404) return null;
+      rethrow;
+    }
+    await _attemptStore.resolve(
+        action: 'create', fingerprint: attempt.fingerprint);
+    return order;
+  }
+
   Future<ManualExchangeOrder> createOrder({
     String sourceCurrency = 'NGN',
     required String amount,
@@ -1171,12 +1217,8 @@ class ManualExchangeService {
       );
     }
 
-    final pending = await _attemptStore.pendingCreate();
-    final pendingFields =
-        pending == null ? null : jsonDecode(pending.fingerprint) as Map;
-    final useDirectBankContract = sourceCurrency == 'GHS' &&
-        settlementMode == ManualSettlementMode.bank &&
-        (pendingFields == null || pendingFields['deliveryPolicyVersion'] == 2);
+    final useDirectBankContract =
+        sourceCurrency == 'GHS' && settlementMode == ManualSettlementMode.bank;
     final fields = <String, dynamic>{
       if (sourceCurrency == 'GHS') 'sourceCurrency': sourceCurrency,
       'amount': normalizedAmount,
@@ -1201,6 +1243,33 @@ class ManualExchangeService {
       fingerprint: fingerprint,
     );
 
+    return _submitCreateOrder(
+        fields, fingerprint, idempotencyKey, normalizedPin);
+  }
+
+  Future<ManualExchangeOrder> resumeCreateOrder(
+      ManualExchangeAttempt attempt, String transactionPin) async {
+    final pending = await _attemptStore.pendingCreates();
+    if (!pending.any((current) =>
+        current.key == attempt.key &&
+        current.fingerprint == attempt.fingerprint)) {
+      throw StateError(
+          'This saved request is no longer pending. Open Recent exchanges to refresh its status.');
+    }
+    final pin = _requireText(transactionPin, 'transaction PIN');
+    if (!RegExp(r'^\d{4,6}$').hasMatch(pin)) {
+      throw const FormatException('Enter a valid transaction PIN.');
+    }
+    final fields = _mapValue(jsonDecode(attempt.fingerprint));
+    return _submitCreateOrder(fields, attempt.fingerprint, attempt.key, pin);
+  }
+
+  Future<ManualExchangeOrder> _submitCreateOrder(
+    Map<String, dynamic> fields,
+    String fingerprint,
+    String idempotencyKey,
+    String normalizedPin,
+  ) async {
     try {
       final response = await _apiClient.client.post<dynamic>(
         '/api/exchange/manual-orders',
@@ -1223,6 +1292,23 @@ class ManualExchangeService {
         await _attemptStore.resolve(
           action: 'create',
           fingerprint: fingerprint,
+        );
+      }
+      if (fields['settlementMode'] == 'WALLET' &&
+          error is DioException &&
+          authErrorMessage(error, '')
+              .contains('Tier 1 transactions are temporarily unavailable')) {
+        throw const FormatException(
+          'This older wallet request could not be reopened. If you already transferred, contact support with your receipt before sending anything again.',
+        );
+      }
+      if (fields['deliveryPolicyVersion'] == 2 &&
+          error is DioException &&
+          error.response?.statusCode == 400 &&
+          authErrorMessage(error, '')
+              .contains('property deliveryPolicyVersion should not exist')) {
+        throw const FormatException(
+          'Cedis to naira is temporarily unavailable. No transfer instructions were issued. Check Exchange again later.',
         );
       }
       rethrow;
@@ -1284,13 +1370,64 @@ class ManualExchangeService {
     }
   }
 
+  Future<ManualReceiptDetails> scanReceipt({
+    required String orderId,
+    required ManualExchangeProofFile file,
+    CancelToken? cancelToken,
+  }) async {
+    final id = _requireText(orderId, 'order id');
+    final type = _normalizeContentType(file.contentType);
+    _validateProofMetadata(
+      fileName: file.fileName,
+      contentType: type,
+      fileSize: file.fileSize,
+    );
+    String? receiptName;
+    String? bankReference;
+    try {
+      await for (final image in receiptScanImages(file.bytes, type)) {
+        final response = await _apiClient.client.post<dynamic>(
+          '/api/exchange/manual-orders/${Uri.encodeComponent(id)}/receipt-scan',
+          data: FormData.fromMap({
+            'image': MultipartFile.fromBytes(image, filename: 'receipt.png'),
+          }),
+          options: Options(receiveTimeout: const Duration(seconds: 25)),
+          cancelToken: cancelToken,
+        );
+        final result = _mapValue(response.data);
+        receiptName ??=
+            _nullableString(result['receiptName'], 'name on receipt');
+        bankReference ??=
+            _nullableString(result['bankReference'], 'bank reference');
+        if (receiptName != null && bankReference != null) break;
+      }
+    } catch (_) {
+      if (receiptName == null && bankReference == null) rethrow;
+    }
+    return (receiptName: receiptName, bankReference: bankReference);
+  }
+
   Future<ManualExchangeOrder> submitProof({
     required String orderId,
     required ManualExchangeProofFile file,
-    required String bankReference,
+    String? bankReference,
+    String? receiptName,
   }) async {
     final normalizedOrderId = _requireText(orderId, 'order id');
-    final normalizedReference = _normalizeBankReference(bankReference);
+    final reference = bankReference?.trim();
+    final normalizedReference = reference == null || reference.isEmpty
+        ? null
+        : _normalizeBankReference(reference);
+    final name = receiptName?.trim();
+    if (name != null &&
+        (name.isEmpty ||
+            name.length > 120 ||
+            RegExp(r'[\x00-\x1f\x7f-\x9f]').hasMatch(name))) {
+      throw const FormatException('Enter the name shown on your receipt.');
+    }
+    if (name == null && normalizedReference == null) {
+      throw const FormatException('Enter the name shown on your receipt.');
+    }
     final normalizedType = _normalizeContentType(file.contentType);
     _validateProofMetadata(
       fileName: file.fileName,
@@ -1298,51 +1435,54 @@ class ManualExchangeService {
       fileSize: file.fileSize,
     );
 
-    // If the app was interrupted after bytes reached object storage but before
-    // the proof response arrived, recover the same object key and idempotency
-    // key. This avoids creating a second proof attempt after a process restart.
-    final pendingProof = await _pendingProofFor(
+    // Match retries to the same receipt bytes and name without storing the name.
+    final receiptDigest = name == null
+        ? null
+        : sha256
+            .convert(utf8.encode(jsonEncode([
+              name,
+              sha256.convert(file.bytes).toString(),
+            ])))
+            .toString();
+    var objectKey = await _pendingProofFor(
       orderId: normalizedOrderId,
       bankReference: normalizedReference,
+      receiptDigest: receiptDigest,
     );
-    if (pendingProof != null) {
-      return attachProof(
+    if (objectKey == null) {
+      final upload = await requestProofUploadUrl(
         orderId: normalizedOrderId,
-        objectKey: pendingProof,
-        bankReference: normalizedReference,
+        fileName: file.fileName,
+        contentType: normalizedType,
+        fileSize: file.fileSize,
       );
+      await uploadProofBytes(
+        upload: upload,
+        contentType: normalizedType,
+        bytes: file.bytes,
+      );
+      objectKey = upload.objectKey;
     }
-
-    final uploadUrl = await requestProofUploadUrl(
-      orderId: normalizedOrderId,
-      fileName: file.fileName,
-      contentType: normalizedType,
-      fileSize: file.fileSize,
-    );
-    await uploadProofBytes(
-      upload: uploadUrl,
-      contentType: normalizedType,
-      bytes: file.bytes,
-    );
 
     final fingerprint = jsonEncode({
       'orderId': normalizedOrderId,
-      'objectKey': uploadUrl.objectKey,
-      'bankReference': normalizedReference,
+      'objectKey': objectKey,
+      if (normalizedReference != null) 'bankReference': normalizedReference,
+      if (receiptDigest != null) 'receiptDigest': receiptDigest,
     });
     final idempotencyKey = await _attemptStore.keyFor(
       action: 'proof',
       fingerprint: fingerprint,
       orderId: normalizedOrderId,
     );
-
     try {
       final response = await _apiClient.client.post<dynamic>(
         '/api/exchange/manual-orders/${Uri.encodeComponent(normalizedOrderId)}/proof',
         options: Options(headers: {'Idempotency-Key': idempotencyKey}),
         data: {
-          'objectKey': uploadUrl.objectKey,
-          'bankReference': normalizedReference,
+          'objectKey': objectKey,
+          if (normalizedReference != null) 'bankReference': normalizedReference,
+          if (name != null) 'receiptName': name,
         },
       );
       final order = ManualExchangeOrder.fromJson(_orderMap(response.data));
@@ -1366,7 +1506,8 @@ class ManualExchangeService {
 
   Future<String?> _pendingProofFor({
     required String orderId,
-    required String bankReference,
+    required String? bankReference,
+    required String? receiptDigest,
   }) async {
     final attempts = await _attemptStore.readForOrder(
       action: 'proof',
@@ -1380,62 +1521,20 @@ class ManualExchangeService {
         throw const FormatException('Manual exchange retry data is corrupt.');
       }
       if (decoded is! Map ||
-          decoded['bankReference'] is! String ||
+          (decoded['bankReference'] != null &&
+              decoded['bankReference'] is! String) ||
+          (decoded['receiptDigest'] != null &&
+              decoded['receiptDigest'] is! String) ||
           decoded['objectKey'] is! String ||
           (decoded['objectKey'] as String).trim().isEmpty) {
         throw const FormatException('Manual exchange retry data is corrupt.');
       }
-      if (decoded['bankReference'] == bankReference) {
+      if (decoded['bankReference'] == bankReference &&
+          decoded['receiptDigest'] == receiptDigest) {
         return (decoded['objectKey'] as String).trim();
       }
     }
     return null;
-  }
-
-  Future<ManualExchangeOrder> attachProof({
-    required String orderId,
-    required String objectKey,
-    required String bankReference,
-  }) async {
-    final normalizedOrderId = _requireText(orderId, 'order id');
-    final normalizedObjectKey = _requireText(objectKey, 'object key');
-    final normalizedReference = _normalizeBankReference(bankReference);
-    final fingerprint = jsonEncode({
-      'orderId': normalizedOrderId,
-      'objectKey': normalizedObjectKey,
-      'bankReference': normalizedReference,
-    });
-    final idempotencyKey = await _attemptStore.keyFor(
-      action: 'proof',
-      fingerprint: fingerprint,
-      orderId: normalizedOrderId,
-    );
-    try {
-      final response = await _apiClient.client.post<dynamic>(
-        '/api/exchange/manual-orders/${Uri.encodeComponent(normalizedOrderId)}/proof',
-        options: Options(headers: {'Idempotency-Key': idempotencyKey}),
-        data: {
-          'objectKey': normalizedObjectKey,
-          'bankReference': normalizedReference,
-        },
-      );
-      final order = ManualExchangeOrder.fromJson(_orderMap(response.data));
-      await _attemptStore.resolve(
-        action: 'proof',
-        fingerprint: fingerprint,
-        orderId: normalizedOrderId,
-      );
-      return order;
-    } catch (error) {
-      if (_canResolveAfterServerError(error)) {
-        await _attemptStore.resolve(
-          action: 'proof',
-          fingerprint: fingerprint,
-          orderId: normalizedOrderId,
-        );
-      }
-      rethrow;
-    }
   }
 
   Future<String> getProofUrl(String orderId) async {
@@ -1663,6 +1762,7 @@ String _attemptAction(dynamic value) {
   final action = _requiredString(value, 'retry action');
   const actions = {
     'create',
+    'draft',
     'upload-url',
     'proof',
     'review-reminder',

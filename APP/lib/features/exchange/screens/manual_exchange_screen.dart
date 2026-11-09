@@ -11,19 +11,18 @@ import '../../../core/router/app_router.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/widgets/tp_page_header.dart';
 import '../../../services/auth_service.dart';
-import '../../../services/kyc_service.dart';
-import '../../home/widgets/kyc_status_presenter.dart';
 import '../../../services/transaction_security_service.dart';
 import '../services/manual_exchange_service.dart';
 import '../services/ghana_bank_directory.dart';
+import '../widgets/exchange_currency_flag.dart';
 import '../widgets/manual_exchange_history.dart';
+import '../widgets/nigerian_bank_mark.dart';
 import '../../security/screens/transaction_security_screen.dart';
 
 class ManualExchangeScreen extends StatefulWidget {
   final ManualExchangeService? service;
   final TransactionSecurityService? securityService;
   final AuthService? authService;
-  final KycService? kycService;
   final bool showBackButton;
   final bool active;
 
@@ -32,7 +31,6 @@ class ManualExchangeScreen extends StatefulWidget {
     this.service,
     this.securityService,
     this.authService,
-    this.kycService,
     this.showBackButton = true,
     this.active = true,
   });
@@ -46,7 +44,6 @@ class _ManualExchangeScreenState extends State<ManualExchangeScreen>
   late final ManualExchangeService _service;
   late final TransactionSecurityService _securityService;
   late final AuthService _authService;
-  late final KycService _kycService;
   late Future<_ManualExchangePageData> _pageFuture;
   ManualExchangeConfig? _currentConfig;
 
@@ -64,7 +61,9 @@ class _ManualExchangeScreenState extends State<ManualExchangeScreen>
   int _step = 0;
   bool _isCreating = false;
   bool _isRefreshing = false;
-  bool _pendingDraftRestored = false;
+  ManualExchangeAttempt? _recoveryAttempt;
+  ManualExchangeAttempt? _amountDraft;
+  bool get _pendingDraftRestored => _recoveryAttempt != null;
   bool _nigerianDestinationVerified = false;
   String? _formMessage;
   Timer? _backgroundRefresh;
@@ -76,7 +75,6 @@ class _ManualExchangeScreenState extends State<ManualExchangeScreen>
     _service = widget.service ?? ManualExchangeService();
     _securityService = widget.securityService ?? TransactionSecurityService();
     _authService = widget.authService ?? AuthService();
-    _kycService = widget.kycService ?? KycService();
     _pageFuture = _loadPage();
     _backgroundRefresh = Timer.periodic(const Duration(seconds: 15), (_) {
       if (mounted && widget.active && !_isCreating) _refresh();
@@ -120,25 +118,21 @@ class _ManualExchangeScreenState extends State<ManualExchangeScreen>
     });
   }
 
-  bool _canOpenDirection(ManualExchangeConfig config, String currency) =>
-      config.enabled && config.supportedSourceCurrencies.contains(currency);
-
-  List<ManualSettlementMode> _receivingModesFor(
+  List<ManualSettlementMode> _destinationModes(
       ManualExchangeConfig config, String currency) {
     final modes = config.deliveryModesFor(currency);
     if (modes.isNotEmpty) return modes;
-    if (currency == 'GHS' && config.supportedSourceCurrencies.contains('GHS')) {
-      return const [ManualSettlementMode.bank];
-    }
-    return modes;
+    return currency == 'GHS'
+        ? const [ManualSettlementMode.bank]
+        : const [ManualSettlementMode.momo, ManualSettlementMode.bank];
   }
 
   Future<_ManualExchangePageData> _loadPage() async {
     final results = await Future.wait<dynamic>([
       _service.fetchConfig(),
-      _loadPendingCreate(),
+      _loadPendingCreates(),
     ]);
-    final pendingCreate = results[1] as ManualExchangeAttempt?;
+    final pendingCreates = results[1] as List<ManualExchangeAttempt>;
     final config = results[0] as ManualExchangeConfig;
     _currentConfig = config;
     if (!_pendingDraftRestored) {
@@ -147,7 +141,7 @@ class _ManualExchangeScreenState extends State<ManualExchangeScreen>
             config.supportedSourceCurrencies.where(config.canExchangeFrom);
         if (available.isNotEmpty) _sourceCurrency = available.first;
       }
-      final modes = config.deliveryModesFor(_sourceCurrency);
+      final modes = _destinationModes(config, _sourceCurrency);
 
       final preserveReceivingSelection = _step == 2 &&
           _settlementModeChosen &&
@@ -162,56 +156,149 @@ class _ManualExchangeScreenState extends State<ManualExchangeScreen>
     return _ManualExchangePageData(
       config: results[0] as ManualExchangeConfig,
       orders: _service.listOrders(),
-      pendingCreate: pendingCreate,
+      pendingCreates: pendingCreates,
     );
   }
 
-  Future<ManualExchangeAttempt?> _loadPendingCreate() async {
+  Future<List<ManualExchangeAttempt>> _loadPendingCreates() async {
     try {
-      return await _service.pendingCreateAttempt();
+      return await _service.pendingCreateAttempts();
     } on StateError {
       // A screen test or an unauthenticated shell can be rendered before a
       // token exists. The protected API remains the source of truth then.
-      return null;
+      return const [];
     }
   }
 
-  void _openPendingCreate(ManualExchangeAttempt attempt) {
+  void _startAmount(String currency, {ManualExchangeAttempt? draft}) {
     setState(() {
-      _restorePendingCreate(attempt);
+      _sourceCurrency = currency;
+      _amountDraft = draft;
+      _amountController.text = draft == null
+          ? ''
+          : (jsonDecode(draft.fingerprint) as Map)['amount'] as String;
+      _institutionController.clear();
+      _accountController.clear();
+      _nameController.clear();
+      _selectedGhanaBank = null;
+      _nigerianDestinationVerified = false;
+      final modes = _destinationModes(_currentConfig!, currency);
+      if (modes.isNotEmpty) _settlementMode = modes.first;
+      _settlementModeChosen = modes.length <= 1;
+      _step = 1;
       _formMessage = null;
     });
     _centerStep();
   }
 
+  Future<void> _saveAmountDraft() async {
+    if (_isCreating) return;
+    FocusManager.instance.primaryFocus?.unfocus();
+    setState(() {
+      _isCreating = true;
+      _formMessage = null;
+    });
+    try {
+      await _service.saveAmountDraft(
+        _sourceCurrency,
+        _amountController.text.trim().replaceAll(',', ''),
+        previous: _amountDraft,
+      );
+      if (!mounted) return;
+      setState(() {
+        _amountDraft = null;
+        _step = 0;
+        _pageFuture = _loadPage();
+      });
+      _centerStep();
+    } catch (error) {
+      if (mounted) {
+        setState(() {
+          _formMessage = manualExchangeErrorMessage(
+              error, 'Could not save this exchange.');
+        });
+      }
+    } finally {
+      if (mounted) setState(() => _isCreating = false);
+    }
+  }
+
+  Future<void> _openPendingCreate(ManualExchangeAttempt attempt) async {
+    if (_isCreating) return;
+    if (attempt.action == 'draft') {
+      final details = jsonDecode(attempt.fingerprint) as Map;
+      _startAmount(details['sourceCurrency'] == 'GHS' ? 'GHS' : 'NGN',
+          draft: attempt);
+      return;
+    }
+    setState(() {
+      _amountDraft = null;
+      _restorePendingCreate(attempt);
+      _formMessage = null;
+      _isCreating = true;
+    });
+    _centerStep();
+    try {
+      final order = await _service.recoverCreatedOrder(attempt);
+      if (mounted && order != null) await _openCreatedOrder(order);
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _formMessage = manualExchangeErrorMessage(
+            error, 'Could not check this exchange. Try again when connected.');
+      });
+    } finally {
+      if (mounted) setState(() => _isCreating = false);
+    }
+  }
+
+  Future<void> _openCreatedOrder(ManualExchangeOrder order) async {
+    await context.push(AppRoutes.exchangeOrderFor(order.id), extra: order);
+    if (!mounted) return;
+    setState(() {
+      _step = 0;
+      _recoveryAttempt = null;
+      _amountDraft = null;
+      _amountController.clear();
+      _institutionController.clear();
+      _accountController.clear();
+      _nameController.clear();
+      _nigerianDestinationVerified = false;
+      _formMessage = null;
+      _pageFuture = _loadPage();
+    });
+  }
+
   Future<void> _confirmDiscardDraft() async {
     if (_isCreating || _step <= 0) return;
-    final discard = await showDialog<bool>(
-          context: context,
-          barrierDismissible: false,
-          builder: (dialogContext) => AlertDialog(
-            title: const Text('Cancel this exchange?'),
-            content: const Text(
-              'Your entered exchange details will be cleared. You can keep working or cancel and return to the exchange options.',
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(dialogContext).pop(false),
-                child: const Text('Keep exchange'),
+    final discard = _pendingDraftRestored ||
+        (await showDialog<bool>(
+              context: context,
+              barrierDismissible: false,
+              builder: (dialogContext) => AlertDialog(
+                title: const Text('Cancel this exchange?'),
+                content: const Text(
+                  'Your entered exchange details will be cleared. You can keep working or cancel and return to the exchange options.',
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.of(dialogContext).pop(false),
+                    child: const Text('Keep exchange'),
+                  ),
+                  FilledButton(
+                    onPressed: () => Navigator.of(dialogContext).pop(true),
+                    child: const Text('Cancel exchange'),
+                  ),
+                ],
               ),
-              FilledButton(
-                onPressed: () => Navigator.of(dialogContext).pop(true),
-                child: const Text('Cancel exchange'),
-              ),
-            ],
-          ),
-        ) ??
-        false;
+            ) ??
+            false);
     if (!discard || !mounted) return;
 
     setState(() {
       _step = 0;
-      _pendingDraftRestored = false;
+      _recoveryAttempt = null;
+      _amountDraft = null;
       _amountController.clear();
       _institutionController.clear();
       _accountController.clear();
@@ -220,6 +307,7 @@ class _ManualExchangeScreenState extends State<ManualExchangeScreen>
       _settlementModeChosen = false;
       _nigerianDestinationVerified = false;
       _formMessage = null;
+      _pageFuture = _loadPage();
     });
     _centerStep();
   }
@@ -245,23 +333,21 @@ class _ManualExchangeScreenState extends State<ManualExchangeScreen>
             decoded['destinationName'] is! String)) {
       throw const FormatException('Manual exchange retry data is corrupt.');
     }
-    _pendingDraftRestored = true;
+    _recoveryAttempt = attempt;
     _sourceCurrency = decoded['sourceCurrency'] == 'GHS' ? 'GHS' : 'NGN';
     _step = 2;
     _settlementModeChosen = true;
-    if (_amountController.text.trim().isEmpty) {
-      _amountController.text = (decoded['amount'] as String).trim();
-      _settlementMode = mode;
-      _institutionController.text = decoded['destinationInstitution'] is String
-          ? (decoded['destinationInstitution'] as String).trim()
-          : '';
-      _accountController.text = decoded['destinationAccount'] is String
-          ? (decoded['destinationAccount'] as String).trim()
-          : '';
-      _nameController.text = decoded['destinationName'] is String
-          ? (decoded['destinationName'] as String).trim()
-          : '';
-    }
+    _amountController.text = (decoded['amount'] as String).trim();
+    _settlementMode = mode;
+    _institutionController.text = decoded['destinationInstitution'] is String
+        ? (decoded['destinationInstitution'] as String).trim()
+        : '';
+    _accountController.text = decoded['destinationAccount'] is String
+        ? (decoded['destinationAccount'] as String).trim()
+        : '';
+    _nameController.text = decoded['destinationName'] is String
+        ? (decoded['destinationName'] as String).trim()
+        : '';
   }
 
   Future<void> _refresh() async {
@@ -284,14 +370,9 @@ class _ManualExchangeScreenState extends State<ManualExchangeScreen>
     FocusManager.instance.primaryFocus?.unfocus();
     setState(() => _formMessage = null);
 
-    if (!_pendingDraftRestored &&
-        !(_currentConfig != null &&
-            _canOpenDirection(_currentConfig!, _sourceCurrency))) {
-      setState(() => _formMessage =
-          'This receiving method is not available for a new exchange yet. Your previous exchanges remain available.');
+    if (!_pendingDraftRestored && !(_formKey.currentState?.validate() ?? false)) {
       return;
     }
-    if (!(_formKey.currentState?.validate() ?? false)) return;
     if (_step == 1) {
       setState(() => _step = 2);
       _centerStep();
@@ -309,39 +390,63 @@ class _ManualExchangeScreenState extends State<ManualExchangeScreen>
 
     setState(() => _isCreating = true);
     try {
-      if (!await _ensureKycCanContinue()) return;
+      if (!_pendingDraftRestored) {
+        var config = _currentConfig!;
+        if (!config.canExchangeFrom(_sourceCurrency) ||
+            !config
+                .deliveryModesFor(_sourceCurrency)
+                .contains(_settlementMode)) {
+          config = await _service.fetchConfig();
+          if (!mounted) return;
+          _currentConfig = config;
+        }
+        if (!config.canExchangeFrom(_sourceCurrency) ||
+            !config
+                .deliveryModesFor(_sourceCurrency)
+                .contains(_settlementMode)) {
+          final reason =
+              _sourceCurrency == 'GHS' && config.deliveryPolicyVersion != 2
+                  ? 'Cedis to naira is being updated.'
+                  : 'Transfer instructions are temporarily unavailable.';
+          setState(() {
+            _formMessage =
+                '$reason Your details are still here. Wait for transfer instructions before paying.';
+          });
+          return;
+        }
+      }
 
       final pin = await _requireTransactionPin();
       if (pin == null || !mounted) return;
 
-      final order = await _service.createOrder(
-        sourceCurrency: _sourceCurrency,
-        amount: _amountController.text.trim().replaceAll(',', ''),
-        settlementMode: _settlementMode,
-        transactionPin: pin,
-        destinationInstitution: _settlementMode == ManualSettlementMode.wallet
-            ? null
-            : _institutionController.text,
-        destinationAccount: _settlementMode == ManualSettlementMode.wallet
-            ? null
-            : _accountController.text,
-        destinationName: _settlementMode == ManualSettlementMode.wallet
-            ? null
-            : _nameController.text,
-      );
-      if (!mounted) return;
-      await context.push(AppRoutes.exchangeOrderFor(order.id), extra: order);
-      if (!mounted) return;
-      setState(() {
-        _step = 0;
-        _pendingDraftRestored = false;
-        _amountController.clear();
-        _institutionController.clear();
-        _accountController.clear();
-        _nameController.clear();
-        _nigerianDestinationVerified = false;
-        _formMessage = null;
-      });
+      final attempt = _recoveryAttempt;
+      final order = attempt != null
+          ? await _service.resumeCreateOrder(attempt, pin)
+          : await _service.createOrder(
+              sourceCurrency: _sourceCurrency,
+              amount: _amountController.text.trim().replaceAll(',', ''),
+              settlementMode: _settlementMode,
+              transactionPin: pin,
+              destinationInstitution:
+                  _settlementMode == ManualSettlementMode.wallet
+                      ? null
+                      : _institutionController.text,
+              destinationAccount: _settlementMode == ManualSettlementMode.wallet
+                  ? null
+                  : _accountController.text,
+              destinationName: _settlementMode == ManualSettlementMode.wallet
+                  ? null
+                  : _nameController.text,
+            );
+      final draft = _amountDraft;
+      if (draft != null) {
+        try {
+          await _service.removeAmountDraft(draft);
+        } catch (_) {
+          // The confirmed order remains accessible in server history.
+        }
+      }
+      if (mounted) await _openCreatedOrder(order);
     } catch (error) {
       if (!mounted) return;
       setState(() {
@@ -353,87 +458,6 @@ class _ManualExchangeScreenState extends State<ManualExchangeScreen>
     } finally {
       if (mounted) setState(() => _isCreating = false);
     }
-  }
-
-  Future<bool> _ensureKycCanContinue() async {
-    try {
-      final overview = await _kycService.fetchOverview();
-      // External exchange is authorized against its own server-side budget.
-      // Historical retries recover their original terms; suspension still blocks authorization.
-      final limitGate = (_settlementMode == ManualSettlementMode.wallet &&
-                  !_pendingDraftRestored) ||
-              overview.isSuspended
-          ? kycActionLimitGate(
-              overview, _amountController.text.trim(), _sourceCurrency)
-          : null;
-      if (overview.isVerified &&
-          _isTier1OrHigher(overview.tier) &&
-          limitGate == null) {
-        return true;
-      }
-      if (!mounted) return false;
-      final pending = overview.providerValidationStatus == 'PENDING';
-      final title = limitGate?.title ??
-          (pending
-              ? 'Your BVN check is in progress'
-              : 'Verify BVN to continue');
-      final message = limitGate?.message ??
-          (pending
-              ? 'View your verification status. Your exchange has not been submitted.'
-              : 'Verify your identity before creating an exchange.');
-      final goToKyc = await showDialog<bool>(
-            context: context,
-            builder: (dialogContext) => AlertDialog(
-              backgroundColor: AppColors.surface,
-              title: Text(title, style: AppTextStyles.headingM),
-              content: Text(message, style: AppTextStyles.bodyM),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.of(dialogContext).pop(false),
-                  child: Text(
-                    'Not now',
-                    style: AppTextStyles.labelM.copyWith(
-                      color: AppColors.textSecondary,
-                    ),
-                  ),
-                ),
-                FilledButton(
-                  onPressed: () => Navigator.of(dialogContext).pop(true),
-                  child: Text(limitGate != null
-                      ? limitGate.upgrade
-                          ? 'Upgrade to Tier 2'
-                          : 'Contact support'
-                      : pending
-                          ? 'View verification status'
-                          : 'Verify BVN'),
-                ),
-              ],
-            ),
-          ) ??
-          false;
-      if (goToKyc && mounted) {
-        await context.push(limitGate != null && !limitGate.upgrade
-            ? AppRoutes.profileSupport
-            : AppRoutes.kyc);
-      }
-      return false;
-    } catch (error) {
-      if (mounted) {
-        setState(() {
-          _formMessage = manualExchangeErrorMessage(
-            error,
-            'Could not verify your KYC status. Try again.',
-          );
-        });
-      }
-      return false;
-    }
-  }
-
-  bool _isTier1OrHigher(String tier) {
-    final match = RegExp(r'\d+').firstMatch(tier.trim());
-    final number = match == null ? null : int.tryParse(match.group(0)!);
-    return number != null && number >= 1;
   }
 
   Future<String?> _requireTransactionPin() async {
@@ -530,7 +554,6 @@ class _ManualExchangeScreenState extends State<ManualExchangeScreen>
       child: Scaffold(
         backgroundColor: AppColors.background,
         body: SafeArea(
-          bottom: false,
           child: FutureBuilder<_ManualExchangePageData>(
             future: _pageFuture,
             builder: (context, snapshot) {
@@ -569,12 +592,15 @@ class _ManualExchangeScreenState extends State<ManualExchangeScreen>
                         contentInset,
                         AppSpacing.sm,
                         contentInset,
-                        AppSpacing.xxl + 80,
+                        _step == 0 ? AppSpacing.lg : AppSpacing.xxl + 80,
                       ),
                       sliver: SliverList.list(
                         children: [
                           if (_step == 0)
                             const _ExchangeChooserIntro()
+                          else if (_pendingDraftRestored)
+                            Text('Resume exchange',
+                                style: AppTextStyles.headingXL)
                           else
                             Text(
                               _step == 1
@@ -586,14 +612,12 @@ class _ManualExchangeScreenState extends State<ManualExchangeScreen>
                                       : 'Receive naira'),
                               style: AppTextStyles.headingXL,
                             ),
-                          if (_step == 2) ...[
+                          if (_step == 2 && !_pendingDraftRestored) ...[
                             const SizedBox(height: 6),
                             Text(
-                                _pendingDraftRestored
-                                    ? 'Recover your earlier exchange request.'
-                                    : _sourceCurrency == 'NGN'
-                                        ? 'Choose where to receive your cedis.'
-                                        : 'Enter the Nigerian bank account to receive your naira.',
+                                _sourceCurrency == 'NGN'
+                                    ? 'Choose where to receive your cedis.'
+                                    : 'Enter the Nigerian bank account to receive your naira.',
                                 style: AppTextStyles.bodyM),
                           ],
                           if (_step == 1) ...[
@@ -602,63 +626,58 @@ class _ManualExchangeScreenState extends State<ManualExchangeScreen>
                                 style: AppTextStyles.bodyM),
                           ],
                           const SizedBox(height: AppSpacing.md),
-                          if (_pendingDraftRestored) ...[
-                            const _PendingExchangeCard(),
-                            const SizedBox(height: AppSpacing.md),
-                          ],
                           if (_step == 0) ...[
                             if (!page.config.enabled)
                               _ExchangeDisabledCard(
-                                  onRetry: _isRefreshing ? null : _refresh)
-                            else ...[
-                              for (final currency in const ['GHS', 'NGN'])
-                                _DirectionChoice(
-                                  currency: currency,
-                                  enabled:
-                                      _canOpenDirection(page.config, currency),
-                                  onTap: _canOpenDirection(
-                                          page.config, currency)
-                                      ? () => setState(() {
-                                            if (_sourceCurrency != currency) {
-                                              _amountController.clear();
-                                              _institutionController.clear();
-                                              _accountController.clear();
-                                              _nameController.clear();
-                                              _nigerianDestinationVerified =
-                                                  false;
-                                              final modes = _receivingModesFor(
-                                                  page.config, currency);
-                                              _settlementMode = modes.first;
-                                              _selectedGhanaBank = null;
-                                              _settlementModeChosen =
-                                                  modes.length <= 1;
-                                            }
-                                            _sourceCurrency = currency;
-                                            _step = 1;
-                                            _formMessage = null;
-                                            _centerStep();
-                                          })
-                                      : null,
-                                ),
-                            ],
+                                  onRetry: _isRefreshing ? null : _refresh),
+                            for (final currency in const ['GHS', 'NGN'])
+                              _DirectionChoice(
+                                currency: currency,
+                                onTap: () => _startAmount(currency),
+                              ),
                             ManualExchangeHistory(
                               orders: page.orders,
                               service: _service,
                               onRetry: _refresh,
                               compact: true,
-                              recovery: page.pendingCreate == null
+                              recovery: page.pendingCreates.isEmpty
                                   ? null
-                                  : _PendingCreateHistoryOrder(
-                                      onTap: () => _openPendingCreate(
-                                          page.pendingCreate!),
+                                  : Column(
+                                      children: [
+                                        for (final attempt
+                                            in page.pendingCreates.reversed)
+                                          Padding(
+                                            padding: const EdgeInsets.only(
+                                                bottom: AppSpacing.sm),
+                                            child: _PendingCreateHistoryOrder(
+                                              attempt: attempt,
+                                              onTap: () =>
+                                                  _openPendingCreate(attempt),
+                                            ),
+                                          ),
+                                      ],
                                     ),
                             ),
-                          ] else
+                          ] else if (_pendingDraftRestored)
+                            _ExchangeRecovery(
+                              amount:
+                                  '$_sourceCurrency ${_amountController.text}',
+                              target: _sourceCurrency == 'NGN' ? 'GHS' : 'NGN',
+                              destination:
+                                  _settlementMode == ManualSettlementMode.wallet
+                                      ? 'TrustPay wallet'
+                                      : _institutionController.text,
+                              account: _accountController.text,
+                              message: _formMessage,
+                              busy: _isCreating,
+                              onResume: _createOrder,
+                            )
+                          else
                             _ExchangeForm(
                               service: _service,
                               onSwap: _pendingDraftRestored ||
-                                      !(_canOpenDirection(page.config, 'GHS') &&
-                                          _canOpenDirection(page.config, 'NGN'))
+                                      !(page.config.canExchangeFrom('GHS') &&
+                                          page.config.canExchangeFrom('NGN'))
                                   ? null
                                   : () {
                                       setState(() {
@@ -666,8 +685,8 @@ class _ManualExchangeScreenState extends State<ManualExchangeScreen>
                                             _sourceCurrency == 'NGN'
                                                 ? 'GHS'
                                                 : 'NGN';
-                                        final modes = _receivingModesFor(
-                                            page.config, _sourceCurrency);
+                                        final modes = page.config
+                                            .deliveryModesFor(_sourceCurrency);
                                         _settlementMode = modes.first;
                                         _selectedGhanaBank = null;
                                         _settlementModeChosen =
@@ -690,12 +709,9 @@ class _ManualExchangeScreenState extends State<ManualExchangeScreen>
                               settlementMode: _settlementMode,
                               selectedGhanaBank: _selectedGhanaBank,
                               settlementModeChosen: _settlementModeChosen,
-                              receivingModes: _pendingDraftRestored
-                                  ? [_settlementMode]
-                                  : _receivingModesFor(
-                                      page.config, _sourceCurrency),
+                              receivingModes: _destinationModes(
+                                  page.config, _sourceCurrency),
                               isSubmitting: _isCreating,
-                              hasPendingCreate: _pendingDraftRestored,
                               nigerianDestinationVerified:
                                   _nigerianDestinationVerified,
                               message: _formMessage,
@@ -727,6 +743,7 @@ class _ManualExchangeScreenState extends State<ManualExchangeScreen>
                                 setState(() =>
                                     _nigerianDestinationVerified = verified);
                               },
+                              onSaveDraft: _step == 1 ? _saveAmountDraft : null,
                               onSubmit: _createOrder,
                             ),
                         ],
@@ -746,12 +763,12 @@ class _ManualExchangeScreenState extends State<ManualExchangeScreen>
 class _ManualExchangePageData {
   final ManualExchangeConfig config;
   final Future<List<ManualExchangeOrder>> orders;
-  final ManualExchangeAttempt? pendingCreate;
+  final List<ManualExchangeAttempt> pendingCreates;
 
   const _ManualExchangePageData({
     required this.config,
     required this.orders,
-    required this.pendingCreate,
+    required this.pendingCreates,
   });
 }
 
@@ -785,18 +802,29 @@ class _ExchangeChooserIntro extends StatelessWidget {
 }
 
 class _PendingCreateHistoryOrder extends StatelessWidget {
+  final ManualExchangeAttempt attempt;
   final VoidCallback onTap;
 
-  const _PendingCreateHistoryOrder({required this.onTap});
+  const _PendingCreateHistoryOrder(
+      {required this.attempt, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
     AppColors.watch(context);
+    final details = jsonDecode(attempt.fingerprint) as Map;
+    final source = details['sourceCurrency'] == 'GHS' ? 'GHS' : 'NGN';
+    final target = source == 'GHS' ? 'NGN' : 'GHS';
+    final amount = details['amount'];
+    final title = amount is String &&
+            amount.length <= 16 &&
+            RegExp(r'^\d+(?:\.\d{1,2})?$').hasMatch(amount)
+        ? '$source $amount'
+        : 'Incomplete exchange';
     return Material(
-      color: AppColors.warning.withValues(alpha: .08),
+      color: AppColors.surface,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(14),
-        side: BorderSide(color: AppColors.warning.withValues(alpha: .28)),
+        side: BorderSide(color: AppColors.border),
       ),
       clipBehavior: Clip.antiAlias,
       child: InkWell(
@@ -820,15 +848,21 @@ class _PendingCreateHistoryOrder extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('Incomplete exchange',
+                  Text(title,
                       style: AppTextStyles.labelM
                           .copyWith(fontWeight: FontWeight.w800)),
                   const SizedBox(height: 3),
-                  Text('Continue saved exchange',
-                      style: AppTextStyles.bodyS.copyWith(
-                        color: AppColors.warning,
-                        fontWeight: FontWeight.w700,
-                      )),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 3,
+                    children: [
+                      Text('$source → $target', style: AppTextStyles.bodyS),
+                      Text('Incomplete',
+                          style: AppTextStyles.bodyS.copyWith(
+                              color: AppColors.warning,
+                              fontWeight: FontWeight.w700)),
+                    ],
+                  ),
                 ],
               ),
             ),
@@ -877,34 +911,67 @@ class _ExchangeDisabledCard extends StatelessWidget {
   }
 }
 
-class _PendingExchangeCard extends StatelessWidget {
-  const _PendingExchangeCard();
+class _ExchangeRecovery extends StatelessWidget {
+  final String amount, target, destination, account;
+  final String? message;
+  final bool busy;
+  final VoidCallback onResume;
+
+  const _ExchangeRecovery({
+    required this.amount,
+    required this.target,
+    required this.destination,
+    required this.account,
+    required this.message,
+    required this.busy,
+    required this.onResume,
+  });
 
   @override
   Widget build(BuildContext context) {
-    AppColors.watch(context);
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: AppSpacing.md),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(Icons.pending_actions_rounded, color: AppColors.warning),
-          const SizedBox(width: AppSpacing.sm),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('Exchange request pending', style: AppTextStyles.headingM),
-                const SizedBox(height: AppSpacing.xs),
-                Text(
-                  'A previous exchange request still needs a server response. Its amount and destination are restored below; enter your PIN again to retry it before starting another exchange.',
-                  style: AppTextStyles.bodyM,
-                ),
-              ],
-            ),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text('Saved request', style: AppTextStyles.labelM),
+        const SizedBox(height: AppSpacing.sm),
+        Container(
+          padding: const EdgeInsets.all(AppSpacing.lg),
+          decoration: BoxDecoration(
+            color: AppColors.surface,
+            border: Border.all(color: AppColors.border),
+            borderRadius: BorderRadius.circular(AppRadius.lg),
           ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(amount, style: AppTextStyles.headingL),
+              const SizedBox(height: AppSpacing.xs),
+              Text('Receive $target · $destination',
+                  style: AppTextStyles.bodyM),
+              if (account.length > 4)
+                Text(
+                    'Account ending in ${account.substring(account.length - 4)}',
+                    style: AppTextStyles.bodyS),
+            ],
+          ),
+        ),
+        const SizedBox(height: AppSpacing.md),
+        Text(
+          'The transfer instructions for this request have not been confirmed on this device. Continue with your PIN to recover the original request. If you already paid, wait for the original order before sending anything again.',
+          style: AppTextStyles.bodyM,
+        ),
+        if (message != null) ...[
+          const SizedBox(height: AppSpacing.sm),
+          Text(message!,
+              style: AppTextStyles.bodyS.copyWith(color: AppColors.error)),
         ],
-      ),
+        const SizedBox(height: AppSpacing.lg),
+        FilledButton.icon(
+          onPressed: busy ? null : onResume,
+          icon: const Icon(Icons.arrow_forward_rounded),
+          label: Text(busy ? 'Checking exchange…' : 'Continue saved request'),
+        ),
+      ],
     );
   }
 }
@@ -924,13 +991,13 @@ class _ExchangeForm extends StatelessWidget {
   final bool settlementModeChosen;
   final List<ManualSettlementMode> receivingModes;
   final bool isSubmitting;
-  final bool hasPendingCreate;
   final bool nigerianDestinationVerified;
   final String? message;
   final ValueChanged<ManualSettlementMode> onSettlementModeChanged;
   final ValueChanged<GhanaBankOption?> onGhanaBankChanged;
   final ValueChanged<bool> onNigerianDestinationVerificationChanged;
   final VoidCallback onSubmit;
+  final VoidCallback? onSaveDraft;
 
   const _ExchangeForm({
     required this.service,
@@ -947,19 +1014,19 @@ class _ExchangeForm extends StatelessWidget {
     required this.settlementModeChosen,
     required this.receivingModes,
     required this.isSubmitting,
-    required this.hasPendingCreate,
     required this.nigerianDestinationVerified,
     required this.message,
     required this.onSettlementModeChanged,
     required this.onGhanaBankChanged,
     required this.onNigerianDestinationVerificationChanged,
     required this.onSubmit,
+    this.onSaveDraft,
   });
 
   @override
   Widget build(BuildContext context) {
     AppColors.watch(context);
-    final canEdit = !isSubmitting && !hasPendingCreate;
+    final canEdit = !isSubmitting;
     return Form(
       key: formKey,
       child: Padding(
@@ -989,12 +1056,6 @@ class _ExchangeForm extends StatelessWidget {
                 child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      if (hasPendingCreate &&
-                          settlementMode == ManualSettlementMode.wallet) ...[
-                        Text('Recover your earlier request',
-                            style: AppTextStyles.headingM),
-                        const SizedBox(height: 16),
-                      ],
                       if (receivingModes.length > 1) ...[
                         LayoutBuilder(builder: (context, constraints) {
                           final stack = !settlementModeChosen ||
@@ -1030,18 +1091,7 @@ class _ExchangeForm extends StatelessWidget {
                           'Select a receiving method to enter its details.',
                           style: AppTextStyles.bodyM,
                         ),
-                      if (settlementModeChosen &&
-                          settlementMode == ManualSettlementMode.wallet) ...[
-                        Icon(Icons.account_balance_wallet_outlined,
-                            color: AppColors.primary, size: 28),
-                        const SizedBox(height: 12),
-                        Text('Earlier exchange destination',
-                            style: AppTextStyles.labelL),
-                        const SizedBox(height: 8),
-                        Text(
-                            'This saved request keeps its original TrustPay wallet destination. Retry only this request; do not create another payment.',
-                            style: AppTextStyles.bodyM),
-                      ] else if (settlementModeChosen) ...[
+                      if (settlementModeChosen) ...[
                         _ExternalDestinationForm(
                           targetCurrency:
                               sourceCurrency == 'GHS' ? 'NGN' : 'GHS',
@@ -1052,7 +1102,6 @@ class _ExchangeForm extends StatelessWidget {
                           nameController: nameController,
                           selectedBank: selectedGhanaBank,
                           enabled: canEdit,
-                          allowExistingBankValue: hasPendingCreate,
                           onBankChanged: onGhanaBankChanged,
                           onVerificationChanged:
                               onNigerianDestinationVerificationChanged,
@@ -1101,9 +1150,8 @@ class _ExchangeForm extends StatelessWidget {
                       textStyle: AppTextStyles.labelL
                           .copyWith(fontWeight: FontWeight.w700)),
                   onPressed: isSubmitting ||
-                          (!hasPendingCreate && receivingModes.isEmpty) ||
-                          (!hasPendingCreate &&
-                              step == 2 &&
+                          receivingModes.isEmpty ||
+                          (step == 2 &&
                               sourceCurrency == 'GHS' &&
                               settlementMode == ManualSettlementMode.bank &&
                               !nigerianDestinationVerified)
@@ -1121,16 +1169,19 @@ class _ExchangeForm extends StatelessWidget {
                       : const Icon(Icons.arrow_forward_rounded),
                   label: Text(
                     isSubmitting
-                        ? 'Creating order…'
-                        : hasPendingCreate
-                            ? 'Retry exchange'
-                            : step == 1
-                                ? 'Continue'
-                                : 'View transfer account',
+                        ? 'Please wait…'
+                        : step == 1
+                            ? 'Continue'
+                            : 'View transfer account',
                   ),
                 ),
               ),
             ],
+            if (onSaveDraft != null)
+              TextButton(
+                onPressed: isSubmitting ? null : onSaveDraft,
+                child: const Text('Save for later'),
+              ),
           ],
         ),
       ),
@@ -1149,7 +1200,6 @@ class _ExternalDestinationForm extends StatefulWidget {
   final bool enabled;
   final ValueChanged<GhanaBankOption?> onBankChanged;
   final ValueChanged<bool> onVerificationChanged;
-  final bool allowExistingBankValue;
 
   const _ExternalDestinationForm({
     required this.targetCurrency,
@@ -1160,7 +1210,6 @@ class _ExternalDestinationForm extends StatefulWidget {
     required this.nameController,
     required this.selectedBank,
     required this.enabled,
-    required this.allowExistingBankValue,
     required this.onBankChanged,
     required this.onVerificationChanged,
   });
@@ -1238,8 +1287,7 @@ class _ExternalDestinationFormState extends State<_ExternalDestinationForm> {
     }
     if (widget.mode == ManualSettlementMode.bank &&
         widget.targetCurrency == 'NGN' &&
-        widget.enabled &&
-        !widget.allowExistingBankValue) {
+        widget.enabled) {
       final future = widget.service.fetchNigerianBanks();
       _nigerianBanksFuture = future;
       future.then<void>((_) {}, onError: (Object _, StackTrace __) {});
@@ -1445,8 +1493,6 @@ class _ExternalDestinationFormState extends State<_ExternalDestinationForm> {
           ),
           validator: (value) {
             final account = value?.trim() ?? '';
-            // Retry the original immutable payload; server replay precedes new delivery rules.
-            if (widget.allowExistingBankValue && !widget.enabled) return null;
             if (!RegExp(r'^\d{7,20}$').hasMatch(account)) {
               return 'Enter a valid account number.';
             }
@@ -1458,7 +1504,6 @@ class _ExternalDestinationFormState extends State<_ExternalDestinationForm> {
           controller: widget.institutionController,
           selected: widget.selectedBank,
           enabled: widget.enabled,
-          allowExistingValue: widget.allowExistingBankValue,
           onSelected: widget.onBankChanged,
         ),
         const SizedBox(height: AppSpacing.md),
@@ -1475,44 +1520,31 @@ class _ExternalDestinationFormState extends State<_ExternalDestinationForm> {
   }
 
   Widget _buildNigerianBankForm(BuildContext context) {
-    final immutableRecovery = widget.allowExistingBankValue && !widget.enabled;
     final currentInput = _selectedNigerianBank == null
         ? null
         : '${_selectedNigerianBank!.code}|${widget.accountController.text.trim()}';
-    final verified = immutableRecovery ||
-        (_resolvedInput != null && _resolvedInput == currentInput);
+    final verified = _resolvedInput != null && _resolvedInput == currentInput;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        if (immutableRecovery)
-          TextFormField(
-            key: const ValueKey('exchange-nigerian-bank-field'),
-            controller: widget.institutionController,
-            enabled: false,
-            decoration: const InputDecoration(
-              floatingLabelBehavior: FloatingLabelBehavior.always,
-              labelText: 'Nigerian bank',
-            ),
-          )
-        else
-          FutureBuilder<List<ManualNigerianBankOption>>(
-            future: _nigerianBanksFuture,
-            builder: (context, snapshot) {
-              if (snapshot.connectionState == ConnectionState.waiting) {
-                return const _NigerianBankLoadingField();
-              }
-              if (snapshot.hasError || (snapshot.data?.isEmpty ?? true)) {
-                return _NigerianBankLoadError(onRetry: _reloadNigerianBanks);
-              }
-              return _NigerianBankSearchField(
-                banks: snapshot.data!,
-                selected: _selectedNigerianBank,
-                controller: widget.institutionController,
-                enabled: widget.enabled,
-                onSelected: _selectNigerianBank,
-              );
-            },
-          ),
+        FutureBuilder<List<ManualNigerianBankOption>>(
+          future: _nigerianBanksFuture,
+          builder: (context, snapshot) {
+            if (snapshot.connectionState == ConnectionState.waiting) {
+              return const _NigerianBankLoadingField();
+            }
+            if (snapshot.hasError || (snapshot.data?.isEmpty ?? true)) {
+              return _NigerianBankLoadError(onRetry: _reloadNigerianBanks);
+            }
+            return _NigerianBankSearchField(
+              banks: snapshot.data!,
+              selected: _selectedNigerianBank,
+              controller: widget.institutionController,
+              enabled: widget.enabled,
+              onSelected: _selectNigerianBank,
+            );
+          },
+        ),
         const SizedBox(height: AppSpacing.md),
         TextFormField(
           key: const ValueKey('exchange-bank-account-field'),
@@ -1534,7 +1566,6 @@ class _ExternalDestinationFormState extends State<_ExternalDestinationForm> {
             hintText: 'Enter Nigerian bank account number',
           ),
           validator: (value) {
-            if (immutableRecovery) return null;
             return RegExp(r'^\d{10}$').hasMatch(value?.trim() ?? '')
                 ? null
                 : 'Enter a ten-digit Nigerian account number.';
@@ -1544,7 +1575,7 @@ class _ExternalDestinationFormState extends State<_ExternalDestinationForm> {
         TextFormField(
           key: const ValueKey('exchange-nigerian-account-name-field'),
           controller: widget.nameController,
-          enabled: immutableRecovery || widget.enabled,
+          enabled: widget.enabled,
           readOnly: true,
           style: AppTextStyles.labelL
               .copyWith(fontSize: 18, fontWeight: FontWeight.w600),
@@ -1564,11 +1595,10 @@ class _ExternalDestinationFormState extends State<_ExternalDestinationForm> {
                     ),
                   )
                 : const Icon(Icons.account_circle_outlined),
-            suffixIcon: verified && !immutableRecovery
+            suffixIcon: verified
                 ? Icon(Icons.verified_rounded, color: AppColors.success)
                 : null,
-            helperText:
-                verified && !immutableRecovery ? 'Recipient confirmed' : null,
+            helperText: verified ? 'Recipient confirmed' : null,
           ),
           validator: (_) =>
               verified ? null : 'Confirm the account name before continuing.',
@@ -1671,9 +1701,7 @@ class _ExternalDestinationFormState extends State<_ExternalDestinationForm> {
                         _scheduleNameCheck();
                       }
                     : null,
-                validator: (_) => _selectedOperator == null &&
-                        !(widget.allowExistingBankValue &&
-                            widget.institutionController.text.trim().isNotEmpty)
+                validator: (_) => _selectedOperator == null
                     ? 'Choose the mobile money network.'
                     : null,
               ),
@@ -1760,13 +1788,11 @@ class _GhanaBankSearchField extends StatelessWidget {
   final TextEditingController controller;
   final GhanaBankOption? selected;
   final bool enabled;
-  final bool allowExistingValue;
   final ValueChanged<GhanaBankOption?> onSelected;
   const _GhanaBankSearchField(
       {required this.controller,
       required this.selected,
       required this.enabled,
-      required this.allowExistingValue,
       required this.onSelected});
 
   Future<void> _chooseBank(BuildContext context) async {
@@ -1852,9 +1878,8 @@ class _GhanaBankSearchField extends StatelessWidget {
                   child: _GhanaBankMark(bank: selected!)),
           suffixIcon: const Icon(Icons.keyboard_arrow_down_rounded),
         ),
-        validator: (_) => selected == null && !allowExistingValue
-            ? 'Choose a bank from the list.'
-            : null,
+        validator: (_) =>
+            selected == null ? 'Choose a bank from the list.' : null,
       );
 }
 
@@ -1888,7 +1913,7 @@ class _NigerianBankSearchField extends StatelessWidget {
               : banks
                   .where((bank) =>
                       bank.name.toLowerCase().contains(normalizedQuery) ||
-                      bank.code.contains(normalizedQuery))
+                      bank.code.toLowerCase().contains(normalizedQuery))
                   .toList(growable: false);
           return Padding(
             padding: EdgeInsets.only(
@@ -1937,14 +1962,7 @@ class _NigerianBankSearchField extends StatelessWidget {
                                   horizontal: 24,
                                   vertical: 6,
                                 ),
-                                leading: CircleAvatar(
-                                  backgroundColor:
-                                      AppColors.primary.withValues(alpha: .1),
-                                  child: Icon(
-                                    Icons.account_balance_rounded,
-                                    color: AppColors.primary,
-                                  ),
-                                ),
+                                leading: NigerianBankMark(bank: option),
                                 title: Text(
                                   option.name,
                                   style: AppTextStyles.labelM,
@@ -1981,12 +1999,17 @@ class _NigerianBankSearchField extends StatelessWidget {
           fontWeight: FontWeight.w600,
         ),
         onTap: enabled ? () => _chooseBank(context) : null,
-        decoration: const InputDecoration(
+        decoration: InputDecoration(
           floatingLabelBehavior: FloatingLabelBehavior.always,
           labelText: 'Nigerian bank',
           hintText: 'Choose a bank',
-          prefixIcon: Icon(Icons.account_balance_outlined),
-          suffixIcon: Icon(Icons.keyboard_arrow_down_rounded),
+          prefixIcon: selected == null
+              ? const Icon(Icons.account_balance_outlined)
+              : Padding(
+                  padding: const EdgeInsets.all(8),
+                  child: NigerianBankMark(bank: selected!, size: 30),
+                ),
+          suffixIcon: const Icon(Icons.keyboard_arrow_down_rounded),
         ),
         validator: (_) => selected == null ? 'Choose a bank.' : null,
       );
@@ -2033,7 +2056,7 @@ class _NigerianBankLoadError extends StatelessWidget {
             const SizedBox(width: AppSpacing.sm),
             Expanded(
               child: Text(
-                'Banks could not be loaded. Check your connection and retry.',
+                'The bank list couldn’t load. Tap Retry to try again.',
                 style: AppTextStyles.bodyS,
               ),
             ),
@@ -2080,10 +2103,8 @@ class _GhanaBankMark extends StatelessWidget {
 
 class _DirectionChoice extends StatelessWidget {
   final String currency;
-  final bool enabled;
-  final VoidCallback? onTap;
-  const _DirectionChoice(
-      {required this.currency, required this.enabled, this.onTap});
+  final VoidCallback onTap;
+  const _DirectionChoice({required this.currency, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
@@ -2093,7 +2114,6 @@ class _DirectionChoice extends StatelessWidget {
       padding: const EdgeInsets.only(bottom: 12),
       child: Semantics(
         button: true,
-        enabled: enabled,
         child: Material(
           borderRadius: BorderRadius.circular(16),
           clipBehavior: Clip.antiAlias,
@@ -2108,23 +2128,26 @@ class _DirectionChoice extends StatelessWidget {
               ),
             ),
             child: InkWell(
-              onTap: enabled ? onTap : null,
+              onTap: onTap,
               child: Padding(
                 padding:
                     const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
                 child: Row(children: [
-                  ExcludeSemantics(
-                      child: SizedBox(
+                  SizedBox(
                     width: 62,
+                    height: 38,
                     child: Stack(children: [
-                      Text(naira ? '🇳🇬' : '🇬🇭',
-                          style: const TextStyle(fontSize: 29)),
-                      Padding(
-                          padding: const EdgeInsets.only(left: 26, top: 18),
-                          child: Text(naira ? '🇬🇭' : '🇳🇬',
-                              style: const TextStyle(fontSize: 25))),
+                      Positioned(
+                          top: 2,
+                          left: 0,
+                          child: ExchangeCurrencyFlag(naira: naira, width: 36)),
+                      Positioned(
+                          bottom: 0,
+                          right: 0,
+                          child:
+                              ExchangeCurrencyFlag(naira: !naira, width: 32)),
                     ]),
-                  )),
+                  ),
                   const SizedBox(width: 12),
                   Expanded(
                       child: Column(
@@ -2134,20 +2157,12 @@ class _DirectionChoice extends StatelessWidget {
                           style: AppTextStyles.labelM.copyWith(
                               color: ink, fontWeight: FontWeight.w800)),
                       const SizedBox(height: 4),
-                      Text(
-                          enabled
-                              ? (naira ? 'Nigeria → Ghana' : 'Ghana → Nigeria')
-                              : 'Not available yet',
+                      Text(naira ? 'Nigeria → Ghana' : 'Ghana → Nigeria',
                           style: AppTextStyles.bodyS.copyWith(color: ink)),
                     ],
                   )),
                   const SizedBox(width: 8),
-                  Icon(
-                      enabled
-                          ? Icons.arrow_forward_rounded
-                          : Icons.schedule_rounded,
-                      color: ink,
-                      size: 20),
+                  Icon(Icons.arrow_forward_rounded, color: ink, size: 20),
                 ]),
               ),
             ),

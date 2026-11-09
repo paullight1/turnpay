@@ -45,15 +45,18 @@ void main() {
     final service = ManualExchangeService(apiClient: ApiClient(dio: dio));
 
     final banks = await service.fetchNigerianBanks();
-    expect(banks.map((bank) => bank.name), ['Access Bank', 'Zenith Bank']);
+    expect(banks.map((bank) => bank.name),
+        ['ALAT by WEMA', 'Access Bank', 'Zenith Bank']);
+    expect(banks.first.code, '035A');
 
     final resolution = await service.resolveNigerianBankAccount(
       accountNumber: '0123456789',
-      bankCode: '044',
+      bankCode: banks.first.code,
     );
     expect(resolution.accountName, 'Ada Lovelace');
     expect(resolution.accountNumber, '0123456789');
-    expect(resolution.bankCode, '044');
+    expect(resolution.bankCode, '035A');
+    expect(adapter.resolvedBankCode, '035A');
   });
 
   test('rejects empty or mismatched Nigerian account resolutions', () async {
@@ -245,12 +248,15 @@ void main() {
     expect(jsonDecode(pending.single.fingerprint),
         {'amount': '100.00', 'settlementMode': 'WALLET'});
 
-    final order = await create();
+    final order = await service.resumeCreateOrder(pending.single, '2468');
     expect(order.id, 'order-1');
     expect(adapter.createIdempotencyKeys, hasLength(2));
     expect(adapter.createIdempotencyKeys.first,
         adapter.createIdempotencyKeys.last);
     expect(await store.readAttempts(), isEmpty);
+    await expectLater(
+        service.resumeCreateOrder(pending.single, '2468'), throwsStateError);
+    expect(adapter.createIdempotencyKeys, hasLength(2));
   });
 
   for (final legacy in [false, true]) {
@@ -275,20 +281,63 @@ void main() {
               'destinationName': 'Beneficiary',
             }));
       }
-      await ManualExchangeService(apiClient: api, attemptStore: store)
-          .createOrder(
-              sourceCurrency: 'GHS',
-              amount: '100.00',
-              settlementMode: ManualSettlementMode.bank,
-              transactionPin: '2468',
-              destinationInstitution: 'Synthetic Nigerian Bank',
-              destinationAccount: '0123456789',
-              destinationName: 'Beneficiary');
+      final service =
+          ManualExchangeService(apiClient: api, attemptStore: store);
+      if (legacy) {
+        await service.resumeCreateOrder(
+            (await store.pendingCreates()).single, '2468');
+      } else {
+        await service.createOrder(
+          sourceCurrency: 'GHS',
+          amount: '100.00',
+          settlementMode: ManualSettlementMode.bank,
+          transactionPin: '2468',
+          destinationInstitution: 'Synthetic Nigerian Bank',
+          destinationAccount: '0123456789',
+          destinationName: 'Beneficiary',
+        );
+      }
       expect(adapter.createBodies.single['deliveryPolicyVersion'],
           legacy ? isNull : 2);
       if (legacy) expect(adapter.createIdempotencyKeys.single, oldKey);
     });
   }
+
+  test('explains a legacy API rejection without retrying an older contract',
+      () async {
+    final adapter = _ManualExchangeAdapter(
+      firstCreateStatus: 400,
+      firstCreateMessage: {
+        'message': ['property deliveryPolicyVersion should not exist'],
+      },
+    );
+    final store = ManualExchangeAttemptStore();
+    final service = ManualExchangeService(
+      attemptStore: store,
+      apiClient: ApiClient(
+        dio: Dio(BaseOptions(baseUrl: _ManualExchangeAdapter.baseUrl))
+          ..httpClientAdapter = adapter,
+      ),
+    );
+    await expectLater(
+      service.createOrder(
+        sourceCurrency: 'GHS',
+        amount: '100.00',
+        settlementMode: ManualSettlementMode.bank,
+        transactionPin: '2468',
+        destinationInstitution: 'Synthetic Nigerian Bank',
+        destinationAccount: '0123456789',
+        destinationName: 'Beneficiary',
+      ),
+      throwsA(isA<FormatException>().having(
+        (error) => error.message,
+        'message',
+        contains('No transfer instructions were issued'),
+      )),
+    );
+    expect(adapter.createBodies.single['deliveryPolicyVersion'], 2);
+    expect(await store.pendingCreates(), isEmpty);
+  });
 
   test('reopens a server receipt status after a fresh service instance',
       () async {
@@ -387,22 +436,44 @@ void main() {
     expect(await first.readAttempts(), hasLength(2));
   });
 
-  test('blocks a replacement create while the original intent is pending',
+  test(
+      'saves separate local drafts with the same amount without creating orders',
+      () async {
+    final adapter = _ManualExchangeAdapter();
+    final service = ManualExchangeService(
+      apiClient: ApiClient(
+        dio: Dio(BaseOptions(baseUrl: _ManualExchangeAdapter.baseUrl))
+          ..httpClientAdapter = adapter,
+      ),
+    );
+    await service.saveAmountDraft('GHS', '150.00');
+    await service.saveAmountDraft('GHS', '150.00');
+    final drafts = await service.pendingCreateAttempts();
+    expect(drafts.map((draft) => draft.action), ['draft', 'draft']);
+    expect(drafts.first.key, isNot(drafts.last.key));
+    await service.saveAmountDraft('GHS', '175.00', previous: drafts.first);
+    final updated = await service.pendingCreateAttempts();
+    expect(updated.map((draft) => jsonDecode(draft.fingerprint)['amount']),
+        unorderedEquals(['150.00', '175.00']));
+    expect(adapter.createCalls, 0);
+  });
+
+  test('keeps independent pending exchanges and reuses identical retry keys',
       () async {
     final store = ManualExchangeAttemptStore();
-    await store.keyFor(
-      action: 'create',
-      fingerprint: '{"amount":"100.00"}',
-    );
-
-    await expectLater(
-      store.keyFor(
-        action: 'create',
-        fingerprint: '{"amount":"200.00"}',
-      ),
-      throwsA(isA<FormatException>()),
-    );
-    expect((await store.pendingCreate())?.fingerprint, '{"amount":"100.00"}');
+    const first = '{"amount":"100.00"}';
+    const second = '{"amount":"200.00"}';
+    final keys = await Future.wait([
+      store.keyFor(action: 'create', fingerprint: first),
+      store.keyFor(action: 'create', fingerprint: second),
+    ]);
+    expect(keys.first, isNot(keys.last));
+    expect(
+        await store.keyFor(action: 'create', fingerprint: first), keys.first);
+    expect((await store.pendingCreates()).map((attempt) => attempt.fingerprint),
+        unorderedEquals([first, second]));
+    await store.resolve(action: 'create', fingerprint: second);
+    expect((await store.pendingCreates()).single.key, keys.first);
   });
 
   test('keeps a create key after an ambiguous conflict response', () async {
@@ -508,17 +579,18 @@ void main() {
       service.submitProof(
         orderId: 'order-1',
         file: file,
-        bankReference: 'TRF-RETRY',
+        receiptName: 'Synthetic Sender',
       ),
       throwsA(isA<DioException>()),
     );
     final journal = jsonEncode(await store.readAttempts());
     expect(journal, isNot(contains('https://signed.manual-exchange.test')));
     expect(journal, isNot(contains('upload-token')));
+    expect(journal, isNot(contains('Synthetic Sender')));
     final retried = await service.submitProof(
       orderId: 'order-1',
       file: file,
-      bankReference: 'TRF-RETRY',
+      receiptName: 'Synthetic Sender',
     );
 
     expect(retried.id, 'order-1');
@@ -526,6 +598,10 @@ void main() {
     expect(
         adapter.proofIdempotencyKeys.first, adapter.proofIdempotencyKeys.last);
     expect(uploadAdapter.uploadCount, 1);
+    expect(adapter.lastProofBody, {
+      'objectKey': 'private/order-1/receipt.png',
+      'receiptName': 'Synthetic Sender',
+    });
   });
 }
 
@@ -541,17 +617,20 @@ class _ManualExchangeAdapter implements HttpClientAdapter {
   final bool failFirstCreate;
   final bool failFirstProof;
   final int? firstCreateStatus;
+  final Object firstCreateMessage;
   final bool malformedCreateResponse;
   int createCalls = 0;
   int proofCalls = 0;
   final List<String> createIdempotencyKeys = [];
   final List<Map<String, dynamic>> createBodies = [];
   final List<String> proofIdempotencyKeys = [];
+  dynamic lastProofBody;
 
   _ManualExchangeAdapter({
     this.failFirstCreate = false,
     this.failFirstProof = false,
     this.firstCreateStatus,
+    this.firstCreateMessage = 'ambiguous',
     this.malformedCreateResponse = false,
   });
 
@@ -575,7 +654,7 @@ class _ManualExchangeAdapter implements HttpClientAdapter {
       );
       if (firstCreateStatus != null && createCalls == 1) {
         return _json(
-          {'message': 'ambiguous'},
+          {'message': firstCreateMessage},
           statusCode: firstCreateStatus!,
         );
       }
@@ -611,6 +690,7 @@ class _ManualExchangeAdapter implements HttpClientAdapter {
 
     if (method == 'POST' &&
         path == '/api/exchange/manual-orders/order-1/proof') {
+      lastProofBody = options.data;
       proofCalls += 1;
       proofIdempotencyKeys.add(
         '${options.headers['Idempotency-Key'] ?? ''}',
@@ -741,6 +821,7 @@ class _GhanaResolveAdapter implements HttpClientAdapter {
 
 class _NigerianBankAdapter implements HttpClientAdapter {
   final Map<String, dynamic>? resolution;
+  String? resolvedBankCode;
 
   _NigerianBankAdapter({this.resolution});
 
@@ -758,14 +839,17 @@ class _NigerianBankAdapter implements HttpClientAdapter {
       body = [
         {'name': 'Zenith Bank', 'code': '057', 'slug': 'zenith-bank'},
         {'name': 'Access Bank', 'code': '044', 'slug': 'access-bank'},
+        {'name': 'ALAT by WEMA', 'code': '035A'},
+        {'name': 'Incomplete entry', 'code': ''},
       ];
     } else if (options.method == 'POST' &&
         options.path == '/api/payments/banks/resolve') {
+      resolvedBankCode = (options.data as Map)['bankCode'] as String;
       body = resolution ??
           {
             'accountName': 'Ada Lovelace',
             'accountNumber': '0123456789',
-            'bankCode': '044',
+            'bankCode': resolvedBankCode,
           };
     } else {
       return ResponseBody.fromString(

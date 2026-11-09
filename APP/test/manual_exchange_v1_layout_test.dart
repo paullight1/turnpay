@@ -55,6 +55,12 @@ void main() {
             )));
         await tester.pumpAndSettle();
         expect(tester.takeException(), isNull);
+        if (stage == 'transfer') {
+          expect(find.textContaining('EXCHANGE ·'), findsNothing);
+          expect(find.text('EX-FIXTURE-001'), findsOneWidget);
+          expect(find.byTooltip('Copy Payment reference'), findsOneWidget);
+          expect(find.byTooltip('Copy Account number'), findsOneWidget);
+        }
         if (const bool.fromEnvironment('V1_EXCHANGE_CAPTURE')) {
           await tester.runAsync(() async {
             final image = await (key.currentContext!.findRenderObject()!

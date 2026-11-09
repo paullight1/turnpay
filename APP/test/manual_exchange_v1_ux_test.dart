@@ -123,9 +123,9 @@ void main() {
         )));
     await tester.pumpAndSettle();
     await tester.enterText(
-        find.widgetWithText(TextFormField, 'Bank reference'), 'TRANSFER-001');
-    await tester.ensureVisible(find.text('Choose receipt'));
-    await tester.tap(find.text('Choose receipt'));
+        find.widgetWithText(TextFormField, 'Name on receipt'), 'Alex Morgan');
+    await tester.ensureVisible(find.text('Upload receipt'));
+    await tester.tap(find.text('Upload receipt'));
     await tester.pumpAndSettle();
     await tester.ensureVisible(find.byType(CheckboxListTile));
     await tester.tap(find.byType(CheckboxListTile));
@@ -239,11 +239,15 @@ void main() {
               bytes: Uint8List.fromList([137, 80, 78, 71])),
         )));
     await tester.pumpAndSettle();
-    await tester.enterText(
-        find.widgetWithText(TextFormField, 'Bank reference'), 'TRANSFER-001');
-    await tester.ensureVisible(find.text('Choose receipt'));
-    await tester.tap(find.text('Choose receipt'));
+    await tester.ensureVisible(find.text('Upload receipt'));
+    await tester.tap(find.text('Upload receipt'));
     await tester.pumpAndSettle();
+    expect(find.text('Alex Morgan'), findsOneWidget);
+    expect(find.text('TRF-00123'), findsOneWidget);
+    await tester.enterText(
+        find.widgetWithText(TextFormField, 'Name on receipt'),
+        'Alex M. Morgan');
+
     await tester.ensureVisible(find.byType(CheckboxListTile));
     await tester.tap(find.byType(CheckboxListTile));
     await tester.pumpAndSettle();
@@ -256,6 +260,7 @@ void main() {
     await tester.tap(find.text('Confirm payment & submit receipt'));
     await tester.pumpAndSettle();
     expect(service.submittedIds, ['original-order', 'original-order']);
+    expect(service.submittedName, 'Alex M. Morgan');
     expect(find.text('Awaiting admin review'), findsWidgets);
     expect(find.text('Transfer to this account'), findsNothing);
     expect(find.text('Credited to wallet'), findsNothing);
@@ -268,13 +273,14 @@ class _V1Service extends ManualExchangeService {
   bool configOffline = false, serverAcceptedBeforeError = false;
   bool historyAvailableOffline = false;
   int submissions = 0;
+  String? submittedName;
   final submittedIds = <String>[];
   ManualExchangeOrder current = fixtureV1Order();
   @override
   Future<String?> latestExchangeOrderId() async =>
       receiptStarted ? 'original-order' : null;
   @override
-  Future<ManualExchangeAttempt?> pendingCreateAttempt() async => null;
+  Future<List<ManualExchangeAttempt>> pendingCreateAttempts() async => const [];
   @override
   Future<List<ManualExchangeOrder>> listOrders() async =>
       configOffline && !historyAvailableOffline
@@ -303,11 +309,21 @@ class _V1Service extends ManualExchangeService {
   }
 
   @override
+  Future<ManualReceiptDetails> scanReceipt({
+    required String orderId,
+    required ManualExchangeProofFile file,
+    CancelToken? cancelToken,
+  }) async =>
+      (receiptName: 'Alex Morgan', bankReference: 'TRF-00123');
+
+  @override
   Future<ManualExchangeOrder> submitProof(
       {required String orderId,
       required ManualExchangeProofFile file,
-      required String bankReference}) async {
+      String? bankReference,
+      String? receiptName}) async {
     submittedIds.add(orderId);
+    submittedName = receiptName;
     if (submissions++ == 0) {
       if (serverAcceptedBeforeError) {
         current =
@@ -339,6 +355,7 @@ ManualExchangeOrder fixtureV1Order(
       'targetAmount': '10000.00',
       'rate': '100.000000',
       'fee': '0.00',
+      'receiptName': null,
       'collectionAccount': {
         'bankName': 'Collection Bank',
         'accountName': 'TrustPay Collection',

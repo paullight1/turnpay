@@ -71,7 +71,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.textContaining('Good '), findsOneWidget);
-    expect(find.text('Top services'), findsOneWidget);
+    expect(find.text('Available balance'), findsOneWidget);
   });
 
   testWidgets('splash routes to onboarding when the session is missing',

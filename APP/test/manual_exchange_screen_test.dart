@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:ui' as ui;
 import 'package:flutter/rendering.dart';
@@ -6,11 +7,12 @@ import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:go_router/go_router.dart';
 import 'package:trustpay_app/core/theme/app_theme.dart';
-import 'package:trustpay_app/services/kyc_service.dart';
 import 'package:trustpay_app/services/auth_service.dart';
 
 import 'package:trustpay_app/features/exchange/screens/manual_exchange_screen.dart';
+import 'package:trustpay_app/features/exchange/screens/manual_exchange_order_screen.dart';
 import 'package:trustpay_app/features/exchange/services/manual_exchange_service.dart';
 import 'manual_exchange_v1_ux_test.dart' show fixtureV1Order;
 
@@ -356,8 +358,7 @@ void main() {
       (tester) async {
     final service = _FakeManualExchangeService(
       enabled: true,
-      availableSourceCurrencies: const ['NGN'],
-      deliveryPolicyVersion: 1,
+      availableSourceCurrencies: const ['GHS', 'NGN'],
       pendingCreate: const ManualExchangeAttempt(
         action: 'create',
         fingerprint:
@@ -370,14 +371,131 @@ void main() {
         .pumpWidget(MaterialApp(home: ManualExchangeScreen(service: service)));
     await tester.pumpAndSettle();
     expect(find.textContaining('bank payout is being updated'), findsNothing);
-    expect(find.text('Not available yet'), findsNothing);
-    expect(find.text('Incomplete exchange'), findsOneWidget);
-    expect(tester.getTopLeft(find.text('Incomplete exchange')).dy,
+    expect(find.text('Temporarily unavailable'), findsNothing);
+    expect(find.text('Incomplete'), findsOneWidget);
+    expect(tester.getTopLeft(find.text('Incomplete')).dy,
         greaterThan(tester.getBottomLeft(find.text('Naira to cedis')).dy));
     await tester.tap(find.text('Cedis to naira'));
     await tester.pumpAndSettle();
     expect(find.byType(TextFormField), findsWidgets);
     expect(find.text('Enter the amount you want to change.'), findsOneWidget);
+  });
+
+  testWidgets('users can still explicitly save and resume several drafts',
+      (tester) async {
+    final service = _FakeManualExchangeService(
+      enabled: true,
+      deliveryPolicyVersion: 1,
+      availableSourceCurrencies: const ['GHS', 'NGN'],
+    );
+    await tester
+        .pumpWidget(MaterialApp(home: ManualExchangeScreen(service: service)));
+    await tester.pumpAndSettle();
+    for (final amount in ['150', '275']) {
+      await tester.tap(find.text('Cedis to naira'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextFormField).first, amount);
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.text('Save for later'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Save for later'));
+      await tester.pumpAndSettle();
+    }
+    expect(find.text('GHS 150'), findsOneWidget);
+    expect(find.text('GHS 275'), findsOneWidget);
+    expect(find.text('Incomplete'), findsNWidgets(2));
+    await tester.ensureVisible(find.text('GHS 150'));
+    await tester.tap(find.text('GHS 150'));
+    await tester.pumpAndSettle();
+    expect(find.text('150'), findsOneWidget);
+    expect(find.text('View transfer account'), findsNothing);
+    expect(find.text('Save for later'), findsOneWidget);
+  });
+
+  testWidgets(
+      'Continue preserves details until transfer is ready and opens review',
+      (tester) async {
+    final service = _CompletesExchange();
+    final router = GoRouter(routes: [
+      GoRoute(
+        path: '/',
+        builder: (_, __) => ManualExchangeScreen(
+          service: service,
+          authService: _ConfiguredPin(),
+        ),
+      ),
+      GoRoute(
+        path: '/exchange/orders/:id',
+        builder: (_, state) => ManualExchangeOrderScreen(
+          orderId: state.pathParameters['id']!,
+          initialOrder: state.extra as ManualExchangeOrder?,
+          service: service,
+          pickReceipt: () async => ManualExchangeProofFile(
+            fileName: 'receipt.png',
+            contentType: 'image/png',
+            bytes: Uint8List.fromList([137, 80, 78, 71]),
+          ),
+        ),
+      ),
+    ]);
+    addTearDown(router.dispose);
+    await tester.pumpWidget(
+        MaterialApp.router(theme: AppTheme.light, routerConfig: router));
+    await tester.pumpAndSettle();
+    Future<void> press(String label) async {
+      final target = find.text(label);
+      if (target.evaluate().isEmpty) {
+        await tester.scrollUntilVisible(target, 180,
+            scrollable: find.byType(Scrollable).first);
+      }
+      await tester.ensureVisible(target);
+      await tester.pumpAndSettle();
+      await tester.tap(target);
+      await tester.pumpAndSettle();
+    }
+
+    await press('Cedis to naira');
+    await tester.enterText(find.byType(TextFormField).first, '100.00');
+    await press('Continue');
+    expect(find.text('Receive naira'), findsOneWidget);
+    expect(service.drafts, isEmpty);
+    await _selectNigerianBank(tester, 'Access Bank');
+    await tester.enterText(
+        find.byKey(const ValueKey('exchange-bank-account-field')),
+        '0123456789');
+    await tester.pump(const Duration(milliseconds: 500));
+    await tester.pumpAndSettle();
+
+    await press('View transfer account');
+    expect(
+        find.textContaining('Cedis to naira is being updated'), findsOneWidget);
+    expect(find.textContaining('Your details are still here'), findsOneWidget);
+    expect(find.text('0123456789'), findsOneWidget);
+    expect(find.text('Ada Lovelace'), findsOneWidget);
+    expect(service.order, isNull);
+    expect(service.drafts, isEmpty);
+
+    service.deliveryPolicyVersion = 2;
+    await press('View transfer account');
+    Navigator.of(tester.element(find.text('Enter your transaction PIN')))
+        .pop('2468');
+    await tester.pumpAndSettle();
+    expect(find.text('Collection Bank'), findsOneWidget);
+    expect(find.text('EX-FIXTURE-001'), findsWidgets);
+    await press('I’ve made this transfer');
+    await tester.enterText(
+        find.widgetWithText(TextFormField, 'Name on receipt'), 'Alex Morgan');
+    await press('Upload receipt');
+    final confirmation = find.byType(CheckboxListTile);
+    await tester.ensureVisible(confirmation);
+    await tester.tap(confirmation);
+    await tester.pumpAndSettle();
+    await press('Confirm payment & submit receipt');
+    expect(find.text('Awaiting admin review'), findsOneWidget);
+    expect(
+        service.order!.status, ManualExchangeOrderStatus.awaitingConfirmation);
+    expect(service.drafts, isEmpty);
+    await tester.pumpWidget(const SizedBox());
   });
 
   testWidgets('cedis exchange advances to a naira payout step', (tester) async {
@@ -408,7 +526,6 @@ void main() {
     await _openNairaDestination(
       tester,
       service: service,
-      kycService: _VerifiedTierOne(),
       authService: _NeedsPinSetup(),
     );
 
@@ -548,12 +665,11 @@ void main() {
   });
 
   testWidgets(
-      'direct naira payout validates ten digits and does not apply wallet limits',
+      'direct naira payout validates ten digits without requiring a wallet tier',
       (tester) async {
     await tester.pumpWidget(MaterialApp(
         home: ManualExchangeScreen(
       service: _FakeManualExchangeService(enabled: true),
-      kycService: _VerifiedTierOne(),
       authService: _NeedsPinSetup(),
     )));
     await tester.pumpAndSettle();
@@ -609,33 +725,60 @@ void main() {
     ))));
     await tester.pumpAndSettle();
     expect(find.text('Start a new exchange'), findsOneWidget);
-    expect(find.text('Incomplete exchange'), findsOneWidget);
-    expect(find.text('Continue saved exchange'), findsOneWidget);
-    expect(find.text('Retry exchange'), findsNothing);
+    expect(find.text('Incomplete'), findsOneWidget);
+    expect(find.text('GHS 100.00'), findsOneWidget);
+    expect(find.text('GHS → NGN'), findsOneWidget);
+    expect(find.text('Continue saved request'), findsNothing);
     expect(find.text('Synthetic Nigerian Bank'), findsNothing);
     expect(find.text('Your naira goes to your TrustPay wallet.'), findsNothing);
     await tester.drag(find.byType(CustomScrollView), const Offset(0, -260));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Continue saved exchange'));
+    await tester.tap(find.text('Incomplete'));
     await tester.pumpAndSettle();
-    expect(find.text('Retry exchange'), findsOneWidget);
-    expect(find.text('Synthetic Nigerian Bank'), findsOneWidget);
-    expect(
-        tester
-            .widget<TextFormField>(
-                find.byKey(const ValueKey('exchange-bank-account-field')))
-            .enabled,
-        isFalse);
+    expect(find.text('Continue saved request'), findsOneWidget);
+    expect(find.text('Receive NGN · Synthetic Nigerian Bank'), findsOneWidget);
+    expect(find.text('Account ending in 6789'), findsOneWidget);
+    expect(find.byType(TextFormField), findsNothing);
     await tester.pumpWidget(const SizedBox());
   });
 
+  testWidgets('a committed saved request opens its original order directly',
+      (tester) async {
+    final service = _FakeManualExchangeService(
+      enabled: true,
+      pendingCreate: const ManualExchangeAttempt(
+        action: 'create',
+        fingerprint: '{"amount":"100.00","settlementMode":"WALLET"}',
+        key: '12345678-1234-4234-8234-123456789012',
+        orderId: null,
+      ),
+    )..recoveredOrder =
+        fixtureV1Order(id: 'original', status: 'AWAITING_TRANSFER');
+    final router = GoRouter(routes: [
+      GoRoute(
+          path: '/',
+          builder: (_, __) => ManualExchangeScreen(service: service)),
+      GoRoute(
+          path: '/exchange/orders/:id',
+          builder: (_, state) =>
+              Scaffold(body: Text('Order ${state.pathParameters['id']}'))),
+    ]);
+    addTearDown(router.dispose);
+    await tester.pumpWidget(MaterialApp.router(routerConfig: router));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Incomplete'));
+    await tester.tap(find.text('Incomplete'));
+    await tester.pumpAndSettle();
+    expect(find.text('Order original'), findsOneWidget);
+    expect(find.text('Continue saved request'), findsNothing);
+  });
+
   testWidgets(
-      'a suspended verified customer cannot authorize an external exchange',
+      'an external exchange reaches PIN setup without an identity check',
       (tester) async {
     await tester.pumpWidget(MaterialApp(
         home: ManualExchangeScreen(
             service: _FakeManualExchangeService(enabled: true),
-            kycService: _VerifiedTierOne(suspended: true),
             authService: _NeedsPinSetup())));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Cedis to naira'));
@@ -654,8 +797,7 @@ void main() {
     await tester.tap(find.text('View transfer account'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 350));
-    expect(find.text('Your account is under review'), findsOneWidget);
-    expect(find.text('Set transaction PIN'), findsNothing);
+    expect(find.text('Set transaction PIN'), findsOneWidget);
     await tester.pumpWidget(const SizedBox());
   });
 
@@ -696,17 +838,19 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Start a new exchange'), findsOneWidget);
-    expect(find.text('Incomplete exchange'), findsOneWidget);
-    expect(find.text('Retry exchange'), findsNothing);
+    expect(find.text('Incomplete'), findsOneWidget);
+    expect(find.text('Continue saved request'), findsNothing);
     expect(find.text('GCB Bank'), findsNothing);
+    expect(find.text('NGN 100.00'), findsOneWidget);
+    expect(find.text('NGN → GHS'), findsOneWidget);
     await tester.drag(find.byType(CustomScrollView), const Offset(0, -260));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Continue saved exchange'));
+    await tester.tap(find.text('Incomplete'));
     await tester.pumpAndSettle();
-    expect(find.text('Exchange request pending'), findsOneWidget);
-    expect(find.text('Retry exchange'), findsOneWidget);
-    expect(find.text('GCB Bank'), findsOneWidget);
-    expect(find.text('23312345678'), findsOneWidget);
+    expect(find.text('Resume exchange'), findsOneWidget);
+    expect(find.text('Continue saved request'), findsOneWidget);
+    expect(find.text('Receive GHS · GCB Bank'), findsOneWidget);
+    expect(find.text('Account ending in 5678'), findsOneWidget);
   });
 
   testWidgets(
@@ -722,18 +866,17 @@ void main() {
                   '{"sourceCurrency":"GHS","amount":"100.00","settlementMode":"BANK","destinationInstitution":"Earlier Bank","destinationAccount":"23312345678","destinationName":"Beneficiary"}',
               key: '12345678-1234-4234-8234-123456789012',
               orderId: null)),
-      kycService: _VerifiedTierOne(),
       authService: _NeedsPinSetup(),
     )));
     await tester.pumpAndSettle();
     expect(find.text('Start a new exchange'), findsOneWidget);
     await tester.drag(find.byType(CustomScrollView), const Offset(0, -260));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Continue saved exchange'));
+    await tester.tap(find.text('Incomplete'));
     await tester.pumpAndSettle();
-    await tester.ensureVisible(find.text('Retry exchange'));
+    await tester.ensureVisible(find.text('Continue saved request'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Retry exchange'));
+    await tester.tap(find.text('Continue saved request'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 350));
     expect(find.text('Set transaction PIN'), findsOneWidget);
@@ -807,7 +950,7 @@ class _FakeManualExchangeService extends ManualExchangeService {
   int configReads = 0;
   final List<String>? availableSourceCurrencies;
   final ManualExchangeAttempt? pendingCreate;
-  final int deliveryPolicyVersion;
+  int deliveryPolicyVersion;
 
   _FakeManualExchangeService(
       {required this.enabled,
@@ -865,22 +1008,92 @@ class _FakeManualExchangeService extends ManualExchangeService {
   @override
   Future<List<ManualExchangeOrder>> listOrders() async => const [];
 
+  ManualExchangeOrder? recoveredOrder;
+
   @override
-  Future<ManualExchangeAttempt?> pendingCreateAttempt() async => pendingCreate;
+  Future<ManualExchangeOrder?> recoverCreatedOrder(
+          ManualExchangeAttempt attempt) async =>
+      recoveredOrder;
+
+  final drafts = <ManualExchangeAttempt>[];
+
+  @override
+  Future<void> saveAmountDraft(String currency, String amount,
+      {ManualExchangeAttempt? previous}) async {
+    drafts.remove(previous);
+    drafts.add(ManualExchangeAttempt(
+      action: 'draft',
+      fingerprint: jsonEncode({'sourceCurrency': currency, 'amount': amount}),
+      key: 'draft-${drafts.length}',
+      orderId: null,
+    ));
+  }
+
+  @override
+  Future<List<ManualExchangeAttempt>> pendingCreateAttempts() async =>
+      [if (pendingCreate != null) pendingCreate!, ...drafts];
 }
 
-class _VerifiedTierOne extends KycService {
-  final bool suspended;
-  _VerifiedTierOne({this.suspended = false});
+class _ConfiguredPin extends AuthService {
   @override
-  Future<KycOverview> fetchOverview(
-          {bool includeIdentityProfile = false}) async =>
-      KycOverview.fromJson({
-        'kycStatus': 'VERIFIED',
-        'kycTier': 'TIER_1',
-        'isSuspended': suspended,
-        'tierOneLimits': null,
-      });
+  Future<TransactionPinServerStatus> getTransactionPinStatus() async =>
+      const TransactionPinServerStatus(
+        configured: true,
+        pinLength: 4,
+        resetHoldUntil: null,
+        locked: false,
+      );
+}
+
+class _CompletesExchange extends _FakeManualExchangeService {
+  _CompletesExchange() : super(enabled: true, deliveryPolicyVersion: 1);
+
+  ManualExchangeOrder? order;
+
+  @override
+  Future<ManualExchangeOrder> createOrder({
+    String sourceCurrency = 'NGN',
+    required String amount,
+    required ManualSettlementMode settlementMode,
+    required String transactionPin,
+    String? destinationInstitution,
+    String? destinationAccount,
+    String? destinationName,
+  }) async {
+    expect(sourceCurrency, 'GHS');
+    expect(amount, '100.00');
+    expect(settlementMode, ManualSettlementMode.bank);
+    expect(transactionPin, '2468');
+    expect(destinationAccount, '0123456789');
+    expect(destinationName, 'Ada Lovelace');
+    return order = fixtureV1Order();
+  }
+
+  @override
+  Future<ManualExchangeOrder> getOrder(String orderId) async => order!;
+
+  @override
+  Future<bool> receiptStepStarted(String orderId) async => false;
+
+  @override
+  Future<void> markReceiptStepStarted(String orderId) async {}
+
+  @override
+  Future<void> clearReceiptStep(String orderId) async {}
+
+  @override
+  Future<ManualExchangeOrder> submitProof({
+    required String orderId,
+    required ManualExchangeProofFile file,
+    String? bankReference,
+    String? receiptName,
+  }) async {
+    expect(orderId, order!.id);
+    expect(receiptName, 'Alex Morgan');
+    expect(bankReference, isEmpty);
+    return order =
+        fixtureV1Order(status: 'AWAITING_CONFIRMATION', hasProof: true);
+  }
 }
 
 class _NeedsPinSetup extends AuthService {
@@ -919,13 +1132,11 @@ class _RecentOrders extends _FakeManualExchangeService {
 Future<void> _openNairaDestination(
   WidgetTester tester, {
   required ManualExchangeService service,
-  KycService? kycService,
   AuthService? authService,
 }) async {
   await tester.pumpWidget(MaterialApp(
     home: ManualExchangeScreen(
       service: service,
-      kycService: kycService,
       authService: authService,
     ),
   ));

@@ -57,7 +57,7 @@ void main() {
     expect(find.text('Exchange'), findsOneWidget);
     expect(find.text('More'), findsWidgets);
     expect(find.text('Profile'), findsWidgets);
-    expect(find.text('Top services'), findsOneWidget);
+    expect(find.text('Available balance'), findsOneWidget);
 
     await tester.tap(find.text('Exchange'));
     await tester.pumpAndSettle();
@@ -69,13 +69,13 @@ void main() {
 
     router.pop();
     await tester.pumpAndSettle();
-    expect(find.text('Top services'), findsOneWidget);
+    expect(find.text('Available balance'), findsOneWidget);
 
     await tester.tap(find.text('More').last);
     await tester.pumpAndSettle();
 
     expect(find.text('Profile'), findsWidgets);
-    expect(find.text('Top services'), findsNothing);
+    expect(find.text('Available balance'), findsNothing);
     expect(find.text('ALL SERVICES'), findsOneWidget);
     expect(find.byKey(const ValueKey('feature-card-airtime')), findsOneWidget);
     expect(find.byKey(const ValueKey('feature-card-wallets')), findsOneWidget);
@@ -103,7 +103,7 @@ void main() {
 
     await tester.tap(find.text('Home').last);
     await tester.pumpAndSettle();
-    expect(find.text('Top services'), findsOneWidget);
+    expect(find.text('Available balance'), findsOneWidget);
     expect(
       bundle.adapter.requestedUris
           .where((uri) => uri.path == '/api/auth/bootstrap')

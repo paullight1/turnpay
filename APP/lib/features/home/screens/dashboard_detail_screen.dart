@@ -85,6 +85,7 @@ class _VtuOrderDetailScreenState extends State<VtuOrderDetailScreen> {
   VtuOrderStatus? _lastKnownOrder;
   String? _statusError;
   bool _isChecking = false;
+  bool _isLoadingDetails = false;
 
   @override
   void initState() {
@@ -94,13 +95,18 @@ class _VtuOrderDetailScreenState extends State<VtuOrderDetailScreen> {
   }
 
   Future<VtuOrderStatus> _loadOrder() async {
-    final order = await _vtuService.getOrderStatus(widget.reference);
-    _lastKnownOrder = order;
-    return order;
+    _isLoadingDetails = true;
+    try {
+      final order = await _vtuService.getOrderStatus(widget.reference);
+      _lastKnownOrder = order;
+      return order;
+    } finally {
+      _isLoadingDetails = false;
+    }
   }
 
   void _reload() {
-    if (_isChecking) return;
+    if (_isChecking || _isLoadingDetails) return;
     setState(() {
       _statusError = null;
       _future = _loadOrder();
@@ -108,7 +114,7 @@ class _VtuOrderDetailScreenState extends State<VtuOrderDetailScreen> {
   }
 
   Future<void> _requery() async {
-    if (_isChecking) return;
+    if (_isChecking || _isLoadingDetails) return;
     if (_lastKnownOrder?.actionRequired == true &&
         VtuOrderStatusReconciler.resolve(_lastKnownOrder!) ==
             VtuOrderResolution.confirming) {
@@ -157,7 +163,7 @@ class _VtuOrderDetailScreenState extends State<VtuOrderDetailScreen> {
           builder: (context, snapshot) {
             final children = <Widget>[
               TpPageHeader(
-                label: 'Payment status',
+                label: 'Payment receipt',
                 menuActions: [
                   TpPageMenuAction(
                     label: 'Refresh',
@@ -193,7 +199,8 @@ class _VtuOrderDetailScreenState extends State<VtuOrderDetailScreen> {
               children.add(
                 _VtuOrderBody(
                   order: order!,
-                  isChecking: _isChecking,
+                  isChecking: _isChecking ||
+                      snapshot.connectionState == ConnectionState.waiting,
                   onCheckStatus: _requery,
                   onRefreshDetails: _reload,
                   errorMessage: _statusError ??
@@ -3304,9 +3311,9 @@ class _TransactionHistoryCard extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.only(bottom: AppSpacing.sm),
       child: GestureDetector(
-        onTap: canTrackVtu
-            ? () => context.push(AppRoutes.vtuOrderFor(transaction.reference))
-            : null,
+        onTap: () => context.push(
+          AppRoutes.receiptFor(transaction.type, transaction.reference),
+        ),
         child: Container(
           padding: const EdgeInsets.symmetric(vertical: AppSpacing.xs),
           child: Row(
