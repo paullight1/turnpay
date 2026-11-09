@@ -240,7 +240,7 @@ void main() {
     expect(find.text('Protected content'), findsOneWidget);
   });
 
-  testWidgets('offers phone security with no enrolled biometric and unlocks',
+  testWidgets('offers phone security only after the existing app PIN succeeds',
       (tester) async {
     _usePhoneSurface(tester);
     FlutterSecureStorage.setMockInitialValues({});
@@ -259,14 +259,18 @@ void main() {
       biometricResult: true,
     );
 
+    final navigatorKey = GlobalKey<NavigatorState>();
     await tester.pumpWidget(
       ProviderScope(
         child: MaterialApp(
-          home: AppLockGate(
+          navigatorKey: navigatorKey,
+          builder: (context, child) => AppLockGate(
+            navigatorKey: navigatorKey,
             securityService: securityService,
-            child: const Scaffold(
-              body: Center(child: Text('Protected content')),
-            ),
+            child: child!,
+          ),
+          home: const Scaffold(
+            body: Center(child: Text('Protected content')),
           ),
         ),
       ),
@@ -274,10 +278,20 @@ void main() {
 
     await tester.pumpAndSettle();
 
-    expect(find.text('Unlock faster with Phone security'), findsOneWidget);
-    expect(find.text('Enable Phone security'), findsOneWidget);
+    expect(find.text('Unlock TrustPay'), findsOneWidget);
+    expect(find.text('Unlock with phone security'), findsNothing);
+    for (final digit in ['1', '3', '5', '7']) {
+      await tester.tap(find.text(digit));
+      await tester.pump();
+    }
+    await tester.pumpAndSettle();
+    expect(find.text('Incorrect PIN. Try again.'), findsOneWidget);
+    expect(find.text('Unlock with phone security'), findsNothing);
+    expect(securityService.biometricCalls, 0);
 
-    await tester.tap(find.text('Enable Phone security'));
+    await _enterPin(tester);
+    expect(find.text('Unlock with phone security'), findsOneWidget);
+    await tester.tap(find.text('Set up'));
     await tester.pumpAndSettle();
 
     expect(securityService.biometricPromptSeen, isTrue);
@@ -286,35 +300,31 @@ void main() {
     expect(find.text('Protected content'), findsOneWidget);
   });
 
-  for (final suppress in [false, true]) {
-    testWidgets('biometric reminder suppression is $suppress when declined',
-        (tester) async {
-      _usePhoneSurface(tester);
-      FlutterSecureStorage.setMockInitialValues({});
-      setMockSecureStorage(refreshToken: 'refresh-token');
-      final service = _FakeAppLockSecurityService(
-        config: const TransactionSecurityConfig(
-          hasPin: true,
-          pinLength: 4,
-          biometricEnabled: false,
-          canUseBiometrics: true,
-          hasBiometric: true,
-          biometricLabel: 'Fingerprint',
-        ),
-        approvedPin: '2468',
-      );
-      await _pumpGate(tester, service);
-      if (suppress) {
-        await tester.tap(find.text('Don’t remind me again'));
-        await tester.pump();
-      }
-      await tester.tap(find.text('Not now'));
-      await tester.pumpAndSettle();
-      expect(service.biometricPromptSeen, suppress);
-      expect(service.biometricCalls, 0);
-      expect(find.text('Unlock TrustPay'), findsOneWidget);
-    });
-  }
+  testWidgets(
+      'skipping phone security keeps the PIN unlock and saves the choice',
+      (tester) async {
+    _usePhoneSurface(tester);
+    setMockSecureStorage(refreshToken: 'refresh-token');
+    final service = _FakeAppLockSecurityService(
+      config: const TransactionSecurityConfig(
+        hasPin: true,
+        pinLength: 4,
+        biometricEnabled: false,
+        canUseBiometrics: true,
+        hasBiometric: true,
+        biometricLabel: 'Fingerprint',
+      ),
+      approvedPin: '2468',
+    );
+    await _pumpGate(tester, service);
+    await _enterPin(tester);
+    await tester.tap(find.text('Not now'));
+    await tester.pumpAndSettle();
+    expect(service.biometricPromptSeen, isTrue);
+    expect(service.biometricCalls, 0);
+    expect(find.text('Unlock TrustPay'), findsNothing);
+    expect(find.text('Protected content'), findsOneWidget);
+  });
 
   testWidgets('keeps the first frame opaque until the lock state is known',
       (tester) async {

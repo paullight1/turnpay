@@ -1662,9 +1662,12 @@ String _normalizeContentType(String raw) {
   return normalized;
 }
 
+bool isManualBankReferenceValid(String value) =>
+    RegExp(r'^[A-Z0-9._-]{4,100}$').hasMatch(value.trim().toUpperCase());
+
 String _normalizeBankReference(String raw) {
   final reference = _requireText(raw, 'bank reference').toUpperCase();
-  if (!RegExp(r'^[A-Z0-9._-]{4,100}$').hasMatch(reference)) {
+  if (!isManualBankReferenceValid(reference)) {
     throw const FormatException('Enter a valid bank reference.');
   }
   return reference;

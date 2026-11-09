@@ -25,6 +25,7 @@ class AppLockActivitySignal extends ChangeNotifier {
 
 class AppLockGate extends ConsumerStatefulWidget {
   final Widget child;
+  final GlobalKey<NavigatorState>? navigatorKey;
   final TransactionSecurityService securityService;
   final AuthService authService;
   final AppLockClock clock;
@@ -34,6 +35,7 @@ class AppLockGate extends ConsumerStatefulWidget {
   AppLockGate({
     super.key,
     required this.child,
+    this.navigatorKey,
     TransactionSecurityService? securityService,
     AuthService? authService,
     AppLockClock? clock,
@@ -61,6 +63,7 @@ class _AppLockGateState extends ConsumerState<AppLockGate>
   bool _lockOnResume = false;
   bool _isForeground = true;
   bool _biometricPromptInProgress = false;
+  bool _offeringPhoneSecurity = false;
   bool _lockCheckQueued = false;
   bool _usingAccountPassword = false;
   String _pin = '';
@@ -251,19 +254,6 @@ class _AppLockGateState extends ConsumerState<AppLockGate>
       }
 
       final shouldLock = config != null && config.hasAppLock;
-      var shouldOfferBiometricSetup = false;
-      if (shouldLock) {
-        shouldOfferBiometricSetup = config.canUseBiometrics &&
-            !config.biometricEnabled &&
-            !(await widget.securityService.hasSeenBiometricPrompt());
-      }
-      if (!mounted) return;
-
-      if (authStateNotifier.sessionExpired) {
-        _handleAuthStateChanged();
-        return;
-      }
-
       setState(() {
         _config = config;
         // Release the pre-emptive lock if this session has no PIN to enter.
@@ -277,15 +267,6 @@ class _AppLockGateState extends ConsumerState<AppLockGate>
           _error = null;
         }
       });
-
-      if (shouldOfferBiometricSetup && mounted && _isForeground) {
-        await _offerBiometricSetup(config!);
-      }
-
-      if (authStateNotifier.sessionExpired) {
-        _handleAuthStateChanged();
-        return;
-      }
 
       // A resume can queue a fresh read while this one is awaiting secure
       // storage. Do not publish this older result as ready or the protected
@@ -522,6 +503,7 @@ class _AppLockGateState extends ConsumerState<AppLockGate>
           _error = null;
         });
         _markSuccessfulActivity();
+        unawaited(_maybeOfferPhoneSecurity(config, generation));
         return;
       }
 
@@ -596,109 +578,81 @@ class _AppLockGateState extends ConsumerState<AppLockGate>
     _markLockStateReady();
   }
 
-  Future<void> _offerBiometricSetup(TransactionSecurityConfig config) async {
-    var dontRemindAgain = false;
-    final shouldEnable = await showDialog<bool>(
-          context: context,
-          barrierDismissible: false,
-          builder: (dialogContext) {
-            return AlertDialog(
-              backgroundColor: AppColors.surface,
-              title: Text(
-                'Unlock faster with ${config.biometricLabel}',
-                style: AppTextStyles.headingM,
-              ),
-              content: StatefulBuilder(builder: (context, update) {
-                return Column(mainAxisSize: MainAxisSize.min, children: [
-                  Text(
-                    'Use your device’s ${config.biometricLabel} to unlock TrustPay. You can always use your PIN or change this in Device Security.',
-                    style: AppTextStyles.bodyM,
-                  ),
-                  const SizedBox(height: AppSpacing.sm),
-                  CheckboxListTile(
-                    contentPadding: EdgeInsets.zero,
-                    controlAffinity: ListTileControlAffinity.leading,
-                    title: const Text('Don’t remind me again'),
-                    value: dontRemindAgain,
-                    onChanged: (value) =>
-                        update(() => dontRemindAgain = value ?? false),
-                  ),
-                ]);
-              }),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.of(dialogContext).pop(false),
-                  child: Text(
-                    'Not now',
-                    style: AppTextStyles.labelM.copyWith(
-                      color: AppColors.textSecondary,
-                    ),
-                  ),
-                ),
-                FilledButton(
-                  onPressed: () => Navigator.of(dialogContext).pop(true),
-                  style: FilledButton.styleFrom(
-                    backgroundColor: AppColors.primary,
-                    foregroundColor: Colors.white,
-                  ),
-                  child: Text('Enable ${config.biometricLabel}'),
-                ),
-              ],
-            );
-          },
-        ) ??
-        false;
-
-    if (!mounted) return;
-    if (authStateNotifier.sessionExpired) {
-      _handleAuthStateChanged();
+  Future<void> _maybeOfferPhoneSecurity(
+    TransactionSecurityConfig config,
+    int pinApproval,
+  ) async {
+    if (_offeringPhoneSecurity ||
+        !config.canUseBiometrics ||
+        config.biometricEnabled) {
       return;
     }
-    if (dontRemindAgain) {
+    _offeringPhoneSecurity = true;
+
+    bool canContinue() =>
+        mounted &&
+        _isForeground &&
+        !_locked &&
+        !authStateNotifier.sessionExpired &&
+        pinApproval == _approvalGeneration;
+
+    try {
+      if (await widget.securityService.hasSeenBiometricPrompt() ||
+          !canContinue()) {
+        return;
+      }
+
+      final enable = await showDialog<bool>(
+        context: widget.navigatorKey?.currentContext ?? context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Unlock with phone security'),
+          content: const Text(
+            'Use a fingerprint, face recognition, or your phone’s screen lock. '
+            'Your TrustPay PIN stays available.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('Not now'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: const Text('Set up'),
+            ),
+          ],
+        ),
+      );
+
+      if (enable == null || !canContinue()) return;
       await widget.securityService.markBiometricPromptSeen();
+      if (!enable || !canContinue()) return;
+
+      final approved = await _authenticateBiometric(
+        reason: 'Set up phone security to unlock TrustPay',
+      );
+      if (!mounted || authStateNotifier.sessionExpired) return;
+      if (!_isForeground) {
+        _lockOnResume = true;
+        return;
+      }
+      if (_locked) return;
+      _markLockStateReady();
+      _markSuccessfulActivity();
+      if (!approved) {
+        ScaffoldMessenger.maybeOf(context)?.showSnackBar(const SnackBar(
+          content: Text(
+              'Phone security wasn’t set up. You can try again in Device Security.'),
+        ));
+        return;
+      }
+
+      await widget.securityService.setBiometricEnabled(true);
+    } catch (_) {
+      // Enrollment is optional. Keep the completed PIN unlock and allow
+      // users to retry from Device Security.
+    } finally {
+      _offeringPhoneSecurity = false;
     }
-    if (!shouldEnable) return;
-
-    final approved = await _authenticateBiometric(
-      reason: 'Enable ${config.biometricLabel} for TrustPay',
-    );
-    if (!mounted) return;
-    if (authStateNotifier.sessionExpired) {
-      _handleAuthStateChanged();
-      return;
-    }
-
-    if (!approved) {
-      setState(() => _error =
-          '${config.biometricLabel} setup was not completed. You can continue with your PIN.');
-      return;
-    }
-
-    await widget.securityService.setBiometricEnabled(true);
-    final refreshedConfig = await widget.securityService.getConfig();
-    if (!mounted) return;
-
-    if (!_isForeground) {
-      _lockOnResume = true;
-      setState(() {
-        _config = refreshedConfig;
-        _locked = true;
-        _ready = false;
-        _verifying = false;
-        _pin = '';
-        _error = null;
-      });
-      return;
-    }
-
-    setState(() {
-      _config = refreshedConfig;
-      _locked = false;
-      _verifying = false;
-      _pin = '';
-      _error = null;
-    });
-    _markSuccessfulActivity();
   }
 
   Future<void> _logout() async {

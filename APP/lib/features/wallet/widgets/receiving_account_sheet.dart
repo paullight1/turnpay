@@ -32,8 +32,12 @@ class _ReceivingAccountSheetState extends State<ReceivingAccountSheet> {
 
   Future<void> _copy(String number) async {
     try {
-      await Clipboard.setData(ClipboardData(text: number));
-      if (mounted) setState(() => _copied = true);
+      await Clipboard.setData(ClipboardData(text: number.trim()));
+      if (!mounted) return;
+      setState(() => _copied = true);
+      ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+        const SnackBar(content: Text('Account number copied')),
+      );
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.maybeOf(context)?.showSnackBar(const SnackBar(
@@ -146,7 +150,7 @@ class _ReceivingAccountSheetState extends State<ReceivingAccountSheet> {
                                     'View your setup status or complete verification to request your account.',
                                     style: AppTextStyles.bodyM,
                                     textAlign: TextAlign.center),
-                                const SizedBox(height: 24),
+                                const SizedBox(height: 16),
                                 TpButton(
                                     label: 'View account setup',
                                     onTap: () => context
@@ -176,13 +180,16 @@ class _ReceivingAccountSheetState extends State<ReceivingAccountSheet> {
                                                     .walletFundingPurpose,
                                                 style: AppTextStyles.bodyS)),
                                       ])),
-                              const SizedBox(height: 24),
+                              const SizedBox(height: 16),
                               _AccountLine(
                                   icon: Icons.credit_card_outlined,
                                   label: 'Account number',
                                   value: account.accountNumber,
                                   prominent: true,
                                   trailing: IconButton(
+                                    style: IconButton.styleFrom(
+                                      minimumSize: const Size.square(48),
+                                    ),
                                     tooltip: _copied
                                         ? 'Account number copied'
                                         : 'Copy account number',
@@ -192,23 +199,17 @@ class _ReceivingAccountSheetState extends State<ReceivingAccountSheet> {
                                     onPressed: () =>
                                         _copy(account.accountNumber),
                                   )),
-                              const SizedBox(height: 24),
+                              const SizedBox(height: 16),
                               _AccountLine(
                                   icon: Icons.account_balance_outlined,
                                   label: 'Bank name',
                                   value: account.bankName),
-                              const SizedBox(height: 24),
+                              const SizedBox(height: 16),
                               _AccountLine(
                                   icon: Icons.person_outline_rounded,
                                   label: 'Account name',
                                   value: account.accountName),
                               const SizedBox(height: 28),
-                              TpButton(
-                                  label: _copied
-                                      ? 'Account number copied'
-                                      : 'Copy account number',
-                                  onTap: () => _copy(account.accountNumber)),
-                              const SizedBox(height: 12),
                               OutlinedButton(
                                   onPressed: () => context
                                       .push(AppRoutes.receivingAccountSetup),
@@ -246,14 +247,16 @@ class _AccountLine extends StatelessWidget {
   @override
   Widget build(BuildContext context) =>
       Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Container(
-            width: 42,
-            height: 42,
-            decoration: BoxDecoration(
-                color: AppColors.primary.withValues(alpha: .08),
-                borderRadius: BorderRadius.circular(10)),
-            child: Icon(icon, color: AppColors.primary, size: 22)),
-        const SizedBox(width: 16),
+        if (!prominent) ...[
+          Container(
+              width: 42,
+              height: 42,
+              decoration: BoxDecoration(
+                  color: AppColors.primary.withValues(alpha: .08),
+                  borderRadius: BorderRadius.circular(10)),
+              child: Icon(icon, color: AppColors.primary, size: 22)),
+          const SizedBox(width: 16),
+        ],
         Expanded(
             child:
                 Column(crossAxisAlignment: CrossAxisAlignment.start, children: [

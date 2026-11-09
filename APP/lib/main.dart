@@ -163,7 +163,10 @@ class TrustPayApp extends ConsumerWidget {
                   ),
                 ),
                 child: KeyboardVisibilityGuard(
-                  child: AppLockGate(child: child ?? const SizedBox.shrink()),
+                  child: AppLockGate(
+                    navigatorKey: router.routerDelegate.navigatorKey,
+                    child: child ?? const SizedBox.shrink(),
+                  ),
                 ),
               ),
             ),

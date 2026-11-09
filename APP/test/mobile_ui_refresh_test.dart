@@ -99,7 +99,7 @@ void main() {
                 walletService: _Accounts(active: false)))));
     await tester.pumpAndSettle();
     expect(find.text('0123456789'), findsNothing);
-    expect(find.text('Copy account number'), findsNothing);
+    expect(find.byTooltip('Copy account number'), findsNothing);
     expect(find.text('View account setup'), findsOneWidget);
   });
 

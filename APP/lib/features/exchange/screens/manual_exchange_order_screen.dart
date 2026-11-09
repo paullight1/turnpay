@@ -322,7 +322,7 @@ class _ManualExchangeOrderScreenState extends State<ManualExchangeOrderScreen>
     if (_receiptNameController.text == _suggestions?.receiptName) {
       _receiptNameController.clear();
     }
-    if (_bankReferenceController.text == _suggestions?.bankReference) {
+    if (_selectedFile != null) {
       _bankReferenceController.clear();
     }
     setState(() {
@@ -349,15 +349,19 @@ class _ManualExchangeOrderScreenState extends State<ManualExchangeOrderScreen>
     }
     final name =
         _receiptNameController.text.isEmpty ? details?.receiptName : null;
-    final reference =
-        _bankReferenceController.text.isEmpty ? details?.bankReference : null;
+    final scannedReference = details?.bankReference?.trim();
+    final reference = _bankReferenceController.text.isEmpty &&
+            scannedReference != null &&
+            isManualBankReferenceValid(scannedReference)
+        ? scannedReference
+        : null;
     setState(() {
       if (name != null) _receiptNameController.text = name;
       if (reference != null) _bankReferenceController.text = reference;
       _suggestions = (receiptName: name, bankReference: reference);
       _receiptScan = null;
       _scanMessage = name == null && reference == null
-          ? 'You can enter the receipt details manually.'
+          ? 'Enter the name as shown on your receipt.'
           : 'Check the suggested details against your receipt.';
     });
   }
@@ -378,6 +382,12 @@ class _ManualExchangeOrderScreenState extends State<ManualExchangeOrderScreen>
     }
     if (order.supportsReceiptName && receiptName.isEmpty) {
       setState(() => _proofMessage = 'Enter the name shown on your receipt.');
+      return;
+    }
+    if (bankReference.isNotEmpty &&
+        !isManualBankReferenceValid(bankReference)) {
+      setState(() => _proofMessage =
+          'Check the bank reference or clear it to submit without one.');
       return;
     }
 
@@ -977,17 +987,31 @@ class _ReceiptCard extends StatelessWidget {
                 controller: receiptNameController,
                 enabled: !isSubmitting,
                 textCapitalization: TextCapitalization.words,
-                textInputAction: TextInputAction.next,
+                textInputAction: TextInputAction.done,
                 decoration: const InputDecoration(labelText: 'Name on receipt'),
               ),
-              const SizedBox(height: AppSpacing.sm),
             ],
-            TextFormField(
-              controller: bankReferenceController,
-              enabled: !isSubmitting,
-              textInputAction: TextInputAction.done,
-              decoration:
-                  const InputDecoration(labelText: 'Bank reference (optional)'),
+            ValueListenableBuilder<TextEditingValue>(
+              valueListenable: bankReferenceController,
+              builder: (context, value, _) => ExpansionTile(
+                key: ValueKey('receipt-reference-${order.id}'),
+                tilePadding: EdgeInsets.zero,
+                childrenPadding: const EdgeInsets.only(bottom: AppSpacing.sm),
+                title: const Text('Bank reference (optional)'),
+                subtitle: value.text.isEmpty
+                    ? null
+                    : Text(value.text,
+                        maxLines: 1, overflow: TextOverflow.ellipsis),
+                children: [
+                  TextFormField(
+                    controller: bankReferenceController,
+                    enabled: !isSubmitting,
+                    textInputAction: TextInputAction.done,
+                    decoration:
+                        const InputDecoration(labelText: 'Bank reference'),
+                  ),
+                ],
+              ),
             ),
             if (message != null) ...[
               const SizedBox(height: AppSpacing.sm),

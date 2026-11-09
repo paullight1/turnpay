@@ -18,14 +18,29 @@ class ThemeModeController extends StateNotifier<ThemeMode> {
   static const _storage = FlutterSecureStorage();
   static const _storageKey = 'trustpay_theme_mode';
 
+  bool _selectedThisSession = false;
+  Future<void> _pendingWrite = Future.value();
+
   Future<void> load() async {
-    final raw = await _storage.read(key: _storageKey);
-    if (mounted) state = _decode(raw);
+    try {
+      final raw = await _storage.read(key: _storageKey);
+      if (mounted && !_selectedThisSession) state = _decode(raw);
+    } catch (_) {
+      // Follow the phone setting if the stored preference is unavailable.
+    }
   }
 
-  Future<void> setMode(ThemeMode mode) async {
+  Future<void> setMode(ThemeMode mode) {
+    _selectedThisSession = true;
     state = mode;
-    await _storage.write(key: _storageKey, value: _encode(mode));
+    _pendingWrite = _pendingWrite.then((_) async {
+      try {
+        await _storage.write(key: _storageKey, value: _encode(mode));
+      } catch (_) {
+        // The selected theme still applies for the current session.
+      }
+    });
+    return _pendingWrite;
   }
 
   Future<void> toggle(bool isLight) {
