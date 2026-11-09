@@ -240,7 +240,7 @@ void main() {
     expect(find.text('Protected content'), findsOneWidget);
   });
 
-  testWidgets('offers biometric setup once and unlocks after approval',
+  testWidgets('offers phone security with no enrolled biometric and unlocks',
       (tester) async {
     _usePhoneSurface(tester);
     FlutterSecureStorage.setMockInitialValues({});
@@ -252,8 +252,8 @@ void main() {
         pinLength: 4,
         biometricEnabled: false,
         canUseBiometrics: true,
-        hasBiometric: true,
-        biometricLabel: 'Fingerprint',
+        hasBiometric: false,
+        biometricLabel: 'Phone security',
       ),
       approvedPin: '2468',
       biometricResult: true,
@@ -274,10 +274,10 @@ void main() {
 
     await tester.pumpAndSettle();
 
-    expect(find.text('Unlock faster with Fingerprint'), findsOneWidget);
-    expect(find.text('Enable Fingerprint'), findsOneWidget);
+    expect(find.text('Unlock faster with Phone security'), findsOneWidget);
+    expect(find.text('Enable Phone security'), findsOneWidget);
 
-    await tester.tap(find.text('Enable Fingerprint'));
+    await tester.tap(find.text('Enable Phone security'));
     await tester.pumpAndSettle();
 
     expect(securityService.biometricPromptSeen, isTrue);

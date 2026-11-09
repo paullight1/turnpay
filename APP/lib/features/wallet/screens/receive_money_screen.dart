@@ -658,6 +658,11 @@ class _VirtualAccountCard extends StatelessWidget {
           if (accountNumber.isEmpty)
             _KycAccountNumberNotice(onCompleteKyc: onCompleteKyc)
           else ...[
+            if (account.currency.toUpperCase() == 'NGN') ...[
+              Text(AccountSetupCopy.walletFundingPurpose,
+                  style: AppTextStyles.bodyS),
+              const SizedBox(height: AppSpacing.sm),
+            ],
             TapScale(
               onTap: () => _copyAccountNumber(context),
               borderRadius: BorderRadius.circular(AppRadius.sm),

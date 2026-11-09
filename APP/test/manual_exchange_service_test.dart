@@ -546,10 +546,10 @@ void main() {
         contentType: 'image/png',
         bytes: Uint8List.fromList([1, 2, 3]),
       ),
-      bankReference: 'TRF-001',
     );
 
     expect(order.id, 'order-1');
+    expect(adapter.lastProofBody, {'objectKey': 'private/order-1/receipt.png'});
     expect(uploadAdapter.authorizationHeader, isNull);
     expect(uploadAdapter.contentType, 'image/png');
     expect(uploadAdapter.bytes, [1, 2, 3]);

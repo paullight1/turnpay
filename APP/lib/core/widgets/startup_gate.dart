@@ -2,6 +2,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../theme/app_theme.dart';
+
 class StartupGate extends StatefulWidget {
   const StartupGate(
       {super.key,
@@ -64,31 +66,34 @@ class _StartupGateState extends State<StartupGate> with WidgetsBindingObserver {
   Widget build(BuildContext context) {
     if (_ready) return widget.builder(context);
     return MaterialApp(
+        theme: AppTheme.light,
+        darkTheme: AppTheme.dark,
         // This loading shell does not own deep links. The application router
         // reads the requested location after initialization completes.
         builder: (context, _) => Scaffold(
-            body: SafeArea(
-                child: Center(
-                    child: Padding(
-      padding: const EdgeInsets.all(24),
-      child: Column(mainAxisSize: MainAxisSize.min, children: [
-        Text(_failed ? 'Unable to start TrustPay' : 'Starting TrustPay',
-            style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w600)),
-        const SizedBox(height: 16),
-        if (_failed) ...[
-          const Text(
-              'Check your connection and try again. If this continues, contact support.',
-              textAlign: TextAlign.center),
-          const SizedBox(height: 16),
-          FilledButton(
-              onPressed: () {
-                setState(() => _failed = false);
-                _initialize();
-              },
-              child: const Text('Retry')),
-        ] else
-          const CircularProgressIndicator(),
-      ]),
-    )))));
+                body: SafeArea(
+                    child: Center(
+                        child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: Column(mainAxisSize: MainAxisSize.min, children: [
+                Text(_failed ? 'Unable to start TrustPay' : 'Starting TrustPay',
+                    style: const TextStyle(
+                        fontSize: 22, fontWeight: FontWeight.w600)),
+                const SizedBox(height: 16),
+                if (_failed) ...[
+                  const Text(
+                      'Check your connection and try again. If this continues, contact support.',
+                      textAlign: TextAlign.center),
+                  const SizedBox(height: 16),
+                  FilledButton(
+                      onPressed: () {
+                        setState(() => _failed = false);
+                        _initialize();
+                      },
+                      child: const Text('Retry')),
+                ] else
+                  const CircularProgressIndicator(),
+              ]),
+            )))));
   }
 }

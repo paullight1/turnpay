@@ -1425,9 +1425,6 @@ class ManualExchangeService {
             RegExp(r'[\x00-\x1f\x7f-\x9f]').hasMatch(name))) {
       throw const FormatException('Enter the name shown on your receipt.');
     }
-    if (name == null && normalizedReference == null) {
-      throw const FormatException('Enter the name shown on your receipt.');
-    }
     final normalizedType = _normalizeContentType(file.contentType);
     _validateProofMetadata(
       fileName: file.fileName,
@@ -1435,8 +1432,9 @@ class ManualExchangeService {
       fileSize: file.fileSize,
     );
 
-    // Match retries to the same receipt bytes and name without storing the name.
-    final receiptDigest = name == null
+    // Match reference-free retries to the same file. Keep the fingerprint of
+    // existing reference-only attempts so they can still be recovered.
+    final receiptDigest = name == null && normalizedReference != null
         ? null
         : sha256
             .convert(utf8.encode(jsonEncode([

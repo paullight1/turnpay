@@ -380,11 +380,6 @@ class _ManualExchangeOrderScreenState extends State<ManualExchangeOrderScreen>
       setState(() => _proofMessage = 'Enter the name shown on your receipt.');
       return;
     }
-    if (!order.supportsReceiptName && bankReference.isEmpty) {
-      setState(
-          () => _proofMessage = 'Enter the bank reference for your transfer.');
-      return;
-    }
 
     FocusManager.instance.primaryFocus?.unfocus();
     _receiptScan?.cancel();
@@ -991,11 +986,8 @@ class _ReceiptCard extends StatelessWidget {
               controller: bankReferenceController,
               enabled: !isSubmitting,
               textInputAction: TextInputAction.done,
-              decoration: InputDecoration(
-                labelText: order.supportsReceiptName
-                    ? 'Bank reference (optional)'
-                    : 'Bank reference',
-              ),
+              decoration:
+                  const InputDecoration(labelText: 'Bank reference (optional)'),
             ),
             if (message != null) ...[
               const SizedBox(height: AppSpacing.sm),

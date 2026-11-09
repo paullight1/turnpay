@@ -303,7 +303,7 @@ class _VirtualAccountScreenState extends State<VirtualAccountScreen>
           const SizedBox(height: 12),
           Text(
               ready
-                  ? 'Transfer naira to these details from any Nigerian bank.'
+                  ? AccountSetupCopy.walletFundingPurpose
                   : needsReview
                       ? AccountSetupCopy.actionRequiredBody(
                           bvnVerified: identityVerified)

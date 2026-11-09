@@ -254,7 +254,6 @@ class _AppLockGateState extends ConsumerState<AppLockGate>
       var shouldOfferBiometricSetup = false;
       if (shouldLock) {
         shouldOfferBiometricSetup = config.canUseBiometrics &&
-            config.hasBiometric &&
             !config.biometricEnabled &&
             !(await widget.securityService.hasSeenBiometricPrompt());
       }
