@@ -408,7 +408,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         path: AppRoutes.activity,
         pageBuilder: (context, state) => _slideTransition(
           state,
-          DashboardDetailScreen(kind: DashboardDetailKind.activity),
+          DashboardTransactionsScreen(),
         ),
       ),
       GoRoute(
@@ -474,12 +474,15 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       ),
       GoRoute(
         path: AppRoutes.walletDetail,
+        redirect: (context, state) =>
+            !LaunchCapabilities.ghanaCedisWalletEnabled &&
+                    state.pathParameters['currency']?.toUpperCase() == 'GHS'
+                ? AppRoutes.wallets
+                : null,
         pageBuilder: (context, state) => _slideTransition(
           state,
           WalletDetailScreen(
-            currency: Uri.decodeComponent(
-              state.pathParameters['currency'] ?? 'NGN',
-            ),
+            currency: state.pathParameters['currency'] ?? 'NGN',
           ),
         ),
       ),

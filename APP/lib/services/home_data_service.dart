@@ -12,6 +12,15 @@ class HomeDataService {
       : _apiClient = apiClient ?? ApiClient();
 
   final ApiClient _apiClient;
+  HomeUser? _lastKnownUser;
+  Future<Response<dynamic>>? _pendingBootstrap;
+
+  HomeUser? get lastKnownUser => _lastKnownUser;
+
+  Future<Response<dynamic>> _bootstrap() => _pendingBootstrap ??=
+          _apiClient.client.post('/api/auth/bootstrap').whenComplete(() {
+        _pendingBootstrap = null;
+      });
 
   /// Lightweight, uncached reads for foreground balance updates.
   Future<List<HomeWallet>> fetchWalletBalances() async {
@@ -29,29 +38,32 @@ class HomeDataService {
       KycService(apiClient: _apiClient).fetchOverview();
 
   Future<HomeUser> fetchCurrentUser() async {
-    final response = await _apiClient.client.post('/api/auth/bootstrap');
+    final response = await _bootstrap();
     final data = response.data;
     if (data is! Map<String, dynamic> ||
         data['user'] is! Map<String, dynamic>) {
       throw const FormatException('Invalid profile response: expected a user.');
     }
-    return HomeUser.fromJson(data['user'] as Map<String, dynamic>);
+    return _lastKnownUser =
+        HomeUser.fromJson(data['user'] as Map<String, dynamic>);
   }
 
   Future<HomeDashboardData> fetchDashboard() async {
     final responses = await Future.wait<dynamic>([
-      _apiClient.client.post('/api/auth/bootstrap'),
+      _bootstrap(),
       _fetchTransactionsForDashboard(),
       _fetchVirtualAccountsForDashboard(),
       _fetchBeneficiariesForDashboard(),
     ]);
 
-    return HomeDashboardData.fromResponses(
+    final dashboard = HomeDashboardData.fromResponses(
       bootstrap: (responses[0] as Response).data,
       transactions: responses[1],
       virtualAccounts: responses[2],
       beneficiaries: responses[3],
     );
+    _lastKnownUser = dashboard.user;
+    return dashboard;
   }
 
   Future<Map<String, dynamic>> _fetchTransactionsForDashboard() async {
@@ -266,7 +278,7 @@ class HomeDataService {
       },
     );
 
-    return HomeUser.fromJson(_asMap(response.data));
+    return _lastKnownUser = HomeUser.fromJson(_asMap(response.data));
   }
 
   Future<List<SupportTicket>> fetchSupportTickets({int limit = 10}) async {

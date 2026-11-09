@@ -164,7 +164,8 @@ void main() {
       ),
     ]);
     await tester.pumpAndSettle();
-    expect(find.text('GHS → NGN'), findsOneWidget);
+    expect(find.text('GHS 100.00 → NGN 10000.00'), findsOneWidget);
+    expect(find.text('EX-FIXTURE-001'), findsNothing);
     expect(find.text('Awaiting admin review'), findsOneWidget);
     await tester.pumpWidget(const SizedBox());
   });

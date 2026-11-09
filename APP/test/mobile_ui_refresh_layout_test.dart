@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
@@ -8,6 +9,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:trustpay_app/core/theme/app_theme.dart';
 import 'package:trustpay_app/features/exchange/widgets/exchange_introduction.dart';
+import 'package:trustpay_app/features/home/screens/dashboard_detail_screen.dart';
 import 'package:trustpay_app/features/profile/widgets/profile_overview.dart';
 import 'package:trustpay_app/features/wallet/widgets/receiving_account_sheet.dart';
 import 'package:trustpay_app/services/home_data_service.dart';
@@ -26,6 +28,29 @@ void main() {
           .load();
     }
   });
+  testWidgets('Profile settings are visible while account details load',
+      (tester) async {
+    final service = _DelayedProfile();
+    await tester.pumpWidget(MaterialApp(
+      theme: AppTheme.light,
+      home: DashboardProfileScreen(homeDataService: service),
+    ));
+
+    expect(find.text('My Profile'), findsOneWidget);
+    expect(find.text('Account Details'), findsOneWidget);
+    expect(find.byType(LinearProgressIndicator), findsOneWidget);
+
+    service.user.complete(HomeUser.fromJson({
+      'id': 'fixture',
+      'fullName': 'Alex Morgan',
+      'email': 'alex@example.test',
+    }));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Alex Morgan'), findsOneWidget);
+    expect(find.byType(LinearProgressIndicator), findsNothing);
+  });
+
   for (final variant in [
     (name: 'light', size: const Size(430, 932), dark: false, scale: 1.0),
     (name: 'dark', size: const Size(430, 932), dark: true, scale: 1.0),
@@ -157,4 +182,11 @@ class _LayoutAccounts extends WalletService {
             currency: 'NGN',
             status: 'ACTIVE')
       ];
+}
+
+class _DelayedProfile extends HomeDataService {
+  final user = Completer<HomeUser>();
+
+  @override
+  Future<HomeUser> fetchCurrentUser() => user.future;
 }

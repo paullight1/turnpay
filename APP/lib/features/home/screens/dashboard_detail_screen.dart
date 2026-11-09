@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:dio/dio.dart';
 
+import '../../../core/config/launch_capabilities.dart';
 import '../../../core/money/money_value.dart';
 import '../../../core/router/app_router.dart';
 import '../../../core/theme/app_theme.dart';
@@ -377,24 +378,26 @@ class _DashboardProfileScreenState extends State<DashboardProfileScreen> {
           child: FutureBuilder<HomeUser>(
             future: _future,
             builder: (context, snapshot) {
-              if (snapshot.connectionState == ConnectionState.waiting) {
-                return const _ProfileSkeletonPanel();
-              }
-              if (snapshot.hasError || !snapshot.hasData) {
-                return _ErrorPanel(
-                  message: authErrorMessage(
-                    snapshot.error ?? 'Could not load profile',
-                    'Could not load profile',
-                  ),
-                  onRetry: () => setState(() {
-                    _future = widget.homeDataService.fetchCurrentUser();
-                  }),
-                );
-              }
-
-              final user = snapshot.data!;
+              final user =
+                  snapshot.data ?? widget.homeDataService.lastKnownUser;
               return ProfileOverview(
                 user: user,
+                identityStatus: snapshot.hasError
+                    ? Row(children: [
+                        Expanded(
+                          child: Text('Could not load account details',
+                              style: AppTextStyles.bodyS),
+                        ),
+                        TextButton(
+                          onPressed: () => setState(() {
+                            _future = widget.homeDataService.fetchCurrentUser();
+                          }),
+                          child: const Text('Retry'),
+                        ),
+                      ])
+                    : const LinearProgressIndicator(
+                        semanticsLabel: 'Loading account details',
+                      ),
                 onLogout: () async {
                   await _authService.logout();
                   if (context.mounted) context.go(AppRoutes.login);
@@ -2873,22 +2876,32 @@ class _WalletsBody extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     AppColors.watch(context);
+    final visibleWallets = wallets
+        .where(
+          (wallet) =>
+              LaunchCapabilities.ghanaCedisWalletEnabled ||
+              wallet.currency.toUpperCase() != 'GHS',
+        )
+        .toList();
     final activeCurrencies =
-        wallets.map((wallet) => wallet.currency.toUpperCase()).toSet();
-    const supportedCurrencies = ['NGN', 'GHS'];
+        visibleWallets.map((wallet) => wallet.currency.toUpperCase()).toSet();
+    const supportedCurrencies = [
+      'NGN',
+      if (LaunchCapabilities.ghanaCedisWalletEnabled) 'GHS',
+    ];
     const plannedCurrencies = ['USD', 'EUR'];
     final addableCurrencies = supportedCurrencies
         .where((currency) => !activeCurrencies.contains(currency))
         .toList();
 
-    if (wallets.isEmpty) {
+    if (visibleWallets.isEmpty) {
       return const Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           _EmptyPanel(
             icon: Icons.account_balance_wallet_outlined,
             title: 'No wallets found',
-            detail: 'Your NGN and GHS wallets will appear here after setup.',
+            detail: 'Your wallets will appear here after setup.',
           ),
           SizedBox(height: AppSpacing.md),
           _WalletAddSection(
@@ -2904,7 +2917,7 @@ class _WalletsBody extends StatelessWidget {
       children: [
         Text('Active wallets', style: AppTextStyles.headingM),
         const SizedBox(height: AppSpacing.sm),
-        ...wallets.map((wallet) {
+        ...visibleWallets.map((wallet) {
           return _WalletManageCard(wallet: wallet);
         }),
         const SizedBox(height: AppSpacing.lg),
@@ -3658,58 +3671,6 @@ class _LoadingPanel extends StatelessWidget {
               ],
             ),
           ),
-        ],
-      ),
-    );
-  }
-}
-
-class _ProfileSkeletonPanel extends StatelessWidget {
-  const _ProfileSkeletonPanel();
-
-  @override
-  Widget build(BuildContext context) {
-    AppColors.watch(context);
-    Widget line(double width, {double height = 12}) {
-      return Container(
-        width: width,
-        height: height,
-        decoration: BoxDecoration(
-          color: AppColors.border.withValues(alpha: 0.55),
-          borderRadius: BorderRadius.circular(AppRadius.full),
-        ),
-      );
-    }
-
-    return _DataPanel(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              CircleAvatar(
-                radius: 28,
-                backgroundColor: AppColors.primary.withValues(alpha: 0.14),
-              ),
-              const SizedBox(width: AppSpacing.md),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    line(128, height: 16),
-                    const SizedBox(height: AppSpacing.sm),
-                    line(190),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: AppSpacing.lg),
-          line(double.infinity),
-          const SizedBox(height: AppSpacing.sm),
-          line(double.infinity),
-          const SizedBox(height: AppSpacing.sm),
-          line(180),
         ],
       ),
     );

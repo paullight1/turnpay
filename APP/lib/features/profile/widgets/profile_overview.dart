@@ -7,73 +7,82 @@ import '../../../core/theme/app_theme.dart';
 import '../../../services/home_data_service.dart';
 
 class ProfileOverview extends StatelessWidget {
-  final HomeUser user;
+  final HomeUser? user;
+  final Widget? identityStatus;
   final VoidCallback onLogout;
   const ProfileOverview(
-      {super.key, required this.user, required this.onLogout});
+      {super.key,
+      required this.user,
+      required this.onLogout,
+      this.identityStatus});
 
   @override
   Widget build(BuildContext context) {
     AppColors.watch(context);
+    final user = this.user;
     return ListView(
-      padding: const EdgeInsets.only(bottom: 100),
+      padding: const EdgeInsets.only(bottom: AppSpacing.lg),
       children: [
         Text('My Profile',
             style:
                 AppTextStyles.headingXL.copyWith(fontWeight: FontWeight.w800)),
         const SizedBox(height: 28),
-        Material(
-          color: AppColors.surface,
-          borderRadius: BorderRadius.circular(16),
-          child: InkWell(
+        if (user == null)
+          identityStatus ?? const SizedBox.shrink()
+        else
+          Material(
+            color: AppColors.surface,
             borderRadius: BorderRadius.circular(16),
-            onTap: () => context.push(AppRoutes.profileAccount),
-            child: Padding(
-              padding: const EdgeInsets.all(20),
-              child: Row(children: [
-                Stack(clipBehavior: Clip.none, children: [
-                  Container(
-                    width: 76,
-                    height: 76,
-                    padding: const EdgeInsets.all(3),
-                    decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        border: Border.all(color: AppColors.primary, width: 2)),
-                    child: CircleAvatar(
-                        backgroundColor:
-                            AppColors.primary.withValues(alpha: .12),
-                        child: Text(user.initials,
-                            style: AppTextStyles.headingL.copyWith(
-                                color: AppColors.primary,
-                                fontWeight: FontWeight.w800))),
-                  ),
-                  Positioned(
-                      right: -2,
-                      bottom: -2,
-                      child: Container(
-                          width: 30,
-                          height: 30,
-                          decoration: BoxDecoration(
-                              color: AppColors.surfaceVariant,
-                              shape: BoxShape.circle,
-                              border: Border.all(
-                                  color: AppColors.surface, width: 2)),
-                          child: Icon(Icons.edit_outlined,
-                              color: AppColors.primary, size: 16))),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(16),
+              onTap: () => context.push(AppRoutes.profileAccount),
+              child: Padding(
+                padding: const EdgeInsets.all(20),
+                child: Row(children: [
+                  Stack(clipBehavior: Clip.none, children: [
+                    Container(
+                      width: 76,
+                      height: 76,
+                      padding: const EdgeInsets.all(3),
+                      decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          border:
+                              Border.all(color: AppColors.primary, width: 2)),
+                      child: CircleAvatar(
+                          backgroundColor:
+                              AppColors.primary.withValues(alpha: .12),
+                          child: Text(user.initials,
+                              style: AppTextStyles.headingL.copyWith(
+                                  color: AppColors.primary,
+                                  fontWeight: FontWeight.w800))),
+                    ),
+                    Positioned(
+                        right: -2,
+                        bottom: -2,
+                        child: Container(
+                            width: 30,
+                            height: 30,
+                            decoration: BoxDecoration(
+                                color: AppColors.surfaceVariant,
+                                shape: BoxShape.circle,
+                                border: Border.all(
+                                    color: AppColors.surface, width: 2)),
+                            child: Icon(Icons.edit_outlined,
+                                color: AppColors.primary, size: 16))),
+                  ]),
+                  const SizedBox(width: 20),
+                  Expanded(
+                      child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                        Text(user.displayName, style: AppTextStyles.headingM),
+                        const SizedBox(height: 6),
+                        Text(user.email, style: AppTextStyles.bodyM),
+                      ])),
                 ]),
-                const SizedBox(width: 20),
-                Expanded(
-                    child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                      Text(user.displayName, style: AppTextStyles.headingM),
-                      const SizedBox(height: 6),
-                      Text(user.email, style: AppTextStyles.bodyM),
-                    ])),
-              ]),
+              ),
             ),
           ),
-        ),
         const SizedBox(height: 28),
         _sectionLabel('Account'),
         const SizedBox(height: 12),

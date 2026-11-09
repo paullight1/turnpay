@@ -87,7 +87,6 @@ class _MainShellState extends State<MainShell> {
   Widget build(BuildContext context) {
     AppColors.watch(context);
     return Scaffold(
-      extendBody: true,
       backgroundColor: AppColors.background,
       body: Stack(children: [
         Offstage(
@@ -159,48 +158,51 @@ class _TrustPayBottomNav extends StatelessWidget {
       for (var index = 0; index < _navItems.length; index++)
         if (index != 1 || exchangeEnabled) (index, _navItems[index]),
     ];
-    return SafeArea(
-      top: false,
-      minimum: const EdgeInsets.fromLTRB(14, 0, 14, 10),
-      child: SizedBox(
-        height: 76,
-        child: LayoutBuilder(
-          builder: (context, constraints) {
-            final itemWidth = constraints.maxWidth / entries.length;
-            final pillWidth = itemWidth - 10;
+    return ColoredBox(
+      color: AppColors.background,
+      child: SafeArea(
+        top: false,
+        minimum: const EdgeInsets.fromLTRB(14, 0, 14, 10),
+        child: SizedBox(
+          height: 76,
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final itemWidth = constraints.maxWidth / entries.length;
+              final pillWidth = itemWidth - 10;
 
-            return Stack(
-              children: [
-                AnimatedPositioned(
-                  duration: const Duration(milliseconds: 260),
-                  curve: Curves.easeOutCubic,
-                  left:
-                      entries.indexWhere((entry) => entry.$1 == selectedIndex) *
-                              itemWidth +
-                          5,
-                  top: 8,
-                  width: pillWidth,
-                  height: 60,
-                  child: const _LiquidGlassPill(),
-                ),
-                Row(
-                  children: List.generate(entries.length, (position) {
-                    final index = entries[position].$1;
-                    final item = entries[position].$2;
-                    final isActive = index == selectedIndex;
+              return Stack(
+                children: [
+                  AnimatedPositioned(
+                    duration: const Duration(milliseconds: 260),
+                    curve: Curves.easeOutCubic,
+                    left: entries.indexWhere(
+                                (entry) => entry.$1 == selectedIndex) *
+                            itemWidth +
+                        5,
+                    top: 8,
+                    width: pillWidth,
+                    height: 60,
+                    child: const _LiquidGlassPill(),
+                  ),
+                  Row(
+                    children: List.generate(entries.length, (position) {
+                      final index = entries[position].$1;
+                      final item = entries[position].$2;
+                      final isActive = index == selectedIndex;
 
-                    return Expanded(
-                      child: _NavBarItem(
-                        item: item,
-                        isActive: isActive,
-                        onTap: () => onTap(index),
-                      ),
-                    );
-                  }),
-                ),
-              ],
-            );
-          },
+                      return Expanded(
+                        child: _NavBarItem(
+                          item: item,
+                          isActive: isActive,
+                          onTap: () => onTap(index),
+                        ),
+                      );
+                    }),
+                  ),
+                ],
+              );
+            },
+          ),
         ),
       ),
     );

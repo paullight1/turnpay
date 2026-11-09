@@ -30,10 +30,6 @@ class ManualExchangeProgress extends StatelessWidget {
             : manualExchangeStatusLabel(order.status);
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       const SizedBox(height: 12),
-      Text('EXCHANGE · ${order.reference.isEmpty ? order.id : order.reference}',
-          style: AppTextStyles.labelS
-              .copyWith(color: AppColors.textSecondary, letterSpacing: .5)),
-      const SizedBox(height: 14),
       Text(title,
           style: AppTextStyles.headingXL.copyWith(fontWeight: FontWeight.w800)),
       const SizedBox(height: 10),

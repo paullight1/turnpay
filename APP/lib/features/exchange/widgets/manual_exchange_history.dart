@@ -195,18 +195,12 @@ class _CompactHistoryOrder extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Row(children: [
-                      Expanded(
-                        child: Text(
-                          '${order.sourceCurrency} → ${order.targetCurrency}',
-                          style: AppTextStyles.labelM
-                              .copyWith(fontWeight: FontWeight.w800),
-                        ),
-                      ),
-                      Text('${order.sourceCurrency} ${order.amount}',
-                          style: AppTextStyles.labelS
-                              .copyWith(fontWeight: FontWeight.w700)),
-                    ]),
+                    Text(
+                      '${order.sourceCurrency} ${order.amount} → '
+                      '${order.targetCurrency} ${order.targetAmount}',
+                      style: AppTextStyles.labelM
+                          .copyWith(fontWeight: FontWeight.w800),
+                    ),
                     const SizedBox(height: 4),
                     Text(
                       manualExchangeStatusLabel(order.status),
@@ -285,10 +279,6 @@ class _HistoryOrder extends StatelessWidget {
           if (order.createdAt != null)
             Text(DateFormat('d MMM, HH:mm').format(order.createdAt!.toLocal()),
                 style: AppTextStyles.bodyS),
-          Text(order.reference,
-              style: AppTextStyles.bodyS,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis),
           const SizedBox(height: 16),
           OutlinedButton(onPressed: open, child: Text(label)),
           ReviewReminderButton(order: order, service: service),
