@@ -617,7 +617,7 @@ class _TransferReceiptScreenState extends State<TransferReceiptScreen> {
                           icon: const Icon(Icons.copy_rounded, size: 18),
                           label: const Text('Copy reference'),
                           style: OutlinedButton.styleFrom(
-                            minimumSize: const Size.fromHeight(50),
+                            minimumSize: const Size.fromHeight(56),
                           ),
                         ),
                         const SizedBox(height: AppSpacing.md),

@@ -79,6 +79,11 @@ void main() {
     expect(find.text('Money confirmed'), findsOneWidget);
     expect(find.text('Waiting for admin'), findsOneWidget);
     expect(find.text('Sent'), findsNothing);
+    expect(find.text('Start another exchange'), findsOneWidget);
+    await tester.tap(find.text('Start another exchange'));
+    await tester.pumpAndSettle();
+    expect(find.text('Cedis to naira'), findsOneWidget);
+    expect(find.text('Money confirmed'), findsNothing);
     await tester.pumpWidget(const SizedBox());
   });
 }

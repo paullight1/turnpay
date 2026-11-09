@@ -1,115 +1,135 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../core/config/launch_capabilities.dart';
 import '../../../core/router/app_router.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/widgets/tp_page_header.dart';
 
 class HomeTaskScreen extends StatelessWidget {
-  const HomeTaskScreen({super.key});
+  const HomeTaskScreen({super.key, this.embedded = false});
+
+  final bool embedded;
+
+  static const _primaryFeatures = [
+    _FeatureItem(
+      slug: 'fund-wallet',
+      title: 'Fund wallet',
+      subtitle: 'Add money securely',
+      iconAsset: 'assets/icons/feature-fund-wallet.svg',
+      route: AppRoutes.fund,
+    ),
+    _FeatureItem(
+      slug: 'send-money',
+      title: 'Send money',
+      subtitle: 'Transfer to another user',
+      iconAsset: 'assets/icons/feature-send-money.svg',
+      route: AppRoutes.send,
+    ),
+    _FeatureItem(
+      slug: 'withdraw',
+      title: 'Withdraw',
+      subtitle: 'Send funds to your bank',
+      iconAsset: 'assets/icons/feature-withdraw.svg',
+      route: AppRoutes.withdraw,
+    ),
+    _FeatureItem(
+      slug: 'airtime',
+      title: 'Airtime',
+      subtitle: 'Top up any phone line',
+      iconAsset: 'assets/icons/feature-airtime.svg',
+      route: AppRoutes.airtime,
+    ),
+    _FeatureItem(
+      slug: 'data',
+      title: 'Data',
+      subtitle: 'Buy mobile data bundles',
+      iconAsset: 'assets/icons/feature-data.svg',
+      route: AppRoutes.data,
+    ),
+    _FeatureItem(
+      slug: 'cable-tv',
+      title: 'Cable TV',
+      subtitle: 'DStv, GOtv and StarTimes',
+      iconAsset: 'assets/icons/feature-cable-tv.svg',
+      route: AppRoutes.cable,
+    ),
+    _FeatureItem(
+      slug: 'electricity',
+      title: 'Electricity',
+      subtitle: 'Recharge prepaid meters',
+      iconAsset: 'assets/icons/feature-electricity.svg',
+      route: AppRoutes.electricity,
+    ),
+    _FeatureItem(
+      slug: 'paystack-account',
+      title: 'NGN account',
+      subtitle: 'Receive naira bank transfers',
+      iconAsset: 'assets/icons/feature-paystack-account.svg',
+      route: AppRoutes.virtualAccount,
+    ),
+    _FeatureItem(
+      slug: 'wallets',
+      title: 'Wallets',
+      subtitle: 'Manage your currencies',
+      iconAsset: 'assets/icons/feature-wallets.svg',
+      route: AppRoutes.wallets,
+    ),
+  ];
+
+  static const _comingSoon = [
+    _FeatureItem(
+      slug: 'airtime-cash',
+      title: 'Airtime to cash',
+      subtitle: 'Turn unused airtime into wallet funds in a few taps.',
+      iconAsset: 'assets/icons/feature-airtime-cash.svg',
+      backgroundAsset: 'assets/images/feature_cards/airtime-to-cash.png',
+    ),
+    _FeatureItem(
+      slug: 'virtual-cards',
+      title: 'Virtual cards',
+      subtitle:
+          'Pay online securely with instant cards you can freeze anytime.',
+      iconAsset: 'assets/icons/feature-virtual-cards.svg',
+      backgroundAsset: 'assets/images/feature_cards/virtual-cards.png',
+    ),
+    _FeatureItem(
+      slug: 'book-hotels',
+      title: 'Book hotels',
+      subtitle:
+          'Reserve stays with your wallet and keep every booking in one place.',
+      iconAsset: 'assets/icons/feature-hotels.svg',
+      backgroundAsset: 'assets/images/feature_cards/book-hotels.png',
+    ),
+    _FeatureItem(
+      slug: 'pay-flights',
+      title: 'Pay for flights',
+      subtitle:
+          'Book flights in seconds with clear receipts and wallet control.',
+      iconAsset: 'assets/icons/feature-flights.svg',
+      backgroundAsset: 'assets/images/feature_cards/pay-flights.png',
+    ),
+    _FeatureItem(
+      slug: 'betting-wallet',
+      title: 'Betting wallet',
+      subtitle: 'Move funds in and out with safer, simpler controls.',
+      iconAsset: 'assets/icons/feature-betting.svg',
+      backgroundAsset: 'assets/images/feature_cards/betting-wallet.png',
+    ),
+    _FeatureItem(
+      slug: 'gift-cards',
+      title: 'Gift cards',
+      subtitle: 'Buy digital gift cards for brands and special moments.',
+      iconAsset: 'assets/icons/feature-gift-cards.svg',
+      backgroundAsset: 'assets/images/feature_cards/gift-cards.png',
+    ),
+  ];
 
   @override
   Widget build(BuildContext context) {
     AppColors.watch(context);
-    const liveFeatures = [
-      _FeatureItem(
-        title: 'Fund wallet',
-        subtitle: 'Card and bank funding',
-        icon: Icons.add_card_rounded,
-        route: AppRoutes.fund,
-      ),
-      _FeatureItem(
-        title: 'Send money',
-        subtitle: 'Move money to another user',
-        icon: Icons.near_me_rounded,
-        route: AppRoutes.send,
-      ),
-      _FeatureItem(
-        title: 'Withdraw',
-        subtitle: 'Send wallet funds to a bank',
-        icon: Icons.account_balance_rounded,
-        route: AppRoutes.withdraw,
-      ),
-      _FeatureItem(
-        title: 'Airtime',
-        subtitle: 'Top up phone lines',
-        icon: Icons.phone_android_rounded,
-        route: AppRoutes.airtime,
-      ),
-      _FeatureItem(
-        title: 'Data',
-        subtitle: 'Buy data bundles',
-        icon: Icons.signal_cellular_alt_rounded,
-        route: AppRoutes.data,
-      ),
-      _FeatureItem(
-        title: 'Cable TV',
-        subtitle: 'Pay DStv, GOtv and StarTimes',
-        icon: Icons.live_tv_rounded,
-        route: AppRoutes.cable,
-      ),
-      _FeatureItem(
-        title: 'Electricity',
-        subtitle: 'Recharge prepaid meters',
-        icon: Icons.bolt_rounded,
-        route: AppRoutes.electricity,
-      ),
-      _FeatureItem(
-        title: 'Paystack NGN account',
-        subtitle: 'Receive NGN bank transfers',
-        icon: Icons.account_balance_outlined,
-        route: AppRoutes.virtualAccount,
-      ),
-      _FeatureItem(
-        title: 'Wallets',
-        subtitle: 'Manage active currencies',
-        icon: Icons.account_balance_wallet_outlined,
-        route: AppRoutes.wallets,
-      ),
-    ];
-
-    const comingSoon = [
-      _FeatureItem(
-        title: 'Airtime to cash',
-        subtitle: 'Turn unused airtime into wallet funds in a few taps.',
-        icon: Icons.swap_horiz_rounded,
-        backgroundAsset: 'assets/images/feature_cards/airtime-to-cash.png',
-      ),
-      _FeatureItem(
-        title: 'Virtual cards',
-        subtitle:
-            'Pay online securely with instant cards you can freeze anytime.',
-        icon: Icons.credit_card_rounded,
-        backgroundAsset: 'assets/images/feature_cards/virtual-cards.png',
-      ),
-      _FeatureItem(
-        title: 'Book hotels',
-        subtitle:
-            'Reserve stays with your wallet and keep every booking in one place.',
-        icon: Icons.hotel_rounded,
-        backgroundAsset: 'assets/images/feature_cards/book-hotels.png',
-      ),
-      _FeatureItem(
-        title: 'Pay for flights',
-        subtitle:
-            'Book flights in seconds with clear receipts and wallet control.',
-        icon: Icons.flight_takeoff_rounded,
-        backgroundAsset: 'assets/images/feature_cards/pay-flights.png',
-      ),
-      _FeatureItem(
-        title: 'Betting wallet',
-        subtitle: 'Move funds in and out quickly with safer, simpler controls.',
-        icon: Icons.sports_esports_rounded,
-        backgroundAsset: 'assets/images/feature_cards/betting-wallet.png',
-      ),
-      _FeatureItem(
-        title: 'Gift cards',
-        subtitle:
-            'Buy digital gift cards for the brands and moments you care about.',
-        icon: Icons.card_giftcard_rounded,
-        backgroundAsset: 'assets/images/feature_cards/gift-cards.png',
-      ),
-    ];
+    final largeText = MediaQuery.textScalerOf(context).scale(1) > 1.35;
 
     return Scaffold(
       backgroundColor: AppColors.background,
@@ -126,32 +146,77 @@ class HomeTaskScreen extends StatelessWidget {
               ),
               sliver: SliverList.list(
                 children: [
-                  const TpPageHeader(
-                    label: 'Feature hub',
+                  TpPageHeader(
+                    label: embedded ? 'More' : 'Feature hub',
+                    showBackButton: !embedded,
+                    menuActions: [
+                      TpPageMenuAction(
+                        label: 'History',
+                        icon: Icons.history_rounded,
+                        onTap: () => context.push(AppRoutes.activity),
+                      ),
+                    ],
                   ),
-                  const SizedBox(height: AppSpacing.xl),
-                  Text('Explore features', style: AppTextStyles.displayMedium),
-                  const SizedBox(height: AppSpacing.sm),
+                  const SizedBox(height: AppSpacing.lg),
                   Text(
-                    'Move money, pay bills, and keep your everyday finances in one calm, secure wallet.',
-                    style: AppTextStyles.bodyL,
+                    'ALL SERVICES',
+                    style: AppTextStyles.caption.copyWith(
+                      color: AppColors.primary,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: 1.4,
+                    ),
                   ),
-                  const SizedBox(height: AppSpacing.xl),
-                  const _FeatureGrid(items: liveFeatures),
-                  const SizedBox(height: AppSpacing.xl),
-                  Text('Coming soon', style: AppTextStyles.headingM),
                   const SizedBox(height: AppSpacing.xs),
                   Text(
-                    'From top-ups to travel and lifestyle spending, the next wave of TrustPay features is designed to keep more of life in one wallet.',
+                    'What can we help with?',
+                    style: AppTextStyles.headingXL.copyWith(
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                  const SizedBox(height: AppSpacing.sm),
+                  Text(
+                    'Choose a service to move money, pay bills or manage your accounts.',
+                    style: AppTextStyles.bodyM,
+                  ),
+                  const SizedBox(height: AppSpacing.xl),
+                  _FeatureGrid(
+                    items: [
+                      for (final item in _primaryFeatures)
+                        if (LaunchCapabilities.moneyOutEnabled ||
+                            (item.slug != 'send-money' &&
+                                item.slug != 'withdraw'))
+                          item,
+                    ],
+                  ),
+                  const SizedBox(height: AppSpacing.xl),
+                  Text(
+                    'Coming soon',
+                    style: AppTextStyles.headingM.copyWith(
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                  const SizedBox(height: AppSpacing.xs),
+                  Text(
+                    'A preview of what we are building next.',
                     style: AppTextStyles.bodyM,
                   ),
                   const SizedBox(height: AppSpacing.md),
-                  ...comingSoon.asMap().entries.map(
-                        (entry) => _ComingSoonCard(
-                          item: entry.value,
-                          index: entry.key,
+                  Column(
+                    key: const ValueKey('coming-soon-list'),
+                    children: [
+                      for (var index = 0;
+                          index < _comingSoon.length;
+                          index++) ...[
+                        _ComingSoonCard(
+                          item: _comingSoon[index],
+                          index: index,
+                          largeText: largeText,
                         ),
-                      ),
+                        if (index < _comingSoon.length - 1)
+                          const SizedBox(height: AppSpacing.sm),
+                      ],
+                    ],
+                  ),
                 ],
               ),
             ),
@@ -170,19 +235,35 @@ class _FeatureGrid extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     AppColors.watch(context);
-    return GridView.builder(
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      itemCount: items.length,
-      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 3,
-        crossAxisSpacing: AppSpacing.xs,
-        mainAxisSpacing: AppSpacing.xs,
-        childAspectRatio: 0.94,
-      ),
-      itemBuilder: (context, index) {
-        final item = items[index];
-        return _FeatureCard(item: item, index: index);
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final largeText = MediaQuery.textScalerOf(context).scale(1) > 1.35;
+        final columns = constraints.maxWidth >= 330 && !largeText ? 3 : 2;
+        final gridWidth =
+            constraints.maxWidth > 382 ? 382.0 : constraints.maxWidth;
+        const gap = AppSpacing.sm;
+        final cardWidth = (gridWidth - (gap * (columns - 1))) / columns;
+        return Align(
+          alignment: Alignment.centerLeft,
+          child: SizedBox(
+            width: gridWidth,
+            child: Wrap(
+              spacing: gap,
+              runSpacing: gap,
+              children: [
+                for (var index = 0; index < items.length; index++)
+                  SizedBox(
+                    width: cardWidth,
+                    child: _FeatureCard(
+                      item: items[index],
+                      index: index,
+                      compact: columns == 3,
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        );
       },
     );
   }
@@ -191,52 +272,61 @@ class _FeatureGrid extends StatelessWidget {
 class _FeatureCard extends StatelessWidget {
   final _FeatureItem item;
   final int index;
+  final bool compact;
 
   const _FeatureCard({
     required this.item,
     required this.index,
+    required this.compact,
   });
 
   @override
   Widget build(BuildContext context) {
     AppColors.watch(context);
-    final color = _featureColor(index);
+    final accent = _featureColor(index);
+    final icon = _FeatureIcon(
+      id: item.slug,
+      asset: item.iconAsset,
+      color: accent,
+      size: 44,
+    );
+    final cardHeight = compact ? 112.0 : 136.0;
 
-    return Material(
-      color: color.withValues(alpha: 0.1),
-      borderRadius: BorderRadius.circular(AppRadius.md),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(AppRadius.md),
-        onTap: item.route == null ? null : () => context.push(item.route!),
-        child: Padding(
-          padding: const EdgeInsets.all(AppSpacing.xs),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Container(
-                width: 40,
-                height: 40,
-                decoration: BoxDecoration(
-                  color: color.withValues(alpha: 0.16),
-                  borderRadius: BorderRadius.circular(AppRadius.md),
-                  border: Border.all(color: color.withValues(alpha: 0.22)),
-                ),
-                child: Icon(item.icon, color: color, size: 20),
+    return Semantics(
+      button: true,
+      label: '${item.title}. ${item.subtitle}',
+      child: Material(
+        key: ValueKey('feature-card-${item.slug}'),
+        color: AppColors.surface,
+        shape: RoundedRectangleBorder(
+          side: BorderSide(color: AppColors.border.withValues(alpha: 0.78)),
+          borderRadius: BorderRadius.circular(AppRadius.lg),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: () => context.push(item.route!),
+          child: SizedBox(
+            height: cardHeight,
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  icon,
+                  const SizedBox(height: AppSpacing.sm),
+                  Text(
+                    item.title,
+                    style: AppTextStyles.labelM.copyWith(
+                      fontWeight: FontWeight.w900,
+                      height: 1.1,
+                    ),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    textAlign: TextAlign.center,
+                  ),
+                ],
               ),
-              const SizedBox(height: 4),
-              Text(
-                item.title,
-                style: AppTextStyles.labelM.copyWith(
-                  color: AppColors.textPrimary,
-                  fontSize: 12,
-                  fontWeight: FontWeight.w900,
-                  height: 1.0,
-                ),
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                textAlign: TextAlign.center,
-              ),
-            ],
+            ),
           ),
         ),
       ),
@@ -244,122 +334,122 @@ class _FeatureCard extends StatelessWidget {
   }
 }
 
-Color _featureColor(int index) {
-  final colors = [
-    AppColors.primary,
-    AppColors.success,
-    AppColors.warning,
-    const Color(0xFF2563EB),
-    const Color(0xFF0EA5E9),
-    const Color(0xFF7C3AED),
-  ];
+class _FeatureIcon extends StatelessWidget {
+  final String id;
+  final String asset;
+  final Color color;
+  final double size;
 
-  return colors[index % colors.length];
+  const _FeatureIcon({
+    required this.id,
+    required this.asset,
+    required this.color,
+    required this.size,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      key: ValueKey('feature-icon-box-$id'),
+      width: size,
+      height: size,
+      padding: EdgeInsets.all(size <= 38 ? 9 : 11),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.11),
+        borderRadius: BorderRadius.circular(AppRadius.md),
+        border: Border.all(color: color.withValues(alpha: 0.18)),
+      ),
+      child: SvgPicture.asset(
+        asset,
+        key: ValueKey('feature-icon-$asset'),
+        colorFilter: ColorFilter.mode(color, BlendMode.srcIn),
+        excludeFromSemantics: true,
+      ),
+    );
+  }
 }
 
 class _ComingSoonCard extends StatelessWidget {
   final _FeatureItem item;
   final int index;
+  final bool largeText;
 
   const _ComingSoonCard({
     required this.item,
     required this.index,
+    required this.largeText,
   });
 
   @override
   Widget build(BuildContext context) {
     AppColors.watch(context);
-    final accent = _featureColor(index);
+    final accent = _comingSoonColor(index);
+    final brightSurface = Color.lerp(accent, Colors.white, 0.72)!;
 
     return Container(
-      margin: const EdgeInsets.only(bottom: AppSpacing.sm),
+      key: ValueKey('coming-soon-${item.slug}'),
+      width: double.infinity,
+      height: largeText ? 144 : 112,
       decoration: BoxDecoration(
-        color: AppColors.surfaceVariant.withValues(alpha: 0.92),
-        borderRadius: BorderRadius.circular(AppRadius.xl),
-        border: Border.all(color: AppColors.border.withValues(alpha: 0.9)),
-        boxShadow: [
-          BoxShadow(
-            color: AppColors.overlayLight,
-            blurRadius: 28,
-            offset: const Offset(0, 14),
-          ),
-        ],
+        color: brightSurface,
+        borderRadius: BorderRadius.circular(AppRadius.lg),
+        border: Border.all(color: accent.withValues(alpha: 0.24)),
       ),
       clipBehavior: Clip.antiAlias,
       child: Stack(
+        fit: StackFit.expand,
         children: [
-          Positioned.fill(
-            child: Opacity(
-              opacity: 0.56,
-              child: Image.asset(
-                item.backgroundAsset ??
-                    'assets/images/feature_cards/airtime-to-cash.png',
-                fit: BoxFit.cover,
-                alignment: Alignment.center,
+          Image.asset(
+            item.backgroundAsset!,
+            key: ValueKey('coming-soon-artwork-${item.slug}'),
+            fit: BoxFit.cover,
+            alignment: Alignment.centerRight,
+            color: accent.withValues(alpha: 0.52),
+            colorBlendMode: BlendMode.screen,
+          ),
+          DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.centerLeft,
+                end: Alignment.centerRight,
+                colors: [
+                  brightSurface,
+                  brightSurface.withValues(alpha: 0.94),
+                  accent.withValues(alpha: 0.34),
+                ],
+                stops: const [0.12, 0.58, 1],
               ),
             ),
-          ),
-          Positioned.fill(
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: [
-                    AppColors.background.withValues(alpha: 0.94),
-                    AppColors.surface.withValues(alpha: 0.56),
-                    accent.withValues(alpha: 0.20),
-                  ],
-                  stops: const [0, 0.52, 1],
-                ),
-              ),
-            ),
-          ),
-          Positioned(
-            top: AppSpacing.xs,
-            right: AppSpacing.xs,
-            child: _LockBadge(accent: accent),
           ),
           Padding(
-            padding: const EdgeInsets.fromLTRB(
-              AppSpacing.lg,
-              AppSpacing.md,
-              92,
-              AppSpacing.md,
+            padding: const EdgeInsets.symmetric(
+              horizontal: AppSpacing.md,
+              vertical: 12,
             ),
-            child: SizedBox(
-              height: 142,
-              child: Align(
-                alignment: Alignment.centerLeft,
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: FractionallySizedBox(
+                widthFactor: 0.72,
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'COMING SOON',
-                      style: AppTextStyles.caption.copyWith(
-                        color: accent,
-                        fontWeight: FontWeight.w900,
-                        letterSpacing: 1.2,
-                      ),
-                    ),
-                    const SizedBox(height: AppSpacing.xs),
-                    Text(
                       item.title,
                       style: AppTextStyles.labelL.copyWith(
-                        fontSize: 19,
-                        fontWeight: FontWeight.w800,
-                        height: 1.1,
+                        color: const Color(0xFF101828),
+                        fontWeight: FontWeight.w900,
+                        height: 1.12,
                       ),
-                      maxLines: 2,
+                      maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
                     const SizedBox(height: AppSpacing.xs),
                     Text(
                       item.subtitle,
-                      style: AppTextStyles.bodyM.copyWith(
-                        color: AppColors.textPrimary.withValues(alpha: 0.78),
-                        fontSize: 14,
+                      style: AppTextStyles.bodyS.copyWith(
+                        color: const Color(0xFF344054),
+                        fontWeight: FontWeight.w600,
                         height: 1.3,
                       ),
                       maxLines: 2,
@@ -377,44 +467,41 @@ class _ComingSoonCard extends StatelessWidget {
 }
 
 class _FeatureItem {
+  final String slug;
   final String title;
   final String subtitle;
-  final IconData icon;
+  final String iconAsset;
   final String? route;
   final String? backgroundAsset;
 
   const _FeatureItem({
+    required this.slug,
     required this.title,
     required this.subtitle,
-    required this.icon,
+    required this.iconAsset,
     this.route,
     this.backgroundAsset,
   });
 }
 
-class _LockBadge extends StatelessWidget {
-  final Color accent;
+Color _featureColor(int index) {
+  final colors = [
+    AppColors.primary,
+    AppColors.success,
+    AppColors.warning,
+    const Color(0xFF2563EB),
+  ];
+  return colors[index % colors.length];
+}
 
-  const _LockBadge({required this.accent});
-
-  @override
-  Widget build(BuildContext context) {
-    AppColors.watch(context);
-    return Container(
-      padding: const EdgeInsets.symmetric(
-        horizontal: AppSpacing.xs,
-        vertical: 4,
-      ),
-      decoration: BoxDecoration(
-        color: AppColors.surface.withValues(alpha: 0.78),
-        borderRadius: BorderRadius.circular(AppRadius.full),
-        border: Border.all(color: accent.withValues(alpha: 0.22)),
-      ),
-      child: Icon(
-        Icons.lock_rounded,
-        size: 14,
-        color: accent,
-      ),
-    );
-  }
+Color _comingSoonColor(int index) {
+  const colors = [
+    Color(0xFFFF7043),
+    Color(0xFF10B981),
+    Color(0xFFF59E0B),
+    Color(0xFF3B82F6),
+    Color(0xFF14B8A6),
+    Color(0xFF8B5CF6),
+  ];
+  return colors[index % colors.length];
 }

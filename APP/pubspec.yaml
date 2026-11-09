@@ -1,6 +1,6 @@
 name: trustpay_app
 description: TRUSTPAY Mobile Application
-version: 0.1.0+1
+version: 0.1.3+5
 
 publish_to: 'none'
 
@@ -63,4 +63,5 @@ flutter:
     - assets/images/vtu/
     - assets/images/kyc/
     - assets/images/ghana_banks/
+    - assets/images/nigerian_banks/
     - assets/icons/

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../core/config/launch_capabilities.dart';
 import '../../../core/router/app_router.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/widgets/micro_interactions.dart';
@@ -18,14 +19,16 @@ class QuickActionsRow extends StatelessWidget {
     AppColors.watch(context);
     return Row(
       children: [
-        Expanded(
-          child: _QuickActionPill(
-            label: 'Send',
-            icon: Icons.send_rounded,
-            onTap: onSend ?? () => context.push(AppRoutes.send),
+        if (LaunchCapabilities.moneyOutEnabled) ...[
+          Expanded(
+            child: _QuickActionPill(
+              label: 'Send',
+              icon: Icons.send_rounded,
+              onTap: onSend ?? () => context.push(AppRoutes.send),
+            ),
           ),
-        ),
-        const SizedBox(width: AppSpacing.md),
+          const SizedBox(width: AppSpacing.md),
+        ],
         Expanded(
           child: _QuickActionPill(
             label: 'Exchange',

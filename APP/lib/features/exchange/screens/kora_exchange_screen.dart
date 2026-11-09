@@ -1,33 +1,55 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:go_router/go_router.dart';
+import '../../../core/router/app_router.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/widgets/tp_page_header.dart';
 import '../../../core/state/wallet_refresh_signal.dart';
 import '../../../services/kora_service.dart';
 import '../../ghana/ghana_widgets.dart';
 import 'manual_exchange_screen.dart';
+import '../widgets/exchange_introduction.dart';
+import '../services/manual_exchange_service.dart';
 
 class ExchangeEntryScreen extends StatefulWidget {
   final bool showBackButton, active;
+  final KoraService? service;
+  final ManualExchangeService? manualService;
   const ExchangeEntryScreen(
-      {super.key, this.showBackButton = true, this.active = true});
+      {super.key,
+      this.showBackButton = true,
+      this.active = true,
+      this.service,
+      this.manualService});
   @override
   State<ExchangeEntryScreen> createState() => _ExchangeEntryScreenState();
 }
 
 class _ExchangeEntryScreenState extends State<ExchangeEntryScreen> {
-  final _service = KoraService();
+  late final _service = widget.service ?? KoraService();
+  late final _manual = widget.manualService ?? ManualExchangeService();
   late Future<Map<String, dynamic>> _future;
+  late Future<String?> _receiptRecovery;
   @override
   void initState() {
     super.initState();
+    _receiptRecovery =
+        _manual.latestExchangeOrderId().catchError((Object _) => null);
     _future = _entry();
   }
 
   Future<Map<String, dynamic>> _entry() async {
     final config = await _service.config();
-    return {...config, 'hasPending': await _service.pendingAttempt() != null};
+    final providerPending = await _service.pendingAttempt() != null;
+    final manualPending = (await _manual.pendingCreateAttempts())
+        .any((attempt) => attempt.action == 'create');
+    return {
+      ...config,
+      'hasPending': providerPending,
+      'manualRecovery': manualPending,
+      'resumePending': providerPending || manualPending
+    };
   }
 
   @override
@@ -40,6 +62,30 @@ class _ExchangeEntryScreenState extends State<ExchangeEntryScreen> {
               body: Center(
                   child: Column(mainAxisSize: MainAxisSize.min, children: [
                 const Text('Exchange availability could not load.'),
+                FutureBuilder<String?>(
+                    future: _receiptRecovery,
+                    builder: (context, recovery) {
+                      final id = recovery.data;
+                      if (id == null) return const SizedBox.shrink();
+                      return Padding(
+                          padding: const EdgeInsets.all(24),
+                          child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [
+                                Text('Your previous exchange is saved',
+                                    style: AppTextStyles.headingM),
+                                const SizedBox(height: 12),
+                                Text(
+                                    'Do not make another transfer if you already paid. Reconnect and upload the receipt to your original exchange.',
+                                    style: AppTextStyles.bodyM),
+                                const SizedBox(height: 16),
+                                FilledButton(
+                                    onPressed: () => context
+                                        .push(AppRoutes.exchangeOrderFor(id)),
+                                    child:
+                                        const Text('Continue receipt upload')),
+                              ]));
+                    }),
                 TextButton(
                     onPressed: () => setState(() {
                           _future = _entry();
@@ -51,24 +97,59 @@ class _ExchangeEntryScreenState extends State<ExchangeEntryScreen> {
           return const Scaffold(
               body: Center(child: CircularProgressIndicator()));
         }
-        if (usesProviderExchange(snapshot.data!)) {
-          return KoraExchangeScreen(
-              service: _service,
-              showBackButton: widget.showBackButton,
-              active: widget.active);
+        final providerExchange = usesProviderExchange(snapshot.data!);
+        if (providerExchange && snapshot.data!['manualRecovery'] == true) {
+          return Scaffold(
+            appBar: const TpAppHeader(label: 'Exchange'),
+            body: SafeArea(
+                child: ListView(padding: const EdgeInsets.all(24), children: [
+              Icon(Icons.restore_rounded, color: AppColors.primary, size: 40),
+              const SizedBox(height: 24),
+              Text('Your exchange request needs recovery',
+                  style: AppTextStyles.headingXL),
+              const SizedBox(height: 12),
+              Text(
+                  'Retry the original request with the same details. TrustPay will reuse its protected request key instead of creating a duplicate.',
+                  style: AppTextStyles.bodyM),
+              const SizedBox(height: 28),
+              FilledButton(
+                  onPressed: () => Navigator.of(context).push(MaterialPageRoute(
+                      builder: (_) => ManualExchangeScreen(service: _manual))),
+                  child: const Text('Retry original request')),
+              const SizedBox(height: 12),
+              OutlinedButton(
+                  onPressed: () => Navigator.of(context).push(MaterialPageRoute(
+                      builder: (_) => KoraExchangeScreen(service: _service))),
+                  child: const Text('Other exchange history')),
+            ])),
+          );
         }
-        return ManualExchangeScreen(
-            showBackButton: widget.showBackButton, active: widget.active);
+        return ExchangeIntroductionGate(
+          showBackButton: widget.showBackButton,
+          manualTransfer: !providerExchange,
+          resumePending: snapshot.data!['resumePending'] == true,
+          builder: (_) => providerExchange
+              ? KoraExchangeScreen(
+                  service: _service,
+                  showBackButton: widget.showBackButton,
+                  active: widget.active)
+              : ManualExchangeScreen(
+                  service: _manual,
+                  showBackButton: widget.showBackButton,
+                  active: widget.active),
+        );
       });
 }
 
 class KoraExchangeScreen extends StatefulWidget {
   final KoraService? service;
+  final KoraOrder? initialOrder;
   final bool showBackButton, active;
   final Future<String?> Function(BuildContext)? authorize;
   const KoraExchangeScreen(
       {super.key,
       this.service,
+      this.initialOrder,
       this.authorize,
       this.showBackButton = true,
       this.active = true});
@@ -99,9 +180,14 @@ class _KoraExchangeScreenState extends State<KoraExchangeScreen>
   void initState() {
     super.initState();
     _service = widget.service ?? KoraService();
+    _order = widget.initialOrder;
     WidgetsBinding.instance.addObserver(this);
     _load();
-    unawaited(_restore());
+    if (widget.initialOrder == null) {
+      unawaited(_restore());
+    } else {
+      _restoreComplete = true;
+    }
     _timer = Timer.periodic(const Duration(seconds: 15), (_) {
       if (widget.active && _foreground && !_busy && _order?.active == true) {
         unawaited(_refreshOrder());
@@ -545,46 +631,6 @@ class _KoraExchangeScreenState extends State<KoraExchangeScreen>
                     const SizedBox(height: 16),
                     _notice(_message!)
                   ],
-                  const SizedBox(height: 28),
-                  Text('Your exchanges', style: AppTextStyles.headingM),
-                  TextButton(
-                      onPressed: () => Navigator.of(context).push(
-                          MaterialPageRoute(
-                              builder: (_) => const ManualExchangeScreen())),
-                      child: const Text('Earlier manual exchanges')),
-                  const SizedBox(height: 12),
-                  FutureBuilder<List<KoraOrder>>(
-                      future: _orders,
-                      builder: (context, snapshot) {
-                        if (snapshot.hasError) {
-                          return TextButton(
-                              onPressed: () => setState(() {
-                                    _orders = _service.orders();
-                                  }),
-                              child: const Text(
-                                  'History could not load · Try again'));
-                        }
-                        if (!snapshot.hasData) {
-                          return const Text('Loading history…');
-                        }
-                        if (snapshot.data!.isEmpty) {
-                          return const Text('Your exchanges will appear here.');
-                        }
-                        return Column(
-                            children: snapshot.data!
-                                .map((order) => ListTile(
-                                    contentPadding: EdgeInsets.zero,
-                                    title: Text(
-                                        koraMoney(order.quote.targetAmount,
-                                            order.quote.targetCurrency),
-                                        style: const TextStyle(
-                                            fontWeight: FontWeight.bold)),
-                                    subtitle: Text(order.label),
-                                    trailing: const Icon(Icons.chevron_right),
-                                    onTap: () =>
-                                        setState(() => _order = order)))
-                                .toList());
-                      }),
                 ])));
   }
 
@@ -694,14 +740,17 @@ class _KoraExchangeScreenState extends State<KoraExchangeScreen>
                   if (mounted) setState(() => _order = next);
                 }),
             child: const Text('Check payment status')),
-        if (!order.active)
-          TextButton(
-              onPressed: () => setState(() {
-                    _order = null;
-                    _quote = null;
-                    _step = 0;
-                    _amount.clear();
-                  }),
-              child: const Text('Make another exchange')),
+        const SizedBox(height: 8),
+        OutlinedButton(
+            onPressed: () => setState(() {
+                  _order = null;
+                  _quote = null;
+                  _step = 0;
+                  _amount.clear();
+                  _recipient.clear();
+                  _code = null;
+                  _message = null;
+                }),
+            child: const Text('Start another exchange')),
       ];
 }

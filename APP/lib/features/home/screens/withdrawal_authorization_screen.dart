@@ -919,7 +919,7 @@ class _WithdrawalActions extends StatelessWidget {
     AppColors.watch(context);
     final resendButton = OutlinedButton.icon(
       style: OutlinedButton.styleFrom(
-        minimumSize: const Size.fromHeight(54),
+        minimumSize: const Size.fromHeight(56),
         padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
       ),
       onPressed: isResending ? null : onResend,
@@ -941,7 +941,7 @@ class _WithdrawalActions extends StatelessWidget {
 
     final authorizeButton = FilledButton.icon(
       style: FilledButton.styleFrom(
-        minimumSize: const Size.fromHeight(54),
+        minimumSize: const Size.fromHeight(56),
         padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
       ),
       onPressed: isSubmitting ? null : onAuthorize,
@@ -1002,7 +1002,7 @@ class _CompletionActions extends StatelessWidget {
     AppColors.watch(context);
     final receiptButton = FilledButton.icon(
       style: FilledButton.styleFrom(
-        minimumSize: const Size.fromHeight(54),
+        minimumSize: const Size.fromHeight(56),
         padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
       ),
       onPressed: onViewReceipt,
@@ -1016,7 +1016,7 @@ class _CompletionActions extends StatelessWidget {
 
     final homeButton = OutlinedButton.icon(
       style: OutlinedButton.styleFrom(
-        minimumSize: const Size.fromHeight(54),
+        minimumSize: const Size.fromHeight(56),
         padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
       ),
       onPressed: onHome,

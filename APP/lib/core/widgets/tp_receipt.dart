@@ -456,7 +456,7 @@ class TpReceiptActions extends StatelessWidget {
     AppColors.watch(context);
     final saveButton = OutlinedButton.icon(
       style: OutlinedButton.styleFrom(
-        minimumSize: const Size.fromHeight(54),
+        minimumSize: const Size.fromHeight(56),
         padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
       ),
       onPressed: isSaving
@@ -477,7 +477,7 @@ class TpReceiptActions extends StatelessWidget {
 
     final shareButton = FilledButton.icon(
       style: FilledButton.styleFrom(
-        minimumSize: const Size.fromHeight(54),
+        minimumSize: const Size.fromHeight(56),
         padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
       ),
       onPressed: isSharing

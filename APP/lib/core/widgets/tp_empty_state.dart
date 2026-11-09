@@ -96,7 +96,7 @@ class TpEmptyState extends StatelessWidget {
                     onPrimaryAction!();
                   },
                   style: FilledButton.styleFrom(
-                    minimumSize: const Size(200, 52),
+                    minimumSize: const Size.fromHeight(56),
                   ),
                   child: Text(primaryActionLabel!),
                 ),

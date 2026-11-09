@@ -5,9 +5,9 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:dio/dio.dart';
 
+import '../../../core/config/launch_capabilities.dart';
 import '../../../core/money/money_value.dart';
 import '../../../core/router/app_router.dart';
-import '../../../core/state/exchange_visibility.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/theme/theme_controller.dart';
 import '../../../core/utils/haptics.dart';
@@ -19,11 +19,17 @@ import '../../../services/auth_service.dart';
 import '../../../services/home_data_service.dart';
 import '../../../services/api_client.dart';
 import '../../../services/vtu_service.dart';
+import '../../../services/kora_service.dart';
+import '../../exchange/services/manual_exchange_service.dart';
+import '../../exchange/widgets/manual_exchange_history.dart';
+import '../../exchange/screens/kora_exchange_screen.dart';
 import '../../auth/widgets/tawk_service.dart';
 import '../../notifications/services/notifications_service.dart';
 import '../../notifications/widgets/notification_inbox.dart';
 import '../../wallet/screens/virtual_account_screen.dart';
+import '../../profile/widgets/profile_overview.dart';
 import '../../wallet/widgets/account_setup_presenter.dart';
+import '../widgets/vtu_order_detail_view.dart';
 
 enum DashboardDetailKind {
   wallets,
@@ -38,6 +44,7 @@ enum ProfileActionKind {
   appearance,
   security,
   support,
+  referrals,
 }
 
 class DashboardDetailScreen extends StatefulWidget {
@@ -59,10 +66,12 @@ class DashboardDetailScreen extends StatefulWidget {
 
 class VtuOrderDetailScreen extends StatefulWidget {
   final String reference;
+  final VtuService? vtuService;
 
   const VtuOrderDetailScreen({
     super.key,
     required this.reference,
+    this.vtuService,
   });
 
   @override
@@ -73,24 +82,49 @@ class _VtuOrderDetailScreenState extends State<VtuOrderDetailScreen> {
   final _attemptIdempotency = MoneyAttemptIdempotency();
   late final VtuService _vtuService;
   late Future<VtuOrderStatus> _future;
+  VtuOrderStatus? _lastKnownOrder;
+  String? _statusError;
   bool _isChecking = false;
+  bool _isLoadingDetails = false;
 
   @override
   void initState() {
     super.initState();
-    _vtuService = VtuService(apiClient: ApiClient());
-    _future = _vtuService.getOrderStatus(widget.reference);
+    _vtuService = widget.vtuService ?? VtuService(apiClient: ApiClient());
+    _future = _loadOrder();
+  }
+
+  Future<VtuOrderStatus> _loadOrder() async {
+    _isLoadingDetails = true;
+    try {
+      final order = await _vtuService.getOrderStatus(widget.reference);
+      _lastKnownOrder = order;
+      return order;
+    } finally {
+      _isLoadingDetails = false;
+    }
   }
 
   void _reload() {
+    if (_isChecking || _isLoadingDetails) return;
     setState(() {
-      _future = _vtuService.getOrderStatus(widget.reference);
+      _statusError = null;
+      _future = _loadOrder();
     });
   }
 
   Future<void> _requery() async {
-    if (_isChecking) return;
-    setState(() => _isChecking = true);
+    if (_isChecking || _isLoadingDetails) return;
+    if (_lastKnownOrder?.actionRequired == true &&
+        VtuOrderStatusReconciler.resolve(_lastKnownOrder!) ==
+            VtuOrderResolution.confirming) {
+      _reload();
+      return;
+    }
+    setState(() {
+      _isChecking = true;
+      _statusError = null;
+    });
     try {
       final order = await _vtuService.requeryOrder(
         widget.reference,
@@ -99,19 +133,18 @@ class _VtuOrderDetailScreenState extends State<VtuOrderDetailScreen> {
         ),
       );
       _attemptIdempotency.markFinalOutcome();
+      _lastKnownOrder = order;
       if (!mounted) return;
       setState(() {
         _future = Future.value(order);
+        _statusError = null;
       });
     } catch (error) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            authErrorMessage(error, 'Unable to refresh VTU order status'),
-          ),
-        ),
-      );
+      setState(() {
+        _statusError =
+            authErrorMessage(error, 'Unable to refresh VTU order status');
+      });
     } finally {
       if (mounted) {
         setState(() => _isChecking = false);
@@ -130,7 +163,7 @@ class _VtuOrderDetailScreenState extends State<VtuOrderDetailScreen> {
           builder: (context, snapshot) {
             final children = <Widget>[
               TpPageHeader(
-                label: 'VTU order',
+                label: 'Payment receipt',
                 menuActions: [
                   TpPageMenuAction(
                     label: 'Refresh',
@@ -144,19 +177,17 @@ class _VtuOrderDetailScreenState extends State<VtuOrderDetailScreen> {
                   ),
                 ],
               ),
-              const SizedBox(height: AppSpacing.sm),
-              Text(
-                'Track provider confirmation and refresh pending bill payments.',
-                style: AppTextStyles.bodyM,
-              ),
-              const SizedBox(height: AppSpacing.xl),
+              const SizedBox(height: AppSpacing.lg),
             ];
 
-            if (snapshot.connectionState == ConnectionState.waiting) {
-              children.add(const _LoadingPanel());
-            } else if (snapshot.hasError || !snapshot.hasData) {
+            final order = snapshot.data ?? _lastKnownOrder;
+            if (order == null &&
+                snapshot.connectionState == ConnectionState.waiting) {
+              children.add(const VtuOrderLoadingView());
+            } else if (order == null &&
+                (snapshot.hasError || !snapshot.hasData)) {
               children.add(
-                _ErrorPanel(
+                VtuOrderInitialErrorView(
                   message: authErrorMessage(
                     snapshot.error ?? 'Could not load VTU order',
                     'Could not load VTU order',
@@ -167,9 +198,20 @@ class _VtuOrderDetailScreenState extends State<VtuOrderDetailScreen> {
             } else {
               children.add(
                 _VtuOrderBody(
-                  order: snapshot.data!,
-                  isChecking: _isChecking,
+                  order: order!,
+                  isChecking: _isChecking ||
+                      snapshot.connectionState == ConnectionState.waiting,
                   onCheckStatus: _requery,
+                  onRefreshDetails: _reload,
+                  errorMessage: _statusError ??
+                      (snapshot.hasError
+                          ? authErrorMessage(
+                              snapshot.error!,
+                              'Could not refresh VTU order status',
+                            )
+                          : null),
+                  onSupport: () => context.go(AppRoutes.profileSupport),
+                  onHistory: () => context.go(AppRoutes.activity),
                 ),
               );
             }
@@ -343,127 +385,30 @@ class _DashboardProfileScreenState extends State<DashboardProfileScreen> {
           child: FutureBuilder<HomeUser>(
             future: _future,
             builder: (context, snapshot) {
-              if (snapshot.connectionState == ConnectionState.waiting) {
-                return const _ProfileSkeletonPanel();
-              }
-              if (snapshot.hasError || !snapshot.hasData) {
-                return _ErrorPanel(
-                  message: authErrorMessage(
-                    snapshot.error ?? 'Could not load profile',
-                    'Could not load profile',
-                  ),
-                  onRetry: () => setState(() {
-                    _future = widget.homeDataService.fetchCurrentUser();
-                  }),
-                );
-              }
-
-              final user = snapshot.data!;
-              return ListView(
-                padding: EdgeInsets.zero,
-                children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text('Profile', style: AppTextStyles.headingXL),
-                      ),
-                      const _ProfileThemeQuickToggle(),
-                    ],
-                  ),
-                  const SizedBox(height: AppSpacing.xl),
-                  Row(
-                    children: [
-                      CircleAvatar(
-                        radius: 32,
-                        backgroundColor: AppColors.primary,
-                        child: Text(
-                          user.initials,
-                          style: AppTextStyles.headingM.copyWith(
-                            color: AppColors.textPrimary,
-                            fontWeight: FontWeight.w900,
-                          ),
+              final user =
+                  snapshot.data ?? widget.homeDataService.lastKnownUser;
+              return ProfileOverview(
+                user: user,
+                identityStatus: snapshot.hasError
+                    ? Row(children: [
+                        Expanded(
+                          child: Text('Could not load account details',
+                              style: AppTextStyles.bodyS),
                         ),
-                      ),
-                      const SizedBox(width: AppSpacing.md),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(user.displayName,
-                                style: AppTextStyles.headingM),
-                            Text(user.email, style: AppTextStyles.bodyM),
-                          ],
+                        TextButton(
+                          onPressed: () => setState(() {
+                            _future = widget.homeDataService.fetchCurrentUser();
+                          }),
+                          child: const Text('Retry'),
                         ),
+                      ])
+                    : const LinearProgressIndicator(
+                        semanticsLabel: 'Loading account details',
                       ),
-                    ],
-                  ),
-                  const SizedBox(height: AppSpacing.xl),
-                  _ProfileActionRow(
-                    icon: Icons.person_outline_rounded,
-                    label: 'Account Details',
-                    detail: 'Name, email, and phone',
-                    onTap: () => context.push(AppRoutes.profileAccount),
-                  ),
-                  _ProfileActionRow(
-                    icon: Icons.palette_outlined,
-                    label: 'Appearance',
-                    detail: 'Dark mode and light mode',
-                    onTap: () => context.push(AppRoutes.profileAppearance),
-                  ),
-                  ValueListenableBuilder<bool>(
-                    valueListenable: exchangeServicesEnabled,
-                    builder: (context, enabled, _) => SwitchListTile.adaptive(
-                      contentPadding: EdgeInsets.zero,
-                      secondary: Icon(
-                        Icons.currency_exchange_rounded,
-                        color: AppColors.primary,
-                      ),
-                      title: Text('Exchange services',
-                          style: AppTextStyles.labelM),
-                      subtitle: Text(
-                        enabled
-                            ? 'Exchange is available in the navigation bar.'
-                            : 'Hide exchange from the navigation bar.',
-                        style: AppTextStyles.bodyS,
-                      ),
-                      value: enabled,
-                      onChanged: setExchangeServicesEnabled,
-                    ),
-                  ),
-                  _ProfileActionRow(
-                    icon: Icons.security_rounded,
-                    label: 'Security & Limits',
-                    detail: 'KYC, role, and session status',
-                    onTap: () => context.push(AppRoutes.profileSecurity),
-                  ),
-                  _ProfileActionRow(
-                    icon: Icons.notifications_outlined,
-                    label: 'Notifications',
-                    detail: 'Account and transaction alerts',
-                    onTap: () => context.push(AppRoutes.notifications),
-                  ),
-                  _ProfileActionRow(
-                    icon: Icons.help_outline_rounded,
-                    label: 'Help & Support',
-                    detail: 'Support options and app details',
-                    onTap: () => context.push(AppRoutes.profileSupport),
-                  ),
-                  const SizedBox(height: AppSpacing.lg),
-                  Center(
-                    child: TextButton(
-                      onPressed: () async {
-                        await _authService.logout();
-                        if (context.mounted) context.go(AppRoutes.login);
-                      },
-                      child: Text(
-                        'Log Out',
-                        style: AppTextStyles.labelL.copyWith(
-                          color: AppColors.error,
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
+                onLogout: () async {
+                  await _authService.logout();
+                  if (context.mounted) context.go(AppRoutes.login);
+                },
               );
             },
           ),
@@ -475,11 +420,18 @@ class _DashboardProfileScreenState extends State<DashboardProfileScreen> {
 
 class DashboardTransactionsScreen extends StatefulWidget {
   final HomeDataService homeDataService;
+  final ManualExchangeService manualExchangeService;
+  final KoraService koraService;
 
   DashboardTransactionsScreen({
     super.key,
     HomeDataService? homeDataService,
-  }) : homeDataService = homeDataService ?? HomeDataService();
+    ManualExchangeService? manualExchangeService,
+    KoraService? koraService,
+  })  : homeDataService = homeDataService ?? HomeDataService(),
+        manualExchangeService =
+            manualExchangeService ?? ManualExchangeService(),
+        koraService = koraService ?? KoraService();
 
   @override
   State<DashboardTransactionsScreen> createState() =>
@@ -576,12 +528,16 @@ class _DashboardTransactionsScreenState
     extends State<DashboardTransactionsScreen> {
   final _authService = AuthService();
   late Future<List<HomeTransaction>> _future;
+  late Future<List<ManualExchangeOrder>> _manualOrders;
+  late Future<List<KoraOrder>> _providerOrders;
   bool _sessionExpired = false;
 
   @override
   void initState() {
     super.initState();
     _future = widget.homeDataService.fetchTransactions();
+    _manualOrders = widget.manualExchangeService.listOrders();
+    _providerOrders = widget.koraService.orders();
   }
 
   @override
@@ -595,9 +551,15 @@ class _DashboardTransactionsScreenState
 
     return TransactionsDetailScaffold(
       future: _future,
+      manualOrders: _manualOrders,
+      providerOrders: _providerOrders,
+      manualExchangeService: widget.manualExchangeService,
+      koraService: widget.koraService,
       onRetry: () {
         setState(() {
           _future = widget.homeDataService.fetchTransactions();
+          _manualOrders = widget.manualExchangeService.listOrders();
+          _providerOrders = widget.koraService.orders();
         });
       },
       onUnauthorized: () async {
@@ -617,12 +579,20 @@ class _DashboardTransactionsScreenState
 
 class TransactionsDetailScaffold extends StatelessWidget {
   final Future<List<HomeTransaction>> future;
+  final Future<List<ManualExchangeOrder>> manualOrders;
+  final Future<List<KoraOrder>> providerOrders;
+  final ManualExchangeService manualExchangeService;
+  final KoraService koraService;
   final VoidCallback onRetry;
   final Future<void> Function() onUnauthorized;
 
   const TransactionsDetailScaffold({
     super.key,
     required this.future,
+    required this.manualOrders,
+    required this.providerOrders,
+    required this.manualExchangeService,
+    required this.koraService,
     required this.onRetry,
     required this.onUnauthorized,
   });
@@ -642,10 +612,25 @@ class TransactionsDetailScaffold extends StatelessWidget {
               padding: const EdgeInsets.all(AppSpacing.lg),
               sliver: SliverList.list(
                 children: [
-                  const TpPageHeader(
-                    label: 'My Transactions',
+                  const TpPageHeader(label: 'History'),
+                  const SizedBox(height: AppSpacing.xs),
+                  Text('Transactions and exchanges',
+                      style: AppTextStyles.bodyM),
+                  ManualExchangeHistory(
+                    orders: manualOrders,
+                    service: manualExchangeService,
+                    onRetry: onRetry,
+                  ),
+                  _ProviderExchangeHistory(
+                    orders: providerOrders,
+                    service: koraService,
+                    onRetry: onRetry,
                   ),
                   const SizedBox(height: AppSpacing.xl),
+                  Text('Transactions',
+                      style: AppTextStyles.headingM
+                          .copyWith(fontWeight: FontWeight.w800)),
+                  const SizedBox(height: AppSpacing.md),
                   FutureBuilder<List<HomeTransaction>>(
                     future: future,
                     builder: (context, snapshot) {
@@ -668,17 +653,24 @@ class TransactionsDetailScaffold extends StatelessWidget {
                       }
                       final transactions = snapshot.data!;
                       if (transactions.isEmpty) {
-                        return SizedBox(
-                          height: MediaQuery.sizeOf(context).height * 0.68,
-                          child: const TpEmptyState(
-                            variant: TpIllustrationVariant.emptyTransactions,
-                            illustrationAsset:
-                                'assets/images/empty_states/empty-transactions.svg',
-                            title: 'No transactions yet',
-                            message:
-                                'Your completed activity will appear here.',
-                            illustrationSize: 220,
+                        return Container(
+                          padding: const EdgeInsets.all(AppSpacing.lg),
+                          decoration: BoxDecoration(
+                            color: AppColors.surface,
+                            border: Border.all(color: AppColors.border),
+                            borderRadius: BorderRadius.circular(AppRadius.lg),
                           ),
+                          child: Column(children: [
+                            Icon(Icons.receipt_long_outlined,
+                                color: AppColors.textHint, size: 32),
+                            const SizedBox(height: AppSpacing.sm),
+                            Text('No transactions yet',
+                                style: AppTextStyles.labelL),
+                            const SizedBox(height: AppSpacing.xs),
+                            Text('Your completed activity will appear here.',
+                                style: AppTextStyles.bodyS,
+                                textAlign: TextAlign.center),
+                          ]),
                         );
                       }
                       return _TransactionsHistoryBody(
@@ -691,6 +683,87 @@ class TransactionsDetailScaffold extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+class _ProviderExchangeHistory extends StatelessWidget {
+  final Future<List<KoraOrder>> orders;
+  final KoraService service;
+  final VoidCallback onRetry;
+
+  const _ProviderExchangeHistory({
+    required this.orders,
+    required this.service,
+    required this.onRetry,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<List<KoraOrder>>(
+      future: orders,
+      builder: (context, snapshot) {
+        if (!snapshot.hasData && !snapshot.hasError) {
+          return Padding(
+            padding: const EdgeInsets.only(top: AppSpacing.md),
+            child:
+                Text('Loading provider exchanges…', style: AppTextStyles.bodyS),
+          );
+        }
+        if (snapshot.hasError) {
+          return Padding(
+            padding: const EdgeInsets.only(top: AppSpacing.sm),
+            child: TextButton.icon(
+              onPressed: onRetry,
+              icon: const Icon(Icons.refresh_rounded),
+              label: const Text('Retry provider exchange history'),
+            ),
+          );
+        }
+        final rows = snapshot.data!;
+        if (rows.isEmpty) return const SizedBox.shrink();
+        return Padding(
+          padding: const EdgeInsets.only(top: AppSpacing.sm),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              for (final order in rows)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+                  child: Material(
+                    color: AppColors.surface,
+                    shape: RoundedRectangleBorder(
+                      side: BorderSide(color: AppColors.border),
+                      borderRadius: BorderRadius.circular(AppRadius.lg),
+                    ),
+                    clipBehavior: Clip.antiAlias,
+                    child: ListTile(
+                      contentPadding: const EdgeInsets.all(AppSpacing.md),
+                      title: Text(
+                        '${order.quote.sourceCurrency} ${order.quote.amount} → ${order.quote.targetCurrency} ${order.quote.targetAmount}',
+                        style: AppTextStyles.labelL
+                            .copyWith(fontWeight: FontWeight.w800),
+                      ),
+                      subtitle: Padding(
+                        padding: const EdgeInsets.only(top: AppSpacing.xs),
+                        child: Text(order.label, style: AppTextStyles.bodyM),
+                      ),
+                      trailing: const Icon(Icons.chevron_right_rounded),
+                      onTap: () => Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => KoraExchangeScreen(
+                            service: service,
+                            initialOrder: order,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        );
+      },
     );
   }
 }
@@ -813,6 +886,8 @@ Widget _profileBodyFor(
         onTransactionSecurity: () =>
             context.push(AppRoutes.transactionSecurity),
       );
+    case ProfileActionKind.referrals:
+      return _InviteFriendPanel(homeDataService: homeDataService);
     case ProfileActionKind.support:
       return _SupportTicketPanel(
         homeDataService: homeDataService,
@@ -867,6 +942,10 @@ _DetailConfig _profileConfigFor(ProfileActionKind kind) {
         title: 'Security & Limits',
         subtitle: 'Account upgrade, PIN, biometrics, and KYC tiers.',
       );
+    case ProfileActionKind.referrals:
+      return const _DetailConfig(
+          title: 'Invite friends',
+          subtitle: 'Your invites and referral rewards.');
     case ProfileActionKind.support:
       return const _DetailConfig(
         title: 'Help & Support',
@@ -2012,55 +2091,6 @@ class _AppearanceSettingsPanel extends ConsumerWidget {
   }
 }
 
-class _ProfileThemeQuickToggle extends ConsumerWidget {
-  const _ProfileThemeQuickToggle();
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    AppColors.watch(context);
-    ref.watch(themeModeProvider);
-    final controller = ref.read(themeModeProvider.notifier);
-    // Reflect what the user is actually looking at (handles system mode too).
-    final isDark = AppColors.isDark;
-
-    return Semantics(
-      button: true,
-      label: isDark ? 'Switch to light mode' : 'Switch to dark mode',
-      child: Material(
-        color: AppColors.surfaceVariant,
-        borderRadius: BorderRadius.circular(AppRadius.full),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(AppRadius.full),
-          onTap: () {
-            Haptics.selection();
-            controller.setMode(isDark ? ThemeMode.light : ThemeMode.dark);
-          },
-          child: Container(
-            width: 46,
-            height: 46,
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(AppRadius.full),
-              border: Border.all(color: AppColors.border),
-            ),
-            child: AnimatedSwitcher(
-              duration: const Duration(milliseconds: 260),
-              transitionBuilder: (child, anim) => RotationTransition(
-                turns: Tween<double>(begin: 0.6, end: 1).animate(anim),
-                child: FadeTransition(opacity: anim, child: child),
-              ),
-              child: Icon(
-                isDark ? Icons.light_mode_rounded : Icons.dark_mode_rounded,
-                key: ValueKey(isDark),
-                color: AppColors.primary,
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
 class _SupportTicketPanel extends StatefulWidget {
   final HomeDataService homeDataService;
 
@@ -2853,22 +2883,32 @@ class _WalletsBody extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     AppColors.watch(context);
+    final visibleWallets = wallets
+        .where(
+          (wallet) =>
+              LaunchCapabilities.ghanaCedisWalletEnabled ||
+              wallet.currency.toUpperCase() != 'GHS',
+        )
+        .toList();
     final activeCurrencies =
-        wallets.map((wallet) => wallet.currency.toUpperCase()).toSet();
-    const supportedCurrencies = ['NGN', 'GHS'];
+        visibleWallets.map((wallet) => wallet.currency.toUpperCase()).toSet();
+    const supportedCurrencies = [
+      'NGN',
+      if (LaunchCapabilities.ghanaCedisWalletEnabled) 'GHS',
+    ];
     const plannedCurrencies = ['USD', 'EUR'];
     final addableCurrencies = supportedCurrencies
         .where((currency) => !activeCurrencies.contains(currency))
         .toList();
 
-    if (wallets.isEmpty) {
+    if (visibleWallets.isEmpty) {
       return const Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           _EmptyPanel(
             icon: Icons.account_balance_wallet_outlined,
             title: 'No wallets found',
-            detail: 'Your NGN and GHS wallets will appear here after setup.',
+            detail: 'Your wallets will appear here after setup.',
           ),
           SizedBox(height: AppSpacing.md),
           _WalletAddSection(
@@ -2884,7 +2924,7 @@ class _WalletsBody extends StatelessWidget {
       children: [
         Text('Active wallets', style: AppTextStyles.headingM),
         const SizedBox(height: AppSpacing.sm),
-        ...wallets.map((wallet) {
+        ...visibleWallets.map((wallet) {
           return _WalletManageCard(wallet: wallet);
         }),
         const SizedBox(height: AppSpacing.lg),
@@ -3196,103 +3236,31 @@ class _VtuOrderBody extends StatelessWidget {
   final VtuOrderStatus order;
   final bool isChecking;
   final VoidCallback onCheckStatus;
+  final String? errorMessage;
+  final VoidCallback? onSupport;
+  final VoidCallback? onHistory;
+  final VoidCallback? onRefreshDetails;
 
   const _VtuOrderBody({
     required this.order,
     required this.isChecking,
     required this.onCheckStatus,
+    this.errorMessage,
+    this.onSupport,
+    this.onHistory,
+    this.onRefreshDetails,
   });
-
-  bool get _isTerminal {
-    return ['SUCCESS', 'FAILED', 'REVERSED'].contains(order.orderStatus);
-  }
 
   @override
   Widget build(BuildContext context) {
-    AppColors.watch(context);
-    final statusTone = _statusTone(order.orderStatus);
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Container(
-          width: double.infinity,
-          padding: const EdgeInsets.all(AppSpacing.lg),
-          decoration: BoxDecoration(
-            color: AppColors.surface,
-            borderRadius: BorderRadius.circular(26),
-            border: Border.all(color: AppColors.border),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Container(
-                    width: 48,
-                    height: 48,
-                    decoration: BoxDecoration(
-                      color: statusTone.background,
-                      shape: BoxShape.circle,
-                    ),
-                    child: Icon(
-                      statusTone.icon,
-                      color: statusTone.foreground,
-                    ),
-                  ),
-                  const SizedBox(width: AppSpacing.md),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          order.orderStatus,
-                          style: AppTextStyles.headingM.copyWith(
-                            fontWeight: FontWeight.w800,
-                          ),
-                        ),
-                        Text(
-                          order.provider,
-                          style: AppTextStyles.bodyM,
-                        ),
-                      ],
-                    ),
-                  ),
-                  _StatusPill(label: order.transactionStatus),
-                ],
-              ),
-              const SizedBox(height: AppSpacing.lg),
-              _InfoRow(label: 'Reference', value: order.reference),
-              _InfoRow(
-                label: 'Amount',
-                value: '${order.currency} ${order.amount}',
-              ),
-              if (order.targetMasked != null)
-                _InfoRow(label: 'Recipient', value: order.targetMasked!),
-              _InfoRow(label: 'Order ID', value: order.orderId),
-              if (order.nextRequeryAt != null)
-                _InfoRow(label: 'Next auto-check', value: order.nextRequeryAt!),
-            ],
-          ),
-        ),
-        const SizedBox(height: AppSpacing.lg),
-        FilledButton.icon(
-          onPressed: isChecking || _isTerminal ? null : onCheckStatus,
-          style: FilledButton.styleFrom(
-            backgroundColor: AppColors.primary,
-            foregroundColor: Colors.white,
-            minimumSize: const Size.fromHeight(54),
-          ),
-          icon: isChecking
-              ? const TrustPayLottie(
-                  variant: TrustPayAnimationVariant.loading,
-                  size: 22,
-                  semanticsLabel: 'Checking VTU status',
-                )
-              : const Icon(Icons.refresh_rounded),
-          label: Text(isChecking ? 'Checking...' : 'Check status'),
-        ),
-      ],
+    return VtuOrderDetailView(
+      order: order,
+      isChecking: isChecking,
+      errorMessage: errorMessage,
+      onCheckStatus: onCheckStatus,
+      onSupport: onSupport,
+      onHistory: onHistory,
+      onRefreshDetails: onRefreshDetails,
     );
   }
 }
@@ -3343,9 +3311,9 @@ class _TransactionHistoryCard extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.only(bottom: AppSpacing.sm),
       child: GestureDetector(
-        onTap: canTrackVtu
-            ? () => context.push(AppRoutes.vtuOrderFor(transaction.reference))
-            : null,
+        onTap: () => context.push(
+          AppRoutes.receiptFor(transaction.type, transaction.reference),
+        ),
         child: Container(
           padding: const EdgeInsets.symmetric(vertical: AppSpacing.xs),
           child: Row(
@@ -3491,35 +3459,6 @@ class _KycBody extends StatelessWidget {
                 ? 'Your account can access withdrawals, higher limits, and virtual account provisioning.'
                 : 'Submit identity checks before withdrawals and virtual account provisioning can be enabled.',
             style: AppTextStyles.bodyM,
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _InfoRow extends StatelessWidget {
-  final String label;
-  final String value;
-
-  const _InfoRow({required this.label, required this.value});
-
-  @override
-  Widget build(BuildContext context) {
-    AppColors.watch(context);
-    return _DataPanel(
-      child: Row(
-        children: [
-          Expanded(child: Text(label, style: AppTextStyles.bodyM)),
-          const SizedBox(width: AppSpacing.md),
-          Flexible(
-            child: Text(
-              value.isEmpty ? 'Not set' : value,
-              style: AppTextStyles.labelM,
-              textAlign: TextAlign.right,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-            ),
           ),
         ],
       ),
@@ -3739,58 +3678,6 @@ class _LoadingPanel extends StatelessWidget {
               ],
             ),
           ),
-        ],
-      ),
-    );
-  }
-}
-
-class _ProfileSkeletonPanel extends StatelessWidget {
-  const _ProfileSkeletonPanel();
-
-  @override
-  Widget build(BuildContext context) {
-    AppColors.watch(context);
-    Widget line(double width, {double height = 12}) {
-      return Container(
-        width: width,
-        height: height,
-        decoration: BoxDecoration(
-          color: AppColors.border.withValues(alpha: 0.55),
-          borderRadius: BorderRadius.circular(AppRadius.full),
-        ),
-      );
-    }
-
-    return _DataPanel(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              CircleAvatar(
-                radius: 28,
-                backgroundColor: AppColors.primary.withValues(alpha: 0.14),
-              ),
-              const SizedBox(width: AppSpacing.md),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    line(128, height: 16),
-                    const SizedBox(height: AppSpacing.sm),
-                    line(190),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: AppSpacing.lg),
-          line(double.infinity),
-          const SizedBox(height: AppSpacing.sm),
-          line(double.infinity),
-          const SizedBox(height: AppSpacing.sm),
-          line(180),
         ],
       ),
     );
@@ -4126,33 +4013,6 @@ _TransactionTone _transactionTone(HomeTransaction transaction) {
         foreground: AppColors.textSecondary,
         background: AppColors.surfaceVariant,
         amountColor: AppColors.textPrimary,
-      );
-  }
-}
-
-_TransactionTone _statusTone(String status) {
-  switch (status.toUpperCase()) {
-    case 'SUCCESS':
-      return _TransactionTone(
-        icon: Icons.check_rounded,
-        foreground: AppColors.success,
-        background: AppColors.success.withValues(alpha: 0.10),
-        amountColor: AppColors.success,
-      );
-    case 'FAILED':
-    case 'REVERSED':
-      return _TransactionTone(
-        icon: Icons.close_rounded,
-        foreground: AppColors.error,
-        background: AppColors.error.withValues(alpha: 0.10),
-        amountColor: AppColors.error,
-      );
-    default:
-      return _TransactionTone(
-        icon: Icons.hourglass_top_rounded,
-        foreground: AppColors.warning,
-        background: AppColors.warning.withValues(alpha: 0.10),
-        amountColor: AppColors.warning,
       );
   }
 }

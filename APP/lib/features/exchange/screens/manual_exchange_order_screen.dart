@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:dio/dio.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -11,12 +12,15 @@ import '../../../core/theme/app_theme.dart';
 import '../../../core/widgets/tp_page_header.dart';
 import '../../../core/widgets/tp_snackbar.dart';
 import '../services/manual_exchange_service.dart';
+import '../widgets/manual_exchange_progress.dart';
+import '../widgets/review_reminder_button.dart';
 
 class ManualExchangeOrderScreen extends StatefulWidget {
   final String orderId;
   final ManualExchangeOrder? initialOrder;
   final ManualExchangeService? service;
   final bool showBackButton;
+  final Future<ManualExchangeProofFile?> Function()? pickReceipt;
 
   const ManualExchangeOrderScreen({
     super.key,
@@ -24,6 +28,7 @@ class ManualExchangeOrderScreen extends StatefulWidget {
     this.initialOrder,
     this.service,
     this.showBackButton = true,
+    this.pickReceipt,
   });
 
   @override
@@ -35,15 +40,22 @@ class _ManualExchangeOrderScreenState extends State<ManualExchangeOrderScreen>
     with WidgetsBindingObserver {
   late final ManualExchangeService _service;
   late Future<ManualExchangeOrder> _orderFuture;
+  final _receiptNameController = TextEditingController();
   final _bankReferenceController = TextEditingController();
+  final _scrollController = ScrollController();
 
   ManualExchangeOrder? _order;
   ManualExchangeProofFile? _selectedFile;
+  CancelToken? _receiptScan;
+  ManualReceiptDetails? _suggestions;
+  String? _scanMessage;
   Timer? _pollTimer;
   bool _isRefreshing = false;
   bool _isSubmittingProof = false;
   bool _isOpeningProof = false;
   bool _showReceiptStep = false;
+  bool _paymentConfirmed = false;
+  bool _reconcileInitialReceipt = false;
   String? _proofMessage;
   String? _connectionMessage;
   AppLifecycleState _lifecycleState = AppLifecycleState.resumed;
@@ -61,7 +73,10 @@ class _ManualExchangeOrderScreenState extends State<ManualExchangeOrderScreen>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _pollTimer?.cancel();
+    _receiptScan?.cancel();
+    _receiptNameController.dispose();
     _bankReferenceController.dispose();
+    _scrollController.dispose();
     super.dispose();
   }
 
@@ -79,6 +94,7 @@ class _ManualExchangeOrderScreenState extends State<ManualExchangeOrderScreen>
   Future<ManualExchangeOrder> _loadOrder() async {
     try {
       final order = await _service.getOrder(widget.orderId);
+      await _restoreReceiptStep(order);
       if (mounted) {
         _order = order;
         _signalWalletRefreshIfCredited(order);
@@ -87,6 +103,7 @@ class _ManualExchangeOrderScreenState extends State<ManualExchangeOrderScreen>
       return order;
     } catch (error) {
       if (widget.initialOrder != null) {
+        await _restoreReceiptStep(widget.initialOrder!);
         if (mounted) {
           _order = widget.initialOrder;
           _signalWalletRefreshIfCredited(widget.initialOrder!);
@@ -97,6 +114,71 @@ class _ManualExchangeOrderScreenState extends State<ManualExchangeOrderScreen>
         return widget.initialOrder!;
       }
       rethrow;
+    }
+  }
+
+  Future<void> _restoreReceiptStep(ManualExchangeOrder order) async {
+    if (!order.canSubmitProof ||
+        order.status == ManualExchangeOrderStatus.awaitingConfirmation) {
+      return;
+    }
+    try {
+      final started = await _service.receiptStepStarted(order.id);
+      if (mounted && started) _showReceiptStep = true;
+    } catch (_) {
+      // Server history remains recoverable if local progress is unavailable.
+    }
+  }
+
+  void _scrollToTop() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_scrollController.hasClients) return;
+      _scrollController.animateTo(0,
+          duration: MediaQuery.disableAnimationsOf(context)
+              ? Duration.zero
+              : const Duration(milliseconds: 240),
+          curve: Curves.easeOutCubic);
+    });
+  }
+
+  void _reconcileReceiptStatus(ManualExchangeOrder refreshed) {
+    // A new receipt accepted after a lost response is distinguishable from an
+    // earlier attachment. Never infer replacement of an already-attached file.
+    if (!_reconcileInitialReceipt ||
+        !refreshed.hasProof ||
+        refreshed.status != ManualExchangeOrderStatus.awaitingConfirmation) {
+      return;
+    }
+    _reconcileInitialReceipt = false;
+    _showReceiptStep = false;
+    _paymentConfirmed = false;
+    _selectedFile = null;
+    _proofMessage = null;
+    _receiptScan?.cancel();
+    _receiptScan = null;
+    _suggestions = null;
+    _scanMessage = null;
+    _receiptNameController.clear();
+    _bankReferenceController.clear();
+    unawaited(
+        _service.clearReceiptStep(refreshed.id).catchError((Object _) {}));
+    _scrollToTop();
+  }
+
+  Future<void> _continueToReceipt(ManualExchangeOrder order) async {
+    if (_isSubmittingProof) return;
+    setState(() {
+      _showReceiptStep = true;
+      _proofMessage = null;
+    });
+    _scrollToTop();
+    try {
+      await _service.markReceiptStepStarted(order.id);
+    } catch (_) {
+      if (mounted) {
+        setState(() => _proofMessage =
+            'Keep this exchange reference. If the app closes, reopen this order from exchange history to continue.');
+      }
     }
   }
 
@@ -120,6 +202,7 @@ class _ManualExchangeOrderScreenState extends State<ManualExchangeOrderScreen>
       if (!mounted) return;
       setState(() {
         _order = refreshed;
+        _reconcileReceiptStatus(refreshed);
         _orderFuture = Future<ManualExchangeOrder>.value(refreshed);
         _connectionMessage = null;
       });
@@ -144,6 +227,7 @@ class _ManualExchangeOrderScreenState extends State<ManualExchangeOrderScreen>
       if (!mounted) return;
       setState(() {
         _order = refreshed;
+        _reconcileReceiptStatus(refreshed);
         _orderFuture = Future<ManualExchangeOrder>.value(refreshed);
         _connectionMessage = null;
       });
@@ -179,6 +263,20 @@ class _ManualExchangeOrderScreenState extends State<ManualExchangeOrderScreen>
 
   Future<void> _pickReceipt() async {
     if (_isSubmittingProof) return;
+    final customPicker = widget.pickReceipt;
+    if (customPicker != null) {
+      final file = await customPicker();
+      if (!mounted || file == null) return;
+      if (file.bytes.isEmpty ||
+          file.fileSize > manualExchangeMaxProofBytes ||
+          _contentTypeFor(file.fileName) == null) {
+        setState(() => _proofMessage =
+            'Choose a JPEG, PNG, WebP, or PDF receipt up to 8 MiB.');
+        return;
+      }
+      await _selectReceipt(file);
+      return;
+    }
     final result = await FilePicker.pickFiles(
       type: FileType.custom,
       allowedExtensions: const ['jpg', 'jpeg', 'png', 'webp', 'pdf'],
@@ -209,33 +307,91 @@ class _ManualExchangeOrderScreenState extends State<ManualExchangeOrderScreen>
       return;
     }
 
+    await _selectReceipt(ManualExchangeProofFile(
+      fileName: selected.name,
+      contentType: contentType,
+      bytes: bytes,
+    ));
+  }
+
+  Future<void> _selectReceipt(ManualExchangeProofFile file) async {
+    if (_isSubmittingProof) return;
+    final order = _order;
+    final token = order?.supportsReceiptName == true ? CancelToken() : null;
+    _receiptScan?.cancel();
+    if (_receiptNameController.text == _suggestions?.receiptName) {
+      _receiptNameController.clear();
+    }
+    if (_bankReferenceController.text == _suggestions?.bankReference) {
+      _bankReferenceController.clear();
+    }
     setState(() {
-      _selectedFile = ManualExchangeProofFile(
-        fileName: selected.name,
-        contentType: contentType,
-        bytes: bytes,
-      );
+      _selectedFile = file;
       _proofMessage = null;
+      _receiptScan = token;
+      _suggestions = null;
+      _scanMessage = null;
+    });
+    if (token == null || order == null) return;
+
+    ManualReceiptDetails? details;
+    try {
+      details = await _service.scanReceipt(
+        orderId: order.id,
+        file: file,
+        cancelToken: token,
+      );
+    } catch (_) {
+      // Keep the selected receipt available for manual entry.
+    }
+    if (!mounted || token.isCancelled || !identical(_receiptScan, token)) {
+      return;
+    }
+    final name =
+        _receiptNameController.text.isEmpty ? details?.receiptName : null;
+    final reference =
+        _bankReferenceController.text.isEmpty ? details?.bankReference : null;
+    setState(() {
+      if (name != null) _receiptNameController.text = name;
+      if (reference != null) _bankReferenceController.text = reference;
+      _suggestions = (receiptName: name, bankReference: reference);
+      _receiptScan = null;
+      _scanMessage = name == null && reference == null
+          ? 'You can enter the receipt details manually.'
+          : 'Check the suggested details against your receipt.';
     });
   }
 
   Future<void> _submitReceipt(ManualExchangeOrder order) async {
     if (_isSubmittingProof) return;
-    final file = _selectedFile;
-    final bankReference = _bankReferenceController.text.trim();
-    if (file == null) {
-      setState(() => _proofMessage = 'Choose your transfer receipt first.');
+    if (!_paymentConfirmed) {
+      setState(() => _proofMessage =
+          'Confirm that you have made this transfer before submitting the receipt.');
       return;
     }
-    if (bankReference.isEmpty) {
+    final file = _selectedFile;
+    final bankReference = _bankReferenceController.text.trim();
+    final receiptName = _receiptNameController.text.trim();
+    if (file == null) {
+      setState(() => _proofMessage = 'Upload your transfer receipt first.');
+      return;
+    }
+    if (order.supportsReceiptName && receiptName.isEmpty) {
+      setState(() => _proofMessage = 'Enter the name shown on your receipt.');
+      return;
+    }
+    if (!order.supportsReceiptName && bankReference.isEmpty) {
       setState(
           () => _proofMessage = 'Enter the bank reference for your transfer.');
       return;
     }
 
     FocusManager.instance.primaryFocus?.unfocus();
+    _receiptScan?.cancel();
     setState(() {
+      _receiptScan = null;
       _isSubmittingProof = true;
+      _reconcileInitialReceipt = false;
       _proofMessage = null;
     });
 
@@ -244,28 +400,37 @@ class _ManualExchangeOrderScreenState extends State<ManualExchangeOrderScreen>
         orderId: order.id,
         file: file,
         bankReference: bankReference,
+        receiptName: order.supportsReceiptName ? receiptName : null,
       );
       if (!mounted) return;
       setState(() {
         _order = updated;
         _orderFuture = Future<ManualExchangeOrder>.value(updated);
         _selectedFile = null;
+        _showReceiptStep = false;
+        _paymentConfirmed = false;
+        _receiptNameController.clear();
         _bankReferenceController.clear();
+        _suggestions = null;
+        _scanMessage = null;
         _proofMessage = null;
       });
+      _scrollToTop();
       showTpSnackbar(
         context,
-        'Receipt submitted. We will confirm the transfer before settlement.',
+        'Payment reported. Your receipt is awaiting admin review.',
         type: TpSnackbarType.success,
       );
+      try {
+        await _service.clearReceiptStep(order.id);
+      } catch (_) {}
       _schedulePoll();
     } catch (error) {
       if (!mounted) return;
       setState(() {
-        _proofMessage = manualExchangeErrorMessage(
-          error,
-          'We could not submit this receipt. Your retry is safe; try again when you are online.',
-        );
+        _reconcileInitialReceipt = !order.hasProof;
+        _proofMessage =
+            '${manualExchangeErrorMessage(error, 'Receipt submission could not be confirmed.')} Your exchange and selected receipt are kept here. Do not make another transfer. Retry this receipt when you are online.';
       });
     } finally {
       if (mounted) setState(() => _isSubmittingProof = false);
@@ -328,13 +493,14 @@ class _ManualExchangeOrderScreenState extends State<ManualExchangeOrderScreen>
               onRefresh: _refresh,
               color: AppColors.primary,
               child: CustomScrollView(
+                controller: _scrollController,
                 physics: const AlwaysScrollableScrollPhysics(
                   parent: BouncingScrollPhysics(),
                 ),
                 slivers: [
                   SliverToBoxAdapter(
                     child: TpPageHeader(
-                      label: 'Exchange order',
+                      label: 'Exchange',
                       showBackButton: widget.showBackButton,
                       menuActions: [
                         TpPageMenuAction(
@@ -354,37 +520,59 @@ class _ManualExchangeOrderScreenState extends State<ManualExchangeOrderScreen>
                     ),
                     sliver: SliverList.list(
                       children: [
-                        _StatusCard(order: order),
+                        ManualExchangeProgress(
+                            order: order, receiptStep: _showReceiptStep),
                         if (_connectionMessage != null) ...[
-                          const SizedBox(height: AppSpacing.sm),
-                          _InfoMessage(message: _connectionMessage!),
+                          _InfoMessage(
+                              message:
+                                  '$_connectionMessage Your exchange reference is unchanged. Do not pay again if you already transferred.'),
+                          const SizedBox(height: 16),
                         ],
-                        const SizedBox(height: AppSpacing.md),
-                        if (!_showReceiptStep) _OrderSummaryCard(order: order),
                         if (!_showReceiptStep &&
+                            order.status ==
+                                ManualExchangeOrderStatus.awaitingTransfer &&
                             order.collectionAccount != null) ...[
-                          const SizedBox(height: AppSpacing.md),
-                          _CollectionAccountCard(
-                            order: order,
-                            onCopy: _copy,
-                          ),
+                          _CollectionAccountCard(order: order, onCopy: _copy),
+                          const SizedBox(height: 20),
+                          SizedBox(
+                              width: double.infinity,
+                              child: FilledButton(
+                                  onPressed: () => _continueToReceipt(order),
+                                  child:
+                                      const Text('I’ve made this transfer'))),
+                          const SizedBox(height: 10),
+                          Text(
+                              'Already paid? Continue with your receipt. Do not send the payment twice.',
+                              style: AppTextStyles.bodyS,
+                              textAlign: TextAlign.center),
                         ],
-                        const SizedBox(height: AppSpacing.md),
-                        if (!_showReceiptStep) _DestinationCard(order: order),
-                        const SizedBox(height: AppSpacing.md),
-                        if (order.canSubmitProof && !_showReceiptStep)
-                          FilledButton(
-                              onPressed: () =>
-                                  setState(() => _showReceiptStep = true),
-                              child: const Text('Upload transfer receipt')),
-                        if (_showReceiptStep || !order.canSubmitProof)
+                        if (order.status ==
+                                ManualExchangeOrderStatus.needsMoreInfo &&
+                            !_showReceiptStep)
+                          SizedBox(
+                              width: double.infinity,
+                              child: FilledButton(
+                                  onPressed: () => _continueToReceipt(order),
+                                  child:
+                                      const Text('Update transfer receipt'))),
+                        if (_showReceiptStep ||
+                            order.status !=
+                                ManualExchangeOrderStatus.awaitingTransfer)
                           _ReceiptCard(
                             order: order,
                             selectedFile: _selectedFile,
+                            receiptNameController: _receiptNameController,
                             bankReferenceController: _bankReferenceController,
                             isSubmitting: _isSubmittingProof,
                             isOpeningProof: _isOpeningProof,
+                            paymentConfirmed: _paymentConfirmed,
+                            onPaymentConfirmed: (value) =>
+                                setState(() => _paymentConfirmed = value),
+                            editable: _showReceiptStep && order.canSubmitProof,
                             message: _proofMessage,
+                            scanMessage: _receiptScan != null
+                                ? 'Reading receipt…'
+                                : _scanMessage,
                             onPick: _pickReceipt,
                             onSubmit: () => _submitReceipt(order),
                             onOpenReceipt: () => _openReceipt(order),
@@ -395,7 +583,35 @@ class _ManualExchangeOrderScreenState extends State<ManualExchangeOrderScreen>
                                   ? null
                                   : () =>
                                       setState(() => _showReceiptStep = false),
-                              child: const Text('Back to transfer account')),
+                              child:
+                                  const Text('View original transfer account')),
+                        if (order.status ==
+                                ManualExchangeOrderStatus
+                                    .awaitingConfirmation &&
+                            !_showReceiptStep) ...[
+                          const SizedBox(height: 16),
+                          const _InfoMessage(
+                              message:
+                                  'No further payment is needed. We’ll update this exchange after admin review.'),
+                          const SizedBox(height: 12),
+                          OutlinedButton.icon(
+                              onPressed: _isRefreshing ? null : _refresh,
+                              icon: const Icon(Icons.refresh_rounded),
+                              label: const Text('Refresh review status')),
+                          TextButton(
+                              onPressed: () => _continueToReceipt(order),
+                              child: const Text('Update receipt')),
+                        ],
+                        ReviewReminderButton(order: order, service: _service),
+                        const SizedBox(height: 20),
+                        ExpansionTile(
+                            tilePadding: EdgeInsets.zero,
+                            title: Text('Exchange details',
+                                style: AppTextStyles.labelL),
+                            children: [
+                              _OrderSummaryCard(order: order),
+                              _DestinationCard(order: order),
+                            ]),
                         if (order.events.isNotEmpty) ...[
                           const SizedBox(height: AppSpacing.xl),
                           _OrderTimeline(events: order.events),
@@ -422,45 +638,6 @@ String? _contentTypeFor(String fileName) {
     'pdf' => 'application/pdf',
     _ => null,
   };
-}
-
-class _StatusCard extends StatelessWidget {
-  final ManualExchangeOrder order;
-
-  const _StatusCard({required this.order});
-
-  @override
-  Widget build(BuildContext context) {
-    AppColors.watch(context);
-    final color = _statusColor(order.status);
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: AppSpacing.md),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            width: 44,
-            height: 44,
-            decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-            child: Icon(_statusIcon(order.status), color: Colors.white),
-          ),
-          const SizedBox(width: AppSpacing.md),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(manualExchangeStatusLabel(order.status),
-                    style: AppTextStyles.headingM.copyWith(color: color)),
-                const SizedBox(height: AppSpacing.xs),
-                Text(manualExchangeStatusDescription(order.status),
-                    style: AppTextStyles.bodyM),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
 }
 
 class _OrderSummaryCard extends StatelessWidget {
@@ -533,26 +710,57 @@ class _CollectionAccountCard extends StatelessWidget {
               Icon(Icons.account_balance_rounded, color: AppColors.primary),
               const SizedBox(width: AppSpacing.sm),
               Expanded(
-                child: Text('TrustPay collection account',
+                child: Text('Transfer to this account',
                     style: AppTextStyles.headingM),
               ),
             ],
           ),
           const SizedBox(height: AppSpacing.xs),
           Text(
-            'Transfer the exact amount from your bank and include the unique payment reference.',
+            'Include the payment reference when sending from your bank or mobile money app.',
             style: AppTextStyles.bodyM,
           ),
-          const SizedBox(height: AppSpacing.md),
-          _CopyValueRow(label: 'Bank', value: account.bankName, onCopy: onCopy),
-          _CopyValueRow(
-              label: 'Account name',
-              value: account.accountName,
-              onCopy: onCopy),
-          _CopyValueRow(
-              label: 'Account number',
-              value: account.accountNumber,
-              onCopy: onCopy),
+          const SizedBox(height: 20),
+          Text('${order.sourceCurrency} ${order.amount}',
+              style: AppTextStyles.displayMedium
+                  .copyWith(fontWeight: FontWeight.w800)),
+          const SizedBox(height: 20),
+          DecoratedBox(
+            decoration: BoxDecoration(
+              color: AppColors.surface,
+              border: Border.all(color: AppColors.border),
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 6, 8, 6),
+              child: Column(
+                children: [
+                  _CopyValueRow(
+                    label: 'Account number',
+                    value: account.accountNumber,
+                    valueStyle: AppTextStyles.headingL
+                        .copyWith(fontWeight: FontWeight.w800),
+                    onCopy: onCopy,
+                  ),
+                  const Divider(height: 1),
+                  _CopyValueRow(
+                    label: 'Account name',
+                    value: account.accountName,
+                    valueStyle: AppTextStyles.labelL,
+                    onCopy: onCopy,
+                  ),
+                  const Divider(height: 1),
+                  _CopyValueRow(
+                    label: 'Bank or mobile money',
+                    value: account.bankName,
+                    valueStyle: AppTextStyles.labelL,
+                    onCopy: onCopy,
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: AppSpacing.xs),
           _CopyValueRow(
               label: 'Currency', value: account.currency, onCopy: onCopy),
           _CopyValueRow(
@@ -562,7 +770,7 @@ class _CollectionAccountCard extends StatelessWidget {
           ),
           const SizedBox(height: AppSpacing.sm),
           Text(
-            'Only transfer to the account shown for this order. The account version is ${account.version.isEmpty ? 'current' : account.version}.',
+            'Use only these transfer details for this exchange. Keep the receipt from your bank or mobile money provider.',
             style: AppTextStyles.bodyS,
           ),
         ],
@@ -574,27 +782,35 @@ class _CollectionAccountCard extends StatelessWidget {
 class _CopyValueRow extends StatelessWidget {
   final String label;
   final String value;
+  final TextStyle? valueStyle;
   final Future<void> Function(String value, String label) onCopy;
 
   const _CopyValueRow({
     required this.label,
     required this.value,
     required this.onCopy,
+    this.valueStyle,
   });
 
   @override
   Widget build(BuildContext context) {
     AppColors.watch(context);
     return Padding(
-      padding: const EdgeInsets.only(top: AppSpacing.sm),
+      padding: const EdgeInsets.symmetric(vertical: AppSpacing.xs),
       child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          SizedBox(width: 104, child: Text(label, style: AppTextStyles.bodyS)),
-          Expanded(child: Text(value, style: AppTextStyles.labelM)),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(label, style: AppTextStyles.bodyS),
+                Text(value, style: valueStyle ?? AppTextStyles.labelM),
+              ],
+            ),
+          ),
+          const SizedBox(width: AppSpacing.xs),
           IconButton(
             tooltip: 'Copy $label',
-            visualDensity: VisualDensity.compact,
             onPressed: value.isEmpty ? null : () => onCopy(value, label),
             icon: const Icon(Icons.copy_rounded, size: 18),
           ),
@@ -665,10 +881,14 @@ class _DestinationCard extends StatelessWidget {
 class _ReceiptCard extends StatelessWidget {
   final ManualExchangeOrder order;
   final ManualExchangeProofFile? selectedFile;
+  final TextEditingController receiptNameController;
   final TextEditingController bankReferenceController;
   final bool isSubmitting;
   final bool isOpeningProof;
+  final bool paymentConfirmed, editable;
+  final ValueChanged<bool> onPaymentConfirmed;
   final String? message;
+  final String? scanMessage;
   final VoidCallback onPick;
   final VoidCallback onSubmit;
   final VoidCallback onOpenReceipt;
@@ -676,10 +896,15 @@ class _ReceiptCard extends StatelessWidget {
   const _ReceiptCard({
     required this.order,
     required this.selectedFile,
+    required this.receiptNameController,
     required this.bankReferenceController,
     required this.isSubmitting,
     required this.isOpeningProof,
+    required this.paymentConfirmed,
+    required this.editable,
+    required this.onPaymentConfirmed,
     required this.message,
+    required this.scanMessage,
     required this.onPick,
     required this.onSubmit,
     required this.onOpenReceipt,
@@ -688,7 +913,7 @@ class _ReceiptCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     AppColors.watch(context);
-    final canSubmit = order.canSubmitProof;
+    final canSubmit = order.canSubmitProof && editable;
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: AppSpacing.md),
       child: Column(
@@ -700,9 +925,7 @@ class _ReceiptCard extends StatelessWidget {
               const SizedBox(width: AppSpacing.sm),
               Expanded(
                 child: Text(
-                  order.hasProof
-                      ? 'Transfer receipt'
-                      : 'Submit transfer receipt',
+                  order.hasProof ? 'Your transfer receipt' : 'Payment receipt',
                   style: AppTextStyles.headingM,
                 ),
               ),
@@ -712,7 +935,7 @@ class _ReceiptCard extends StatelessWidget {
           Text(
             order.hasProof
                 ? 'Your receipt is attached to this order for review.'
-                : 'Upload a clear receipt after the transfer. Receipt submission does not confirm the deposit.',
+                : 'Upload proof of payment so our team can verify your transfer.',
             style: AppTextStyles.bodyM,
           ),
           if (order.hasProof) ...[
@@ -736,35 +959,65 @@ class _ReceiptCard extends StatelessWidget {
           ],
           if (canSubmit) ...[
             const SizedBox(height: AppSpacing.lg),
-            TextFormField(
-              controller: bankReferenceController,
-              enabled: !isSubmitting,
-              textInputAction: TextInputAction.done,
-              decoration: const InputDecoration(
-                labelText: 'Bank reference',
-                hintText: 'Enter the reference on your transfer receipt',
-              ),
-            ),
-            const SizedBox(height: AppSpacing.md),
             OutlinedButton.icon(
               onPressed: isSubmitting ? null : onPick,
               icon: const Icon(Icons.attach_file_rounded),
               label: Text(
-                  selectedFile == null ? 'Choose receipt' : 'Change receipt'),
+                  selectedFile == null ? 'Upload receipt' : 'Change receipt'),
             ),
             if (selectedFile != null) ...[
               const SizedBox(height: AppSpacing.sm),
               _SelectedFile(file: selectedFile!),
             ],
+            if (scanMessage != null) ...[
+              const SizedBox(height: AppSpacing.sm),
+              Semantics(
+                liveRegion: true,
+                child: Text(scanMessage!, style: AppTextStyles.bodyS),
+              ),
+            ],
+            const SizedBox(height: AppSpacing.md),
+            if (order.supportsReceiptName) ...[
+              TextFormField(
+                controller: receiptNameController,
+                enabled: !isSubmitting,
+                textCapitalization: TextCapitalization.words,
+                textInputAction: TextInputAction.next,
+                decoration: const InputDecoration(labelText: 'Name on receipt'),
+              ),
+              const SizedBox(height: AppSpacing.sm),
+            ],
+            TextFormField(
+              controller: bankReferenceController,
+              enabled: !isSubmitting,
+              textInputAction: TextInputAction.done,
+              decoration: InputDecoration(
+                labelText: order.supportsReceiptName
+                    ? 'Bank reference (optional)'
+                    : 'Bank reference',
+              ),
+            ),
             if (message != null) ...[
               const SizedBox(height: AppSpacing.sm),
               _InfoMessage(message: message!, error: true),
             ],
+            const SizedBox(height: 16),
+            CheckboxListTile(
+              contentPadding: EdgeInsets.zero,
+              controlAffinity: ListTileControlAffinity.leading,
+              value: paymentConfirmed,
+              onChanged: isSubmitting
+                  ? null
+                  : (value) => onPaymentConfirmed(value ?? false),
+              title: Text(
+                  'I confirm I transferred ${order.sourceCurrency} ${order.amount} to the account shown for this exchange.',
+                  style: AppTextStyles.bodyS),
+            ),
             const SizedBox(height: AppSpacing.md),
             SizedBox(
               width: double.infinity,
               child: FilledButton.icon(
-                onPressed: isSubmitting ? null : onSubmit,
+                onPressed: isSubmitting || !paymentConfirmed ? null : onSubmit,
                 icon: isSubmitting
                     ? const SizedBox(
                         width: 18,
@@ -777,9 +1030,7 @@ class _ReceiptCard extends StatelessWidget {
                     : const Icon(Icons.upload_file_rounded),
                 label: Text(isSubmitting
                     ? 'Submitting receipt…'
-                    : order.hasProof
-                        ? 'Replace receipt'
-                        : 'Submit receipt'),
+                    : 'Confirm payment & submit receipt'),
               ),
             ),
           ] else if (message != null) ...[
@@ -1005,25 +1256,6 @@ class _OrderLoadError extends StatelessWidget {
 
 String _formatDate(DateTime date) =>
     DateFormat('d MMM yyyy, HH:mm').format(date.toLocal());
-
-IconData _statusIcon(ManualExchangeOrderStatus status) {
-  switch (status) {
-    case ManualExchangeOrderStatus.credited:
-    case ManualExchangeOrderStatus.completed:
-      return Icons.check_rounded;
-    case ManualExchangeOrderStatus.needsMoreInfo:
-    case ManualExchangeOrderStatus.rejected:
-      return Icons.priority_high_rounded;
-    case ManualExchangeOrderStatus.payoutProcessing:
-    case ManualExchangeOrderStatus.payoutSent:
-      return Icons.sync_rounded;
-    case ManualExchangeOrderStatus.payoutPending:
-    case ManualExchangeOrderStatus.awaitingTransfer:
-    case ManualExchangeOrderStatus.awaitingConfirmation:
-    case ManualExchangeOrderStatus.unknown:
-      return Icons.schedule_rounded;
-  }
-}
 
 Color _statusColor(ManualExchangeOrderStatus status) {
   switch (status) {

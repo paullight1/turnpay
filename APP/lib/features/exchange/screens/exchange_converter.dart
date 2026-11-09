@@ -4,6 +4,7 @@ import '../../../core/money/money_value.dart';
 import '../../../core/money/amount_words.dart';
 import '../../../core/theme/app_theme.dart';
 import '../services/manual_exchange_service.dart';
+import '../widgets/exchange_currency_flag.dart';
 
 /// Exact rational arithmetic for a display estimate; the server freezes the quote.
 String convertExchangePreview(String amount, String rate,
@@ -217,9 +218,7 @@ class _ExchangeConverterState extends State<ExchangeConverter> {
               borderRadius: BorderRadius.circular(AppRadius.full),
             ),
             child: Row(mainAxisSize: MainAxisSize.min, children: [
-              ExcludeSemantics(
-                  child: Text(code == 'NGN' ? '🇳🇬' : '🇬🇭',
-                      style: const TextStyle(fontSize: 18))),
+              ExchangeCurrencyFlag(naira: code == 'NGN', width: 22),
               const SizedBox(width: 6),
               Text(code, style: AppTextStyles.labelM),
             ]),
@@ -271,7 +270,7 @@ class _ExchangeConverterState extends State<ExchangeConverter> {
                       return 'A valid exchange rate is required to continue.';
                     }
                     try {
-                      if ((value?.length ?? 0) > 14 ||
+                      if (((value ?? '').replaceAll(',', '').length) > 16 ||
                           MoneyValue.parse((value ?? '').replaceAll(',', ''))
                                   .minorUnits <=
                               BigInt.zero) {

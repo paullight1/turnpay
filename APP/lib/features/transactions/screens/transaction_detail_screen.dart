@@ -7,6 +7,7 @@ import '../../../core/theme/app_theme.dart';
 import '../../../core/widgets/micro_interactions.dart';
 import '../../../core/widgets/tp_page_header.dart';
 import '../../../services/wallet_service.dart';
+import '../../home/widgets/receipt_download_button.dart';
 
 class TransactionDetailScreen extends StatefulWidget {
   final String reference;
@@ -43,7 +44,7 @@ class _TransactionDetailScreenState extends State<TransactionDetailScreen> {
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: TpAppHeader(
-        label: 'Transaction Details',
+        label: 'Transaction receipt',
         menuActions: [
           TpPageMenuAction(
             label: 'Refresh',
@@ -89,6 +90,18 @@ class _TransactionDetailScreenState extends State<TransactionDetailScreen> {
                     children: [
                       // Amount hero
                       _AmountHero(detail: detail),
+                      const SizedBox(height: AppSpacing.md),
+                      ReceiptDownloadButton(details: {
+                        'Status': detail.status.replaceAll('_', ' '),
+                        'Type': detail.type.replaceAll('_', ' '),
+                        'Amount':
+                            '${detail.currency} ${detail.amountDecimalString}',
+                        'Fee': '${detail.currency} ${detail.feeDecimalString}',
+                        'Reference': detail.reference,
+                        if (detail.createdAt != null)
+                          'Date (UTC)': DateFormat('d MMM yyyy, HH:mm')
+                              .format(detail.createdAt!.toUtc()),
+                      }),
                       const SizedBox(height: AppSpacing.lg),
 
                       if (detail.type.toUpperCase() == 'INTERNAL_TRANSFER') ...[

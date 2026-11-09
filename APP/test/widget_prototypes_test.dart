@@ -89,7 +89,7 @@ void main() {
     expect(find.text('GH₵ ••••••'), findsOneWidget);
   });
 
-  testWidgets('quick actions and wallet cards render demo content',
+  testWidgets('V1 quick actions hide Send and keep Exchange available',
       (tester) async {
     await tester.pumpWidget(
       const MaterialApp(
@@ -108,14 +108,14 @@ void main() {
       ),
     );
 
-    expect(find.text('Send'), findsOneWidget);
+    expect(find.text('Send'), findsNothing);
     expect(find.text('Exchange'), findsOneWidget);
     expect(find.text('Wallets'), findsOneWidget);
     expect(find.textContaining('GHS'), findsWidgets);
     expect(find.textContaining('NGN'), findsWidgets);
   });
 
-  testWidgets('recent recipients and transactions render live data',
+  testWidgets('V1 hides withdrawal recipients but keeps transactions visible',
       (tester) async {
     final bundle = buildTrustPayTestBundle();
 
@@ -141,8 +141,8 @@ void main() {
 
     await tester.pumpAndSettle();
 
-    expect(find.text('Recipients'), findsOneWidget);
-    expect(find.textContaining('First Bank'), findsOneWidget);
+    expect(find.text('Recipients'), findsNothing);
+    expect(find.textContaining('First Bank'), findsNothing);
     expect(find.text('Recent transactions'), findsOneWidget);
     expect(find.text('Fund'), findsWidgets);
     expect(find.text('DEP-001'), findsOneWidget);

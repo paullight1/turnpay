@@ -3,6 +3,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:trustpay_app/features/home/screens/dashboard_detail_screen.dart';
 import 'package:trustpay_app/features/notifications/services/notifications_service.dart';
 import 'package:trustpay_app/services/home_data_service.dart';
+import 'package:trustpay_app/services/kora_service.dart';
+import 'package:trustpay_app/features/exchange/services/manual_exchange_service.dart';
 import 'support/trustpay_test_api.dart';
 
 class ClosureService extends HomeDataService {
@@ -60,6 +62,79 @@ void main() {
             'A support status does not by itself confirm account deletion.'),
         findsOneWidget);
   });
+  testWidgets('the History tab includes exchange orders', (tester) async {
+    final bundle = buildTrustPayTestBundle(includeTransactions: false);
+    await tester.pumpWidget(MaterialApp(
+        home: DashboardTransactionsScreen(
+            homeDataService: bundle.homeDataService,
+            manualExchangeService: _HistoryManualService(),
+            koraService: _HistoryKoraService())));
+    await tester.pumpAndSettle();
+    expect(find.text('History'), findsOneWidget);
+    expect(find.text('Exchange history'), findsOneWidget);
+    expect(find.text('View review status'), findsOneWidget);
+    expect(find.text('Our team is checking this payment'), findsOneWidget);
+  });
+}
+
+class _HistoryManualService extends ManualExchangeService {
+  @override
+  Future<List<ManualExchangeOrder>> listOrders() async => [
+        ManualExchangeOrder.fromJson({
+          'id': 'manual-order-1',
+          'reference': 'EX-HISTORY-001',
+          'status': 'AWAITING_CONFIRMATION',
+          'settlementMode': 'BANK',
+          'sourceCurrency': 'GHS',
+          'targetCurrency': 'NGN',
+          'amount': '100.00',
+          'targetAmount': '10000.00',
+          'rate': '100.000000',
+          'fee': '0.00',
+          'collectionAccount': {
+            'bankName': 'Collection Bank',
+            'accountName': 'TrustPay Collection',
+            'accountNumber': '0123456789',
+            'currency': 'GHS',
+            'version': 'v1'
+          },
+          'createdAt': '2026-11-04T10:00:00.000Z',
+          'updatedAt': '2026-11-04T10:00:00.000Z',
+          'expiresAt': '2026-11-05T10:00:00.000Z',
+          'destinationInstitution': 'Recipient Bank',
+          'destinationAccountMasked': '******6789',
+          'destinationName': 'Alex Morgan',
+          'hasProof': true,
+          'hasPayoutProof': false,
+          'events': <dynamic>[],
+        })
+      ];
+}
+
+class _HistoryKoraService extends KoraService {
+  @override
+  Future<List<KoraOrder>> orders() async => [
+        KoraOrder.fromJson({
+          'id': 'provider-order-1',
+          'reference': 'PX-HISTORY-001',
+          'status': 'NEEDS_REVIEW',
+          'quote': {
+            'id': 'quote-1',
+            'sourceCurrency': 'NGN',
+            'targetCurrency': 'GHS',
+            'fundingSource': 'EXTERNAL',
+            'amount': '5000.00',
+            'fee': '100.00',
+            'total': '5100.00',
+            'rate': '0.060000',
+            'targetAmount': '300.00',
+            'destinationName': 'Ama Mensah',
+            'destinationMasked': '024***4567',
+            'destinationCode': 'mtn',
+            'expiresAt': '2026-11-04T11:00:00.000Z',
+          },
+        })
+      ];
 }
 
 class _AccountActivityNotificationService extends NotificationsService {

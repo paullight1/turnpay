@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:image/image.dart' as img;
@@ -86,6 +87,49 @@ class ReceiptExporter {
     );
 
     return Uint8List.fromList(await document.save());
+  }
+
+  static Future<void> saveReceipt({
+    required Map<String, String> details,
+  }) async {
+    final document = pw.Document(title: 'TrustPay receipt');
+    document.addPage(pw.Page(
+      pageFormat: PdfPageFormat.a4,
+      margin: const pw.EdgeInsets.all(36),
+      build: (_) => pw.Column(
+        crossAxisAlignment: pw.CrossAxisAlignment.start,
+        children: [
+          pw.Text('TrustPay',
+              style: pw.TextStyle(
+                fontSize: 24,
+                fontWeight: pw.FontWeight.bold,
+              )),
+          pw.SizedBox(height: 4),
+          pw.Text('Transaction receipt',
+              style: const pw.TextStyle(fontSize: 16)),
+          pw.SizedBox(height: 16),
+          pw.Divider(),
+          for (final entry in details.entries)
+            pw.Padding(
+              padding: const pw.EdgeInsets.symmetric(vertical: 8),
+              child: pw.Row(
+                crossAxisAlignment: pw.CrossAxisAlignment.start,
+                children: [
+                  pw.SizedBox(width: 105, child: pw.Text(entry.key)),
+                  pw.Expanded(child: pw.Text(entry.value)),
+                ],
+              ),
+            ),
+        ],
+      ),
+    ));
+    await FilePicker.saveFile(
+      dialogTitle: 'Save TrustPay receipt',
+      fileName: 'trustpay-receipt.pdf',
+      type: FileType.custom,
+      allowedExtensions: ['pdf'],
+      bytes: await document.save(),
+    );
   }
 
   static Future<void> shareImage({

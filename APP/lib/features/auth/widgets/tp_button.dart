@@ -67,10 +67,12 @@ class TpButton extends StatelessWidget {
             style: OutlinedButton.styleFrom(
               foregroundColor: AppColors.textSecondary,
               side: BorderSide(color: AppColors.border, width: 1.5),
-              shape: const StadiumBorder(),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(AppRadius.button)),
               minimumSize: minimumSize,
               padding: padding,
-              textStyle: AppTextStyles.labelL,
+              textStyle:
+                  AppTextStyles.labelL.copyWith(fontWeight: FontWeight.w700),
             ),
             child: content,
           )
@@ -82,16 +84,18 @@ class TpButton extends StatelessWidget {
               disabledBackgroundColor:
                   AppColors.primary.withValues(alpha: 0.35),
               disabledForegroundColor: Colors.white,
-              shape: const StadiumBorder(),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(AppRadius.button)),
               minimumSize: minimumSize,
               padding: padding,
-              textStyle: AppTextStyles.labelL,
+              textStyle:
+                  AppTextStyles.labelL.copyWith(fontWeight: FontWeight.w700),
             ),
             child: content,
           );
     return DecoratedBox(
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(AppRadius.full),
+        borderRadius: BorderRadius.circular(AppRadius.button),
         boxShadow: (!isOutlined && !effectiveDisabled)
             ? [
                 BoxShadow(

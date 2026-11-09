@@ -78,6 +78,8 @@ class ApiClient {
           try {
             final retryOptions = error.requestOptions;
             retryOptions.headers['Authorization'] = 'Bearer $accessToken';
+            final data = retryOptions.data;
+            if (data is FormData) retryOptions.data = data.clone();
             final response = await _dio.fetch<dynamic>(retryOptions);
             return handler.resolve(response);
           } on DioException catch (retryError) {

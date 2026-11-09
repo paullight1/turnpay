@@ -1,12 +1,14 @@
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 
+import '../../core/router/app_router.dart';
 import '../../core/theme/app_theme.dart';
 import '../state/exchange_visibility.dart';
 import '../../features/home/screens/dashboard_detail_screen.dart';
 import '../../features/home/screens/home_screen.dart';
-import '../../features/exchange/screens/kora_exchange_screen.dart';
+import '../../features/home/screens/home_task_screen.dart';
 import '../../features/notifications/services/notifications_service.dart';
 import '../../services/home_data_service.dart';
 import 'micro_interactions.dart';
@@ -35,9 +37,9 @@ const _navItems = [
     activeIcon: Icons.currency_exchange_rounded,
   ),
   _NavItem(
-    label: 'History',
-    icon: Icons.pie_chart_outline_rounded,
-    activeIcon: Icons.pie_chart_rounded,
+    label: 'More',
+    icon: Icons.grid_view_outlined,
+    activeIcon: Icons.grid_view_rounded,
   ),
   _NavItem(
     label: 'Profile',
@@ -63,7 +65,6 @@ class MainShell extends StatefulWidget {
 
 class _MainShellState extends State<MainShell> {
   int _selectedIndex = 0;
-  bool _exchangeVisited = false;
 
   @override
   void initState() {
@@ -79,18 +80,13 @@ class _MainShellState extends State<MainShell> {
   }
 
   void _onExchangePreferenceChanged() {
-    if (!exchangeServicesEnabled.value && _selectedIndex == 1) {
-      setState(() => _selectedIndex = 0);
-    } else {
-      setState(() {});
-    }
+    setState(() {});
   }
 
   @override
   Widget build(BuildContext context) {
     AppColors.watch(context);
     return Scaffold(
-      extendBody: true,
       backgroundColor: AppColors.background,
       body: Stack(children: [
         Offstage(
@@ -104,14 +100,6 @@ class _MainShellState extends State<MainShell> {
             ),
           ),
         ),
-        if (_exchangeVisited)
-          Offstage(
-            offstage: _selectedIndex != 1,
-            child: TickerMode(
-                enabled: _selectedIndex == 1,
-                child: ExchangeEntryScreen(
-                    showBackButton: false, active: _selectedIndex == 1)),
-          ),
         if (_selectedIndex > 1) _screenFor(_selectedIndex),
       ]),
       bottomNavigationBar: MediaQuery.viewInsetsOf(context).bottom > 0
@@ -120,12 +108,14 @@ class _MainShellState extends State<MainShell> {
               selectedIndex: _selectedIndex,
               exchangeEnabled: exchangeServicesEnabled.value,
               onTap: (i) {
+                if (i == 1) {
+                  FocusManager.instance.primaryFocus?.unfocus();
+                  context.push(AppRoutes.exchange);
+                  return;
+                }
                 if (i == _selectedIndex) return;
                 FocusManager.instance.primaryFocus?.unfocus();
-                setState(() {
-                  _selectedIndex = i;
-                  if (i == 1) _exchangeVisited = true;
-                });
+                setState(() => _selectedIndex = i);
               },
             ),
     );
@@ -133,12 +123,8 @@ class _MainShellState extends State<MainShell> {
 
   Widget _screenFor(int index) {
     switch (index) {
-      case 1:
-        return const ExchangeEntryScreen(showBackButton: false);
       case 2:
-        return DashboardTransactionsScreen(
-          homeDataService: widget.homeDataService,
-        );
+        return const HomeTaskScreen(embedded: true);
       case 3:
         return DashboardProfileScreen(
           homeDataService: widget.homeDataService,
@@ -172,48 +158,51 @@ class _TrustPayBottomNav extends StatelessWidget {
       for (var index = 0; index < _navItems.length; index++)
         if (index != 1 || exchangeEnabled) (index, _navItems[index]),
     ];
-    return SafeArea(
-      top: false,
-      minimum: const EdgeInsets.fromLTRB(14, 0, 14, 10),
-      child: SizedBox(
-        height: 76,
-        child: LayoutBuilder(
-          builder: (context, constraints) {
-            final itemWidth = constraints.maxWidth / entries.length;
-            final pillWidth = itemWidth - 10;
+    return ColoredBox(
+      color: AppColors.background,
+      child: SafeArea(
+        top: false,
+        minimum: const EdgeInsets.fromLTRB(14, 0, 14, 10),
+        child: SizedBox(
+          height: 76,
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final itemWidth = constraints.maxWidth / entries.length;
+              final pillWidth = itemWidth - 10;
 
-            return Stack(
-              children: [
-                AnimatedPositioned(
-                  duration: const Duration(milliseconds: 260),
-                  curve: Curves.easeOutCubic,
-                  left:
-                      entries.indexWhere((entry) => entry.$1 == selectedIndex) *
-                              itemWidth +
-                          5,
-                  top: 8,
-                  width: pillWidth,
-                  height: 60,
-                  child: const _LiquidGlassPill(),
-                ),
-                Row(
-                  children: List.generate(entries.length, (position) {
-                    final index = entries[position].$1;
-                    final item = entries[position].$2;
-                    final isActive = index == selectedIndex;
+              return Stack(
+                children: [
+                  AnimatedPositioned(
+                    duration: const Duration(milliseconds: 260),
+                    curve: Curves.easeOutCubic,
+                    left: entries.indexWhere(
+                                (entry) => entry.$1 == selectedIndex) *
+                            itemWidth +
+                        5,
+                    top: 8,
+                    width: pillWidth,
+                    height: 60,
+                    child: const _LiquidGlassPill(),
+                  ),
+                  Row(
+                    children: List.generate(entries.length, (position) {
+                      final index = entries[position].$1;
+                      final item = entries[position].$2;
+                      final isActive = index == selectedIndex;
 
-                    return Expanded(
-                      child: _NavBarItem(
-                        item: item,
-                        isActive: isActive,
-                        onTap: () => onTap(index),
-                      ),
-                    );
-                  }),
-                ),
-              ],
-            );
-          },
+                      return Expanded(
+                        child: _NavBarItem(
+                          item: item,
+                          isActive: isActive,
+                          onTap: () => onTap(index),
+                        ),
+                      );
+                    }),
+                  ),
+                ],
+              );
+            },
+          ),
         ),
       ),
     );

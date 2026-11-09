@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../core/config/launch_capabilities.dart';
 import '../../../core/router/app_router.dart';
 import '../../../core/theme/app_theme.dart';
 import '../widgets/auth_help_button.dart';
@@ -21,12 +22,13 @@ class _OnboardingPage {
 }
 
 const _pages = [
-  _OnboardingPage(
-    title: 'Send money\nwithout limits.',
-    subtitle:
-        'Transfer between GHS and NGN instantly at the best market rates.',
-    imageAsset: 'assets/images/onboarding_transfer.jpg',
-  ),
+  if (LaunchCapabilities.moneyOutEnabled)
+    _OnboardingPage(
+      title: 'Send money\nwithout limits.',
+      subtitle:
+          'Transfer between GHS and NGN instantly at the best market rates.',
+      imageAsset: 'assets/images/onboarding_transfer.jpg',
+    ),
   _OnboardingPage(
     title: 'Swap cedis to naira\nin seconds.',
     subtitle:
@@ -323,31 +325,22 @@ class _AuthButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     AppColors.watch(context);
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        height: 54,
-        decoration: BoxDecoration(
-          color: isPrimary
-              ? AppColors.primary
-              : Colors.white.withValues(alpha: 0.14),
-          borderRadius: BorderRadius.circular(AppRadius.full),
-          border: isPrimary
-              ? null
-              : Border.all(
-                  color: Colors.white.withValues(alpha: 0.42),
-                  width: 1.5,
-                ),
-        ),
-        child: Center(
-          child: Text(
-            label,
-            style: AppTextStyles.labelL.copyWith(
-              color: Colors.white,
-            ),
-          ),
-        ),
-      ),
+    final style = FilledButton.styleFrom(
+      backgroundColor:
+          isPrimary ? AppColors.primary : Colors.white.withValues(alpha: .14),
+      foregroundColor: Colors.white,
+      minimumSize: const Size.fromHeight(56),
+      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+      shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(AppRadius.button)),
+      side: isPrimary
+          ? null
+          : BorderSide(color: Colors.white.withValues(alpha: .42), width: 1.5),
+      textStyle: AppTextStyles.labelL.copyWith(fontWeight: FontWeight.w700),
     );
+    return FilledButton(
+        onPressed: onTap,
+        style: style,
+        child: Text(label, textAlign: TextAlign.center));
   }
 }
