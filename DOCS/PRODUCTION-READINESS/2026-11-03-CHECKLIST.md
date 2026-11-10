@@ -1,0 +1,64 @@
+# TRUSTPAY production readiness checklist
+
+Updated 3 November 2026 after repository remediation. Base commit: `7f7b4f8`. Changes are reviewable in the current checkout and have not been deployed. **Hold public production launch until the remaining external gates below are evidenced for an immutable release candidate.**
+
+## Repository fixes
+
+- Production npm startup and the rate-endpoint helper now use the emitted `dist/src/main.js` entry point. The npm command explicitly selects production mode and runs startup validation.
+- Production runtime now requires explicit core financial flags and forbids sandbox mode; deployed processes ignore local/example env files. Noncanonical environment modes are rejected so shell, validated config and raw environment checks agree. This also protects direct Railpack starts outside the reviewed templates.
+- Backend TypeScript strict mode is enabled, including strict property initialization and implicit-any checking. DTOs explicitly declare framework-assigned fields; test helpers declare partial-mock boundaries. No wallet, ledger, KYC entitlement or payment state-machine logic changed.
+- `render.production.yaml` is a separate opt-in paid proposal with production validation, a pre-deploy migration job, persistent non-evicting Redis, protected secret slots, manual deployment and disabled provider/transfer/Ghana flags. `render.yaml` remains staging. Compose banking, account, withdrawal, checkout and VTU defaults are explicitly off.
+- Render and Compose pass through transactional email settings. Delivery remains disabled until the sender and a supported SMTP/Resend transport are configured. SMTP retains mandatory TLS; Supabase OTP/recovery mail remains separate.
+- Manifest checks now reject duplicate environment keys, unsafe financial defaults, sandbox URLs in the production proposal, inline provider/encryption credentials, weak Compose email TLS and missing migration controls. Legacy Monnify credential slots are preserved, and production startup rejects their sandbox endpoint even with Paystack primary.
+- Browser QA uses Next's default Turbopack server. A targeted admin case failed with forced Webpack under both local Node 24 and CI-compatible Node 22, including a longer diagnostic timeout, and passed under the default bundler with the original timeout. No authorization checks were relaxed.
+- Retained customer-flow tests seed only the existing non-production QA session. Real policy tests explicitly clear shared QA headers. Smoke checks exercise the current payments landing page and staff-only authentication rather than obsolete FX landing/customer web-login behavior. Payout assertions identify the exact order row.
+- The recovery page handles absent provider configuration with a safe unavailable state instead of throwing during rendering. Password changes still require a prepared recovery session. Manual-exchange review failures keep their inline alert while omitting the duplicate toast that blocked retry buttons on Mobile Safari.
+- Active operational entry points now describe Paystack, approved Ninja NIN upgrades, legacy-only Monnify, VTpass, email OTP, current migration procedures and optional Sentry correctly.
+
+## Verification
+
+Evidence is under [`output/production-remediation-2026-11-03`](../../output/production-remediation-2026-11-03).
+
+| Check | Latest result | Evidence and limits |
+| --- | --- | --- |
+| Backend full strict type check | PASS | Application, scripts and test TypeScript checked with `tsc --project tsconfig.json --noEmit --incremental false`. [Transcript](../../output/production-remediation-2026-11-03/backend-typecheck-release.log). |
+| Backend production build and lint | PASS | [Build](../../output/production-remediation-2026-11-03/backend-build-release.log), [lint](../../output/production-remediation-2026-11-03/backend-lint-release.log). |
+| Backend full unit suite | PASS | 110 suites, 875 tests, including explicit production flags, environment-file isolation and noncanonical-mode rejection. [Transcript](../../output/production-remediation-2026-11-03/backend-unit-release.log). |
+| Legacy production configuration regressions | PASS | Sandbox legacy URL rejected with Paystack primary; retained live URL accepted. [Transcript](../../output/production-remediation-2026-11-03/legacy-config-green.log). |
+| Backend simulated HTTP E2E | PASS | 6 suites, 41 tests. Corrected an older harness that omitted the controller's required valid idempotency header. [Transcript](../../output/production-remediation-2026-11-03/backend-e2e-release.log). |
+| Real PostgreSQL/Redis financial and fault E2E | PASS | 14 suites, 104 tests, isolated disposable services and synthetic external boundaries. Covers concurrency, idempotency, pending/reversal recovery, KYC, limits, funding and FX price safety. [Transcript](../../output/production-remediation-2026-11-03/financial-e2e.log). |
+| Fresh migration deployment and schema drift | PASS | All migrations through 054 applied; schema valid and no drift. [Migrations](../../output/production-remediation-2026-11-03/migrations.log), [drift](../../output/production-remediation-2026-11-03/migration-drift.log). Production migration status is separate. |
+| Synthetic financial restore rehearsal | PASS | Source/restored wallet balances and financial counts/totals match. [Transcript](../../output/production-remediation-2026-11-03/restore-drill.log). This does not prove production backup scheduling or recovery objectives. |
+| Flutter analysis | PASS | No issues using `flutter analyze --no-pub --no-fatal-infos`. [Transcript](../../output/production-remediation-2026-11-03/flutter-analyze-release.log). |
+| Full Flutter tests | PASS | 496 tests with concurrency limited to two, including the current concurrent wallet changes preserved in this checkout. [Transcript](../../output/production-remediation-2026-11-03/flutter-test-release.log). No signed store artifact was produced. |
+| Website lint | PASS | Final source linted after the recovery and retry fixes. [Transcript](../../output/production-remediation-2026-11-03/website-lint-release.log). |
+| Website production build | PASS | Final optimized build and Next TypeScript checks pass. [Transcript](../../output/production-remediation-2026-11-03/website-build-release.log). The installed Next version emits a non-blocking Edge Runtime deprecation warning. |
+| Website browser suite | PASS | 510 tests across Chromium, Firefox, WebKit, Mobile Chrome and Mobile Safari against synthetic APIs; zero skips. The final clean run includes the recovery, policy and retry fixes. [Transcript](../../output/production-remediation-2026-11-03/website-e2e-clean.log). |
+| Render schema and deployment safety | PASS | Both Render files validate against the current official schema; fingerprints are [recorded](../../output/production-remediation-2026-11-03/render-schema-validation.json). [Negative safety fixtures](../../output/production-remediation-2026-11-03/manifest-tests-release.log) cover duplicate keys, unsafe flags, TLS and secret slots. |
+| Production Node dependency audits | PASS | Both report zero known vulnerabilities. [Backend](../../output/production-remediation-2026-11-03/backend-audit.json), [website](../../output/production-remediation-2026-11-03/website-audit.json). These audits exclude development and Flutter dependencies. |
+| Rate-endpoint helper tests | PASS | [Transcript](../../output/production-remediation-2026-11-03/rate-helper-tests-release.log). |
+| Repository safety regression gates | PASS | Manifest, mobile-release configuration, release-manifest and encrypted-backup script tests pass. [Exit-code ledger](../../output/production-remediation-2026-11-03/repository-gates-release.json). These fixture checks do not certify public mobile pins or a live backup service. |
+| Secret safety and diff whitespace | PASS | [Secret scan](../../output/production-remediation-2026-11-03/secret-scan-release.log) and `git diff --check` pass. These pattern checks do not replace credential-store review. |
+| Release candidate gate | NOT YET SATISFIED | The new proposal, checklist, runtime helper and modifications must be reviewed and tracked in a clean candidate. [Current failure](../../output/production-remediation-2026-11-03/release-candidate-final.log) is an untracked required file; the guard has not been weakened. |
+
+An independent focused review found no remaining actionable issues after the canonical environment-mode correction. Its 29 focused Jest tests, manifest negatives and scoped lint passed; it did not rerun the full browser matrix. The final npm entry smoke check also confirms that a caller-supplied development mode cannot bypass required production configuration.
+
+Task-owned PostgreSQL and Redis were stopped after financial verification. Browser binaries were downloaded from the official Playwright distribution; stalled local archive extraction was recovered with the macOS archive tool. No real financial event, identity decision, external email, production DDL, paid provisioning or deployment was performed.
+
+Verification command exits and final test counts are also recorded in [the final ledger](../../output/production-remediation-2026-11-03/verification-summary.json). Temporary Next configuration additions were removed after testing, preserving the pre-existing file-mode changes. Other concurrent source and document edits were preserved.
+
+## What still needs owner input and live evidence
+
+| Gate | Required input or evidence |
+| --- | --- |
+| Production host and resources | The current operations record identifies Dokploy as the active backend host. Confirm its production sizing, persistent services and isolated data topology; the Render proposal is an alternative template, not a required migration to another host. Supply platform access through the normal secure connection; approve paid resources separately if selected. |
+| Production secrets and Redis/storage security | Configure the chosen deployment secret store, isolated Supabase project, authenticated persistent Redis and reviewed TLS/private routing. Verify actual migrations, RLS/advisors, private evidence buckets, signed URL expiry and production/staging isolation. Repository checks cannot establish managed-service settings. Before the Dokploy release, set exact `NODE_ENV=production`, populate all explicit core flags and execute migration 054 through the controlled release job, then verify migration status; the current direct Railpack start does not execute the Docker migration wrapper. |
+| Provider acceptance and funding | Record Paystack product access, signed real webhook/inbox/worker/audit delivery, required provider balances, approved limits and reconciled low-value acceptance for every enabled capability. VTpass needs the controlled signing ingress and purchase/failure/requery evidence. Preserve legacy Monnify obligations with live credentials; do not create new activity there. Approved Ninja integration still needs actual configured service acceptance rather than fabricated verification outcomes. |
+| Mail sender and delivery | Choose SMTP or Resend for transactional status email, verify the requested sender/domain and put credentials only in the backend secret store. Independently confirm Supabase OTP/recovery SMTP templates, expiry, quotas and real delivery. No secret values should be pasted into chat. |
+| Financial operations and recovery | Name finance/reconciliation and on-call owners; verify provider-to-ledger reconciliation, production backup retention and a timed production-equivalent restore, alert delivery, backlog/DLQ handling and incident freeze/rollback procedures. Define and approve recovery objectives and perform load/multi-instance/outage checks on the chosen infrastructure. |
+| Public mobile distribution | Supply protected platform-security/pin-rotation evidence for the candidate, signing/store configuration and the accountable release approvals. The Android internal-testing system-TLS exception does not authorize public production promotion. |
+| Feature and release approval | Review the final candidate and choose the approved launch scope. Keep internal transfers and unactivated Kora/GHS flows disabled until their certification registers and required approvals are complete. Commit and run release CI on that exact candidate before deployment. |
+
+## Operational references
+
+[Security rules](../SECURITY-RULES.MD), [provider source of truth](../PROVIDER-SOURCE-OF-TRUTH.MD), [Paystack activation](../PAYSTACK-ACTIVATION.md), [deployment guide](../PRODUCTION-GUIDES/21-SUPABASE-RENDER-VERCEL-LAUNCH.MD), [database and Redis](../PRODUCTION-GUIDES/02-DATABASE-REDIS.MD), [migration runbook](../PRODUCTION-GUIDES/20-MIGRATION-RUNBOOK.md), [internal-transfer certification](../PRODUCTION-GUIDES/20-INTERNAL-TRANSFER-CERTIFICATION.md).

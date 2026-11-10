@@ -4,7 +4,7 @@
 
 Use this guide for NGN/GHS quotes, rate sourcing, quote expiry, execution, fees, and wallet settlement. Local tests can validate arithmetic, but production launch requires live rate source, treasury policy, limits, and reconciliation.
 
-For the first operations-controlled NGN to GHS launch, the backend/admin manual receipt flow is implemented under `POST /api/exchange/receipts` and `POST /api/admin/exchange/receipts/:receiptId/review`. Users deposit NGN externally, submit receipt evidence, and finance credits GHS only after verification. See `14-MANUAL-EXCHANGE-RECEIPT-FLOW.MD`.
+For the current direct-account V1 launch, use `/api/exchange/manual-orders` and the matching admin queue. New cedis→naira orders pay a Nigerian bank account; new naira→cedis orders pay a Ghana bank/MoMo account. Follow [the current operator and activation instructions](../MANUAL-EXCHANGE-ADMIN-TRIGGERS.md). The receipt/wallet routes described elsewhere in this guide retain historical semantics and are not the new mobile entry point.
 
 ## Required Env Vars
 

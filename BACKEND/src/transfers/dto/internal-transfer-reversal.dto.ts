@@ -10,17 +10,17 @@ export class InternalTransferReversalReasonDto {
   @IsString()
   @MinLength(10)
   @MaxLength(500)
-  reason: string;
+  reason!: string;
 }
 
 export class InternalTransferReferenceParamDto {
   @IsString()
   @MaxLength(128)
   @Matches(/^IT-[A-Za-z0-9-]+$/)
-  reference: string;
+  reference!: string;
 }
 
 export class InternalTransferReversalIdParamDto {
   @IsUUID()
-  id: string;
+  id!: string;
 }

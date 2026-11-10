@@ -26,6 +26,8 @@ export const HTTP_LOG_REDACTION_PATHS = [
   'req.body.destinationAccount',
   'req.body.accountNumber',
   'req.body.objectKey',
+  'req.body.receiptName',
+  'req.body.bankReference',
   'req.body.payoutProofObjectKey',
 ] as const;
 

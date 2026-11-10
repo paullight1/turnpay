@@ -399,7 +399,7 @@ export class ManualExchangeService {
           },
           orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
           take: 51,
-          include,
+          include: { ...include, user: { select: { fullName: true } } },
         });
         const groups = await tx.manualExchangeOrder.groupBy({
           by: ['status'],
@@ -414,7 +414,10 @@ export class ManualExchangeService {
     );
     const page = rows.slice(0, 50);
     return {
-      items: page.map((row) => this.present(row, true)),
+      items: page.map((row) => ({
+        ...this.present(row, true),
+        customerName: row.user.fullName,
+      })),
       nextCursor: rows.length > 50 ? page.at(-1)!.id : null,
       counts: Object.fromEntries(
         groups.map((group) => [group.status, group._count._all]),
@@ -741,6 +744,7 @@ export class ManualExchangeService {
       await this.claimVersion(tx, row, {
         status: 'AWAITING_CONFIRMATION',
         proofKey: dto.objectKey,
+        receiptName: dto.receiptName ?? null,
         bankReference: dto.bankReference ?? null,
         reviewReason:
           row.expiresAt < new Date()
@@ -1302,6 +1306,7 @@ export class ManualExchangeService {
         ? `***${row.destinationAccount.slice(-4)}`
         : null,
       destinationName: row.destinationName,
+      receiptName: row.receiptName,
       bankReference: row.bankReference,
       depositReference: row.depositReference,
       payoutReference: row.payoutReference,

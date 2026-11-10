@@ -49,11 +49,11 @@ export class InternalTransferDto {
   @Matches(MONEY_AMOUNT_PATTERN, {
     message: 'amount must be a positive decimal with at most 2 decimal places',
   })
-  amount: string;
+  amount!: string;
 
   @IsString()
   @IsIn(SUPPORTED_CURRENCIES)
-  currency: (typeof SUPPORTED_CURRENCIES)[number];
+  currency!: (typeof SUPPORTED_CURRENCIES)[number];
 
   @IsOptional()
   @IsString()

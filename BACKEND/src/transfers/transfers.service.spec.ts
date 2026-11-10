@@ -55,7 +55,7 @@ describe('TransfersService', () => {
     auditLog: {
       create: jest.fn(),
     },
-    $transaction: jest.fn(async (fn: any) => fn(prisma)),
+    $transaction: jest.fn(async (fn: any): Promise<unknown> => fn(prisma)),
   };
 
   const ledger = {
@@ -125,7 +125,7 @@ describe('TransfersService', () => {
       version: 1,
     });
     service = new TransfersService(
-      prisma,
+      prisma as never,
       ledger as unknown as LedgerService,
       logger as any,
       transactionPin as any,

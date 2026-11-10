@@ -1,3 +1,5 @@
+> Historical guide. Superseded for current deployment/provider decisions. Use [the current operations index](00-README.MD), [Paystack activation](../PAYSTACK-ACTIVATION.md), and [the migration runbook](20-MIGRATION-RUNBOOK.md). Customer OTP is Supabase email; Sentry is optional; Monnify is legacy-only; the recorded active backend host is Dokploy. Do not apply the old SMS/provider/platform setup below to production.
+
 > Provider update, 2026-10-30: new payment and automated BVN flows use Paystack. The Monnify implementation details below apply to legacy obligations. Follow [Paystack activation](../PAYSTACK-ACTIVATION.md) and the provider source of truth for current setup.
 
 # Monnify-Only Virtual Accounts Status

@@ -13,15 +13,15 @@ import {
 class BootstrapAdminDto {
   @IsEmail()
   @MaxLength(254)
-  email: string;
+  email!: string;
 
   @IsString()
   @MinLength(5)
   @MaxLength(500)
-  reason: string;
+  reason!: string;
 
   @IsBoolean()
-  apply: boolean;
+  apply!: boolean;
 }
 
 type AuthIdentity = {

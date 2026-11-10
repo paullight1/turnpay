@@ -36,3 +36,10 @@ The restarted preview exposed a separate bootstrap routing warning when opening 
 
 
 The wider GitHub backend check found one unnecessary `as number` assertion in the new rate result. It was removed without changing emitted JavaScript, and scoped ESLint passed. This is a CI lint correction rather than a runtime behavior change.
+
+
+## Production readiness follow-up
+
+The repository now requires explicit production values for banking, virtual accounts, withdrawals, checkout, VTU and sandbox mode, and deployed configuration ignores local/example env files. Before deploying this candidate to the recorded Dokploy service, populate those decisions in its protected environment and leave uncertified features off. Production KYC requires a live Paystack key even with payments disabled; retained Monnify credentials must target the live endpoint.
+
+Migration 054 is a prerequisite for this candidate. Configure a controlled release task using `npx prisma migrate deploy`, verify `npx prisma migrate status`, then serve with `NODE_ENV=production sh scripts/validate-production-config.sh node dist/src/main.js`. Keep `RUN_MIGRATIONS_ON_STARTUP=false` when migrations are handled by that release job; Railpack's direct command does not consume the Docker wrapper flag. No live DDL, environment update or Dokploy deployment is authorized by these repository edits alone. See the [current migration runbook](../PRODUCTION-GUIDES/20-MIGRATION-RUNBOOK.md).

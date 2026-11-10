@@ -200,6 +200,7 @@ describe('VTpass VTU financial E2E (real PostgreSQL)', () => {
         !firstResponse ||
         typeof firstResponse !== 'object' ||
         !('orderId' in firstResponse) ||
+        !('reference' in firstResponse) ||
         typeof firstResponse.orderId !== 'string'
       ) {
         throw new Error('Successful purchase did not return an order ID');

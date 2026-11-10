@@ -243,6 +243,51 @@ test("authenticated staff screen offers account actions without another login fo
   }
 });
 
+test("verified staff go directly to the requested admin page", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => Response.json({ user: { role: "ADMIN" } });
+  try {
+    const cookie = `base64-${Buffer.from(JSON.stringify({ access_token: "synthetic-access" })).toString("base64url")}`;
+    for (const [callback, expected] of [
+      ["/admin?tab=exchange", "/admin?tab=exchange"],
+      ["//example.org/admin", "/admin"],
+      ["/staff", "/admin"],
+    ]) {
+      const url = new URL("http://localhost:3001/staff");
+      url.searchParams.set("callbackUrl", callback);
+      const response = await proxy(new NextRequest(url, {
+        headers: { cookie: `supabase.auth.token=${cookie}` },
+      }));
+      expect(response.headers.get("location")).toBe(`http://localhost:3001${expected}`);
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("admin rendering receives the verified refreshed session on the same request", async () => {
+  const originalFetch = globalThis.fetch;
+  const refreshedSession = { access_token: "rotated-access", refresh_token: "rotated-refresh" };
+  globalThis.fetch = async (input, init) => {
+    if (String(input).endsWith("/api/auth/refresh")) return Response.json({ session: refreshedSession });
+    return new Headers(init?.headers).get("Authorization") === "Bearer rotated-access"
+      ? Response.json({ user: { role: "ADMIN" } })
+      : Response.json({}, { status: 401 });
+  };
+  try {
+    const cookie = `base64-${Buffer.from(JSON.stringify({ access_token: "expired", refresh_token: "refresh" })).toString("base64url")}`;
+    const response = await proxy(new NextRequest("http://localhost:3001/admin", {
+      headers: { cookie: `supabase.auth.token=${cookie}` },
+    }));
+    const renewedCookie = response.cookies.get("supabase.auth.token")?.value;
+    expect(renewedCookie).toBeTruthy();
+    expect(response.headers.get("location")).toBeNull();
+    expect(response.headers.get("x-middleware-request-cookie")).toContain(`supabase.auth.token=${renewedCookie}`);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("server admin gate sends the required idempotency key when verifying staff", async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async (_input, init) =>

@@ -179,10 +179,15 @@ test.describe("web session hardening", () => {
     await expect(page).toHaveURL(/\/admin/);
     await expect.poll(() => readStoredSession(page)).toBeNull();
 
-    const accountMenu = page.locator('[data-slot="dropdown-menu-trigger"]').last();
-    await expect(accountMenu).toBeVisible();
-    await accountMenu.click();
-    await page.getByRole("menuitem", { name: "Sign Out", exact: true }).click();
-    await expect(page).toHaveURL(/\/staff/);
+    await page.goto("/staff?callbackUrl=%2Fadmin%3Ftab%3Dexchange");
+    await expect(page).toHaveURL(/\/admin\?tab=exchange$/);
+
+    await page.setViewportSize({ width: 430, height: 932 });
+    await page.getByRole("button", { name: "Open menu", exact: true }).click();
+    const navigation = page.getByRole("dialog", { name: "Navigation menu" });
+    await expect(navigation.getByText("Admin account", { exact: true })).toBeVisible();
+    await expect(navigation.getByText(TEST_USER.email, { exact: true })).toBeVisible();
+    await navigation.getByRole("button", { name: "Log out", exact: true }).click();
+    await expect(page).toHaveURL(/\/staff/, { timeout: 30000 });
   });
 });

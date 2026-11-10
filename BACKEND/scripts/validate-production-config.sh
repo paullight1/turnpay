@@ -25,6 +25,12 @@ fail() {
   exit 1
 }
 
+# Raw process.env checks must agree with the validated application mode.
+case "${NODE_ENV-development}" in
+  development|test|staging|production) ;;
+  *) fail "NODE_ENV must be development, test, staging, or production" ;;
+esac
+
 require_env() {
   value="$(value_of "$1")"
   [ -n "$value" ] || fail "$1 is required"
@@ -116,6 +122,11 @@ if [ "${NODE_ENV:-development}" = "production" ]; then
   require_https_url WEB_URL
   require_https_url ADMIN_URL
   require_boolean_env INTERNAL_TRANSFERS_ENABLED
+  for flag in BANKING_ENABLED VIRTUAL_ACCOUNTS_ENABLED WITHDRAWALS_ENABLED PAYSTACK_CHECKOUT_ENABLED BANKING_SANDBOX_MODE VTU_ENABLED; do
+    require_boolean_env "$flag"
+  done
+  [ "$(lower "${BANKING_SANDBOX_MODE:-}")" = "false" ] ||
+    fail "BANKING_SANDBOX_MODE must be false in production"
   require_boolean_env TRANSACTION_PIN_REQUIRED
   [ "$(lower "${TRANSACTION_PIN_REQUIRED:-}")" = "true" ] ||
     fail "TRANSACTION_PIN_REQUIRED must be true in production"
@@ -134,6 +145,18 @@ if [ "${NODE_ENV:-development}" = "production" ]; then
   esac
   require_base64_32_bytes IDEMPOTENCY_RESPONSE_ENCRYPTION_KEY
   require_env IDEMPOTENCY_RESPONSE_ENCRYPTION_KEY_ID
+
+  # Retained obligations can still call Monnify even when Paystack handles
+  # all new business. Never send those legacy operations to a sandbox host.
+  if [ -n "${MONNIFY_API_KEY:-}${MONNIFY_SECRET_KEY:-}" ]; then
+    require_env MONNIFY_API_KEY
+    require_env MONNIFY_SECRET_KEY
+    require_env MONNIFY_BASE_URL
+    case "${MONNIFY_BASE_URL%/}" in
+      https://api.monnify.com) ;;
+      *) fail "MONNIFY_BASE_URL must use the live endpoint for retained obligations" ;;
+    esac
+  fi
 
   if is_truthy "${BANKING_ENABLED:-false}" ||
     is_truthy "${VIRTUAL_ACCOUNTS_ENABLED:-false}" ||
@@ -161,7 +184,13 @@ if [ "${NODE_ENV:-development}" = "production" ]; then
   fi
 
   case "$(lower "${KYC_PROVIDER:-paystack}")" in
-    paystack) require_env PAYSTACK_SECRET_KEY ;;
+    paystack)
+      require_env PAYSTACK_SECRET_KEY
+      case "${PAYSTACK_SECRET_KEY}" in
+        sk_live_*) ;;
+        *) fail "PAYSTACK_SECRET_KEY must be a live secret in production" ;;
+      esac
+      ;;
     monnify)
       require_env MONNIFY_API_KEY
       require_env MONNIFY_SECRET_KEY

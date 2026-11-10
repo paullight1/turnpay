@@ -88,4 +88,5 @@ describe('Paystack webhook reachability over HTTP', () => {
 
 const captureWebhookRawBodyForTest: NonNullable<
   Parameters<typeof json>[0]
->['verify'] = (req, _res, body) => captureWebhookRawBody(req, body);
+>['verify'] = (req, _res, body) =>
+  captureWebhookRawBody(Object.assign(req, { url: req.url ?? '' }), body);

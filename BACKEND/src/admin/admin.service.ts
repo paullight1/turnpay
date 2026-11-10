@@ -731,6 +731,29 @@ export class AdminService {
           orderBy: { createdAt: 'desc' },
         },
         exchangeReceipt: true,
+        manualExchangeOrder: {
+          select: {
+            id: true,
+            status: true,
+            settlementMode: true,
+            destinationInstitution: true,
+            destinationAccount: true,
+            destinationName: true,
+            targetAmount: true,
+            targetCurrency: true,
+            proofKey: true,
+            payoutProofKey: true,
+          },
+        },
+        exchangePayout: {
+          select: {
+            destinationBankName: true,
+            destinationAccountNumber: true,
+            destinationAccountName: true,
+            destinationAmount: true,
+            destinationCurrency: true,
+          },
+        },
         disputes: {
           orderBy: { createdAt: 'desc' },
           select: {
@@ -802,8 +825,23 @@ export class AdminService {
       }),
     ]);
 
+    const { manualExchangeOrder, ...transactionDetails } = transaction;
     return {
-      ...this.sanitizeTransactionDrilldown(transaction),
+      ...this.sanitizeTransactionDrilldown(transactionDetails),
+      manualExchange: manualExchangeOrder
+        ? {
+            id: manualExchangeOrder.id,
+            status: manualExchangeOrder.status,
+            settlementMode: manualExchangeOrder.settlementMode,
+            destinationInstitution: manualExchangeOrder.destinationInstitution,
+            destinationAccount: manualExchangeOrder.destinationAccount,
+            destinationName: manualExchangeOrder.destinationName,
+            targetAmount: manualExchangeOrder.targetAmount,
+            targetCurrency: manualExchangeOrder.targetCurrency,
+            hasProof: Boolean(manualExchangeOrder.proofKey),
+            hasPayoutProof: Boolean(manualExchangeOrder.payoutProofKey),
+          }
+        : null,
       providerEvents,
       auditTrail,
     };

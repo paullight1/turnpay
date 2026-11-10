@@ -172,7 +172,7 @@ describe('Banking — Virtual Account Provisioning (e2e simulated)', () => {
     };
 
     const context = makeContext({
-      idempotencyKey: 'provision-key-001-test',
+      idempotencyKey: 'provision-account-001',
       path: '/api/banking/accounts/provision',
       body: requestBody,
     });
@@ -182,7 +182,8 @@ describe('Banking — Virtual Account Provisioning (e2e simulated)', () => {
         { userId: 'user-tier2-verified' },
         requestBody,
         undefined,
-        'provision-key-001-test',
+        context.switchToHttp().getRequest<{ headers: Record<string, string> }>()
+          .headers['idempotency-key'],
       ),
     );
 
@@ -215,7 +216,7 @@ describe('Banking — Virtual Account Provisioning (e2e simulated)', () => {
       });
 
     const context = makeContext({
-      idempotencyKey: 'provision-key-002-test',
+      idempotencyKey: 'provision-account-002',
       path: '/api/banking/accounts/provision',
       body: requestBody,
     });
@@ -225,7 +226,8 @@ describe('Banking — Virtual Account Provisioning (e2e simulated)', () => {
         { userId: 'user-tier2-verified' },
         requestBody,
         undefined,
-        'provision-key-002-test',
+        context.switchToHttp().getRequest<{ headers: Record<string, string> }>()
+          .headers['idempotency-key'],
       ),
     );
 
@@ -234,7 +236,8 @@ describe('Banking — Virtual Account Provisioning (e2e simulated)', () => {
         { userId: 'user-tier2-verified' },
         requestBody,
         undefined,
-        'provision-key-002-test',
+        context.switchToHttp().getRequest<{ headers: Record<string, string> }>()
+          .headers['idempotency-key'],
       ),
     );
 
@@ -259,7 +262,7 @@ describe('Banking — Virtual Account Provisioning (e2e simulated)', () => {
     };
 
     const context = makeContext({
-      idempotencyKey: 'provision-key-003-test',
+      idempotencyKey: 'provision-account-003',
       path: '/api/banking/accounts/provision',
       body: requestBody,
       userId: 'user-unverified',
@@ -271,7 +274,11 @@ describe('Banking — Virtual Account Provisioning (e2e simulated)', () => {
           { userId: 'user-unverified' },
           requestBody,
           undefined,
-          'provision-key-003-test',
+          context
+            .switchToHttp()
+            .getRequest<{ headers: Record<string, string> }>().headers[
+            'idempotency-key'
+          ],
         ),
       ),
     ).rejects.toThrow();
@@ -279,7 +286,7 @@ describe('Banking — Virtual Account Provisioning (e2e simulated)', () => {
     expect(mockBankingService.provisionVirtualAccount).toHaveBeenCalledWith(
       'user-unverified',
       requestBody,
-      'provision-key-003-test',
+      'provision-account-003',
     );
   });
 

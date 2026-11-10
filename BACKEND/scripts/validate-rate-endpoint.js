@@ -326,9 +326,9 @@ async function startBackend(config, reporter) {
   reporter.info("Starting NestJS backend because no existing backend responded...");
   const backendDir = path.resolve(__dirname, "..");
   const env = { ...process.env, PORT: String(config.backendPort) };
-  const hasDist = fs.existsSync(path.join(backendDir, "dist", "main.js"));
+  const hasDist = fs.existsSync(path.join(backendDir, "dist", "src", "main.js"));
   const command = hasDist ? "node" : "npx";
-  const args = hasDist ? ["dist/main"] : ["nest", "start"];
+  const args = hasDist ? ["dist/src/main.js"] : ["nest", "start"];
 
   backendProcess = spawn(command, args, {
     cwd: backendDir,

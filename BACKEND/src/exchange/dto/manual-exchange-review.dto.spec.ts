@@ -1,9 +1,42 @@
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
 import {
+  AttachManualProofDto,
   CreateManualExchangeDto,
   ReviewManualExchangeDto,
 } from './manual-exchange.dto';
+
+describe('manual exchange receipt validation', () => {
+  it.each([
+    {},
+    { receiptName: '  Alex Morgan  ' },
+    { bankReference: 'BANK-001' },
+    { receiptName: 'Alex Morgan', bankReference: 'BANK-001' },
+  ])(
+    'accepts receipt details from current and legacy clients',
+    async (details) => {
+      const dto = plainToInstance(AttachManualProofDto, {
+        objectKey: 'private/receipt.pdf',
+        ...details,
+      });
+      expect(await validate(dto)).toEqual([]);
+      if ('receiptName' in details) expect(dto.receiptName).toBe('Alex Morgan');
+    },
+  );
+
+  it.each([{ receiptName: ' ' }, { receiptName: null }])(
+    'rejects an invalid receipt name when supplied',
+    async (details) => {
+      const dto = plainToInstance(AttachManualProofDto, {
+        objectKey: 'private/receipt.pdf',
+        ...details,
+      });
+      expect((await validate(dto)).map((error) => error.property)).toContain(
+        'receiptName',
+      );
+    },
+  );
+});
 
 describe('manual payout handover request validation', () => {
   it('accepts large exact payout evidence up to the existing database precision', async () => {

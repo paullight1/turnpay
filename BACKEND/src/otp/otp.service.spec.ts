@@ -4,6 +4,7 @@ import {
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { OtpService } from './otp.service';
+import { EmailOtpProvider } from './email-otp.provider';
 
 type StoredValue = {
   value: string;
@@ -91,7 +92,7 @@ describe('OtpService', () => {
       redis as never,
       configService as never,
       logger as never,
-      emailProvider,
+      emailProvider as unknown as EmailOtpProvider,
     );
 
     const attempts = await Promise.allSettled(
@@ -119,7 +120,7 @@ describe('OtpService', () => {
       redis as never,
       configService as never,
       logger as never,
-      emailProvider,
+      emailProvider as unknown as EmailOtpProvider,
     );
 
     const attempts = await Promise.allSettled(
@@ -147,7 +148,7 @@ describe('OtpService', () => {
       redis as never,
       configService as never,
       logger as never,
-      emailProvider,
+      emailProvider as unknown as EmailOtpProvider,
     );
 
     await service.sendOtp('ada@example.com');
@@ -171,7 +172,7 @@ describe('OtpService', () => {
       redis as never,
       configService as never,
       logger as never,
-      emailProvider,
+      emailProvider as unknown as EmailOtpProvider,
     );
 
     await expect(service.sendOtp('ada@example.com')).resolves.toEqual({
@@ -194,7 +195,7 @@ describe('OtpService', () => {
       redis as never,
       configService as never,
       logger as never,
-      emailProvider,
+      emailProvider as unknown as EmailOtpProvider,
     );
 
     await expect(service.sendOtp('ada@example.com')).rejects.toBeInstanceOf(
@@ -214,7 +215,7 @@ describe('OtpService', () => {
       redis as never,
       configService as never,
       logger as never,
-      emailProvider,
+      emailProvider as unknown as EmailOtpProvider,
     );
 
     await service.sendOtp('ada@example.com');
@@ -228,7 +229,7 @@ describe('OtpService', () => {
       redis as never,
       configService as never,
       logger as never,
-      emailProvider,
+      emailProvider as unknown as EmailOtpProvider,
     );
     await stagingService.sendOtp('ada@example.com');
     expect(emailProvider.sendOtp).toHaveBeenLastCalledWith('ada@example.com');

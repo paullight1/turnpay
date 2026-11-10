@@ -49,33 +49,33 @@ const ALLOWED_RECEIPT_CONTENT_TYPES = [
 export class GetRateDto {
   @IsString()
   @IsIn(SUPPORTED_CURRENCIES)
-  from: (typeof SUPPORTED_CURRENCIES)[number];
+  from!: (typeof SUPPORTED_CURRENCIES)[number];
 
   @IsString()
   @IsIn(SUPPORTED_CURRENCIES)
-  to: (typeof SUPPORTED_CURRENCIES)[number];
+  to!: (typeof SUPPORTED_CURRENCIES)[number];
 }
 
 export class CreateQuoteDto {
   @IsString()
   @IsIn(SUPPORTED_CURRENCIES)
-  from: (typeof SUPPORTED_CURRENCIES)[number];
+  from!: (typeof SUPPORTED_CURRENCIES)[number];
 
   @IsString()
   @IsIn(SUPPORTED_CURRENCIES)
-  to: (typeof SUPPORTED_CURRENCIES)[number];
+  to!: (typeof SUPPORTED_CURRENCIES)[number];
 
   @Transform(({ value }) => normalizeDecimalInput(value))
   @IsString()
   @Matches(MONEY_AMOUNT_PATTERN, {
     message: 'amount must be a positive decimal with at most 2 decimal places',
   })
-  amount: string;
+  amount!: string;
 }
 
 export class ExecuteQuoteDto {
   @IsString()
-  quoteId: string;
+  quoteId!: string;
 
   @IsOptional()
   @IsString()
@@ -86,11 +86,11 @@ export class ExecuteQuoteDto {
 export class AdminUpdateRateDto {
   @IsString()
   @IsIn(SUPPORTED_CURRENCIES)
-  from: (typeof SUPPORTED_CURRENCIES)[number];
+  from!: (typeof SUPPORTED_CURRENCIES)[number];
 
   @IsString()
   @IsIn(SUPPORTED_CURRENCIES)
-  to: (typeof SUPPORTED_CURRENCIES)[number];
+  to!: (typeof SUPPORTED_CURRENCIES)[number];
 
   // Absolute ceiling; the service validates the direction for the selected
   // quote basis. Existing clients omit quoteBasis and continue to submit the
@@ -99,7 +99,7 @@ export class AdminUpdateRateDto {
   @Type(() => Number)
   @IsPositive()
   @Max(100_000)
-  rate: number;
+  rate!: number;
 
   @IsOptional()
   @IsString()
@@ -124,12 +124,12 @@ export class AdminUpdateRateDto {
 export class AdminApproveRateOverrideDto {
   @IsString()
   @IsIn(['APPROVED', 'REJECTED'])
-  status: 'APPROVED' | 'REJECTED';
+  status!: 'APPROVED' | 'REJECTED';
 
   @IsString()
   @MinLength(10)
   @MaxLength(500)
-  reason: string;
+  reason!: string;
 }
 
 export class SubmitExchangeReceiptDto {
@@ -138,16 +138,16 @@ export class SubmitExchangeReceiptDto {
   @Matches(MONEY_AMOUNT_PATTERN, {
     message: 'amount must be a positive decimal with at most 2 decimal places',
   })
-  amount: string;
+  amount!: string;
 
   @IsString()
   @Matches(/^[A-Za-z0-9._-]{4,80}$/)
-  bankReference: string;
+  bankReference!: string;
 
   @IsString()
   @MinLength(2)
   @MaxLength(120)
-  senderName: string;
+  senderName!: string;
 
   @IsOptional()
   @IsString()
@@ -181,7 +181,7 @@ export class CreateMonnifyExchangeDepositDto {
   @Matches(MONEY_AMOUNT_PATTERN, {
     message: 'amount must be a positive decimal with at most 2 decimal places',
   })
-  amount: string;
+  amount!: string;
 }
 
 export class CreateExchangeReceiptUploadDto {
@@ -191,16 +191,16 @@ export class CreateExchangeReceiptUploadDto {
   @Matches(/^[A-Za-z0-9._ -]+$/, {
     message: 'File name contains unsupported characters',
   })
-  fileName: string;
+  fileName!: string;
 
   @IsString()
   @IsIn(ALLOWED_RECEIPT_CONTENT_TYPES)
-  contentType: (typeof ALLOWED_RECEIPT_CONTENT_TYPES)[number];
+  contentType!: (typeof ALLOWED_RECEIPT_CONTENT_TYPES)[number];
 
   @IsNumber()
   @Type(() => Number)
   @IsPositive()
-  fileSize: number;
+  fileSize!: number;
 }
 
 export class AdminExchangeReceiptsQueryDto extends LimitQueryDto {
@@ -212,12 +212,12 @@ export class AdminExchangeReceiptsQueryDto extends LimitQueryDto {
 export class AdminReviewExchangeReceiptDto {
   @IsString()
   @IsIn(['APPROVED', 'REJECTED', 'NEEDS_MORE_INFO'])
-  status: 'APPROVED' | 'REJECTED' | 'NEEDS_MORE_INFO';
+  status!: 'APPROVED' | 'REJECTED' | 'NEEDS_MORE_INFO';
 
   @IsString()
   @MinLength(10)
   @MaxLength(500)
-  reason: string;
+  reason!: string;
 }
 
 export class CreateExchangePayoutDto {
@@ -227,12 +227,12 @@ export class CreateExchangePayoutDto {
     message:
       'sourceAmount must be a positive decimal with at most 2 decimal places',
   })
-  sourceAmount: string;
+  sourceAmount!: string;
 
   @IsString()
   @MinLength(2)
   @MaxLength(120)
-  destinationBankName: string;
+  destinationBankName!: string;
 
   @IsOptional()
   @IsString()
@@ -245,12 +245,12 @@ export class CreateExchangePayoutDto {
   @Matches(/^\d{10,20}$/, {
     message: 'destinationAccountNumber must be 10-20 digits',
   })
-  destinationAccountNumber: string;
+  destinationAccountNumber!: string;
 
   @IsString()
   @MinLength(2)
   @MaxLength(120)
-  destinationAccountName: string;
+  destinationAccountName!: string;
 
   @IsOptional()
   @IsString()
@@ -269,19 +269,19 @@ export class AdminExchangePayoutsQueryDto extends LimitQueryDto {
 export class AdminReviewPayoutDto {
   @IsString()
   @IsIn(['APPROVED', 'REJECTED'])
-  status: 'APPROVED' | 'REJECTED';
+  status!: 'APPROVED' | 'REJECTED';
 
   @IsString()
   @MinLength(10)
   @MaxLength(500)
-  reason: string;
+  reason!: string;
 }
 
 export class AdminMarkPayoutSentDto {
   @IsString()
   @MinLength(10)
   @MaxLength(500)
-  reason: string;
+  reason!: string;
 
   @IsOptional()
   @IsString()

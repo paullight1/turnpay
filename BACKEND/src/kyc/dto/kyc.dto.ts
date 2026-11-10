@@ -34,16 +34,16 @@ export class CreateKycUploadDto {
   @Matches(/^[A-Za-z0-9._ -]+$/, {
     message: 'File name contains unsupported characters',
   })
-  fileName: string;
+  fileName!: string;
 
   @IsString()
   @IsIn(ALLOWED_KYC_CONTENT_TYPES)
-  contentType: (typeof ALLOWED_KYC_CONTENT_TYPES)[number];
+  contentType!: (typeof ALLOWED_KYC_CONTENT_TYPES)[number];
 
   @IsInt()
   @Min(1)
   @Max(8 * 1024 * 1024)
-  fileSize: number;
+  fileSize!: number;
 }
 
 export class CreateIdentityVerificationDto {
@@ -71,11 +71,11 @@ export class CreateIdentityVerificationDto {
 
   @IsString()
   @IsIn(['BVN', 'NIN'])
-  type: KYCType;
+  type!: KYCType;
 
   @IsString()
   @IsIn(['NG'])
-  country: 'NG';
+  country!: 'NG';
 
   @IsString()
   @MinLength(5)
@@ -83,16 +83,16 @@ export class CreateIdentityVerificationDto {
   @Matches(/^[A-Za-z0-9-]+$/, {
     message: 'ID number can contain letters, numbers, and hyphen only',
   })
-  idNumber: string;
+  idNumber!: string;
 
   @IsDateString({ strict: true, strictSeparator: true })
-  dateOfBirth: string;
+  dateOfBirth!: string;
 
   @IsBoolean()
   @Equals(true, {
     message: 'Consent is required before starting identity verification',
   })
-  consentAccepted: true;
+  consentAccepted!: true;
 
   /** Required for Paystack's Nigerian bank-account identification flow. */
   @IsOptional()
@@ -114,28 +114,28 @@ export class CreateIdentityVerificationDto {
 export class CreateManualKycDocumentDto {
   @IsString()
   @IsIn(['NIN'])
-  type: 'NIN';
+  type!: 'NIN';
 
   @IsString()
   @Matches(/^\d{11}$/)
-  idNumber: string;
+  idNumber!: string;
 
   @IsString()
   @MaxLength(255)
   @Matches(/^kyc\/[A-Za-z0-9_-]+\/[A-Za-z0-9._-]+$/)
-  objectKey: string;
+  objectKey!: string;
 
   @IsBoolean()
   @Equals(true, {
     message: 'Consent is required before submitting a manual identity document',
   })
-  consentAccepted: true;
+  consentAccepted!: true;
 }
 
 export class ReviewKycDto {
   @IsString()
   @IsIn(['VERIFIED', 'REJECTED'])
-  status: 'VERIFIED' | 'REJECTED';
+  status!: 'VERIFIED' | 'REJECTED';
 
   @IsString()
   @IsOptional()
@@ -147,7 +147,7 @@ export class ReviewKycDto {
 export class CreateDisputeDto {
   @IsString()
   @IsIn(['TRANSACTION', 'WITHDRAWAL', 'EXCHANGE', 'VTU', 'OTHER'])
-  type: string;
+  type!: string;
 
   @IsString()
   @IsOptional()
@@ -156,13 +156,13 @@ export class CreateDisputeDto {
   @IsString()
   @MinLength(10)
   @MaxLength(500)
-  description: string;
+  description!: string;
 }
 
 export class ResolveDisputeDto {
   @IsString()
   @IsIn(['RESOLVED', 'CLOSED', 'ESCALATED'])
-  status: string;
+  status!: string;
 
   @IsString()
   @IsOptional()

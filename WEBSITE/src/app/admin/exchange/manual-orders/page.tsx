@@ -1,6 +1,7 @@
 "use client";
 
 import { hasAdminAccess } from "@/lib/admin-access";
+import { isDepositReviewStatus } from "@/lib/admin-manual-exchange";
 
 import {
   startTransition,
@@ -34,17 +35,16 @@ import {
 import {
   ArrowLeftRight,
   CheckCircle2,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   CircleAlert,
   Clock3,
   Eye,
-  FileCheck2,
   Info,
-  Landmark,
   LoaderCircle,
-  LockKeyhole,
   ShieldCheck,
   Upload,
-  WalletCards,
   XCircle,
 } from "lucide-react";
 import { z } from "zod";
@@ -54,9 +54,7 @@ import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
-  CardDescription,
   CardHeader,
-  CardTitle,
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -68,14 +66,9 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
+import { ExchangeRecipientDetails } from "@/components/admin/exchange-recipient-details";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 
 const ORDER_STATUS_FILTERS = [
@@ -90,6 +83,20 @@ const ORDER_STATUS_FILTERS = [
   "COMPLETED",
   "REJECTED",
 ] as const;
+
+const REQUEST_GROUPS = [
+  { currency: "NGN", title: "Naira requests", color: "border-sky-200 bg-sky-50 text-sky-950" },
+  { currency: "GHS", title: "Cedis requests", color: "border-emerald-200 bg-emerald-50 text-emerald-950" },
+] as const;
+
+function requestLabel(status: string, opened: boolean) {
+  if (["CREDITED", "COMPLETED", "PAYOUT_SENT", "REJECTED"].includes(status)) return null;
+  if (opened) return "Opened";
+  if (isDepositReviewStatus(status) || status === "PAYOUT_PENDING") {
+    return "Needs attention";
+  }
+  return null;
+}
 
 const ALLOWED_UPLOAD_TYPES = new Set([
   "image/jpeg",
@@ -208,21 +215,6 @@ function statusVariant(status: string) {
   if (status === "REJECTED") return "destructive" as const;
   if (status === "NEEDS_MORE_INFO") return "secondary" as const;
   return "outline" as const;
-}
-
-function statusTone(status: string) {
-  if (["CREDITED", "COMPLETED"].includes(status)) {
-    return "border-emerald-500/25 bg-emerald-500/10";
-  }
-  if (status === "REJECTED") return "border-red-500/25 bg-red-500/10";
-  if (["PAYOUT_PENDING", "PAYOUT_PROCESSING"].includes(status)) {
-    return "border-amber-500/25 bg-amber-500/10";
-  }
-  return "border-border bg-muted/30";
-}
-
-function isDepositReviewStatus(status: string) {
-  return status === "AWAITING_CONFIRMATION" || status === "NEEDS_MORE_INFO";
 }
 
 function isOrderExpired(order: AdminManualExchangeOrder) {
@@ -347,12 +339,8 @@ function DetailValue({
       <dt className="text-xs uppercase tracking-[0.12em] text-muted-foreground">
         {label}
       </dt>
-      <dd
-        className={
-          mono ? "mt-1 break-all font-mono text-sm" : "mt-1 text-sm font-medium"
-        }
-      >
-        {value}
+      <dd className="mt-1 flex min-w-0 items-center justify-between gap-2">
+        <span className={cn("min-w-0 wrap-anywhere text-sm font-medium", mono && "font-mono")}>{value}</span>
       </dd>
     </div>
   );
@@ -366,6 +354,15 @@ export default function AdminManualExchangeOrdersPage() {
   const [statusFilter, setStatusFilter] =
     useState<(typeof ORDER_STATUS_FILTERS)[number]>("ALL");
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
+  const [openCurrencies, setOpenCurrencies] = useState<Set<string>>(new Set());
+  const [openedOrders, setOpenedOrders] = useState<Set<string>>(new Set());
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const titleRef = useRef<HTMLHeadingElement>(null);
+  const actionFormRef = useRef<HTMLFormElement>(null);
+  const swipeStart = useRef<{ x: number; y: number } | null>(null);
+  const movingRequest = useRef(false);
+  const [slideDirection, setSlideDirection] = useState<-1 | 0 | 1>(0);
+  const requestTriggerRef = useRef<HTMLButtonElement | null>(null);
   const [actionPanel, setActionPanel] = useState<ActionPanel | null>(null);
   const [reason, setReason] = useState("");
   const [depositReference, setDepositReference] = useState("");
@@ -414,6 +411,15 @@ export default function AdminManualExchangeOrdersPage() {
       router.push("/dashboard");
     }
   }, [authLoading, profile, router, user]);
+
+  useEffect(() => {
+    if (actionPanel) {
+      actionFormRef.current?.focus();
+    } else if (selectedOrderId && slideDirection !== 0) {
+      dialogRef.current?.scrollTo({ top: 0, behavior: "instant" });
+      titleRef.current?.focus({ preventScroll: true });
+    }
+  }, [actionPanel, selectedOrderId, slideDirection]);
 
   const getAttemptKey = useCallback(
     ({ orderId, action }: AttemptIdentity) => {
@@ -521,19 +527,6 @@ export default function AdminManualExchangeOrdersPage() {
       !admin.isSuspended && admin.id !== selectedOrder?.payoutClaimedBy,
   );
 
-  const queueCounts = useMemo(() => {
-    const counts = ordersQuery.data?.pages[0]?.counts ?? {};
-    return {
-      needsReview:
-        (counts.AWAITING_CONFIRMATION ?? 0) + (counts.NEEDS_MORE_INFO ?? 0),
-      payouts:
-        (counts.PAYOUT_PENDING ?? 0) +
-        (counts.PAYOUT_PROCESSING ?? 0) +
-        (counts.PAYOUT_SENT ?? 0),
-      completed: (counts.CREDITED ?? 0) + (counts.COMPLETED ?? 0),
-    };
-  }, [ordersQuery.data]);
-
   const resetActionState = useCallback(() => {
     setActionPanel(null);
     setReason("");
@@ -586,6 +579,8 @@ export default function AdminManualExchangeOrdersPage() {
       startTransition(() => {
         setDeepLinkState("found");
         setSelectedOrderId(matchingOrder.id);
+        setOpenCurrencies((current) => new Set(current).add(matchingOrder.sourceCurrency));
+        setOpenedOrders((current) => new Set(current).add(matchingOrder.id));
       });
       return;
     }
@@ -615,6 +610,62 @@ export default function AdminManualExchangeOrdersPage() {
     orders,
   ]);
 
+  const clearOrderLink = () => {
+    if (!deepLinkedOrderId) return;
+    const params = new URLSearchParams(searchParams.toString());
+    params.delete("orderId");
+    const query = params.toString();
+    router.replace(`/admin/exchange/manual-orders${query ? `?${query}` : ""}`, { scroll: false });
+  };
+
+  const moveRequest = async (
+    direction: -1 | 1,
+    fromId = selectedOrderId,
+    afterApproval = false,
+  ) => {
+    if (movingRequest.current) return;
+    const index = orders.findIndex(({ id }) => id === fromId);
+    if (index === -1) return;
+    movingRequest.current = true;
+    try {
+      const following = orders.slice(index + 1);
+      const pendingDeposit = (order: AdminManualExchangeOrder) =>
+        order.status === "AWAITING_TRANSFER" || isDepositReviewStatus(order.status);
+      let next = direction === -1
+        ? orders[index - 1]
+        : afterApproval ? following.find(pendingDeposit) : following[0];
+      if (!next && direction === 1 && hasNextManualOrdersPage) {
+        const result = await fetchNextManualOrdersPage({ cancelRefetch: false });
+        if (result.isFetchNextPageError) {
+          toast.error("Could not load the next request. Try again.");
+          return;
+        }
+        const added = result.data?.pages.slice(ordersQuery.data?.pages.length ?? 0)
+          .flatMap(({ items }) => items) ?? [];
+        next = afterApproval ? added.find(pendingDeposit) : added[0];
+        if (!added.length && result.hasNextPage) {
+          if (!afterApproval) toast.info("Requests are refreshing. Try again.");
+          return;
+        }
+      }
+      if (!next) {
+        if (direction === 1 && !afterApproval) {
+          closeOrder();
+          toast.info("You reached the end of this list.");
+        }
+        return;
+      }
+      resetActionState();
+      setSlideDirection(direction);
+      setSelectedOrderId(next.id);
+      setOpenedOrders((current) => new Set(current).add(next.id));
+      setOpenCurrencies((current) => new Set(current).add(next.sourceCurrency));
+      clearOrderLink();
+    } finally {
+      movingRequest.current = false;
+    }
+  };
+
   const reviewMutation = useMutation({
     mutationFn: ({
       orderId,
@@ -631,6 +682,9 @@ export default function AdminManualExchangeOrdersPage() {
         action: `review:${variables.input.action}`,
       });
       resetActionState();
+      if (variables.input.action === "CREDIT_WALLET" || variables.input.action === "CONFIRM_DEPOSIT") {
+        await moveRequest(1, variables.orderId, true);
+      }
       await queryClient.invalidateQueries({
         queryKey: ["admin-manual-exchange-orders"],
       });
@@ -717,9 +771,19 @@ export default function AdminManualExchangeOrdersPage() {
     setActionPanel(action);
   };
 
-  const selectOrder = (orderId: string) => {
+  const selectOrder = (orderId: string, trigger: HTMLButtonElement) => {
+    requestTriggerRef.current = trigger;
+    setSlideDirection(0);
     resetActionState();
     setSelectedOrderId(orderId);
+    setOpenedOrders((current) => new Set(current).add(orderId));
+  };
+
+  const closeOrder = () => {
+    setSelectedOrderId(null);
+    setDeepLinkState("idle");
+    resetActionState();
+    clearOrderLink();
   };
 
   const submitReview = () => {
@@ -915,9 +979,8 @@ export default function AdminManualExchangeOrdersPage() {
 
   if (!isAdmin) return null;
 
-  const canReviewDeposit = selectedOrder
-    ? isDepositReviewStatus(selectedOrder.status)
-    : false;
+  const canReviewDeposit = selectedOrder && isDepositReviewStatus(selectedOrder.status);
+  const canApproveDeposit = canReviewDeposit && selectedOrder.hasProof;
   const selectedOrderExpired = selectedOrder
     ? isOrderExpired(selectedOrder)
     : false;
@@ -934,78 +997,29 @@ export default function AdminManualExchangeOrdersPage() {
   const reviewDisabled =
     reviewMutation.isPending || uploadProofMutation.isPending;
 
+  const canWait = selectedOrder?.status === "AWAITING_TRANSFER" ||
+    canReviewDeposit;
+  const navigationDisabled = Boolean(actionPanel) || reviewDisabled || proofLoading !== null || isFetchingNextManualOrdersPage;
+  const hasPreviousRequest = orders.findIndex(({ id }) => id === selectedOrderId) > 0;
+  const hasNextRequest = hasNextManualOrdersPage || (
+    selectedOrderId !== null && orders.at(-1)?.id !== selectedOrderId
+  );
+
   return (
     <DashboardLayout>
       <div className="mx-auto flex max-w-[1600px] flex-col gap-6">
-        <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-end">
-          <div>
-            <div className="flex flex-wrap items-center gap-2">
-              <h1 className="text-3xl font-semibold tracking-tight">
-                Exchange requests
-              </h1>
-              <Badge variant="secondary">
-                Cedis ↔ Naira · Admin confirmation
-              </Badge>
-            </div>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Verify incoming payments, send the quoted amount to the recorded
-              bank or MoMo account, then record the completed payment here.
-            </p>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <Button variant="outline" asChild>
-              <Link href="/admin/exchange/provider">Kora payment queue</Link>
-            </Button>
-            <Button variant="outline" asChild>
-              <Link href="/admin?tab=exchange">
-                <ArrowLeftRight className="size-4" />
-                Rates & settlement
-              </Link>
-            </Button>
-          </div>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">
+            Exchange requests
+          </h1>
+          <Button variant="outline" asChild>
+            <Link href="/admin?tab=exchange&rates=open">
+              <ArrowLeftRight aria-hidden="true" className="size-4" />
+              Rates
+            </Link>
+          </Button>
         </div>
 
-        <div className="grid gap-3 sm:grid-cols-3">
-          <Card size="sm">
-            <CardContent className="flex items-center justify-between gap-3">
-              <div>
-                <p className="text-xs uppercase tracking-[0.12em] text-muted-foreground">
-                  Needs review
-                </p>
-                <p className="mt-1 text-2xl font-semibold">
-                  {queueCounts.needsReview}
-                </p>
-              </div>
-              <FileCheck2 className="size-5 text-amber-400" />
-            </CardContent>
-          </Card>
-          <Card size="sm">
-            <CardContent className="flex items-center justify-between gap-3">
-              <div>
-                <p className="text-xs uppercase tracking-[0.12em] text-muted-foreground">
-                  Payouts
-                </p>
-                <p className="mt-1 text-2xl font-semibold">
-                  {queueCounts.payouts}
-                </p>
-              </div>
-              <Landmark className="size-5 text-red-400" />
-            </CardContent>
-          </Card>
-          <Card size="sm">
-            <CardContent className="flex items-center justify-between gap-3">
-              <div>
-                <p className="text-xs uppercase tracking-[0.12em] text-muted-foreground">
-                  Completed
-                </p>
-                <p className="mt-1 text-2xl font-semibold">
-                  {queueCounts.completed}
-                </p>
-              </div>
-              <CheckCircle2 className="size-5 text-emerald-400" />
-            </CardContent>
-          </Card>
-        </div>
         <div className="-mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
           <ShieldCheck
             className={
@@ -1023,16 +1037,11 @@ export default function AdminManualExchangeOrdersPage() {
                 : "not run yet"}
           </span>
         </div>
-        <div className="grid min-w-0 gap-6 2xl:grid-cols-[minmax(0,1.12fr)_minmax(360px,0.88fr)]">
+        <div className="min-w-0">
           <Card className="min-w-0">
-            <CardHeader className="gap-3 border-b border-border/80 pb-4">
-              <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start">
-                <div>
-                  <CardTitle>Review queue</CardTitle>
-                  <CardDescription>
-                    Select an order to view evidence and take action.
-                  </CardDescription>
-                </div>
+            <CardHeader className="gap-2 border-b border-border/80 pb-4">
+              <div className="flex items-center justify-between gap-2">
+                <h2 className="shrink-0 text-base font-semibold">Review queue</h2>
                 <Select
                   value={statusFilter}
                   onValueChange={(value) => {
@@ -1044,7 +1053,7 @@ export default function AdminManualExchangeOrdersPage() {
                   }}
                 >
                   <SelectTrigger
-                    className="w-full sm:w-52"
+                    className="min-w-0 max-w-48"
                     aria-label="Filter manual exchange orders"
                   >
                     <SelectValue />
@@ -1060,6 +1069,29 @@ export default function AdminManualExchangeOrdersPage() {
                   </SelectContent>
                 </Select>
               </div>
+              <div className="grid grid-cols-2 gap-2">
+                {REQUEST_GROUPS.map(({ currency, title, color }) => (
+                  <button
+                    key={currency}
+                    type="button"
+                    aria-expanded={openCurrencies.has(currency)}
+                    aria-controls={`requests-${currency}`}
+                    onClick={() => setOpenCurrencies((current) => {
+                      const next = new Set(current);
+                      if (next.has(currency)) next.delete(currency);
+                      else next.add(currency);
+                      return next;
+                    })}
+                    className={cn(
+                      "flex min-h-14 min-w-0 items-center justify-between gap-2 rounded-xl border px-3 py-2 text-left text-sm font-bold hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
+                      color,
+                    )}
+                  >
+                    {title}
+                    <ChevronDown aria-hidden="true" className={cn("size-4 shrink-0", openCurrencies.has(currency) && "rotate-180")} />
+                  </button>
+                ))}
+              </div>
             </CardHeader>
             <CardContent className="p-0">
               {ordersQuery.isError && ordersQuery.data && (
@@ -1071,121 +1103,80 @@ export default function AdminManualExchangeOrdersPage() {
                   retry automatically.
                 </p>
               )}
-              {ordersQuery.isLoading ? (
-                <div className="space-y-3 p-4">
-                  {[1, 2, 3, 4].map((item) => (
-                    <Skeleton key={item} className="h-16 w-full" />
-                  ))}
-                </div>
-              ) : ordersQuery.isError && !ordersQuery.data ? (
-                <div className="flex flex-col items-center gap-3 px-4 py-12 text-center">
-                  <CircleAlert className="size-6 text-red-400" />
-                  <p className="text-sm text-muted-foreground">
-                    Could not load the manual exchange queue.
-                  </p>
-                  <Button
-                    variant="outline"
-                    onClick={() => void ordersQuery.refetch()}
-                  >
-                    Retry
-                  </Button>
-                </div>
-              ) : orders.length === 0 ? (
-                <div className="flex flex-col items-center gap-3 px-4 py-12 text-center">
-                  <Clock3 className="size-6 text-muted-foreground" />
-                  <p className="text-sm font-medium">No orders in this view</p>
-                  <p className="max-w-sm text-sm text-muted-foreground">
-                    Try another status filter or wait for the queue to update.
-                  </p>
+              {ordersQuery.isError && !ordersQuery.data ? (
+                <div role="alert" className="flex flex-col items-center gap-3 px-4 py-6 text-center">
+                  <CircleAlert aria-hidden="true" className="size-5 text-red-400" />
+                  <p className="text-sm">Could not load exchange requests.</p>
+                  <Button variant="outline" onClick={() => void ordersQuery.refetch()}>Retry</Button>
                 </div>
               ) : (
                 <>
-                  <div className="overflow-x-auto">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Order</TableHead>
-                          <TableHead>User</TableHead>
-                          <TableHead>Path</TableHead>
-                          <TableHead>Amount</TableHead>
-                          <TableHead>Status</TableHead>
-                          <TableHead className="text-right">Review</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {orders.map((order) => {
-                          const selected = order.id === selectedOrderId;
-                          return (
-                            <TableRow
-                              key={order.id}
-                              data-state={selected ? "selected" : undefined}
-                              className={selected ? "bg-primary/5" : undefined}
-                            >
-                              <TableCell className="min-w-40">
-                                <p className="font-mono text-xs font-medium">
-                                  {order.reference}
-                                </p>
-                                <p className="mt-1 text-xs text-muted-foreground">
-                                  {formatDate(order.createdAt)}
-                                </p>
-                              </TableCell>
-                              <TableCell className="min-w-28">
-                                <p className="font-mono text-xs">
-                                  {order.userId.slice(0, 10)}…
-                                </p>
-                                {order.destinationInstitution && (
-                                  <p className="mt-1 text-xs text-muted-foreground">
-                                    {order.destinationInstitution}
-                                  </p>
-                                )}
-                              </TableCell>
-                              <TableCell>
-                                <Badge variant="outline">
-                                  {order.settlementMode}
-                                </Badge>
-                                {destinationPreview(order) && (
-                                  <p className="mt-1 font-mono text-xs text-muted-foreground">
-                                    {destinationPreview(order)}
-                                  </p>
-                                )}
-                              </TableCell>
-                              <TableCell className="whitespace-nowrap">
-                                <p className="font-medium">
-                                  {formatMoney(
-                                    order.amount,
-                                    order.sourceCurrency,
+                  {REQUEST_GROUPS.map(({ currency, title }) => {
+                    const requests = orders.filter((order) => order.sourceCurrency === currency);
+                    return (
+                      <section
+                        key={currency}
+                        id={`requests-${currency}`}
+                        aria-label={title}
+                        hidden={!openCurrencies.has(currency)}
+                        className="space-y-2 px-3 py-2"
+                      >
+                        <h3 className="text-sm font-semibold">{title}</h3>
+                        {ordersQuery.isLoading ? (
+                          <Skeleton className="h-20 w-full" />
+                        ) : requests.length === 0 ? (
+                          <p className="py-2 text-sm text-muted-foreground">No requests in this view.</p>
+                        ) : (
+                          <ul className="grid gap-2">
+                            {requests.map((order) => {
+                              const marker = requestLabel(order.status, openedOrders.has(order.id));
+                              const account = destinationPreview(order);
+                              return (
+                                <li key={order.id} className="flex min-w-0 items-center gap-2 rounded-xl border bg-background p-2">
+                                  <button
+                                    type="button"
+                                    onClick={(event) => selectOrder(order.id, event.currentTarget)}
+                                    aria-label={`Review ${order.reference}`}
+                                    aria-haspopup="dialog"
+                                    className="min-h-11 min-w-0 flex-1 rounded-md p-1 text-left hover:bg-muted/50 focus-visible:outline-2 focus-visible:outline-ring"
+                                  >
+                                    <span className="flex flex-wrap justify-between gap-x-3 gap-y-1 font-bold">
+                                      <span className="wrap-anywhere">{order.customerName?.trim() || "Customer name unavailable"}</span>
+                                      <span>{formatMoney(order.amount, order.sourceCurrency)}</span>
+                                    </span>
+                                    <span className="mt-1 block wrap-anywhere text-xs text-muted-foreground">
+                                      <span>{order.reference}</span> · {formatDate(order.createdAt)}
+                                    </span>
+                                    <span className="mt-1 flex flex-wrap items-center gap-1.5 text-xs">
+                                      <Badge variant={statusVariant(order.status)} className="h-auto whitespace-normal">{statusLabel(order.status)}</Badge>
+                                      {marker && <span className="text-muted-foreground">{marker}</span>}
+                                      {account && <span className="text-muted-foreground">{account}</span>}
+                                    </span>
+                                  </button>
+                                  {order.hasProof && isDepositReviewStatus(order.status) && (
+                                    <Button
+                                      size="icon"
+                                      variant="outline"
+                                      className="size-11 shrink-0 border-emerald-500/40 text-emerald-400"
+                                      aria-label={`Approve ${order.reference}`}
+                                      disabled={reviewDisabled}
+                                      onClick={(event) => {
+                                        selectOrder(order.id, event.currentTarget);
+                                        setActionPanel(order.settlementMode === "WALLET" ? "CREDIT_WALLET" : "CONFIRM_DEPOSIT");
+                                      }}
+                                    >
+                                      <CheckCircle2 aria-hidden="true" />
+                                    </Button>
                                   )}
-                                </p>
-                                <p className="mt-1 text-xs text-muted-foreground">
-                                  →{" "}
-                                  {formatMoney(
-                                    order.targetAmount,
-                                    order.targetCurrency,
-                                  )}
-                                </p>
-                              </TableCell>
-                              <TableCell>
-                                <Badge variant={statusVariant(order.status)}>
-                                  {statusLabel(order.status)}
-                                </Badge>
-                              </TableCell>
-                              <TableCell className="text-right">
-                                <Button
-                                  size="sm"
-                                  variant={selected ? "default" : "outline"}
-                                  onClick={() => selectOrder(order.id)}
-                                  aria-label={`Review ${order.reference}`}
-                                >
-                                  {selected ? "Selected" : "Review"}
-                                </Button>
-                              </TableCell>
-                            </TableRow>
-                          );
-                        })}
-                      </TableBody>
-                    </Table>
-                  </div>
-                  {ordersQuery.hasNextPage && (
+                                </li>
+                              );
+                            })}
+                          </ul>
+                        )}
+                      </section>
+                    );
+                  })}
+                  {openCurrencies.size > 0 && ordersQuery.hasNextPage && (
                     <div className="border-t p-4">
                       <Button
                         variant="outline"
@@ -1203,103 +1194,102 @@ export default function AdminManualExchangeOrdersPage() {
             </CardContent>
           </Card>
 
-          <Card className="min-w-0 self-start 2xl:sticky 2xl:top-24">
-            {!selectedOrder ? (
-              <CardContent className="flex min-h-80 flex-col items-center justify-center gap-3 text-center">
-                {deepLinkedOrderId && deepLinkState === "not-found" ? (
-                  <>
-                    <CircleAlert className="size-8 text-amber-400" />
-                    <p className="font-medium">Order not found</p>
-                    <p
-                      className="max-w-sm text-sm text-muted-foreground"
-                      data-testid="manual-order-deeplink-not-found"
-                    >
-                      We could not find this exchange request in the admin
-                      queue. It may have been removed or you may not have access
-                      to it.
+          <Dialog
+            open={Boolean(selectedOrder || deepLinkState === "loading" || deepLinkState === "error" || deepLinkState === "not-found")}
+            onOpenChange={(open) => {
+              if (!open && !reviewDisabled && !movingRequest.current) closeOrder();
+            }}
+          >
+            <DialogContent
+              ref={dialogRef}
+              className="max-h-[85dvh] min-w-0 touch-pan-y gap-2 overflow-y-auto overscroll-contain sm:max-w-xl"
+              onTouchStart={(event) => {
+                const touch = event.touches[0];
+                swipeStart.current = touch && !navigationDisabled && event.touches.length === 1 &&
+                  !(event.target instanceof Element && event.target.closest("button, a, input, textarea, select, label, summary"))
+                  ? { x: touch.clientX, y: touch.clientY }
+                  : null;
+              }}
+              onTouchCancel={() => { swipeStart.current = null; }}
+              onTouchEnd={(event) => {
+                const start = swipeStart.current;
+                swipeStart.current = null;
+                if (!start || navigationDisabled || !selectedOrder) return;
+                const touch = event.changedTouches[0];
+                if (!touch) return;
+                const dx = touch.clientX - start.x;
+                const dy = touch.clientY - start.y;
+                if (Math.abs(dx) >= 60 && Math.abs(dx) > Math.abs(dy) * 1.5) {
+                  if (dx < 0 ? hasNextRequest : hasPreviousRequest) {
+                    void moveRequest(dx < 0 ? 1 : -1);
+                  }
+                }
+              }}
+              showCloseButton={!reviewDisabled && !isFetchingNextManualOrdersPage}
+              onCloseAutoFocus={(event) => {
+                if (requestTriggerRef.current?.isConnected) {
+                  event.preventDefault();
+                  requestTriggerRef.current.focus();
+                }
+                requestTriggerRef.current = null;
+              }}
+            >
+              <DialogHeader className="min-w-0 pr-9">
+                <DialogTitle ref={titleRef} tabIndex={-1} className="outline-none">Exchange payment details</DialogTitle>
+                <DialogDescription className="wrap-anywhere">
+                  {selectedOrder
+                    ? (selectedOrder.customerName?.trim() || `User ${selectedOrder.userId}`)
+                    : "Find the exchange request from your notification."}
+                </DialogDescription>
+              </DialogHeader>
+              {!selectedOrder ? (
+                <div className="space-y-2 text-sm" role="status">
+                  {deepLinkState === "not-found" ? (
+                    <p data-testid="manual-order-deeplink-not-found">
+                      Order not found. The exchange request may have been removed or you may not have access to it.
                     </p>
-                  </>
-                ) : deepLinkedOrderId && deepLinkState === "error" ? (
-                  <>
-                    <CircleAlert className="size-8 text-red-400" />
-                    <p className="font-medium">Exchange request unavailable</p>
-                    <p className="max-w-sm text-sm text-muted-foreground">
-                      The requested order could not be loaded. Retry the queue
-                      to try again.
-                    </p>
-                  </>
-                ) : (
-                  <>
-                    <WalletCards className="size-8 text-muted-foreground" />
-                    <p className="font-medium">Select an order to review</p>
-                    <p className="max-w-sm text-sm text-muted-foreground">
-                      Deposit evidence, payout details, and actions will appear
-                      here.
-                    </p>
-                  </>
-                )}
-              </CardContent>
-            ) : (
-              <>
-                <CardHeader className="border-b border-border/80 pb-4">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <CardTitle className="truncate font-mono text-base">
-                        {selectedOrder.reference}
-                      </CardTitle>
-                      <CardDescription className="mt-1">
-                        User {selectedOrder.userId}
-                      </CardDescription>
+                  ) : deepLinkState === "error" ? (
+                    <>
+                      <p>Could not load the exchange request.</p>
+                      <Button variant="outline" onClick={() => void ordersQuery.refetch()}>Retry</Button>
+                    </>
+                  ) : (
+                    <p>Loading exchange request…</p>
+                  )}
+                </div>
+              ) : (
+                <div key={selectedOrder.id} className={cn(
+                  "min-w-0 space-y-2.5",
+                  slideDirection === 1 && "motion-safe:animate-in motion-safe:slide-in-from-right-4 motion-safe:duration-200",
+                  slideDirection === -1 && "motion-safe:animate-in motion-safe:slide-in-from-left-4 motion-safe:duration-200",
+                )}>
+                  <ExchangeRecipientDetails compact
+                    wallet={selectedOrder.settlementMode === "WALLET"}
+                    institution={selectedOrder.destinationInstitution}
+                    account={selectedOrder.destinationAccount}
+                    name={selectedOrder.destinationName}
+                  />
+                  <section aria-label="Transaction summary" className="relative isolate space-y-1.5 overflow-hidden rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-emerald-950">
+                    <svg aria-hidden="true" viewBox="0 0 160 96" className="pointer-events-none absolute -top-1 -right-3 -z-10 h-24 w-40 text-emerald-600/15" fill="none">
+                      <circle cx="115" cy="46" r="33" stroke="currentColor" strokeWidth="2" />
+                      <circle cx="115" cy="46" r="26" stroke="currentColor" />
+                      <path d="M96 40h37l-8-8m8 20H96l8 8M0 80c48 0 57-24 81-24m-53 35c28 0 47-20 61-20" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                    <div className="flex flex-wrap items-center justify-between gap-1">
+                      <h3 className="font-semibold">Transaction</h3>
+                      <Badge variant="outline" className="h-auto whitespace-normal border-emerald-300 bg-emerald-50 text-emerald-900">
+                        {statusLabel(selectedOrder.status)}
+                      </Badge>
                     </div>
-                    <Badge
-                      variant={statusVariant(selectedOrder.status)}
-                      className="shrink-0"
-                    >
-                      {statusLabel(selectedOrder.status)}
-                    </Badge>
-                  </div>
-                </CardHeader>
-                <CardContent className="space-y-5 pt-5">
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <div
-                      className={`rounded-xl border p-3 ${statusTone(selectedOrder.status)}`}
-                    >
-                      <p className="text-xs uppercase tracking-[0.12em] text-muted-foreground">
-                        Deposit
-                      </p>
-                      <p className="mt-1 text-lg font-semibold">
-                        {formatMoney(
-                          selectedOrder.amount,
-                          selectedOrder.sourceCurrency,
-                        )}
-                      </p>
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        Expected{" "}
-                        {formatMoney(
-                          selectedOrder.targetAmount,
-                          selectedOrder.targetCurrency,
-                        )}
-                      </p>
-                    </div>
-                    <div className="rounded-xl border border-border bg-muted/20 p-3">
-                      <p className="text-xs uppercase tracking-[0.12em] text-muted-foreground">
-                        {`Rate (${selectedOrder.targetCurrency} per ${selectedOrder.sourceCurrency})`}
-                      </p>
-                      <p className="mt-1 text-lg font-semibold">
-                        {selectedOrder.rate}
-                      </p>
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        Fee{" "}
-                        {formatMoney(
-                          selectedOrder.fee,
-                          selectedOrder.sourceCurrency,
-                        )}
-                      </p>
-                    </div>
-                  </div>
+                    <dl className="grid grid-cols-2 gap-2">
+                      <div><dt className="text-xs text-emerald-800">Deposit</dt><dd className="font-bold">{formatMoney(selectedOrder.amount, selectedOrder.sourceCurrency)}</dd></div>
+                      <div><dt className="text-xs text-emerald-800">Expected payout</dt><dd className="font-bold">{formatMoney(selectedOrder.targetAmount, selectedOrder.targetCurrency)}</dd></div>
+                    </dl>
+                    <p className="wrap-anywhere font-mono text-xs text-emerald-800">{selectedOrder.reference}</p>
+                  </section>
 
-                  {selectedOrderExpired && canReviewDeposit && (
-                    <div className="flex items-start gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-100">
+                  {selectedOrderExpired && canApproveDeposit && (
+                    <div className="flex items-start gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-900 dark:text-amber-100">
                       <CircleAlert className="mt-0.5 size-4 shrink-0" />
                       <p>
                         This order is past its quoted expiry. Deposit
@@ -1309,172 +1299,125 @@ export default function AdminManualExchangeOrdersPage() {
                     </div>
                   )}
 
-                  <dl className="grid gap-4 rounded-xl border border-border bg-muted/10 p-4 sm:grid-cols-2">
-                    <DetailValue
-                      label="Settlement mode"
-                      value={humanize(selectedOrder.settlementMode)}
-                    />
-                    <DetailValue
-                      label="Expires"
-                      value={formatDate(selectedOrder.expiresAt)}
-                    />
-                    <DetailValue
-                      label="Created"
-                      value={formatDate(selectedOrder.createdAt)}
-                    />
-                    <DetailValue
-                      label="Collection bank"
-                      value={selectedOrder.collectionAccount.bankName}
-                    />
-                    <DetailValue
-                      label="Collection account"
-                      value={`${selectedOrder.collectionAccount.accountName} · ${selectedOrder.collectionAccount.accountNumber}`}
-                      mono
-                    />
-                    {selectedOrder.destinationInstitution && (
-                      <DetailValue
-                        label="Destination institution"
-                        value={selectedOrder.destinationInstitution}
-                      />
+                  <div className="flex flex-wrap items-center gap-2">
+                    {selectedOrder.hasProof ? (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() =>
+                          void openProtectedProof(selectedOrder, "DEPOSIT")
+                        }
+                        disabled={proofLoading !== null}
+                      >
+                        {proofLoading === "DEPOSIT" ? (
+                          <LoaderCircle className="size-4 animate-spin" />
+                        ) : (
+                          <Eye className="size-4" />
+                        )}
+                        View deposit receipt
+                      </Button>
+                    ) : (
+                      <Badge variant="outline">
+                        No deposit receipt attached
+                      </Badge>
                     )}
-                    {selectedOrder.destinationAccount && (
-                      <DetailValue
-                        label="Destination account"
-                        value={selectedOrder.destinationAccount}
-                        mono
-                      />
+                    {selectedOrder.hasPayoutProof && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() =>
+                          void openProtectedProof(selectedOrder, "PAYOUT")
+                        }
+                        disabled={proofLoading !== null}
+                      >
+                        {proofLoading === "PAYOUT" ? (
+                          <LoaderCircle className="size-4 animate-spin" />
+                        ) : (
+                          <Eye className="size-4" />
+                        )}
+                        View payout proof
+                      </Button>
                     )}
-                    {selectedOrder.destinationName && (
-                      <DetailValue
-                        label="Destination name"
-                        value={selectedOrder.destinationName}
-                      />
-                    )}
-                    {selectedOrder.bankReference && (
-                      <DetailValue
-                        label="Customer bank reference"
-                        value={selectedOrder.bankReference}
-                        mono
-                      />
-                    )}
-                    {selectedOrder.depositReference && (
-                      <DetailValue
-                        label="Verified deposit reference"
-                        value={selectedOrder.depositReference}
-                        mono
-                      />
-                    )}
-                    {selectedOrder.payoutReference && (
-                      <DetailValue
-                        label="Payout reference"
-                        value={selectedOrder.payoutReference}
-                        mono
-                      />
-                    )}
-                  </dl>
+                  </div>
 
-                  <div className="rounded-xl border border-border p-4">
-                    <div className="flex items-start gap-3">
-                      <LockKeyhole className="mt-0.5 size-4 shrink-0 text-emerald-400" />
-                      <div>
-                        <p className="text-sm font-medium">
-                          Protected evidence
-                        </p>
-                        <p className="mt-1 text-xs text-muted-foreground">
-                          Links expire and are fetched only after this admin
-                          request. Object keys and signed URLs are never shown
-                          in the queue.
-                        </p>
+                  {canWait && !actionPanel && (
+                    <div className="space-y-1.5">
+                      <p className="text-xs text-muted-foreground">
+                        {canApproveDeposit ? "Check that the money reached your account." : "Waiting for the customer’s payment proof."}
+                      </p>
+                      <div className="flex gap-2">
+                        <Button variant="outline" className="min-h-11 flex-1" disabled={navigationDisabled} onClick={() => void moveRequest(1)}>
+                          Keep waiting
+                        </Button>
+                        {canApproveDeposit && (
+                          <Button className="min-h-11 flex-1 bg-emerald-700 text-white hover:bg-emerald-800" disabled={navigationDisabled} onClick={() => openAction(selectedOrder.settlementMode === "WALLET" ? "CREDIT_WALLET" : "CONFIRM_DEPOSIT")}>
+                            <CheckCircle2 aria-hidden="true" /> Approve
+                          </Button>
+                        )}
                       </div>
                     </div>
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      {selectedOrder.hasProof ? (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() =>
-                            void openProtectedProof(selectedOrder, "DEPOSIT")
-                          }
-                          disabled={proofLoading !== null}
-                        >
-                          {proofLoading === "DEPOSIT" ? (
-                            <LoaderCircle className="size-4 animate-spin" />
-                          ) : (
-                            <Eye className="size-4" />
-                          )}
-                          View deposit receipt
-                        </Button>
-                      ) : (
-                        <Badge variant="outline">
-                          No deposit receipt attached
-                        </Badge>
-                      )}
-                      {selectedOrder.hasPayoutProof && (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() =>
-                            void openProtectedProof(selectedOrder, "PAYOUT")
-                          }
-                          disabled={proofLoading !== null}
-                        >
-                          {proofLoading === "PAYOUT" ? (
-                            <LoaderCircle className="size-4 animate-spin" />
-                          ) : (
-                            <Eye className="size-4" />
-                          )}
-                          View payout proof
-                        </Button>
-                      )}
-                    </div>
-                  </div>
+                  )}
 
-                  <div className="rounded-xl border border-border p-4">
-                    <div className="flex items-center justify-between gap-3">
-                      <p className="text-sm font-medium">Audit timeline</p>
-                      <Badge variant="outline">
-                        {selectedOrder.events.length} events
-                      </Badge>
-                    </div>
-                    <div className="mt-3 space-y-3">
-                      {selectedOrder.events.length === 0 ? (
-                        <p className="text-sm text-muted-foreground">
-                          No events recorded yet.
-                        </p>
-                      ) : (
-                        selectedOrder.events.map((event, index) => (
-                          <div
-                            key={`${event.createdAt}-${event.status}-${index}`}
-                            className="flex gap-3 text-sm"
-                          >
-                            <div className="mt-1 flex size-5 shrink-0 items-center justify-center rounded-full bg-muted">
-                              {index === selectedOrder.events.length - 1 ? (
-                                <Clock3 className="size-3 text-primary" />
-                              ) : (
-                                <CheckCircle2 className="size-3 text-emerald-400" />
-                              )}
-                            </div>
-                            <div className="min-w-0">
-                              <p className="font-medium">
-                                {statusLabel(event.status)}
-                              </p>
-                              <p className="mt-0.5 text-xs text-muted-foreground">
-                                {event.reason}
-                              </p>
-                              <p className="mt-0.5 text-xs text-muted-foreground">
-                                {formatDate(event.createdAt)}
-                              </p>
-                            </div>
-                          </div>
-                        ))
+                  <details className="rounded-xl border border-border px-3 py-2">
+                    <summary className="cursor-pointer font-medium">More transaction details</summary>
+                    <dl className="mt-3 grid gap-3 sm:grid-cols-2">
+                      <DetailValue label="Rate" value={`${selectedOrder.rate} ${selectedOrder.targetCurrency} per ${selectedOrder.sourceCurrency}`} />
+                      <DetailValue label="Fee" value={formatMoney(selectedOrder.fee, selectedOrder.sourceCurrency)} />
+                      <DetailValue
+                        label="Settlement mode"
+                        value={humanize(selectedOrder.settlementMode)}
+                      />
+                      <DetailValue
+                        label="Expires"
+                        value={formatDate(selectedOrder.expiresAt)}
+                      />
+                      <DetailValue
+                        label="Created"
+                        value={formatDate(selectedOrder.createdAt)}
+                      />
+                      <DetailValue
+                        label="Collection bank"
+                        value={selectedOrder.collectionAccount.bankName}
+                      />
+                      <DetailValue
+                        label="Collection account"
+                        value={`${selectedOrder.collectionAccount.accountName} · ${selectedOrder.collectionAccount.accountNumber}`}
+                        mono
+                      />
+                      {selectedOrder.receiptName && (
+                        <DetailValue
+                          label="Name on receipt"
+                          value={selectedOrder.receiptName}
+                        />
                       )}
-                    </div>
-                  </div>
+                      {selectedOrder.bankReference && (
+                        <DetailValue
+                          label="Customer bank reference"
+                          value={selectedOrder.bankReference}
+                          mono
+                        />
+                      )}
+                      {selectedOrder.depositReference && (
+                        <DetailValue
+                          label="Verified deposit reference"
+                          value={selectedOrder.depositReference}
+                          mono
+                        />
+                      )}
+                      {selectedOrder.payoutReference && (
+                        <DetailValue
+                          label="Payout reference"
+                          value={selectedOrder.payoutReference}
+                          mono
+                        />
+                      )}
+                    </dl>
+                  </details>
 
                   {selectedOrder.reviewReason && (
                     <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm">
                       <div className="flex items-start gap-2">
-                        <Info className="mt-0.5 size-4 shrink-0 text-amber-300" />
+                        <Info className="mt-0.5 size-4 shrink-0 text-amber-700 dark:text-amber-300" />
                         <div>
                           <p className="font-medium">Latest review reason</p>
                           <p className="mt-1 text-muted-foreground">
@@ -1485,155 +1428,98 @@ export default function AdminManualExchangeOrdersPage() {
                     </div>
                   )}
 
-                  <div className="space-y-2">
-                    <p className="text-xs uppercase tracking-[0.12em] text-muted-foreground">
-                      Available actions
-                    </p>
-                    {selectedOrder.sourceCurrency === "GHS" &&
-                      selectedOrder.targetCurrency === "NGN" &&
-                      selectedOrder.settlementMode === "WALLET" && (
-                        <p className="text-sm text-muted-foreground">
-                          Confirm only after the cedis appear in your statement.
-                          The frozen naira amount will be credited to this
-                          customer’s TrustPay wallet.
-                        </p>
+                  {canReviewDeposit && !actionPanel && (
+                    <details className="rounded-xl border px-3 py-2">
+                      <summary className="cursor-pointer font-medium">Other options</summary>
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        <Button variant="outline" onClick={() => openAction("REQUEST_INFO")} disabled={reviewDisabled}>Request info</Button>
+                        <Button variant="destructive" onClick={() => openAction("REJECT")} disabled={reviewDisabled}>Reject</Button>
+                      </div>
+                    </details>
+                  )}
+                  {(canClaimPayout || selectedOrder.status === "PAYOUT_PROCESSING" || canComplete) && (
+                    <div className="space-y-2">
+                      {canClaimPayout && (
+                        <p className="text-sm text-muted-foreground">Claim this request before sending the payout.</p>
                       )}
-                    {selectedOrder.sourceCurrency === "NGN" &&
-                      selectedOrder.targetCurrency === "GHS" &&
-                      selectedOrder.settlementMode !== "WALLET" && (
-                        <p className="text-sm text-muted-foreground">
-                          Claim this order before paying. Send the exact cedi
-                          amount through your bank or MoMo app, then record the
-                          completed transfer below. Do not send again after a
-                          page error.
-                        </p>
+                      {canMarkSent && !actionPanel && (
+                        <p className="text-sm text-muted-foreground">Send the exact payout shown above. If the page errors, check your bank or MoMo before sending again.</p>
                       )}
-                    {selectedOrder.payoutWorkflow === "ADMIN_EXTERNAL" && (
-                      <p className="text-sm text-muted-foreground">
-                        Claim this order before paying. Send the exact naira
-                        amount to the recorded Nigerian bank beneficiary through
-                        your business bank, then record the completed transfer
-                        below. Do not send again after a page error.
-                      </p>
-                    )}
-                    <div className="flex flex-wrap gap-2">
-                      {canReviewDeposit && (
-                        <>
+                      <div className="flex flex-wrap gap-2">
+                        {canClaimPayout && (
+                          <Button
+                            onClick={() => openAction("CLAIM_PAYOUT")}
+                            disabled={reviewDisabled}
+                          >
+                            {selectedOrder.targetCurrency === "GHS"
+                              ? "Start cedi transfer"
+                              : selectedOrder.payoutWorkflow === "ADMIN_EXTERNAL"
+                                ? "Start naira transfer"
+                                : "Claim payout"}
+                          </Button>
+                        )}
+                        {selectedOrder.status === "PAYOUT_PROCESSING" &&
+                          !ownsPayoutClaim && (
+                            <div className="flex items-start gap-2 rounded-lg border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-xs text-amber-900 dark:text-amber-100">
+                              <CircleAlert className="mt-0.5 size-4 shrink-0" />
+                              <span>
+                                {selectedOrder.payoutClaimedBy
+                                  ? "This payout is claimed by another admin. Check the real bank/MoMo outcome before a supervised handover; an unknown outcome must not be reassigned."
+                                  : "Claim ownership is required before sending evidence."}
+                              </span>
+                            </div>
+                          )}
+                        {canHandoverPayout && (
+                          <Button
+                            variant="outline"
+                            onClick={() => openAction("HANDOVER_PAYOUT")}
+                            disabled={reviewDisabled}
+                          >
+                            <ShieldCheck className="size-4" />
+                            Supervised handover
+                          </Button>
+                        )}
+                        {canMarkSent && (
                           <Button
                             onClick={() =>
                               openAction(
-                                selectedOrder.settlementMode === "WALLET"
-                                  ? "CREDIT_WALLET"
-                                  : "CONFIRM_DEPOSIT",
+                                selectedOrder.sourceCurrency === "NGN" &&
+                                  selectedOrder.targetCurrency === "GHS"
+                                  ? "RECORD_CEDIS_SENT"
+                                  : selectedOrder.payoutWorkflow ===
+                                      "ADMIN_EXTERNAL"
+                                    ? "RECORD_PAYOUT_SENT"
+                                    : "MARK_SENT",
                               )
                             }
                             disabled={reviewDisabled}
                           >
-                            {selectedOrder.settlementMode === "WALLET"
-                              ? selectedOrder.sourceCurrency === "GHS" &&
-                                selectedOrder.targetCurrency === "NGN"
-                                ? "Confirm cedis & credit naira"
-                                : "Approve & credit wallet"
-                              : selectedOrder.sourceCurrency === "NGN"
-                                ? "Confirm naira received"
-                                : "Confirm cedis received"}
+                            {selectedOrder.sourceCurrency === "NGN" &&
+                            selectedOrder.targetCurrency === "GHS"
+                              ? "I sent the cedis"
+                              : selectedOrder.payoutWorkflow === "ADMIN_EXTERNAL"
+                                ? "I sent the naira"
+                                : "Mark sent"}
                           </Button>
+                        )}
+                        {canComplete && (
                           <Button
-                            variant="outline"
-                            onClick={() => openAction("REQUEST_INFO")}
+                            onClick={() => openAction("COMPLETE")}
                             disabled={reviewDisabled}
                           >
-                            Request info
+                            Complete
                           </Button>
-                          <Button
-                            variant="destructive"
-                            onClick={() => openAction("REJECT")}
-                            disabled={reviewDisabled}
-                          >
-                            Reject
-                          </Button>
-                        </>
-                      )}
-                      {canClaimPayout && (
-                        <Button
-                          onClick={() => openAction("CLAIM_PAYOUT")}
-                          disabled={reviewDisabled}
-                        >
-                          {selectedOrder.targetCurrency === "GHS"
-                            ? "Start cedi transfer"
-                            : selectedOrder.payoutWorkflow === "ADMIN_EXTERNAL"
-                              ? "Start naira transfer"
-                              : "Claim payout"}
-                        </Button>
-                      )}
-                      {selectedOrder.status === "PAYOUT_PROCESSING" &&
-                        !ownsPayoutClaim && (
-                          <div className="flex items-start gap-2 rounded-lg border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-xs text-amber-100">
-                            <CircleAlert className="mt-0.5 size-4 shrink-0" />
-                            <span>
-                              {selectedOrder.payoutClaimedBy
-                                ? "This payout is claimed by another admin. Check the real bank/MoMo outcome before a supervised handover; an unknown outcome must not be reassigned."
-                                : "Claim ownership is required before sending evidence."}
-                            </span>
-                          </div>
                         )}
-                      {canHandoverPayout && (
-                        <Button
-                          variant="outline"
-                          onClick={() => openAction("HANDOVER_PAYOUT")}
-                          disabled={reviewDisabled}
-                        >
-                          <ShieldCheck className="size-4" />
-                          Supervised handover
-                        </Button>
-                      )}
-                      {canMarkSent && (
-                        <Button
-                          onClick={() =>
-                            openAction(
-                              selectedOrder.sourceCurrency === "NGN" &&
-                                selectedOrder.targetCurrency === "GHS"
-                                ? "RECORD_CEDIS_SENT"
-                                : selectedOrder.payoutWorkflow ===
-                                    "ADMIN_EXTERNAL"
-                                  ? "RECORD_PAYOUT_SENT"
-                                  : "MARK_SENT",
-                            )
-                          }
-                          disabled={reviewDisabled}
-                        >
-                          {selectedOrder.sourceCurrency === "NGN" &&
-                          selectedOrder.targetCurrency === "GHS"
-                            ? "I sent the cedis"
-                            : selectedOrder.payoutWorkflow === "ADMIN_EXTERNAL"
-                              ? "I sent the naira"
-                              : "Mark sent"}
-                        </Button>
-                      )}
-                      {canComplete && (
-                        <Button
-                          onClick={() => openAction("COMPLETE")}
-                          disabled={reviewDisabled}
-                        >
-                          Complete
-                        </Button>
-                      )}
-                      {!canReviewDeposit &&
-                        !canClaimPayout &&
-                        !canHandoverPayout &&
-                        !canMarkSent &&
-                        !canComplete &&
-                        selectedOrder.status !== "PAYOUT_PROCESSING" && (
-                          <p className="text-sm text-muted-foreground">
-                            No action is available for this status.
-                          </p>
-                        )}
+                      </div>
                     </div>
-                  </div>
+                  )}
 
                   {actionPanel && (
                     <form
-                      className="space-y-4 rounded-xl border border-primary/30 bg-primary/5 p-4"
+                      ref={actionFormRef}
+                      tabIndex={-1}
+                      aria-label="Confirm exchange action"
+                      className="space-y-3 rounded-xl border border-primary/30 bg-primary/5 p-3 outline-none"
                       onSubmit={(event) => {
                         event.preventDefault();
                         submitReview();
@@ -1643,11 +1529,9 @@ export default function AdminManualExchangeOrdersPage() {
                         <p className="text-sm font-medium">
                           {actionLabel(actionPanel, selectedOrder)}
                         </p>
-                        <p className="mt-1 text-xs text-muted-foreground">
-                          This action is recorded in the append-only order
-                          timeline. Network errors leave the same idempotency
-                          key ready for retry.
-                        </p>
+                        {(actionPanel === "CREDIT_WALLET" || actionPanel === "CONFIRM_DEPOSIT") && (
+                          <p className="mt-1 text-xs text-muted-foreground">Use the amount and reference from your account statement.</p>
+                        )}
                       </div>
 
                       {["CREDIT_WALLET", "CONFIRM_DEPOSIT"].includes(
@@ -1703,12 +1587,12 @@ export default function AdminManualExchangeOrdersPage() {
                               className="mt-0.5 size-4 shrink-0 accent-amber-500"
                             />
                             <span>
-                              <span className="flex items-center gap-1.5 font-medium text-amber-100">
+                              <span className="flex items-center gap-1.5 font-medium text-amber-900 dark:text-amber-100">
                                 <CircleAlert className="size-4" />
                                 Honor the original quoted amount for this
                                 expired order
                               </span>
-                              <span className="mt-1 block text-xs text-amber-100/75">
+                              <span className="mt-1 block text-xs text-amber-900 dark:text-amber-100/75">
                                 Record the actual deposit and preserve the
                                 frozen rate. This does not reprice the order.
                               </span>
@@ -1742,7 +1626,7 @@ export default function AdminManualExchangeOrdersPage() {
                               </SelectContent>
                             </Select>
                             {handoverAdmins.length === 0 && (
-                              <p className="text-xs text-amber-100/80">
+                              <p className="text-xs text-amber-900 dark:text-amber-100/80">
                                 No other active administrator is available. Do
                                 not release this claim manually.
                               </p>
@@ -1930,7 +1814,7 @@ export default function AdminManualExchangeOrdersPage() {
                               upload request carries no API bearer token.
                             </p>
                             {payoutProofObjectKey && (
-                              <p className="flex items-center gap-1.5 text-xs text-emerald-300">
+                              <p className="flex items-center gap-1.5 text-xs text-emerald-800 dark:text-emerald-300">
                                 <CheckCircle2 className="size-3.5" />
                                 Proof uploaded and ready to attach to this
                                 action.
@@ -1946,12 +1830,12 @@ export default function AdminManualExchangeOrdersPage() {
                           id="manual-review-reason"
                           value={reason}
                           onChange={(event) => setReason(event.target.value)}
-                          placeholder="Record what you verified and why this action is approved."
+                          placeholder="What did you verify?"
                           minLength={10}
                           maxLength={500}
-                          rows={4}
+                          rows={2}
                           disabled={reviewMutation.isPending}
-                          className="flex min-h-24 w-full rounded-lg border border-input bg-transparent px-3 py-2 text-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-input/30"
+                          className="flex min-h-16 w-full rounded-lg border border-input bg-transparent px-3 py-2 text-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-input/30"
                         />
                         <div className="flex justify-between gap-3 text-xs text-muted-foreground">
                           <span>10–500 characters</span>
@@ -1962,7 +1846,7 @@ export default function AdminManualExchangeOrdersPage() {
                       {formError && (
                         <p
                           role="alert"
-                          className="flex items-start gap-2 text-sm text-red-300"
+                          className="flex items-start gap-2 text-sm text-red-700 dark:text-red-300"
                         >
                           <XCircle className="mt-0.5 size-4 shrink-0" />
                           {formError}
@@ -2005,10 +1889,59 @@ export default function AdminManualExchangeOrdersPage() {
                       </div>
                     </form>
                   )}
-                </CardContent>
-              </>
-            )}
-          </Card>
+                  <details className="rounded-xl border border-border px-3 py-2">
+                    <summary className="cursor-pointer font-medium">
+                      Audit timeline <span className="text-muted-foreground">({selectedOrder.events.length})</span>
+                    </summary>
+                    <div className="mt-3 space-y-3">
+                      {selectedOrder.events.length === 0 ? (
+                        <p className="text-sm text-muted-foreground">
+                          No events recorded yet.
+                        </p>
+                      ) : (
+                        selectedOrder.events.map((event, index) => (
+                          <div
+                            key={`${event.createdAt}-${event.status}-${index}`}
+                            className="flex gap-3 text-sm"
+                          >
+                            <div className="mt-1 flex size-5 shrink-0 items-center justify-center rounded-full bg-muted">
+                              {index === selectedOrder.events.length - 1 ? (
+                                <Clock3 className="size-3 text-primary" />
+                              ) : (
+                                <CheckCircle2 className="size-3 text-emerald-400" />
+                              )}
+                            </div>
+                            <div className="min-w-0">
+                              <p className="font-medium">
+                                {statusLabel(event.status)}
+                              </p>
+                              <p className="mt-0.5 text-xs text-muted-foreground">
+                                {event.reason}
+                              </p>
+                              <p className="mt-0.5 text-xs text-muted-foreground">
+                                {formatDate(event.createdAt)}
+                              </p>
+                            </div>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </details>
+                  {!actionPanel && (
+                    <nav aria-label="Browse exchange requests" className="flex items-center justify-between gap-2 border-t pt-2">
+                      <Button variant="ghost" className="min-h-11" disabled={navigationDisabled || !hasPreviousRequest} onClick={() => void moveRequest(-1)}>
+                        <ChevronLeft aria-hidden="true" /> Previous
+                      </Button>
+                      <span className="text-xs text-muted-foreground">Swipe to browse</span>
+                      <Button variant="ghost" className="min-h-11" disabled={navigationDisabled || !hasNextRequest} onClick={() => void moveRequest(1)}>
+                        Next <ChevronRight aria-hidden="true" />
+                      </Button>
+                    </nav>
+                  )}
+                </div>
+              )}
+            </DialogContent>
+          </Dialog>
         </div>
       </div>
     </DashboardLayout>

@@ -16,13 +16,13 @@ const BANK_RESOLVE_PROVIDERS = ['monnify', 'paystack'] as const;
 export class RequestAccountSetupDto {
   @IsBoolean()
   @Equals(true)
-  consentAccepted: true;
+  consentAccepted!: true;
 }
 
 export class AccountSetupResponseDto {
-  provider: 'PAYSTACK';
-  status: string;
-  updatedAt: Date;
+  provider!: 'PAYSTACK';
+  status!: string;
+  updatedAt!: Date;
 }
 
 export class ProvisionVirtualAccountDto {
@@ -33,7 +33,7 @@ export class ProvisionVirtualAccountDto {
 
   @IsString()
   @IsIn(VIRTUAL_ACCOUNT_CURRENCIES)
-  currency: (typeof VIRTUAL_ACCOUNT_CURRENCIES)[number];
+  currency!: (typeof VIRTUAL_ACCOUNT_CURRENCIES)[number];
 
   @IsOptional()
   @IsString()
@@ -87,11 +87,11 @@ export class ProvisionVirtualAccountDto {
 export class ResolveBankAccountDto {
   @IsString()
   @Matches(/^\d{10}$/)
-  accountNumber: string;
+  accountNumber!: string;
 
   @IsString()
   @MaxLength(20)
-  bankCode: string;
+  bankCode!: string;
 
   @IsOptional()
   @IsString()
@@ -102,9 +102,9 @@ export class ResolveBankAccountDto {
 export class CreateBeneficiaryDto extends ResolveBankAccountDto {
   @IsString()
   @MaxLength(120)
-  bankName: string;
+  bankName!: string;
 
   @IsString()
   @IsIn(SUPPORTED_CURRENCIES)
-  currency: (typeof SUPPORTED_CURRENCIES)[number];
+  currency!: (typeof SUPPORTED_CURRENCIES)[number];
 }

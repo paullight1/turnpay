@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Get,
@@ -9,8 +10,11 @@ import {
   Post,
   Query,
   Req,
+  UploadedFile,
   UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { Throttle } from '@nestjs/throttler';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
@@ -30,12 +34,19 @@ import { ManualExchangeService } from './manual-exchange.service';
 import { ManualExchangeReconciliationService } from './manual-exchange-reconciliation.service';
 import { createRequestAuditContext } from '../common/services/request-audit-context';
 import type { AuthenticatedRequest } from '../common/types/request-context';
+import {
+  RECEIPT_SCAN_MAX_BYTES,
+  ReceiptScanService,
+} from './receipt-scan.service';
 
 @Controller('exchange/manual-orders')
 @UseGuards(JwtAuthGuard)
 @Throttle({ default: { limit: 20, ttl: 60000 } })
 export class ManualExchangeController {
-  constructor(private readonly service: ManualExchangeService) {}
+  constructor(
+    private readonly service: ManualExchangeService,
+    private readonly receiptScanner: ReceiptScanService,
+  ) {}
   @Get('config') configuration() {
     return this.service.configuration();
   }
@@ -94,6 +105,24 @@ export class ManualExchangeController {
       }),
     );
   }
+  @Post(':id/receipt-scan')
+  @Header('Cache-Control', 'no-store')
+  @Throttle({ default: { limit: 6, ttl: 60000 } })
+  @UseInterceptors(
+    FileInterceptor('image', {
+      limits: { fileSize: RECEIPT_SCAN_MAX_BYTES, files: 1, fields: 0 },
+    }),
+  )
+  async scanReceipt(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: { userId: string },
+    @UploadedFile() image: { buffer: Buffer } | undefined,
+  ) {
+    if (!image) throw new BadRequestException('Upload a receipt image');
+    await this.service.get(id, user.userId);
+    return this.receiptScanner.scan(image.buffer);
+  }
+
   @Post(':id/upload-url')
   @Throttle({ default: { limit: 5, ttl: 600000 } })
   upload(

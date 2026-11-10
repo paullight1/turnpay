@@ -357,6 +357,8 @@ export class IdempotencyInterceptor implements NestInterceptor {
       path === '/api/banking/banks/resolve' ||
       path === '/api/transfers/recipient/preview' ||
       path === '/api/transfers/internal' ||
+      // This read-only upload returns private suggestions that must not be cached.
+      /^\/api\/exchange\/manual-orders\/[^/]+\/receipt-scan$/.test(path) ||
       // These endpoints persist the upload intent themselves and regenerate
       // expiring credentials on replay. Never cache signed upload tokens.
       /^\/api\/(?:admin\/)?exchange\/manual-orders\/[^/]+\/(?:upload-url|handover-upload-url)$/.test(

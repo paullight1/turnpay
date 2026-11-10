@@ -2,26 +2,17 @@
 
 ## Scope
 
-Use this guide for daily and intra-day reconciliation of wallets, ledger entries, provider events, payment settlements, Monnify virtual account deposits, withdrawals, VTU purchases, exchange execution, and manual NGN to GHS receipt credits. Local checks can validate formulas, but production requires provider reports and real settlement data.
+Use this guide for daily and intra-day reconciliation of wallets, ledger entries, provider events, payment settlements, Paystack deposits and legacy Monnify obligations, withdrawals, VTU purchases, exchange execution, and manual NGN to GHS receipt credits. Local checks can validate formulas, but production requires provider reports and real settlement data.
 
-## Required Env Vars
+## Provider and schedule configuration
 
-```env
-RECONCILIATION_CRON=0 */1 * * *
-WEBHOOK_QUEUE_NAME=banking-webhooks
-DLQ_NAME=banking-dead-letter
-ADMIN_REVIEW_WEBHOOK_ALERT_CHANNEL=
-MONNIFY_API_KEY=
-MONNIFY_SECRET_KEY=
-VTPASS_API_KEY=
-VTPASS_SECRET_KEY=
-FX_RATE_API_URL=
-FX_RATE_API_KEY=
-```
+Use the active [provider source of truth](../PROVIDER-SOURCE-OF-TRUTH.MD), [Paystack acceptance guide](../PAYSTACK-ACTIVATION.md), and provider-specific deployment secrets. Retain Monnify credentials only for legacy obligations. Kora reports are required only for activated Ghana flows. Never place provider credentials in clients or ordinary logs.
+
+`ReconciliationService` schedules wallet reconciliation daily and internal-transfer reconciliation hourly. Verify actual worker execution, timezone, ownership and alert delivery; a documented variable name is not proof that a scheduler or alert integration consumes it. Keep admin-set FX prices authoritative when `FX_RATE_SOURCE=admin`.
 
 ## Sandbox Steps
 
-1. Generate test funding, Monnify virtual-account deposit, withdrawal, internal transfer, exchange, manual receipt credit, and VTU records.
+1. Generate test funding, Paystack virtual-account deposit, withdrawal, internal transfer, exchange, manual receipt credit, and VTU records.
 2. Run reconciliation and confirm no unmatched ledger entries.
 3. Replay a webhook and confirm reconciliation still sees one provider event and one wallet effect.
 4. Create a deliberate mismatch and confirm it appears in admin review.
@@ -30,7 +21,7 @@ FX_RATE_API_KEY=
 
 ## Live Steps
 
-1. Obtain provider report access for Monnify, VTpass, and the FX source where applicable.
+1. Obtain provider report access for Paystack and VTpass, legacy Monnify obligations, and activated Kora flows where applicable. Admin-set FX rates remain authoritative when `FX_RATE_SOURCE=admin`.
 2. Define daily cutoff time, timezone, owner, and sign-off process.
 3. Run reconciliation after the first live transaction before broader launch.
 4. Compare provider totals, wallet ledger totals, transaction statuses, fees, reversals, and settlements.

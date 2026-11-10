@@ -1,23 +1,29 @@
 "use client";
 
 import { hasAdminAccess } from "@/lib/admin-access";
+import { isDepositReviewStatus, manualExchangeRequestHref } from "@/lib/admin-manual-exchange";
 
-import { Suspense, useDeferredValue, useEffect, useMemo, useState, useTransition } from "react";
+import { Suspense, useDeferredValue, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useAuth } from "@/lib/auth-provider";
 import { getErrorMessage } from "@/lib/errors";
-import { createMoneyAttemptIdempotencyKey } from "@/lib/idempotency";
+import { createManualExchangeIdempotencyKey, createMoneyAttemptIdempotencyKey } from "@/lib/idempotency";
 import { maskEmail, maskPhone } from "@/lib/privacy";
 import { cn } from "@/lib/utils";
-import { adminExchangeApi, adminExchangePayoutApi, adminExchangeRateApi, adminUserApi, adminVtuApi, apiClient } from "@/services/api";
+import { adminExchangeApi, adminExchangePayoutApi, adminExchangeRateApi, adminManualExchangeApi, adminUserApi, adminVtuApi, apiClient, type ManualExchangeProofKind } from "@/services/api";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Activity,
   ArrowLeftRight,
+  ArrowRight,
   Banknote,
+  Check,
+  ChevronDown,
   CircleDollarSign,
+  Eye,
   Landmark,
   Search,
   ShieldCheck,
+  SlidersHorizontal,
   Smartphone,
   UsersRound,
   WalletCards,
@@ -25,11 +31,21 @@ import {
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import DashboardLayout from "@/components/layout/dashboard-layout";
+import { adminNotificationsQueryOptions, notificationDestination } from "@/components/admin/admin-notification-bell";
+import { ExchangeRecipientDetails } from "@/components/admin/exchange-recipient-details";
 import { RateControlCard } from "@/components/admin/rate-control";
 import { InternalTransferReversalQueue } from "@/components/admin/internal-transfer-reversal-queue";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -127,6 +143,23 @@ type AdminTransactionDetail = AdminTransaction & {
     updatedAt: string;
   }>;
   exchangeReceipt?: ManualExchangeReceipt | null;
+  manualExchange?: {
+    id: string;
+    status: string;
+    settlementMode: string;
+    destinationInstitution: string | null;
+    destinationAccount: string | null;
+    destinationName: string | null;
+    targetAmount: string;
+    targetCurrency: string;
+    hasProof: boolean;
+    hasPayoutProof: boolean;
+  } | null;
+  exchangePayout?: Pick<
+    ExchangePayout,
+    "destinationBankName" | "destinationAccountNumber" | "destinationAccountName" |
+    "destinationAmount" | "destinationCurrency"
+  > | null;
   disputes?: Array<{
     id: string;
     type: string;
@@ -774,8 +807,8 @@ function StatTile({
           className={cn(
             "flex size-8 items-center justify-center rounded-lg border transition-all duration-200",
             tone === "money" &&
-              "border-emerald-500/30 bg-emerald-500/10 text-emerald-300 group-hover:bg-emerald-500/20 group-hover:shadow-sm group-hover:shadow-emerald-500/20",
-            tone === "risk" && "border-red-500/30 bg-red-500/10 text-red-300 group-hover:bg-red-500/20 group-hover:shadow-sm group-hover:shadow-red-500/20",
+              "border-emerald-500/30 bg-emerald-500/10 text-emerald-800 dark:text-emerald-300 group-hover:bg-emerald-500/20 group-hover:shadow-sm group-hover:shadow-emerald-500/20",
+            tone === "risk" && "border-red-500/30 bg-red-500/10 text-red-700 dark:text-red-300 group-hover:bg-red-500/20 group-hover:shadow-sm group-hover:shadow-red-500/20",
             tone === "default" &&
               "border-border bg-muted text-muted-foreground group-hover:bg-muted/80",
           )}
@@ -817,132 +850,246 @@ function TransactionDrilldownCard({
         </Button>
       </CardHeader>
       <CardContent>
-        {loading || !detail ? (
-          <Skeleton className="h-44 w-full" />
-        ) : (
-          <div className="grid gap-5 xl:grid-cols-[1fr_1fr]">
-            <div className="grid gap-4 md:grid-cols-2">
-              <DetailField label="Reference" value={detail.reference} />
-              <DetailField
-                label="Type"
-                value={detail.type.replaceAll("_", " ")}
-              />
-              <DetailField
-                label="Amount"
-                value={formatMoney(detail.amount, detail.currency)}
-              />
-              <div>
-                <p className="text-xs text-muted-foreground">Status</p>
-                <Badge className="mt-1" variant={statusVariant(detail.status)}>
-                  {detail.status}
-                </Badge>
-              </div>
-              <DetailField label="User" value={maskEmail(detail.user?.email)} />
-              <DetailField
-                label="Phone"
-                value={maskPhone(detail.user?.phone)}
-              />
-              <DetailField
-                label="Created"
-                value={shortDate(detail.createdAt)}
-              />
-              <DetailField
-                label="Updated"
-                value={shortDate(detail.updatedAt)}
-              />
-            </div>
+        {loading || !detail
+          ? <Skeleton className="h-44 w-full" />
+          : <TransactionDrilldownDetails detail={detail} />}
+      </CardContent>
+    </Card>
+  );
+}
 
-            <div className="space-y-4">
-              <div>
-                <p className="text-sm font-medium">Ledger entries</p>
-                {(detail.ledgerEntries ?? []).length === 0 ? (
-                  <p className="mt-2 text-sm text-muted-foreground">
-                    No ledger entries recorded.
+function TransactionDrilldownDetails({ detail }: { detail: AdminTransactionDetail }) {
+  return (
+    <div className="grid gap-5 xl:grid-cols-[1fr_1fr]">
+      <div className="grid gap-4 md:grid-cols-2">
+        <DetailField label="Reference" value={detail.reference} />
+        <DetailField
+          label="Type"
+          value={detail.type.replaceAll("_", " ")}
+        />
+        <DetailField
+          label="Amount"
+          value={formatMoney(detail.amount, detail.currency)}
+        />
+        <div>
+          <p className="text-xs text-muted-foreground">Status</p>
+          <Badge className="mt-1" variant={statusVariant(detail.status)}>
+            {detail.status}
+          </Badge>
+        </div>
+        <DetailField label="User" value={maskEmail(detail.user?.email)} />
+        <DetailField
+          label="Phone"
+          value={maskPhone(detail.user?.phone)}
+        />
+        <DetailField
+          label="Created"
+          value={shortDate(detail.createdAt)}
+        />
+        <DetailField
+          label="Updated"
+          value={shortDate(detail.updatedAt)}
+        />
+      </div>
+
+      <div className="space-y-4">
+        <div>
+          <p className="text-sm font-medium">Ledger entries</p>
+          {(detail.ledgerEntries ?? []).length === 0 ? (
+            <p className="mt-2 text-sm text-muted-foreground">
+              No ledger entries recorded.
+            </p>
+          ) : (
+            <div className="mt-2 space-y-2">
+              {detail.ledgerEntries?.map((entry) => (
+                <div
+                  key={entry.id}
+                  className="rounded-md border border-border bg-muted/30 p-3"
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-sm font-medium">
+                      {entry.source}
+                    </span>
+                    <Badge variant="outline">{entry.direction}</Badge>
+                  </div>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    {formatMoney(entry.amount, entry.currency)} · balance{" "}
+                    {formatMoney(entry.balanceBefore, entry.currency)} to{" "}
+                    {formatMoney(entry.balanceAfter, entry.currency)}
                   </p>
-                ) : (
-                  <div className="mt-2 space-y-2">
-                    {detail.ledgerEntries?.map((entry) => (
-                      <div
-                        key={entry.id}
-                        className="rounded-md border border-border bg-muted/30 p-3"
-                      >
-                        <div className="flex items-center justify-between gap-3">
-                          <span className="text-sm font-medium">
-                            {entry.source}
-                          </span>
-                          <Badge variant="outline">{entry.direction}</Badge>
-                        </div>
-                        <p className="mt-1 text-sm text-muted-foreground">
-                          {formatMoney(entry.amount, entry.currency)} · balance{" "}
-                          {formatMoney(entry.balanceBefore, entry.currency)} to{" "}
-                          {formatMoney(entry.balanceAfter, entry.currency)}
-                        </p>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              {(detail.transferAttempts ?? []).length > 0 && (
-                <div>
-                  <p className="text-sm font-medium">Transfer attempts</p>
-                  <div className="mt-2 space-y-2">
-                    {detail.transferAttempts?.map((attempt) => (
-                      <div
-                        key={attempt.id ?? attempt.providerReference}
-                        className="rounded-md border border-border bg-muted/30 p-3"
-                      >
-                        <div className="flex items-center justify-between gap-3">
-                          <span className="text-sm font-medium">
-                            {attempt.provider}
-                          </span>
-                          <Badge variant={statusVariant(attempt.status)}>
-                            {attempt.status}
-                          </Badge>
-                        </div>
-                        <p className="mt-1 font-mono text-xs text-muted-foreground">
-                          {attempt.providerReference}
-                        </p>
-                        <p className="mt-1 text-xs text-muted-foreground">
-                          Provider status: {attempt.providerStatus}
-                        </p>
-                      </div>
-                    ))}
-                  </div>
                 </div>
-              )}
+              ))}
+            </div>
+          )}
+        </div>
 
-              {(detail.vtuOrders ?? []).length > 0 && (
-                <div>
-                  <p className="text-sm font-medium">VTU orders</p>
-                  <div className="mt-2 space-y-2">
-                    {detail.vtuOrders?.map((order) => (
-                      <div
-                        key={order.id}
-                        className="rounded-md border border-border bg-muted/30 p-3"
-                      >
-                        <div className="flex items-center justify-between gap-3">
-                          <span className="text-sm font-medium">
-                            {order.serviceType} · {order.provider}
-                          </span>
-                          <Badge variant={statusVariant(order.status)}>
-                            {order.status}
-                          </Badge>
-                        </div>
-                        <p className="mt-1 text-xs text-muted-foreground">
-                          Target {order.targetMasked ?? "masked"} · requeries{" "}
-                          {order.requeryAttempts}
-                        </p>
-                      </div>
-                    ))}
+        {(detail.transferAttempts ?? []).length > 0 && (
+          <div>
+            <p className="text-sm font-medium">Transfer attempts</p>
+            <div className="mt-2 space-y-2">
+              {detail.transferAttempts?.map((attempt) => (
+                <div
+                  key={attempt.id ?? attempt.providerReference}
+                  className="rounded-md border border-border bg-muted/30 p-3"
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-sm font-medium">
+                      {attempt.provider}
+                    </span>
+                    <Badge variant={statusVariant(attempt.status)}>
+                      {attempt.status}
+                    </Badge>
                   </div>
+                  <p className="mt-1 font-mono text-xs text-muted-foreground">
+                    {attempt.providerReference}
+                  </p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Provider status: {attempt.providerStatus}
+                  </p>
                 </div>
-              )}
+              ))}
             </div>
           </div>
         )}
-      </CardContent>
-    </Card>
+
+        {(detail.vtuOrders ?? []).length > 0 && (
+          <div>
+            <p className="text-sm font-medium">VTU orders</p>
+            <div className="mt-2 space-y-2">
+              {detail.vtuOrders?.map((order) => (
+                <div
+                  key={order.id}
+                  className="rounded-md border border-border bg-muted/30 p-3"
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-sm font-medium">
+                      {order.serviceType} · {order.provider}
+                    </span>
+                    <Badge variant={statusVariant(order.status)}>
+                      {order.status}
+                    </Badge>
+                  </div>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Target {order.targetMasked ?? "masked"} · requeries{" "}
+                    {order.requeryAttempts}
+                  </p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function transactionDetailOptions(reference: string | null) {
+  return {
+    queryKey: ["admin-transaction-detail", reference],
+    queryFn: async () => {
+      const response = await apiClient.get(
+        `/api/admin/transactions/${encodeURIComponent(reference ?? "")}`,
+      );
+      return response.data as AdminTransactionDetail;
+    },
+  };
+}
+
+function ExchangeHistoryPaymentDetails({ detail }: { detail: AdminTransactionDetail }) {
+  const proofKeys = useRef(new Map<ManualExchangeProofKind, string>());
+  const manual = detail.manualExchange;
+  const payout = detail.exchangePayout;
+  const receipt = detail.exchangeReceipt;
+  const hasLegacyReceipt = receipt?.receiptUrl && !receipt.receiptUrl.startsWith("monnify://");
+  const payoutAmount = manual
+    ? formatMoney(manual.targetAmount, manual.targetCurrency)
+    : payout
+      ? formatMoney(payout.destinationAmount, payout.destinationCurrency)
+      : null;
+
+  const canReviewPayment = Boolean(manual?.hasProof && isDepositReviewStatus(manual.status));
+  const canReviewPayout = manual && ["PAYOUT_PENDING", "PAYOUT_PROCESSING", "PAYOUT_SENT"].includes(manual.status);
+
+  const proofMutation = useMutation({
+    mutationFn: async (kind: ManualExchangeProofKind | "legacy") => {
+      let url: string;
+      if (kind === "legacy" && receipt && hasLegacyReceipt) {
+        const response = await adminExchangeApi.getReceiptProofUrl(receipt.id);
+        url = response.data.url;
+      } else if (kind !== "legacy" && manual) {
+        const key = proofKeys.current.get(kind) ?? createManualExchangeIdempotencyKey();
+        proofKeys.current.set(kind, key);
+        const response = await adminManualExchangeApi.getProofUrl(manual.id, kind, key);
+        url = response.data.url;
+      } else {
+        throw new Error("Receipt is unavailable");
+      }
+
+      if (!["https:", "http:"].includes(new URL(url).protocol)) {
+        throw new Error("Invalid receipt link");
+      }
+      window.open(url, "_blank", "noopener,noreferrer");
+      if (kind !== "legacy") proofKeys.current.delete(kind);
+    },
+    onError: (error) => toast.error(getErrorMessage(error, "Could not open the receipt")),
+  });
+
+  return (
+    <>
+      <ExchangeRecipientDetails
+        wallet={manual?.settlementMode === "WALLET"}
+        institution={manual ? manual.destinationInstitution : payout?.destinationBankName}
+        account={manual ? manual.destinationAccount : payout?.destinationAccountNumber}
+        name={manual ? manual.destinationName : payout?.destinationAccountName}
+      />
+      <section aria-label="Transaction summary" className="grid gap-2 rounded-xl border p-3">
+        <div className="flex flex-wrap items-start justify-between gap-2">
+          <div>
+            <p className="text-xs text-muted-foreground">Payment amount</p>
+            <p className="text-lg font-bold">{formatMoney(detail.amount, detail.currency)}</p>
+          </div>
+          <Badge variant={statusVariant(detail.status)}>{humanizeLabel(manual?.status ?? detail.status)}</Badge>
+        </div>
+        {payoutAmount && <DetailField label="Expected payout" value={payoutAmount} />}
+        <DetailField label="Reference" value={detail.reference} />
+      </section>
+      <section aria-label="Payment receipts" className="flex flex-wrap gap-2">
+        {(manual?.hasProof || hasLegacyReceipt) && (
+          <Button variant="outline" disabled={proofMutation.isPending} onClick={() => proofMutation.mutate(manual?.hasProof ? "DEPOSIT" : "legacy")}>
+            <Eye aria-hidden="true" /> View payment receipt
+          </Button>
+        )}
+        {manual?.hasPayoutProof && (
+          <Button variant="outline" disabled={proofMutation.isPending} onClick={() => proofMutation.mutate("PAYOUT")}>
+            <Eye aria-hidden="true" /> View payout receipt
+          </Button>
+        )}
+        {!manual?.hasProof && !manual?.hasPayoutProof && !hasLegacyReceipt && (
+          <p className="text-sm text-muted-foreground">No receipt attached.</p>
+        )}
+      </section>
+      <details className="rounded-xl border p-3">
+        <summary className="cursor-pointer font-semibold">More transaction details</summary>
+        <div className="pt-3"><TransactionDrilldownDetails detail={detail} /></div>
+      </details>
+      {manual && (
+        <footer className="grid gap-2 border-t pt-3">
+          {manual.status === "AWAITING_TRANSFER" && (
+            <p className="text-sm text-muted-foreground">Waiting for the customer’s payment.</p>
+          )}
+          <Button
+            asChild
+            variant={canReviewPayment || canReviewPayout ? "default" : "outline"}
+            className="min-h-11 w-full"
+          >
+            <Link href={manualExchangeRequestHref(manual.id)}>
+              {canReviewPayment && <Check aria-hidden="true" />}
+              {canReviewPayment ? "Review & approve" : canReviewPayout ? "Review payout" : "Open exchange request"}
+            </Link>
+          </Button>
+        </footer>
+      )}
+    </>
   );
 }
 
@@ -1583,6 +1730,12 @@ function UserDrilldownCard({
 
 const ADMIN_TABS = ["ops", "finance", "users", "exchange", "currencies", "reports"];
 
+const EXCHANGE_SECTIONS = [
+  { id: "payments", label: "See payments", icon: Search, color: "border-sky-200 bg-sky-50 text-sky-950" },
+  { id: "deposits", label: "Confirm deposits", icon: Banknote, color: "border-amber-200 bg-amber-50 text-amber-950" },
+  { id: "payouts", label: "Approve payouts", icon: WalletCards, color: "border-emerald-200 bg-emerald-50 text-emerald-950" },
+] as const;
+
 function AdminPageContent() {
   const { user, profile, isLoading: authLoading } = useAuth();
   const router = useRouter();
@@ -1607,6 +1760,13 @@ function AdminPageContent() {
     startTabTransition(() => router.replace(`/admin?${params.toString()}`, { scroll: false }));
   };
   const [transactionType, setTransactionType] = useState("ALL");
+  const [exchangeSection, setExchangeSection] =
+    useState<(typeof EXCHANGE_SECTIONS)[number]["id"] | null>(null);
+  const [historyPayment, setHistoryPayment] = useState<AdminTransaction | null>(null);
+  const historyPaymentTrigger = useRef<HTMLButtonElement | null>(null);
+  const [exchangePaymentSearch, setExchangePaymentSearch] = useState("");
+  const [exchangePaymentStatus, setExchangePaymentStatus] = useState("ALL");
+  const showExchangeHistory = isOpsTab || (isExchangeTab && exchangeSection === "payments");
   const [kycStatus, setKycStatus] = useState("ALL");
   const [userSearch, setUserSearch] = useState("");
   const [receiptStatus, setReceiptStatus] = useState("SUBMITTED");
@@ -1725,9 +1885,33 @@ function AdminPageContent() {
       const res = await apiClient.get("/api/admin/transactions?limit=50");
       return res.data as AdminTransaction[];
     },
-    enabled: isAdmin && (isFinanceTab || isReportsTab),
+    enabled: isAdmin && (isFinanceTab || isReportsTab || showExchangeHistory),
     staleTime: 30000,
+    refetchInterval: showExchangeHistory ? 15_000 : false,
   });
+  const adminId = profile?.id ?? user?.id ?? null;
+  const exchangeNotificationsQuery = useQuery({
+    ...adminNotificationsQueryOptions(adminId),
+    enabled: isAdmin && (isOpsTab || isExchangeTab) && Boolean(adminId),
+  });
+  const newExchangePayments = (exchangeNotificationsQuery.data ?? []).filter(
+    ({ eventKey, readAt }) => !readAt && (
+      /^manual-exchange:[^:]+:payment-submitted:/.test(eventKey) ||
+      eventKey.startsWith("exchange-funded:")
+    ),
+  );
+  const exchangeSearch = exchangePaymentSearch.trim().toLowerCase();
+  const recentExchangePayments = (transactionsQuery.data ?? []).filter((tx) => tx.type === "EXCHANGE");
+  const exchangePaymentStatuses = [...new Set(recentExchangePayments.map((tx) => tx.status))].sort();
+  const exchangePayments = recentExchangePayments.filter((tx) =>
+    (exchangePaymentStatus === "ALL" || tx.status === exchangePaymentStatus) &&
+    (!exchangeSearch || [
+      tx.reference,
+      String(tx.amount),
+      formatMoney(tx.amount, tx.currency),
+      humanizeLabel(tx.status),
+    ].some((value) => value.toLowerCase().includes(exchangeSearch))),
+  );
 
   const usersQuery = useQuery({
     queryKey: ["admin-users", kycStatus, deferredUserSearch],
@@ -1841,14 +2025,13 @@ function AdminPageContent() {
   });
 
   const transactionDetailQuery = useQuery({
-    queryKey: ["admin-transaction-detail", selectedTransactionRef],
-    queryFn: async () => {
-      const res = await apiClient.get(
-        `/api/admin/transactions/${encodeURIComponent(selectedTransactionRef ?? "")}`,
-      );
-      return res.data as AdminTransactionDetail;
-    },
+    ...transactionDetailOptions(selectedTransactionRef),
     enabled: isAdmin && Boolean(selectedTransactionRef),
+  });
+
+  const historyPaymentQuery = useQuery({
+    ...transactionDetailOptions(historyPayment?.reference ?? null),
+    enabled: isAdmin && showExchangeHistory && Boolean(historyPayment),
   });
 
   const userDetailQuery = useQuery({
@@ -1879,7 +2062,7 @@ function AdminPageContent() {
       const res = await adminExchangeApi.getReceipts(receiptStatus, 50);
       return res.data as ManualExchangeReceipt[];
     },
-    enabled: isAdmin && isExchangeTab,
+    enabled: isAdmin && isExchangeTab && exchangeSection === "deposits",
     staleTime: 30000,
   });
 
@@ -1892,7 +2075,7 @@ function AdminPageContent() {
       );
       return res.data as ExchangePayout[];
     },
-    enabled: isAdmin && isExchangeTab,
+    enabled: isAdmin && isExchangeTab && exchangeSection === "payouts",
     staleTime: 30000,
   });
 
@@ -1902,7 +2085,7 @@ function AdminPageContent() {
       const res = await adminExchangePayoutApi.getPayoutStats();
       return res.data as PayoutStats;
     },
-    enabled: isAdmin && isExchangeTab,
+    enabled: isAdmin && isExchangeTab && exchangeSection === "payouts",
     staleTime: 30000,
   });
 
@@ -2393,6 +2576,133 @@ function AdminPageContent() {
     return null;
   }
 
+  const exchangeHistory = (
+    <section aria-labelledby="exchange-history-title" className="max-w-4xl space-y-3">
+      <h2 id="exchange-history-title" className="text-lg font-semibold">Exchange history</h2>
+      {newExchangePayments.length > 0 && (
+        <details className="rounded-xl border border-sky-300/30 bg-sky-500/10">
+          <summary className="cursor-pointer rounded-xl px-3 py-3 font-semibold focus-visible:outline-2 focus-visible:outline-ring">
+            New payment alerts ({newExchangePayments.length})
+          </summary>
+          <ul className="divide-y divide-border px-3 pb-2">
+            {newExchangePayments.map((notification) => (
+              <li key={notification.id}>
+                <Link
+                  href={notificationDestination(notification).href}
+                  className="block rounded py-2 text-sm hover:underline focus-visible:outline-2 focus-visible:outline-ring"
+                >
+                  {notification.title}
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
+      <div className="flex gap-2">
+        <div className="relative min-w-0 flex-1">
+          <Search aria-hidden="true" className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            type="search"
+            aria-label="Search recent payments"
+            placeholder="Reference, amount, or status"
+            value={exchangePaymentSearch}
+            onChange={(event) => setExchangePaymentSearch(event.target.value)}
+            className="h-11 pl-9"
+          />
+        </div>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              variant={exchangePaymentStatus === "ALL" ? "outline" : "secondary"}
+              size="icon"
+              className="size-11"
+              aria-label={exchangePaymentStatus === "ALL" ? "Filter by payment status" : `Filter by payment status, ${humanizeLabel(exchangePaymentStatus)} selected`}
+            >
+              <SlidersHorizontal aria-hidden="true" className="size-4" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="min-w-40">
+            <DropdownMenuRadioGroup value={exchangePaymentStatus} onValueChange={setExchangePaymentStatus}>
+              <DropdownMenuRadioItem value="ALL">All statuses</DropdownMenuRadioItem>
+              {exchangePaymentStatuses.map((status) => (
+                <DropdownMenuRadioItem key={status} value={status}>{humanizeLabel(status)}</DropdownMenuRadioItem>
+              ))}
+            </DropdownMenuRadioGroup>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+      {transactionsQuery.isLoading ? (
+        <Skeleton className="h-24 w-full" />
+      ) : transactionsQuery.isError ? (
+        <div role="alert" className="flex flex-wrap items-center gap-3 text-sm">
+          <p>Could not load payments.</p>
+          <Button variant="outline" onClick={() => void transactionsQuery.refetch()}>Retry</Button>
+        </div>
+      ) : exchangePayments.length === 0 ? (
+        <p className="text-sm text-muted-foreground" role="status">
+          {exchangePaymentStatus !== "ALL"
+            ? "No recent payments match your filters."
+            : exchangeSearch
+              ? "No recent payments match your search."
+              : "No exchange payments in recent activity."}
+        </p>
+      ) : (
+        <ul className="grid gap-2">
+          {exchangePayments.map((tx) => (
+            <li key={tx.id} className="min-w-0">
+              <button
+                type="button"
+                aria-haspopup="dialog"
+                className="flex w-full items-center justify-between gap-3 rounded-xl border bg-card p-3 text-left hover:border-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                onClick={(event) => {
+                  historyPaymentTrigger.current = event.currentTarget;
+                  setHistoryPayment(tx);
+                }}
+              >
+                <span className="min-w-0">
+                  <span className="block text-lg font-bold">{formatMoney(tx.amount, tx.currency)}</span>
+                  <span className="block truncate text-xs text-muted-foreground">
+                    {maskEmail(tx.user?.email)} · {new Date(tx.createdAt).toLocaleDateString()}
+                  </span>
+                </span>
+                <span className="flex shrink-0 flex-col items-end gap-1">
+                  <Badge variant={statusVariant(tx.status)}>{humanizeLabel(tx.status)}</Badge>
+                  <span className="text-xs font-semibold">See payment</span>
+                </span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <Dialog open={Boolean(historyPayment)} onOpenChange={(open) => { if (!open) setHistoryPayment(null); }}>
+        <DialogContent
+          className="max-h-[85dvh] min-w-0 overflow-y-auto overscroll-contain sm:max-w-2xl"
+          onCloseAutoFocus={(event) => {
+            if (historyPaymentTrigger.current?.isConnected) {
+              event.preventDefault();
+              historyPaymentTrigger.current.focus();
+            }
+          }}
+        >
+          <DialogHeader className="pr-8">
+            <DialogTitle className="text-lg font-semibold">Payment details</DialogTitle>
+            <DialogDescription>{maskEmail(historyPayment?.user?.email)}</DialogDescription>
+          </DialogHeader>
+          {historyPaymentQuery.data ? (
+            <ExchangeHistoryPaymentDetails key={historyPaymentQuery.data.id} detail={historyPaymentQuery.data} />
+          ) : historyPaymentQuery.isError ? (
+            <div role="alert" className="flex flex-wrap items-center gap-3">
+              <p>Could not load payment details.</p>
+              <Button variant="outline" onClick={() => void historyPaymentQuery.refetch()}>Retry</Button>
+            </div>
+          ) : (
+            <Skeleton aria-label="Loading payment details" className="h-36 w-full" />
+          )}
+        </DialogContent>
+      </Dialog>
+    </section>
+  );
+
   return (
     <DashboardLayout>
       {isTabPending && (
@@ -2401,24 +2711,86 @@ function AdminPageContent() {
         </div>
       )}
       <div className="flex flex-col gap-6">
-        <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-end">
+        {isOpsTab ? (
+          <h1 className="sr-only">Admin overview</h1>
+        ) : (
           <div>
-            <h1 className="text-2xl font-semibold">{adminTab === 'reports' ? 'Reports & system health' : adminTab === 'exchange' ? 'Exchange management' : adminTab === 'users' ? 'Customers' : adminTab === 'finance' ? 'Finance' : adminTab === 'currencies' ? 'Currencies' : 'Admin overview'}</h1>
+            <h1 className="text-2xl font-semibold">{adminTab === 'reports' ? 'Reports & system health' : adminTab === 'exchange' ? 'Exchange management' : adminTab === 'users' ? 'Customers' : adminTab === 'finance' ? 'Finance' : 'Currencies'}</h1>
             <p className="mt-1 text-sm text-muted-foreground">
-              {adminTab === 'ops' ? 'Your business at a glance.' : adminTab === 'reports' ? 'Detailed operations, treasury and service activity.' : adminTab === 'exchange' ? 'Review requests, manage rates and track payouts.' : adminTab === 'users' ? 'Search accounts, review KYC, and manage access.' : 'Review activity and manage customer operations.'}
+              {adminTab === 'reports' ? 'Detailed operations, treasury and service activity.' : adminTab === 'exchange' ? 'Check payments and see what needs your attention.' : adminTab === 'users' ? 'Search accounts, review KYC, and manage access.' : 'Review activity and manage customer operations.'}
             </p>
           </div>
-        </div>
-
-        {isOpsTab && (
-          <section aria-label="Business totals" className="grid gap-3 sm:grid-cols-3">
-            <StatTile label="Customers" value={statsQuery.isError ? "Unavailable" : formatCount(statsQuery.data?.totalUsers)} detail="Total accounts" icon={UsersRound} loading={statsQuery.isLoading} />
-            <StatTile label="Transactions" value={statsQuery.isError ? "Unavailable" : formatCount(statsQuery.data?.totalTransactions)} detail="All time" icon={Activity} loading={statsQuery.isLoading} />
-            <StatTile label="Successful volume" value={statsQuery.isError ? "Unavailable" : formatMoney(statsQuery.data?.totalVolume, "NGN")} detail="All time" icon={CircleDollarSign} loading={statsQuery.isLoading} />
-          </section>
         )}
 
-        {(adminTab === "ops" || adminTab === "exchange") && (
+        {isOpsTab && (
+          <nav aria-label="Overview cards">
+            <ul className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+              {[
+                {
+                  label: "Customers",
+                  href: "/admin?tab=users",
+                  value: formatCount(statsQuery.data?.totalUsers),
+                  icon: UsersRound,
+                  color: "border-sky-200 bg-sky-50 text-sky-900",
+                },
+                {
+                  label: "Transactions",
+                  href: "/admin?tab=finance",
+                  value: formatCount(statsQuery.data?.totalTransactions),
+                  icon: Activity,
+                  color: "border-violet-200 bg-violet-50 text-violet-900",
+                },
+                {
+                  label: "Amount processed",
+                  href: "/admin?tab=reports",
+                  value: formatMoney(statsQuery.data?.totalVolume, "NGN"),
+                  icon: CircleDollarSign,
+                  color: "border-emerald-200 bg-emerald-50 text-emerald-900",
+                },
+                {
+                  label: "Exchange",
+                  href: "/admin?tab=exchange",
+                  icon: ArrowLeftRight,
+                  color: "border-amber-200 bg-amber-50 text-amber-950",
+                },
+              ].map(({ label, href, value, icon: Icon, color }) => (
+                <li key={href} className="min-w-0">
+                  <Link
+                    href={href}
+                    prefetch={false}
+                    className={cn(
+                      "group flex h-full flex-col justify-between gap-2 rounded-xl border p-3 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring sm:p-4",
+                      color,
+                    )}
+                  >
+                    <span className="flex items-center gap-2 text-sm font-medium group-hover:underline">
+                      <Icon aria-hidden="true" className="size-4 shrink-0" />
+                      {label}
+                    </span>
+                    <div className="flex items-end justify-between gap-1.5">
+                      {value === undefined ? (
+                        <span className="text-sm font-semibold text-slate-950">Manage rates</span>
+                      ) : (
+                        <div className="min-w-0 text-lg font-semibold tracking-tight tabular-nums wrap-anywhere text-slate-950 sm:text-2xl">
+                          {statsQuery.isLoading ? (
+                            <Skeleton aria-label="Loading total" className="block h-7 w-20 max-w-full bg-slate-900/10" />
+                          ) : statsQuery.isError ? (
+                            "Unavailable"
+                          ) : (
+                            value
+                          )}
+                        </div>
+                      )}
+                      <ArrowRight aria-hidden="true" className="mb-1 size-4 shrink-0" />
+                    </div>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </nav>
+        )}
+
+        {isOpsTab && (
           <section aria-label="Exchange rate controls" className="max-w-4xl">
             <RateControlCard />
           </section>
@@ -2426,18 +2798,7 @@ function AdminPageContent() {
 
         <Tabs value={adminTab} onValueChange={changeAdminTab} className="gap-4 min-w-0">
           <TabsContent value="ops" className="flex flex-col gap-4">
-            <nav aria-label="Quick access" className="divide-y divide-border border-y border-border">
-              {[
-                { href: "/admin/exchange/manual-orders", title: "Exchange requests", detail: "Review confirmed payments and send payouts" },
-                { href: "/admin/support", title: "Customer support", detail: "Open customer cases" },
-                { href: "/admin?tab=reports", title: "Reports & system health", detail: "Treasury, service activity and detailed reports" },
-              ].map((item) => (
-                <Link key={item.href} href={item.href} className="flex min-h-16 items-center justify-between gap-4 rounded-sm px-2 py-3 transition-colors hover:bg-muted/40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring">
-                  <span><span className="block font-medium">{item.title}</span><span className="text-sm text-muted-foreground">{item.detail}</span></span>
-                  <span aria-hidden="true">→</span>
-                </Link>
-              ))}
-            </nav>
+            {isOpsTab && exchangeHistory}
           </TabsContent>
           <TabsContent value="reports" className="flex flex-col gap-4">
             <Link href="/admin" className="w-fit text-sm text-muted-foreground hover:text-foreground">← Back to overview</Link>
@@ -3958,634 +4319,501 @@ function AdminPageContent() {
             )}
           </TabsContent>
 
-          <TabsContent
-            value="exchange"
-            className="flex flex-col gap-4 min-w-0"
-          >
-            <Card>
-              <CardHeader>
-                <CardTitle>Exchange transactions</CardTitle>
-              </CardHeader>
-              <CardContent>
-                {transactionsQuery.isLoading ? (
-                  <Skeleton className="h-48 w-full" />
-                ) : (
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Reference</TableHead>
-                        <TableHead>User</TableHead>
-                        <TableHead>Debit</TableHead>
-                        <TableHead>Status</TableHead>
-                        <TableHead>Created</TableHead>
-                        <TableHead>Drilldown</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {(transactionsQuery.data ?? [])
-                        .filter((tx) => tx.type === "EXCHANGE")
-                        .slice(0, 10)
-                        .map((tx) => (
-                          <TableRow key={tx.id}>
-                            <TableCell className="font-mono text-xs">
-                              {tx.reference}
-                            </TableCell>
-                            <TableCell>{maskEmail(tx.user?.email)}</TableCell>
-                            <TableCell>
-                              {formatMoney(tx.amount, tx.currency)}
-                            </TableCell>
-                            <TableCell>
-                              <Badge variant={statusVariant(tx.status)}>
-                                {tx.status}
-                              </Badge>
-                            </TableCell>
-                            <TableCell>
-                              {new Date(tx.createdAt).toLocaleDateString()}
-                            </TableCell>
-                            <TableCell>
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={() =>
-                                  openTransactionDrilldown(tx.reference)
-                                }
-                              >
-                                <Search className="size-3.5" />
-                                View
-                              </Button>
-                            </TableCell>
-                          </TableRow>
-                        ))}
-                    </TableBody>
-                  </Table>
-                )}
-              </CardContent>
-            </Card>
+          <TabsContent value="exchange" className="flex min-w-0 flex-col gap-4">
+            <Link
+              href="/admin/exchange/manual-orders"
+              className="flex min-h-16 items-center justify-between gap-3 rounded-xl border border-rose-200 bg-rose-50 p-4 text-rose-950 hover:bg-rose-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+            >
+              <span>
+                <span className="block text-lg font-bold">Exchange requests</span>
+                <span className="text-sm">Check receipts and confirm payments</span>
+              </span>
+              <ArrowRight aria-hidden="true" className="size-5 shrink-0" />
+            </Link>
 
-            {selectedTransactionRef && (
-              <TransactionDrilldownCard
-                title="Transaction drilldown"
-                detail={transactionDetailQuery.data}
-                loading={transactionDetailQuery.isLoading}
-                onClose={closeTransactionDrilldown}
-              />
+            <div className="grid grid-cols-2 gap-2 lg:grid-cols-3">
+              {EXCHANGE_SECTIONS.map(({ id, label, icon: Icon, color }) => (
+                <button
+                  key={id}
+                  type="button"
+                  aria-expanded={exchangeSection === id}
+                  aria-controls={`exchange-${id}`}
+                  aria-describedby={id === "payments" && newExchangePayments.length > 0
+                    ? "new-exchange-payment-count"
+                    : undefined}
+                  onClick={() => setExchangeSection(exchangeSection === id ? null : id)}
+                  className={cn(
+                    "flex min-h-14 items-center gap-2 rounded-xl border px-3 py-2 text-left text-sm font-bold hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
+                    color,
+                  )}
+                >
+                  <Icon aria-hidden="true" className="size-4 shrink-0" />
+                  {label}
+                  {id === "payments" && newExchangePayments.length > 0 ? (
+                    <Badge aria-hidden="true" className="ml-auto bg-sky-800 text-white">
+                      {newExchangePayments.length}
+                    </Badge>
+                  ) : (
+                    <ChevronDown
+                      aria-hidden="true"
+                      className={cn("ml-auto size-4 shrink-0", exchangeSection === id && "rotate-180")}
+                    />
+                  )}
+                </button>
+              ))}
+            </div>
+            {newExchangePayments.length > 0 && (
+              <p id="new-exchange-payment-count" className="sr-only">
+                Unread payment alerts {newExchangePayments.length}
+              </p>
             )}
 
-            <Card className="xl:col-span-2">
-              <CardHeader className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                <CardTitle>Exchange deposit queue</CardTitle>
-                <Select
-                  value={receiptStatus}
-                  onValueChange={(value) => {
-                    setReceiptStatus(value);
-                    setSelectedReceipt(null);
-                    setReviewReason("");
-                  }}
-                >
-                  <SelectTrigger className="w-full md:w-52">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {receiptStatusFilters.map((filter) => (
-                      <SelectItem key={filter} value={filter}>
-                        {filter.replaceAll("_", " ")}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </CardHeader>
-              <CardContent>
-                {receiptsQuery.isLoading ? (
-                  <div className="space-y-3">
-                    {[1, 2, 3].map((item) => (
-                      <Skeleton key={item} className="h-12 w-full" />
-                    ))}
-                  </div>
-                ) : receiptsQuery.isError ? (
-                  <div className="flex flex-col items-center gap-3 py-8 text-center">
-                    <p className="text-sm text-muted-foreground">
-                      Could not load exchange deposit receipts.
-                    </p>
-                    <Button
-                      variant="outline"
-                      onClick={() => void receiptsQuery.refetch()}
-                    >
-                      Retry
-                    </Button>
-                  </div>
-                ) : (receiptsQuery.data ?? []).length === 0 ? (
-                  <div className="py-8 text-center text-muted-foreground">
-                    No receipts for this status
-                  </div>
-                ) : (
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Reference</TableHead>
-                        <TableHead>User</TableHead>
-                        <TableHead>Deposit</TableHead>
-                        <TableHead>Credit</TableHead>
-                        <TableHead>Bank ref</TableHead>
-                        <TableHead>Status</TableHead>
-                        <TableHead>Actions</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {receiptsQuery.data?.map((receipt) => (
-                        <TableRow key={receipt.id}>
-                          <TableCell>
-                            <p className="font-mono text-xs">
-                              {receipt.transaction?.reference ?? receipt.id}
-                            </p>
-                            <p className="text-xs text-muted-foreground">
-                              {new Date(receipt.createdAt).toLocaleDateString()}
-                            </p>
-                          </TableCell>
-                          <TableCell>
-                            <p className="font-medium">
-                              {maskEmail(receipt.user?.email)}
-                            </p>
-                            <p className="text-xs text-muted-foreground">
-                              {maskPhone(receipt.user?.phone)}
-                            </p>
-                          </TableCell>
-                          <TableCell>
-                            {formatMoney(receipt.amount, "NGN")}
-                          </TableCell>
-                          <TableCell>
-                            <p className="font-medium">
-                              {formatMoney(receipt.expectedCreditAmount, "GHS")}
-                            </p>
-                            <p className="text-xs text-muted-foreground">
-                              Rate {receipt.rate}
-                              {isMonnifyVerifiedReceipt(receipt) && (
-                                <span className="ml-2 text-emerald-600">
-                                  Monnify verified
-                                </span>
-                              )}
-                            </p>
-                          </TableCell>
-                          <TableCell className="font-mono text-xs">
-                            {receipt.bankReference}
-                          </TableCell>
-                          <TableCell>
-                            <Badge variant={statusVariant(receipt.status)}>
-                              {receipt.status.replaceAll("_", " ")}
-                            </Badge>
-                          </TableCell>
-                          <TableCell>
-                            {[
-                              "SUBMITTED",
-                              "UNDER_REVIEW",
-                              "NEEDS_MORE_INFO",
-                            ].includes(receipt.status) ? (
-                              <div className="flex flex-wrap gap-2">
-                                <Button
-                                  size="sm"
-                                  onClick={() =>
-                                    startReceiptReview(receipt, "APPROVED")
-                                  }
-                                >
-                                  {isMonnifyVerifiedReceipt(receipt)
-                                    ? "Credit verified"
-                                    : "Approve"}
-                                </Button>
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  onClick={() =>
-                                    startReceiptReview(receipt, "REJECTED")
-                                  }
-                                >
-                                  Reject
-                                </Button>
-                              </div>
-                            ) : (
-                              <span className="text-sm text-muted-foreground">
-                                Reviewed
-                              </span>
-                            )}
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                )}
+            <div id="exchange-payments" hidden={exchangeSection !== "payments"}>
+              {exchangeSection === "payments" && exchangeHistory}
+            </div>
 
-                {selectedReceipt && (
-                  <div className="mt-6 rounded-lg border border-border bg-muted/30 p-4">
-                    <div className="grid gap-4 lg:grid-cols-[1fr_1fr]">
-                      <div>
-                        <p className="text-sm font-medium">
-                          Review {selectedReceipt.transaction?.reference}
-                        </p>
-                        <p className="mt-1 text-sm text-muted-foreground">
-                          {isMonnifyVerifiedReceipt(selectedReceipt)
-                            ? "Monnify has verified this deposit. Admin approval credits "
-                            : "Confirm statement match before approving. Approval credits "}
-                          {formatMoney(
-                            selectedReceipt.expectedCreditAmount,
-                            "GHS",
-                          )}{" "}
-                          to the user wallet.
-                        </p>
-                        {selectedReceipt.receiptUrl.startsWith("monnify://") ? (
-                          <Badge variant="outline" className="mt-3">
-                            Provider evidence attached
-                          </Badge>
-                        ) : (
-                          <button
-                            type="button"
-                            className="mt-3 inline-flex text-sm font-medium text-primary underline-offset-4 hover:underline"
-                            onClick={() =>
-                              void openReceiptProof(selectedReceipt)
-                            }
-                          >
-                            Open receipt proof
-                          </button>
-                        )}
+            <div id="exchange-deposits" hidden={exchangeSection !== "deposits"}>
+              {exchangeSection === "deposits" && (
+                <Card className="xl:col-span-2">
+                  <CardHeader className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                    <CardTitle>Confirm deposits</CardTitle>
+                    <Select
+                      value={receiptStatus}
+                      onValueChange={(value) => {
+                        setReceiptStatus(value);
+                        setSelectedReceipt(null);
+                        setReviewReason("");
+                      }}
+                    >
+                      <SelectTrigger aria-label="Deposit status" className="w-full md:w-52">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {receiptStatusFilters.map((filter) => (
+                          <SelectItem key={filter} value={filter}>
+                            {humanizeLabel(filter)}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </CardHeader>
+                  <CardContent>
+                    {receiptsQuery.isLoading ? (
+                      <div className="space-y-3">
+                        {[1, 2, 3].map((item) => (
+                          <Skeleton key={item} className="h-12 w-full" />
+                        ))}
                       </div>
-                      <div className="flex flex-col gap-3">
-                        <Select
-                          value={reviewAction}
-                          onValueChange={(value) =>
-                            setReviewAction(
-                              value as
-                                | "APPROVED"
-                                | "REJECTED"
-                                | "NEEDS_MORE_INFO",
-                            )
-                          }
+                    ) : receiptsQuery.isError ? (
+                      <div className="flex flex-col items-center gap-3 py-8 text-center">
+                        <p className="text-sm text-muted-foreground">
+                          Could not load exchange deposit receipts.
+                        </p>
+                        <Button
+                          variant="outline"
+                          onClick={() => void receiptsQuery.refetch()}
                         >
-                          <SelectTrigger>
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="APPROVED">
-                              Approve and credit
-                            </SelectItem>
-                            <SelectItem value="REJECTED">Reject</SelectItem>
-                            <SelectItem value="NEEDS_MORE_INFO">
-                              Needs more info
-                            </SelectItem>
-                          </SelectContent>
-                        </Select>
-                        <textarea
-                          className="min-h-24 rounded-md border border-input bg-background px-3 py-2 text-sm outline-none ring-offset-background placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                          placeholder="Admin review reason"
-                          value={reviewReason}
-                          maxLength={500}
-                          onChange={(event) =>
-                            setReviewReason(event.target.value)
-                          }
-                        />
-                        <div className="flex flex-wrap gap-2">
-                          <Button
-                            onClick={submitReceiptReview}
-                            disabled={reviewReceiptMutation.isPending}
-                          >
-                            {reviewReceiptMutation.isPending
-                              ? "Saving..."
-                              : "Save review"}
-                          </Button>
-                          <Button
-                            variant="outline"
-                            onClick={() => {
-                              setSelectedReceipt(null);
-                              setReviewReason("");
-                              setReviewAttemptKey(null);
-                            }}
-                          >
-                            Cancel
-                          </Button>
-                        </div>
+                          Retry
+                        </Button>
                       </div>
-                    </div>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-
-            <Card className="xl:col-span-2">
-              <CardHeader className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                <div className="flex items-center gap-3">
-                  <CardTitle>Payout Approvals</CardTitle>
-                  {payoutStatsQuery.data && (
-                    <Badge variant="secondary" className="text-sm">
-                      {payoutStatsQuery.data.pendingApproval} pending
-                    </Badge>
-                  )}
-                </div>
-                <Select
-                  value={payoutStatus}
-                  onValueChange={(value) => {
-                    setPayoutStatus(value);
-                    setSelectedPayout(null);
-                    setShowPayoutMarkSent(false);
-                  }}
-                >
-                  <SelectTrigger className="w-full md:w-52">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {payoutStatusFilters.map((filter) => (
-                      <SelectItem key={filter} value={filter}>
-                        {filter.replaceAll("_", " ")}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </CardHeader>
-
-              <CardContent>
-                {payoutStatsQuery.data && (
-                  <div className="mb-4 grid grid-cols-3 gap-3">
-                    <div className="rounded-md border bg-muted/30 p-3 text-center">
-                      <p className="text-xs text-muted-foreground">Pending</p>
-                      <p className="mt-1 text-xl font-semibold text-amber-500">
-                        {payoutStatsQuery.data.pendingApproval}
-                      </p>
-                    </div>
-                    <div className="rounded-md border bg-muted/30 p-3 text-center">
-                      <p className="text-xs text-muted-foreground">Approved</p>
-                      <p className="mt-1 text-xl font-semibold text-blue-500">
-                        {payoutStatsQuery.data.approved}
-                      </p>
-                    </div>
-                    <div className="rounded-md border bg-muted/30 p-3 text-center">
-                      <p className="text-xs text-muted-foreground">Sent</p>
-                      <p className="mt-1 text-xl font-semibold text-emerald-500">
-                        {payoutStatsQuery.data.sent}
-                      </p>
-                    </div>
-                  </div>
-                )}
-
-                {payoutsQuery.isLoading ? (
-                  <div className="space-y-3">
-                    {[1, 2, 3].map((item) => (
-                      <Skeleton key={item} className="h-12 w-full" />
-                    ))}
-                  </div>
-                ) : payoutsQuery.isError ? (
-                  <div className="flex flex-col items-center gap-3 py-8 text-center">
-                    <p className="text-sm text-muted-foreground">
-                      Could not load payout requests.
-                    </p>
-                    <Button
-                      variant="outline"
-                      onClick={() => void payoutsQuery.refetch()}
-                    >
-                      Retry
-                    </Button>
-                  </div>
-                ) : (payoutsQuery.data ?? []).length === 0 ? (
-                  <div className="py-8 text-center text-muted-foreground">
-                    No payouts for this status
-                  </div>
-                ) : (
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Reference</TableHead>
-                        <TableHead>User</TableHead>
-                        <TableHead>NGN</TableHead>
-                        <TableHead>GHS</TableHead>
-                        <TableHead>Bank</TableHead>
-                        <TableHead>Account</TableHead>
-                        <TableHead>Status</TableHead>
-                        <TableHead>Actions</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {payoutsQuery.data?.map((payout) => (
-                        <TableRow key={payout.id}>
-                          <TableCell>
-                            <p className="font-mono text-xs">
-                              {payout.transaction?.reference ?? payout.id.slice(0, 12)}
-                            </p>
-                            <p className="text-xs text-muted-foreground">
-                              {new Date(payout.createdAt).toLocaleDateString()}
-                            </p>
-                          </TableCell>
-                          <TableCell>
-                            <p className="font-medium">
-                              {maskEmail(payout.user?.email)}
-                            </p>
-                            <p className="text-xs text-muted-foreground">
-                              {maskPhone(payout.user?.phone)}
-                            </p>
-                          </TableCell>
-                          <TableCell className="font-medium">
-                            {formatMoney(payout.sourceAmount, "NGN")}
-                          </TableCell>
-                          <TableCell>
-                            <p className="font-medium">
-                              {formatMoney(payout.destinationAmount, "GHS")}
-                            </p>
-                            <p className="text-xs text-muted-foreground">
-                              Rate {Number(payout.rate).toFixed(4)}
-                            </p>
-                          </TableCell>
-                          <TableCell>{payout.destinationBankName}</TableCell>
-                          <TableCell className="font-mono text-xs">
-                            {payout.destinationAccountNumber}
-                          </TableCell>
-                          <TableCell>
-                            <Badge variant={statusVariant(payout.status)}>
-                              {payout.status.replaceAll("_", " ")}
-                            </Badge>
-                          </TableCell>
-                          <TableCell>
-                            {payout.status === "PENDING_APPROVAL" ? (
-                              <div className="flex flex-wrap gap-2">
-                                <Button
-                                  size="sm"
-                                  onClick={() =>
-                                    startPayoutReview(payout, "APPROVED")
-                                  }
-                                >
-                                  Approve
-                                </Button>
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  onClick={() =>
-                                    startPayoutReview(payout, "REJECTED")
-                                  }
-                                >
-                                  Reject
-                                </Button>
+                    ) : (receiptsQuery.data ?? []).length === 0 ? (
+                      <div className="py-8 text-center text-muted-foreground">
+                        No deposits to show.
+                      </div>
+                    ) : (
+                      <ul className="grid gap-3 lg:grid-cols-2">
+                        {receiptsQuery.data?.filter((receipt) => !selectedReceipt || receipt.id === selectedReceipt.id).map((receipt) => (
+                          <li key={receipt.id} className="min-w-0 space-y-3 rounded-xl border bg-background p-3">
+                            <div className="flex flex-wrap items-start justify-between gap-2">
+                              <div>
+                                <p className="text-lg font-bold">{formatMoney(receipt.amount, "NGN")}</p>
+                                <p className="text-sm text-muted-foreground">Credit {formatMoney(receipt.expectedCreditAmount, "GHS")}</p>
                               </div>
-                            ) : payout.status === "APPROVED" ? (
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={() => startPayoutMarkSent(payout)}
+                              <Badge variant={statusVariant(receipt.status)}>{humanizeLabel(receipt.status)}</Badge>
+                            </div>
+                            <p className="wrap-anywhere text-sm text-muted-foreground">{maskEmail(receipt.user?.email)}</p>
+                            {isMonnifyVerifiedReceipt(receipt) && <p className="text-sm">Monnify verified this deposit</p>}
+                            <p className="wrap-anywhere font-mono text-xs text-muted-foreground">{receipt.transaction?.reference ?? receipt.id}</p>
+                            {!selectedReceipt && (
+                              <div className="flex flex-wrap gap-2">
+                                {receipt.receiptUrl && !receipt.receiptUrl.startsWith("monnify://") && (
+                                  <Button variant="outline" onClick={() => void openReceiptProof(receipt)}>See receipt</Button>
+                                )}
+                                {["SUBMITTED", "UNDER_REVIEW", "NEEDS_MORE_INFO"].includes(receipt.status) && (
+                                  <Button onClick={() => startReceiptReview(receipt, "APPROVED")}>Review deposit</Button>
+                                )}
+                              </div>
+                            )}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+
+                    {selectedReceipt && (
+                      <div className="mt-6 rounded-lg border border-border bg-muted/30 p-4">
+                        <div className="grid gap-4 lg:grid-cols-[1fr_1fr]">
+                          <div>
+                            <p className="text-sm font-medium">
+                              Review {selectedReceipt.transaction?.reference}
+                            </p>
+                            <p className="mt-1 text-sm text-muted-foreground">
+                              {isMonnifyVerifiedReceipt(selectedReceipt)
+                                ? "Monnify has verified this deposit. Admin approval credits "
+                                : "Confirm statement match before approving. Approval credits "}
+                              {formatMoney(
+                                selectedReceipt.expectedCreditAmount,
+                                "GHS",
+                              )}{" "}
+                              to the user wallet.
+                            </p>
+                            {selectedReceipt.bankReference && (
+                              <p className="mt-2 wrap-anywhere text-sm">Bank reference {selectedReceipt.bankReference}</p>
+                            )}
+                            {selectedReceipt.receiptUrl.startsWith("monnify://") ? (
+                              <Badge variant="outline" className="mt-3">
+                                Provider evidence attached
+                              </Badge>
+                            ) : (
+                              <button
+                                type="button"
+                                className="mt-3 inline-flex text-sm font-medium text-primary underline-offset-4 hover:underline"
+                                onClick={() =>
+                                  void openReceiptProof(selectedReceipt)
+                                }
                               >
-                                Mark Sent
-                              </Button>
-                            ) : (
-                              <span className="text-sm text-muted-foreground">
-                                {payout.notificationSent ? "Notified" : "Processed"}
-                              </span>
+                                Open receipt proof
+                              </button>
                             )}
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                )}
+                          </div>
+                          <div className="flex flex-col gap-3">
+                            <Select
+                              value={reviewAction}
+                              onValueChange={(value) =>
+                                setReviewAction(
+                                  value as
+                                    | "APPROVED"
+                                    | "REJECTED"
+                                    | "NEEDS_MORE_INFO",
+                                )
+                              }
+                            >
+                              <SelectTrigger>
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="APPROVED">
+                                  Approve and credit
+                                </SelectItem>
+                                <SelectItem value="REJECTED">Reject</SelectItem>
+                                <SelectItem value="NEEDS_MORE_INFO">
+                                  Needs more info
+                                </SelectItem>
+                              </SelectContent>
+                            </Select>
+                            <textarea
+                              className="min-h-24 rounded-md border border-input bg-background px-3 py-2 text-sm outline-none ring-offset-background placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                              placeholder="Admin review reason"
+                              value={reviewReason}
+                              maxLength={500}
+                              onChange={(event) =>
+                                setReviewReason(event.target.value)
+                              }
+                            />
+                            <div className="flex flex-wrap gap-2">
+                              <Button
+                                onClick={submitReceiptReview}
+                                disabled={reviewReceiptMutation.isPending}
+                              >
+                                {reviewReceiptMutation.isPending
+                                  ? "Saving..."
+                                  : reviewAction === "APPROVED"
+                                    ? "Approve and credit"
+                                    : reviewAction === "REJECTED"
+                                      ? "Reject deposit"
+                                      : "Request more info"}
+                              </Button>
+                              <Button
+                                variant="outline"
+                                onClick={() => {
+                                  setSelectedReceipt(null);
+                                  setReviewReason("");
+                                  setReviewAttemptKey(null);
+                                }}
+                              >
+                                Cancel
+                              </Button>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              )}
+            </div>
 
-                {selectedPayout && !showPayoutMarkSent && (
-                  <div className="mt-6 rounded-lg border border-border bg-muted/30 p-4">
-                    <div className="grid gap-4 lg:grid-cols-[1fr_1fr]">
-                      <div>
-                        <p className="text-sm font-medium">
-                          Review payout {selectedPayout.transaction?.reference}
-                        </p>
-                        <p className="mt-1 text-sm text-muted-foreground">
-                          {payoutReviewAction === "APPROVED"
-                            ? "Approving means you will manually send GHS to the userʼs bank account. Mark as sent after the transfer."
-                            : "Rejecting reverses the NGN debit back to the userʼs wallet."}
-                        </p>
-                        <div className="mt-3 grid gap-2 text-sm">
-                          <p>
-                            <span className="text-muted-foreground">Bank: </span>
-                            {selectedPayout.destinationBankName}
+            <div id="exchange-payouts" hidden={exchangeSection !== "payouts"}>
+              {exchangeSection === "payouts" && (
+                <Card className="xl:col-span-2">
+                  <CardHeader className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                    <div className="flex items-center gap-3">
+                      <CardTitle>Approve payouts</CardTitle>
+                      {payoutStatsQuery.data && (
+                        <Badge variant="secondary" className="text-sm">
+                          {payoutStatsQuery.data.pendingApproval} pending
+                        </Badge>
+                      )}
+                    </div>
+                    <Select
+                      value={payoutStatus}
+                      onValueChange={(value) => {
+                        setPayoutStatus(value);
+                        setSelectedPayout(null);
+                        setShowPayoutMarkSent(false);
+                      }}
+                    >
+                      <SelectTrigger aria-label="Payout status" className="w-full md:w-52">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {payoutStatusFilters.map((filter) => (
+                          <SelectItem key={filter} value={filter}>
+                            {humanizeLabel(filter)}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </CardHeader>
+
+                  <CardContent>
+                    {payoutStatsQuery.data && (
+                      <div className="mb-4 grid grid-cols-3 gap-3">
+                        <div className="rounded-md border bg-muted/30 p-3 text-center">
+                          <p className="text-xs text-muted-foreground">Pending</p>
+                          <p className="mt-1 text-xl font-semibold text-amber-500">
+                            {payoutStatsQuery.data.pendingApproval}
                           </p>
-                          <p>
-                            <span className="text-muted-foreground">Account: </span>
-                            {selectedPayout.destinationAccountNumber}
+                        </div>
+                        <div className="rounded-md border bg-muted/30 p-3 text-center">
+                          <p className="text-xs text-muted-foreground">Approved</p>
+                          <p className="mt-1 text-xl font-semibold text-blue-500">
+                            {payoutStatsQuery.data.approved}
                           </p>
-                          <p>
-                            <span className="text-muted-foreground">Name: </span>
-                            {selectedPayout.destinationAccountName}
-                          </p>
-                          <p>
-                            <span className="text-muted-foreground">Amount: </span>
-                            {formatMoney(selectedPayout.destinationAmount, "GHS")}
+                        </div>
+                        <div className="rounded-md border bg-muted/30 p-3 text-center">
+                          <p className="text-xs text-muted-foreground">Sent</p>
+                          <p className="mt-1 text-xl font-semibold text-emerald-500">
+                            {payoutStatsQuery.data.sent}
                           </p>
                         </div>
                       </div>
-                      <div className="flex flex-col gap-3">
-                        <Select
-                          value={payoutReviewAction}
-                          onValueChange={(value) =>
-                            setPayoutReviewAction(
-                              value as "APPROVED" | "REJECTED",
-                            )
-                          }
+                    )}
+
+                    {payoutsQuery.isLoading ? (
+                      <div className="space-y-3">
+                        {[1, 2, 3].map((item) => (
+                          <Skeleton key={item} className="h-12 w-full" />
+                        ))}
+                      </div>
+                    ) : payoutsQuery.isError ? (
+                      <div className="flex flex-col items-center gap-3 py-8 text-center">
+                        <p className="text-sm text-muted-foreground">
+                          Could not load payout requests.
+                        </p>
+                        <Button
+                          variant="outline"
+                          onClick={() => void payoutsQuery.refetch()}
                         >
-                          <SelectTrigger>
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="APPROVED">
-                              Approve payout
-                            </SelectItem>
-                            <SelectItem value="REJECTED">
-                              Reject and reverse
-                            </SelectItem>
-                          </SelectContent>
-                        </Select>
-                        <textarea
-                          className="min-h-24 rounded-md border border-input bg-background px-3 py-2 text-sm outline-none ring-offset-background placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                          placeholder="Admin review reason (min 10 chars)"
-                          value={payoutReviewReason}
-                          maxLength={500}
-                          onChange={(event) =>
-                            setPayoutReviewReason(event.target.value)
-                          }
-                        />
-                        <div className="flex flex-wrap gap-2">
-                          <Button
-                            onClick={submitPayoutReview}
-                            disabled={reviewPayoutMutation.isPending}
-                          >
-                            {reviewPayoutMutation.isPending
-                              ? "Saving..."
-                              : "Save review"}
-                          </Button>
-                          <Button
-                            variant="outline"
-                            onClick={() => {
-                              setSelectedPayout(null);
-                              setPayoutReviewReason("");
-                              setPayoutReviewAttemptKey(null);
-                            }}
-                          >
-                            Cancel
-                          </Button>
-                        </div>
+                          Retry
+                        </Button>
                       </div>
-                    </div>
-                  </div>
-                )}
+                    ) : (payoutsQuery.data ?? []).length === 0 ? (
+                      <div className="py-8 text-center text-muted-foreground">
+                        No payouts to show.
+                      </div>
+                    ) : (
+                      <ul className="grid gap-3 lg:grid-cols-2">
+                        {payoutsQuery.data?.filter((payout) => !selectedPayout || payout.id === selectedPayout.id).map((payout) => (
+                          <li key={payout.id} className="min-w-0 space-y-3 rounded-xl border bg-background p-3">
+                            <div className="flex flex-wrap items-start justify-between gap-2">
+                              <div>
+                                <p className="text-lg font-bold">{formatMoney(payout.destinationAmount, "GHS")}</p>
+                                <p className="text-sm text-muted-foreground">From {formatMoney(payout.sourceAmount, "NGN")}</p>
+                              </div>
+                              <Badge variant={statusVariant(payout.status)}>{humanizeLabel(payout.status)}</Badge>
+                            </div>
+                            <p className="wrap-anywhere text-sm text-muted-foreground">
+                              {payout.destinationBankName} · {maskEmail(payout.user?.email)}
+                            </p>
+                            <p className="wrap-anywhere font-mono text-xs text-muted-foreground">{payout.transaction?.reference ?? payout.id}</p>
+                        {!selectedPayout && payout.status === "PENDING_APPROVAL" && (
+                              <Button onClick={() => startPayoutReview(payout, "APPROVED")}>Review payout</Button>
+                            )}
+                            {!selectedPayout && payout.status === "APPROVED" && (
+                              <Button onClick={() => startPayoutMarkSent(payout)}>Mark as sent</Button>
+                            )}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
 
-                {selectedPayout && showPayoutMarkSent && (
-                  <div className="mt-6 rounded-lg border border-border bg-muted/30 p-4">
-                    <div className="grid gap-4 lg:grid-cols-[1fr_1fr]">
-                      <div>
-                        <p className="text-sm font-medium">
-                          Mark payout as sent
-                        </p>
-                        <p className="mt-1 text-sm text-muted-foreground">
-                          Confirm you have manually transferred{" "}
-                          {formatMoney(selectedPayout.destinationAmount, "GHS")}{" "}
-                          to {selectedPayout.destinationBankName} account{" "}
-                          {selectedPayout.destinationAccountNumber} (
-                          {selectedPayout.destinationAccountName}). The user will
-                          be notified that money is incoming.
-                        </p>
-                      </div>
-                      <div className="flex flex-col gap-3">
-                        <textarea
-                          className="min-h-24 rounded-md border border-input bg-background px-3 py-2 text-sm outline-none ring-offset-background placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                          placeholder="Reason for marking as sent (min 10 chars)"
-                          value={payoutMarkSentReason}
-                          maxLength={500}
-                          onChange={(event) =>
-                            setPayoutMarkSentReason(event.target.value)
-                          }
-                        />
-                        <input
-                          type="url"
-                          className="rounded-md border border-input bg-background px-3 py-2 text-sm outline-none ring-offset-background placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                          placeholder="Payment receipt URL (optional, https)"
-                          value={payoutMarkSentReceiptUrl}
-                          onChange={(event) =>
-                            setPayoutMarkSentReceiptUrl(event.target.value)
-                          }
-                        />
-                        <div className="flex flex-wrap gap-2">
-                          <Button
-                            onClick={submitPayoutMarkSent}
-                            disabled={markPayoutSentMutation.isPending}
-                          >
-                            {markPayoutSentMutation.isPending
-                              ? "Saving..."
-                              : "Mark as sent"}
-                          </Button>
-                          <Button
-                            variant="outline"
-                            onClick={() => {
-                              setSelectedPayout(null);
-                              setShowPayoutMarkSent(false);
-                              setPayoutMarkSentReason("");
-                              setPayoutMarkSentReceiptUrl("");
-                              setPayoutMarkSentAttemptKey(null);
-                            }}
-                          >
-                            Cancel
-                          </Button>
+                    {selectedPayout && !showPayoutMarkSent && (
+                      <div className="mt-6 rounded-lg border border-border bg-muted/30 p-4">
+                        <div className="grid gap-4 lg:grid-cols-[1fr_1fr]">
+                          <div>
+                            <p className="text-sm font-medium">
+                              Review payout {selectedPayout.transaction?.reference}
+                            </p>
+                            <p className="mt-1 text-sm text-muted-foreground">
+                              {payoutReviewAction === "APPROVED"
+                                ? "Approving means you will manually send GHS to the userʼs bank account. Mark as sent after the transfer."
+                                : "Rejecting reverses the NGN debit back to the userʼs wallet."}
+                            </p>
+                            <div className="mt-3 grid gap-2 text-sm">
+                              <p>
+                                <span className="text-muted-foreground">Bank: </span>
+                                {selectedPayout.destinationBankName}
+                              </p>
+                              <p>
+                                <span className="text-muted-foreground">Account: </span>
+                                {selectedPayout.destinationAccountNumber}
+                              </p>
+                              <p>
+                                <span className="text-muted-foreground">Name: </span>
+                                {selectedPayout.destinationAccountName}
+                              </p>
+                              <p>
+                                <span className="text-muted-foreground">Amount: </span>
+                                {formatMoney(selectedPayout.destinationAmount, "GHS")}
+                              </p>
+                            </div>
+                          </div>
+                          <div className="flex flex-col gap-3">
+                            <Select
+                              value={payoutReviewAction}
+                              onValueChange={(value) =>
+                                setPayoutReviewAction(
+                                  value as "APPROVED" | "REJECTED",
+                                )
+                              }
+                            >
+                              <SelectTrigger>
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="APPROVED">
+                                  Approve payout
+                                </SelectItem>
+                                <SelectItem value="REJECTED">
+                                  Reject and reverse
+                                </SelectItem>
+                              </SelectContent>
+                            </Select>
+                            <textarea
+                              className="min-h-24 rounded-md border border-input bg-background px-3 py-2 text-sm outline-none ring-offset-background placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                              placeholder="Admin review reason (min 10 chars)"
+                              value={payoutReviewReason}
+                              maxLength={500}
+                              onChange={(event) =>
+                                setPayoutReviewReason(event.target.value)
+                              }
+                            />
+                            <div className="flex flex-wrap gap-2">
+                              <Button
+                                onClick={submitPayoutReview}
+                                disabled={reviewPayoutMutation.isPending}
+                              >
+                                {reviewPayoutMutation.isPending
+                                  ? "Saving..."
+                                  : payoutReviewAction === "APPROVED"
+                                    ? "Approve payout"
+                                    : "Reject payout"}
+                              </Button>
+                              <Button
+                                variant="outline"
+                                onClick={() => {
+                                  setSelectedPayout(null);
+                                  setPayoutReviewReason("");
+                                  setPayoutReviewAttemptKey(null);
+                                }}
+                              >
+                                Cancel
+                              </Button>
+                            </div>
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
+                    )}
+
+                    {selectedPayout && showPayoutMarkSent && (
+                      <div className="mt-6 rounded-lg border border-border bg-muted/30 p-4">
+                        <div className="grid gap-4 lg:grid-cols-[1fr_1fr]">
+                          <div>
+                            <p className="text-sm font-medium">
+                              Mark payout as sent
+                            </p>
+                            <p className="mt-1 text-sm text-muted-foreground">
+                              Confirm you have manually transferred{" "}
+                              {formatMoney(selectedPayout.destinationAmount, "GHS")}{" "}
+                              to {selectedPayout.destinationBankName} account{" "}
+                              {selectedPayout.destinationAccountNumber} (
+                              {selectedPayout.destinationAccountName}). The user will
+                              be notified that money is incoming.
+                            </p>
+                          </div>
+                          <div className="flex flex-col gap-3">
+                            <textarea
+                              className="min-h-24 rounded-md border border-input bg-background px-3 py-2 text-sm outline-none ring-offset-background placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                              placeholder="Reason for marking as sent (min 10 chars)"
+                              value={payoutMarkSentReason}
+                              maxLength={500}
+                              onChange={(event) =>
+                                setPayoutMarkSentReason(event.target.value)
+                              }
+                            />
+                            <input
+                              type="url"
+                              className="rounded-md border border-input bg-background px-3 py-2 text-sm outline-none ring-offset-background placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                              placeholder="Payment receipt URL (optional, https)"
+                              value={payoutMarkSentReceiptUrl}
+                              onChange={(event) =>
+                                setPayoutMarkSentReceiptUrl(event.target.value)
+                              }
+                            />
+                            <div className="flex flex-wrap gap-2">
+                              <Button
+                                onClick={submitPayoutMarkSent}
+                                disabled={markPayoutSentMutation.isPending}
+                              >
+                                {markPayoutSentMutation.isPending
+                                  ? "Saving..."
+                                  : "Mark as sent"}
+                              </Button>
+                              <Button
+                                variant="outline"
+                                onClick={() => {
+                                  setSelectedPayout(null);
+                                  setShowPayoutMarkSent(false);
+                                  setPayoutMarkSentReason("");
+                                  setPayoutMarkSentReceiptUrl("");
+                                  setPayoutMarkSentAttemptKey(null);
+                                }}
+                              >
+                                Cancel
+                              </Button>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              )}
+            </div>
+
+            <section aria-label="Exchange rate controls" className="max-w-4xl">
+              <RateControlCard open={searchParams.get("rates") === "open"} />
+            </section>
           </TabsContent>
 
           <TabsContent value="currencies">

@@ -27,7 +27,7 @@ describe('LedgerService', () => {
       findMany: jest.fn(),
     },
     $queryRaw: jest.fn(),
-    $transaction: jest.fn(async (fn: any) => fn(prisma)),
+    $transaction: jest.fn(async (fn: any): Promise<unknown> => fn(prisma)),
   };
 
   let service: LedgerService;
@@ -51,7 +51,7 @@ describe('LedgerService', () => {
           ]
         : [],
     );
-    service = new LedgerService(prisma);
+    service = new LedgerService(prisma as never);
   });
 
   it('credits a wallet and records the balance movement in one transaction', async () => {
@@ -294,7 +294,7 @@ describe('LedgerService', () => {
           reference: 'RECOVERY-1',
           source: 'PAYSTACK_ADVERSE_RECOVERY',
         },
-        prisma,
+        prisma as never,
       ),
     ).resolves.toEqual(expect.objectContaining({ walletId: 'wallet-1' }));
     expect(prisma.fundingAdverseCase.findMany).not.toHaveBeenCalled();
@@ -318,7 +318,7 @@ describe('LedgerService', () => {
           reference: 'RECOVERY-2',
           source: 'PAYSTACK_ADVERSE_RECOVERY',
         },
-        prisma,
+        prisma as never,
       ),
     ).rejects.toThrow('reconciliation is blocked');
   });

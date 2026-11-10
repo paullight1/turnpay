@@ -1,3 +1,5 @@
+> Historical guide. Superseded for current deployment/provider decisions. Use [the current operations index](00-README.MD), [Paystack activation](../PAYSTACK-ACTIVATION.md), and [the migration runbook](20-MIGRATION-RUNBOOK.md). Customer OTP is Supabase email; Sentry is optional; Monnify is legacy-only; the recorded active backend host is Dokploy. Do not apply the old SMS/provider/platform setup below to production.
+
 # 🏗️ Production Provisioning Guide — PostgreSQL, Redis & App Hosting
 
 > **Guide ID:** `PROD-16-PROVISION`

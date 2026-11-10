@@ -109,10 +109,10 @@ class VtuRecipient implements ValidatorConstraintInterface {
 }
 
 export class InternationalCountryDto {
-  @IsString() @Matches(/^[A-Z]{2}$/) countryCode: string;
+  @IsString() @Matches(/^[A-Z]{2}$/) countryCode!: string;
 }
 export class ValidateSmileDto {
-  @IsEmail() @MaxLength(254) smileEmail: string;
+  @IsEmail() @MaxLength(254) smileEmail!: string;
 }
 
 export class GetVtuProvidersDto {
@@ -127,7 +127,7 @@ export class GetVtuPackagesDto {
   @IsString()
   @IsNotEmpty()
   @IsIn(VTU_PROVIDERS)
-  provider: (typeof VTU_PROVIDERS)[number];
+  provider!: (typeof VTU_PROVIDERS)[number];
 
   @ValidateIf(
     (dto: GetVtuPackagesDto) =>
@@ -149,7 +149,7 @@ export class ValidateVtuCustomerDto {
   @IsString()
   @IsNotEmpty()
   @IsIn(VTU_PROVIDERS)
-  provider: (typeof VTU_PROVIDERS)[number];
+  provider!: (typeof VTU_PROVIDERS)[number];
 
   @IsString()
   @IsNotEmpty()
@@ -157,14 +157,14 @@ export class ValidateVtuCustomerDto {
   @Matches(CUSTOMER_IDENTIFIER_REGEX, {
     message: 'number must contain only letters, numbers, or hyphen',
   })
-  number: string;
+  number!: string;
 }
 
 export class ValidateSmartCardDto {
   @IsString()
   @IsNotEmpty()
   @IsIn(['dstv', 'gotv', 'startimes'])
-  provider: 'dstv' | 'gotv' | 'startimes';
+  provider!: 'dstv' | 'gotv' | 'startimes';
 
   @IsString()
   @IsNotEmpty()
@@ -172,18 +172,18 @@ export class ValidateSmartCardDto {
   @Matches(CUSTOMER_IDENTIFIER_REGEX, {
     message: 'smartCardNumber must contain only letters, numbers, or hyphen',
   })
-  smartCardNumber: string;
+  smartCardNumber!: string;
 
   @IsString()
   @IsIn(VTU_SUBSCRIPTION_TYPES)
-  subscriptionType: VtuSubscriptionType;
+  subscriptionType!: VtuSubscriptionType;
 
   @PhoneField()
   @IsString()
   @Matches(NIGERIA_PHONE_REGEX, {
     message: 'contactPhone must be a valid Nigerian phone number',
   })
-  contactPhone: string;
+  contactPhone!: string;
 }
 
 export class ValidateMeterDto {
@@ -203,7 +203,7 @@ export class ValidateMeterDto {
     'aba',
     'yedc',
   ])
-  provider: (typeof VTU_PROVIDERS)[number];
+  provider!: (typeof VTU_PROVIDERS)[number];
 
   @IsString()
   @IsNotEmpty()
@@ -211,18 +211,18 @@ export class ValidateMeterDto {
   @Matches(/^\d{5,32}$/, {
     message: 'meterNumber must contain 5 to 32 digits',
   })
-  meterNumber: string;
+  meterNumber!: string;
 
   @IsString()
   @IsIn(VTU_METER_TYPES)
-  meterType: VtuMeterType;
+  meterType!: VtuMeterType;
 
   @PhoneField()
   @IsString()
   @Matches(NIGERIA_PHONE_REGEX, {
     message: 'contactPhone must be a valid Nigerian phone number',
   })
-  contactPhone: string;
+  contactPhone!: string;
 }
 
 export class VtuOrderReferenceDto {
@@ -232,18 +232,18 @@ export class VtuOrderReferenceDto {
   @Matches(/^[A-Za-z0-9:_-]{8,128}$/, {
     message: 'reference must be a valid VTU order reference',
   })
-  reference: string;
+  reference!: string;
 }
 
 export class PurchaseVtuDto {
   @IsString()
   @IsIn(VTU_TYPES)
-  type: VtuType;
+  type!: VtuType;
 
   @IsString()
   @IsNotEmpty()
   @IsIn(VTU_PROVIDERS)
-  provider: (typeof VTU_PROVIDERS)[number];
+  provider!: (typeof VTU_PROVIDERS)[number];
 
   @PhoneField()
   @IsString()
@@ -263,14 +263,14 @@ export class PurchaseVtuDto {
   @Matches(NIGERIA_PHONE_REGEX, {
     message: 'contactPhone must be a valid Nigerian phone number',
   })
-  contactPhone: string;
+  contactPhone!: string;
 
   @Transform(({ value }) => normalizeDecimalInput(value))
   @IsString()
   @Matches(MONEY_AMOUNT_PATTERN, {
     message: 'amount must be a positive decimal with at most 2 decimal places',
   })
-  amount: string;
+  amount!: string;
 
   @IsString()
   @ValidateIf(
@@ -363,7 +363,7 @@ export class PurchaseVtuDto {
 }
 
 export class VtuQuoteDto extends GetVtuPackagesDto {
-  @IsString() @IsNotEmpty() @MaxLength(100) packageId: string;
+  @IsString() @IsNotEmpty() @MaxLength(100) packageId!: string;
   @IsOptional() @IsString() @Matches(MONEY_AMOUNT_PATTERN) faceValue?: string;
-  @IsString() @IsIn(VTU_TYPES) type: VtuType;
+  @IsString() @IsIn(VTU_TYPES) type!: VtuType;
 }

@@ -31,6 +31,7 @@ describe('retired KYC provider production configuration', () => {
     INTERNAL_TRANSFERS_ENABLED: 'false',
     TRANSACTION_PIN_REQUIRED: 'true',
     BANKING_ENABLED: 'false',
+    BANKING_SANDBOX_MODE: 'false',
     BANKING_PROVIDER_PRIMARY: 'monnify',
     VIRTUAL_ACCOUNTS_ENABLED: 'false',
     WITHDRAWALS_ENABLED: 'false',
@@ -38,7 +39,7 @@ describe('retired KYC provider production configuration', () => {
     KYC_PROVIDER: 'monnify',
     MONNIFY_API_KEY: 'test-monnify-api-key',
     MONNIFY_SECRET_KEY: 'test-monnify-secret-key',
-    MONNIFY_BASE_URL: 'https://api.monnify.example.com',
+    MONNIFY_BASE_URL: 'https://api.monnify.com',
     PII_ENCRYPTION_KEY: 'test-pii-key-with-at-least-32-characters',
     VTU_ENABLED: 'false',
     VTU_PROVIDER: 'vtpass',
@@ -57,11 +58,74 @@ describe('retired KYC provider production configuration', () => {
     return spawnSync(script, ['true'], { env, encoding: 'utf8' });
   };
 
+  it.each(['Production', 'PRODUCTION', ' production ', 'staging '])(
+    'rejects a noncanonical environment mode %p before provider checks',
+    (mode) => {
+      const result = validate({
+        NODE_ENV: mode,
+        PAYSTACK_SECRET_KEY: 'sk_test_ci',
+        MONNIFY_BASE_URL: 'https://sandbox.monnify.com',
+      });
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain(
+        'NODE_ENV must be development, test, staging, or production',
+      );
+    },
+  );
+
   it('rejects every retired KYC provider', () => {
     for (const provider of ['ninja', 'youverify', 'manual']) {
       const result = validate({ KYC_PROVIDER: provider });
       expect(result.status).toBe(1);
       expect(result.stderr).toContain('KYC_PROVIDER must be');
     }
+  });
+
+  it('rejects sandbox legacy credentials even when Paystack is primary', () => {
+    const result = validate({
+      BANKING_PROVIDER_PRIMARY: 'paystack',
+      KYC_PROVIDER: 'paystack',
+      PAYSTACK_SECRET_KEY: 'sk_live_ci',
+      MONNIFY_BASE_URL: 'https://sandbox.monnify.com',
+    });
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(
+      'MONNIFY_BASE_URL must use the live endpoint',
+    );
+  });
+
+  it('accepts retained live Monnify credentials alongside Paystack', () => {
+    const result = validate({
+      BANKING_PROVIDER_PRIMARY: 'paystack',
+      KYC_PROVIDER: 'paystack',
+      PAYSTACK_SECRET_KEY: 'sk_live_ci',
+      MONNIFY_BASE_URL: 'https://api.monnify.com',
+    });
+    expect(result.status).toBe(0);
+  });
+
+  it.each([
+    'BANKING_ENABLED',
+    'VIRTUAL_ACCOUNTS_ENABLED',
+    'WITHDRAWALS_ENABLED',
+    'PAYSTACK_CHECKOUT_ENABLED',
+    'BANKING_SANDBOX_MODE',
+    'VTU_ENABLED',
+  ])('requires an explicit production decision for %s', (key) => {
+    const result = validate({ [key]: undefined });
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(`${key} must be explicitly true or false`);
+  });
+
+  it('rejects a test Paystack key for production KYC with payment flags off', () => {
+    const result = validate({
+      BANKING_PROVIDER_PRIMARY: 'paystack',
+      KYC_PROVIDER: 'paystack',
+      PAYSTACK_SECRET_KEY: 'sk_test_ci',
+    });
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(
+      'PAYSTACK_SECRET_KEY must be a live secret',
+    );
   });
 });

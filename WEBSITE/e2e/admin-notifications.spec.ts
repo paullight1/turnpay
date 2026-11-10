@@ -205,15 +205,17 @@ test("admin notification inbox dedupes retries, retries read state, and deep-lin
   await expect(
     page.getByRole("heading", { name: "Exchange requests", exact: true }),
   ).toBeVisible({ timeout: 30000 });
+  await page.getByRole("button", { name: "Naira requests", exact: true }).click();
+  const nairaRequests = page.getByRole("region", { name: "Naira requests" });
   await expect(
-    page.getByRole("table").getByText("MX-NOTIFY-001", { exact: true }),
+    nairaRequests.getByText("MX-NOTIFY-001", { exact: true }),
   ).toBeVisible();
 
   // Start from a restrictive queue view, then follow an older notification
   // into an order that belongs to a different status.
   await page.getByRole("combobox", { name: "Filter manual exchange orders" }).click();
   await page.getByRole("option", { name: "Rejected", exact: true }).click();
-  await expect(page.getByText("No orders in this view", { exact: true })).toBeVisible();
+  await expect(nairaRequests.getByText("No requests in this view.", { exact: true })).toBeVisible();
 
   await page
     .getByRole("button", { name: /Admin notifications/ })
@@ -262,9 +264,9 @@ test("admin notification inbox dedupes retries, retries read state, and deep-lin
   await expect(page).toHaveURL(
     new RegExp(`/admin/exchange/manual-orders\\?orderId=${orderId}$`),
   );
-  await expect(
-    page.getByRole("table").getByText("MX-NOTIFY-001", { exact: true }),
-  ).toBeVisible();
+  const detail = page.getByRole("dialog", { name: "Exchange payment details" });
+  await expect(detail.getByText("MX-NOTIFY-001", { exact: true })).toBeVisible();
+  await detail.getByRole("button", { name: "Close", exact: true }).click();
   await page.getByRole("button", { name: /Admin notifications/ }).click();
 
   await page

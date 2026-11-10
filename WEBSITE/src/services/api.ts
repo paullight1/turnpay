@@ -509,10 +509,12 @@ export type AdminManualExchangeOrder = {
   updatedAt: string;
   reviewReason: string | null;
   userId: string;
+  customerName?: string | null;
   destinationInstitution: string | null;
   destinationAccountMasked: string | null;
   destinationAccount: string | null;
   destinationName: string | null;
+  receiptName?: string | null;
   bankReference: string | null;
   depositReference: string | null;
   payoutReference: string | null;

@@ -70,8 +70,25 @@ function createContentSecurityPolicy(nonce: string) {
 }
 
 const PROTECTED_ROUTES = ["/dashboard"];
-const ADMIN_ROUTES = ["/admin"];
 const AUTH_ROUTES = ["/login", "/register"];
+
+function isAdminPath(pathname: string) {
+  return pathname === "/admin" || pathname.startsWith("/admin/");
+}
+
+function getStaffDestination(request: NextRequest) {
+  const callback = request.nextUrl.searchParams.get("callbackUrl");
+  if (callback?.startsWith("/") && URL.canParse(callback, request.url)) {
+    const destination = new URL(callback, request.url);
+    if (
+      destination.origin === request.nextUrl.origin &&
+      isAdminPath(destination.pathname)
+    ) {
+      return destination;
+    }
+  }
+  return new URL("/admin", request.url);
+}
 
 // Reads the locally-persisted session cookie ONLY to recover a candidate
 // bearer token. The presence/contents of this cookie are NOT trusted for
@@ -92,7 +109,7 @@ function readLocalSessionCandidateToken(request: NextRequest) {
 async function verifyWithBackend(
   accessToken: string,
   request: NextRequest,
-): Promise<{ ok: boolean; role?: string; canAccessAdmin?: boolean }> {
+): Promise<{ ok: boolean; status?: number; role?: string; canAccessAdmin?: boolean }> {
   try {
     const bootstrapUrl = apiBaseUrl
       ? `${apiBaseUrl.replace(/\/$/, "")}/api/auth/bootstrap`
@@ -108,7 +125,7 @@ async function verifyWithBackend(
     });
 
     if (!res.ok) {
-      return { ok: false };
+      return { ok: false, status: res.status };
     }
 
     const data = (await res.json().catch(() => null)) as {
@@ -178,9 +195,8 @@ export async function proxy(request: NextRequest) {
     (route) => pathname === route || pathname.startsWith(`${route}/`),
   );
 
-  const isAdmin = ADMIN_ROUTES.some(
-    (route) => pathname === route || pathname.startsWith(`${route}/`),
-  );
+  const isAdmin = isAdminPath(pathname);
+  const isStaffPage = pathname === "/staff";
 
   const isAuthRoute = AUTH_ROUTES.includes(pathname);
   const localE2EAuthToken = process.env.TRUSTPAY_E2E_AUTH_BYPASS_TOKEN;
@@ -193,8 +209,15 @@ export async function proxy(request: NextRequest) {
 
   const redirectToLogin = () => {
     const url = new URL(isAdmin ? "/staff" : "/login", request.url);
-    url.searchParams.set("callbackUrl", pathname);
+    url.searchParams.set("callbackUrl", pathname + request.nextUrl.search);
     return NextResponse.redirect(url);
+  };
+
+  const withSessionCookies = (next: NextResponse) => {
+    for (const cookie of response.cookies.getAll()) {
+      next.cookies.set(cookie);
+    }
+    return next;
   };
 
   // Browser mocks cannot intercept this server-side guard's backend request.
@@ -204,15 +227,14 @@ export async function proxy(request: NextRequest) {
     return response;
   }
 
-  // Candidate bearer token for backend verification. Prefer a Supabase-
-  // validated session when Supabase is configured; otherwise use the local
-  // cookie only as a candidate that must still pass backend verification.
-  // This keeps backend-issued local sessions usable without weakening the
-  // fail-closed behavior for forged or unverifiable cookies.
+  // Staff navigation uses the same HttpOnly session as /api/auth/session.
+  // Every candidate still needs backend verification before granting access.
   let hasVerifiedSupabaseUser = false;
-  let candidateToken: string | null = null;
+  let candidateToken = isAdmin || isStaffPage
+    ? readLocalSessionCandidateToken(request)
+    : null;
 
-  if (supabaseUrl && supabaseAnonKey) {
+  if (!candidateToken && supabaseUrl && supabaseAnonKey) {
     const supabase = createServerClient(supabaseUrl, supabaseAnonKey, {
       cookies: {
         getAll() {
@@ -220,6 +242,7 @@ export async function proxy(request: NextRequest) {
         },
         setAll(cookiesToSet) {
           cookiesToSet.forEach(({ name, value, options }) => {
+            request.cookies.set(name, value);
             response.cookies.set(name, value, options);
           });
         },
@@ -245,32 +268,40 @@ export async function proxy(request: NextRequest) {
     candidateToken = readLocalSessionCandidateToken(request);
   }
 
-  if (isAdmin) {
+  if (isAdmin || isStaffPage) {
     if (!candidateToken) {
-      return redirectToLogin();
+      return isAdmin ? redirectToLogin() : response;
     }
 
     let result = await verifyWithBackend(candidateToken, request);
-    if (!result.ok) {
+    if (result.status === 401) {
       const refreshedToken = await refreshCookieBackedSession(
         request,
         response,
       );
-      if (!refreshedToken) {
-        return redirectToLogin();
-      }
-
-      candidateToken = refreshedToken;
-      result = await verifyWithBackend(candidateToken, request);
-      if (!result.ok) {
-        return redirectToLogin();
+      if (refreshedToken) {
+        result = await verifyWithBackend(refreshedToken, request);
       }
     }
-    if (!hasAdminAccess(result)) {
-      return NextResponse.redirect(new URL("/staff", request.url));
+    if (!result.ok || !hasAdminAccess(result)) {
+      return isAdmin ? withSessionCookies(redirectToLogin()) : response;
     }
 
-    return response;
+    if (isStaffPage) {
+      return withSessionCookies(NextResponse.redirect(getStaffDestination(request)));
+    }
+
+    if (!response.cookies.getAll().length) return response;
+
+    // The layout independently verifies the session. Give it the same cookies
+    // as the browser receives so it does not check an expired access token.
+    for (const { name, value } of response.cookies.getAll()) {
+      request.cookies.set(name, value);
+    }
+    requestHeaders.set("cookie", request.cookies.toString());
+    const next = NextResponse.next({ request: { headers: requestHeaders } });
+    next.headers.set("Content-Security-Policy", contentSecurityPolicy);
+    return withSessionCookies(next);
   }
 
   if (isProtected) {
@@ -279,12 +310,9 @@ export async function proxy(request: NextRequest) {
     const workspaceResponse = (result: {
       role?: string;
       canAccessAdmin?: boolean;
-    }) => {
-      const redirect = NextResponse.redirect(new URL(hasAdminAccess(result) ? '/admin' : '/download', request.url));
-      for (const cookie of response.cookies.getAll())
-        redirect.cookies.set(cookie);
-      return redirect;
-    };
+    }) => withSessionCookies(NextResponse.redirect(
+      new URL(hasAdminAccess(result) ? "/admin" : "/download", request.url),
+    ));
     if (candidateToken) {
       const result = await verifyWithBackend(candidateToken, request);
       if (result.ok) {

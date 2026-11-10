@@ -52,7 +52,7 @@ export class AdminProviderEventsQueryDto extends LimitQueryDto {
 
 export class AdminTransactionStatusDto {
   @IsIn(['PENDING', 'SUCCESS', 'FAILED', 'REVERSED'])
-  status: 'PENDING' | 'SUCCESS' | 'FAILED' | 'REVERSED';
+  status!: 'PENDING' | 'SUCCESS' | 'FAILED' | 'REVERSED';
 }
 
 export class AdminUpdateUserDto {
@@ -105,22 +105,22 @@ export class AdminUpdateUserDto {
   @IsString()
   @MinLength(10)
   @MaxLength(500)
-  reason: string;
+  reason!: string;
 }
 
 export class AdminStatsDto {
-  totalUsers: number;
-  totalTransactions: number;
-  totalVolume: number;
-  totalFees: number;
-  activeUsers: number;
+  totalUsers!: number;
+  totalTransactions!: number;
+  totalVolume!: number;
+  totalFees!: number;
+  activeUsers!: number;
 }
 
 export class AdminActionReasonDto {
   @IsString()
   @MinLength(10)
   @MaxLength(500)
-  reason: string;
+  reason!: string;
 }
 
 export class AdminTransferVerificationDto extends AdminActionReasonDto {

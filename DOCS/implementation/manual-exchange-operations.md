@@ -1,6 +1,6 @@
 # Manual Exchange: staging and operating steps
 
-The first corridor is NGN → GHS. Customers choose TrustPay wallet, bank or MoMo settlement before receiving transfer instructions. Wallet approval credits the in-app GHS balance atomically. BANK/MOMO settlement is performed by the assigned operator outside the app; approval alone never records a completed payout.
+New V1 orders settle directly: NGN → Ghana bank/MoMo and GHS → Nigerian bank account. The assigned operator verifies collection and sends the payout outside TrustPay. Historical wallet orders retain their original credit contract. Current operator actions and activation policy are in [Manual exchange admin triggers](../MANUAL-EXCHANGE-ADMIN-TRIGGERS.md).
 
 ## Configure staging
 
@@ -8,17 +8,17 @@ The first corridor is NGN → GHS. Customers choose TrustPay wallet, bank or MoM
 2. Keep `MANUAL_EXCHANGE_ENABLED=false` until configuration and acceptance are checked. Set `MANUAL_EXCHANGE_COLLECTION_BANK_NAME`, `MANUAL_EXCHANGE_COLLECTION_ACCOUNT_NAME`, `MANUAL_EXCHANGE_COLLECTION_ACCOUNT_NUMBER` and `MANUAL_EXCHANGE_COLLECTION_VERSION` in the backend environment. Increment the version when collection instructions change; existing orders retain their original snapshot.
 3. Use a dedicated collection account with real statement access. It must not be a customer's virtual account or an account automatically credited through wallet-funding webhooks. The server refuses known user virtual accounts and rejects references already associated with provider funding or another exchange settlement.
 4. Configure `EXCHANGE_RECEIPT_BUCKET` (default `exchange-receipts`) as **private**, with an 8 MiB upload limit and JPEG, PNG, WebP and PDF content types. Do not add anonymous read/write policies. The server signs order-scoped uploads and verifies ownership, stored size and file signature before attaching evidence. Signed reads expire after five minutes. Test the actual storage API; local financial tests use synthetic storage.
-5. Provision synthetic staging customers with VERIFIED KYC and Tier 2, a transaction PIN, and a GHS wallet for wallet settlement. Confirm the legitimate Tier 2 upgrade path before onboarding customers; do not bypass eligibility to make a demo pass.
+5. Provision synthetic staging customers with VERIFIED KYC at Tier 1 or higher and a transaction PIN. Direct orders do not need a wallet. Direct exchanges have no application amount/daily cap. Do not fabricate verification or select live policy values to make a demo pass.
 6. Set up a named ADMIN operator using the existing authorized role-management process. Confirm current NGN→GHS rates are fresh. Enable the feature only in staging and open `/admin/exchange/manual-orders`.
 
 ## Process one order
 
-1. Customer creates the order, checks the frozen receive amount and destination, transfers the exact NGN amount to the displayed account, uploads proof and enters the transfer reference. Only server acceptance changes the status to Awaiting confirmation.
+1. Customer creates the order with the updated app, checks the frozen receive amount and destination, transfers the exact source-currency amount to the displayed account, uploads proof and enters the transfer reference. Only server acceptance changes the status to Awaiting confirmation.
 2. Admin opens the proof and independently checks the incoming bank statement. Enter the actual deposit reference, exact received amount and a meaningful reason. A screenshot is not confirmation of received money. Underpayment/overpayment stays in review; do not edit the amount to force approval.
 3. If instructions expired, explicitly select **honor the original quoted terms**. This records acceptance of the original amount; the system never silently reprices received funds. If the original terms cannot be honored, escalate to support for a documented resolution.
-4. For WALLET, approve credit. Deposit allocation, exact GHS ledger credit, customer status and audit event commit together. Refresh after uncertainty; never issue a separate manual credit for the same reference.
+4. For historical WALLET orders only, approve credit. Deposit allocation, exact GHS ledger credit, customer status and audit event commit together. Refresh after uncertainty; never issue a separate manual credit for the same reference.
 5. For BANK/MOMO, confirm the deposit, then claim the payout. Check the recorded beneficiary and the external bank/MoMo history before sending. The claim stays with one operator and has no automatic lease expiry. A timeout is an unknown outcome: check the external provider before taking another action. Never independently pay an order claimed by somebody else.
-6. After the external send, upload payout evidence and enter the actual unique payout reference. Mark sent; verify settlement before marking completed. No wallet credit or debit is made for this path.
+6. After independently verifying the external send, upload payout evidence and enter the actual unique reference and exact quoted payout amount. New NGN→GHS uses Confirm cedis sent; new GHS→NGN uses Confirm naira sent. These actions record completion without dispatching another transfer. Historical LEGACY external orders retain Mark sent/Complete. An already-sent supervised handover can be completed only with its previously verified evidence. No wallet credit or debit is made for an external payout.
 7. Request information or reject only before deposit confirmation. After confirmed receipt, funds remain an outstanding obligation until settlement or a separately reviewed support/refund process. There is deliberately no arbitrary status edit or automatic refund action in this first release.
 
 ## Reconciliation and incidents

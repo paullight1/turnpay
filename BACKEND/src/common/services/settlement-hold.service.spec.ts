@@ -15,8 +15,9 @@ describe('SettlementHoldService', () => {
     fundingAdverseCase: {
       findMany: jest.fn(),
     },
-    $transaction: jest.fn(async (operation: (tx: unknown) => unknown) =>
-      operation(prisma),
+    $transaction: jest.fn(
+      async (operation: (tx: unknown) => unknown): Promise<unknown> =>
+        operation(prisma),
     ),
   };
 
@@ -42,7 +43,7 @@ describe('SettlementHoldService', () => {
   });
 
   beforeEach(() => {
-    service = new SettlementHoldService(prisma);
+    service = new SettlementHoldService(prisma as never);
   });
 
   it('keeps every unresolved blocked run effective even when a newer run passed', async () => {

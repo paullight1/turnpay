@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { isAxiosError } from "axios";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { ArrowDown } from "lucide-react";
+import { ChevronDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -49,36 +49,44 @@ const CURRENCY_PAIRS = [
     from: "NGN",
     to: "GHS",
     title: "Naira to cedis",
-    fromName: "naira",
-    fromFlag: "🇳🇬",
-    toFlag: "🇬🇭",
     saveLabel: "Save naira to cedis",
   },
   {
     from: "GHS",
     to: "NGN",
     title: "Cedis to naira",
-    fromName: "cedi",
-    fromFlag: "🇬🇭",
-    toFlag: "🇳🇬",
     saveLabel: "Save cedis to naira",
   },
 ] as const;
 
-export function RateControlCard() {
+export function RateControlCard({ open }: { open?: boolean }) {
   return (
-    <div className="grid gap-4">
-      <h2 className="text-lg font-semibold">Exchange rates</h2>
-      <p className="text-sm text-muted-foreground">
-        Set both prices here. They are checked together to prevent a profitable
-        round trip.
-      </p>
-      <div className="grid min-w-0 gap-4 lg:grid-cols-2">
+    <details open={open} className="group/rates rounded-xl border border-border bg-card">
+      <summary className="relative isolate flex min-h-20 cursor-pointer list-none items-center justify-between gap-3 overflow-hidden rounded-xl bg-linear-to-r from-teal-950 via-emerald-900 to-cyan-800 px-4 text-lg font-semibold text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring group-open/rates:mb-3 group-open/rates:rounded-b-none [&::-webkit-details-marker]:hidden">
+        <svg
+          aria-hidden="true"
+          focusable="false"
+          viewBox="0 0 224 80"
+          fill="none"
+          className="pointer-events-none absolute inset-y-0 right-8 -z-10 h-full w-56 max-w-[68%] text-teal-200 [mask-image:linear-gradient(to_right,transparent,black_55%)]"
+        >
+          <path d="M0 74C42 60 54 76 92 48S152 12 224 15M0 86C48 70 64 86 102 58s64-38 122-33M0 62C35 50 43 63 81 36s70-36 143-30" stroke="currentColor" strokeOpacity=".28" />
+          <circle cx="164" cy="40" r="32" fill="currentColor" fillOpacity=".12" stroke="currentColor" strokeOpacity=".42" />
+          <circle cx="164" cy="40" r="26" stroke="currentColor" strokeOpacity=".22" />
+          <path d="M147 34h31m-6-6 6 6-6 6m9 6h-31m6-6-6 6 6 6" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+          <path d="M207 40v10m-5-5h10M112 18v8m-4-4h8" stroke="currentColor" strokeOpacity=".6" strokeLinecap="round" />
+        </svg>
+        Exchange rates
+        <span className="grid size-8 shrink-0 place-items-center rounded-full bg-white/15">
+          <ChevronDown aria-hidden="true" className="size-4 group-open/rates:rotate-180" />
+        </span>
+      </summary>
+      <div className="grid min-w-0 gap-2 px-3 pb-3 lg:grid-cols-2">
         {CURRENCY_PAIRS.map((direction) => (
           <DirectionRateEditor key={direction.from} selectedPair={direction} />
         ))}
       </div>
-    </div>
+    </details>
   );
 }
 
@@ -87,12 +95,6 @@ function defaultBasis(from: string): RateQuoteBasis {
   // entries remain the familiar target-per-source multiplier. The API still
   // defaults omitted basis values to TARGET_PER_SOURCE for old clients.
   return from === "NGN" ? "SOURCE_PER_TARGET" : "TARGET_PER_SOURCE";
-}
-
-function basisLabel(basis: RateQuoteBasis) {
-  return basis === "SOURCE_PER_TARGET"
-    ? "Source units per 1 destination unit (divisor)"
-    : "Destination units received per 1 source unit";
 }
 
 function inputLabel(
@@ -350,110 +352,42 @@ function DirectionRateEditor({
   };
 
   return (
-    <section aria-label={selectedPair.title} className="min-w-0 space-y-3">
+    <section
+      aria-label={selectedPair.title}
+      className="min-w-0 space-y-2 rounded-xl border border-border bg-card p-3"
+    >
       <div className="flex items-center justify-between gap-3">
         <h3 className="text-base font-semibold">{selectedPair.title}</h3>
         <span role="status" className="shrink-0 text-xs text-muted-foreground">
-          {rateQuery.isLoading
-            ? "Loading…"
-            : rateQuery.isError
-              ? "Unavailable"
-              : hasUnsavedChanges
-                ? "Unsaved"
-                : rateQuery.data?.blockedReason ===
-                    "EXCHANGE_RATE_PAIR_CONFLICT"
-                  ? "Needs attention"
-                  : rateQuery.data?.configured === false
-                    ? "Not set"
-                    : rateQuery.data?.isStale
-                      ? "Stale"
-                      : "Saved"}
+          {updateRateMutation.isPending
+            ? "Saving…"
+            : rateQuery.isLoading
+              ? "Loading…"
+              : rateQuery.isError
+                ? "Unavailable"
+                : hasUnsavedChanges
+                  ? "Unsaved"
+                  : rateQuery.data?.blockedReason ===
+                      "EXCHANGE_RATE_PAIR_CONFLICT"
+                    ? "Needs attention"
+                    : rateQuery.data?.configured === false
+                      ? "Not set"
+                      : rateQuery.data?.isStale
+                        ? "Stale"
+                        : "Saved"}
         </span>
       </div>
 
-      <div className="rounded-2xl border border-border bg-card p-4">
-        <Label htmlFor={basisId} className="text-sm text-muted-foreground">
-          How is this rate entered?
+      <div className="grid grid-cols-[minmax(0,6.5rem)_minmax(0,9rem)_auto] justify-start items-center gap-1.5">
+        <Label htmlFor={inputId} className="sr-only">
+          {inputLabel(selectedPair, quoteBasis)}
         </Label>
-        <select
-          id={basisId}
-          aria-label="Rate units"
-          value={quoteBasis}
-          onChange={(event) => {
-            setQuoteBasis(event.target.value as RateQuoteBasis);
-            setRateAttemptKey(null);
-          }}
-          disabled={
-            updateRateMutation.isPending ||
-            rateQuery.isLoading ||
-            rateQuery.isError
-          }
-          className="mt-2 h-11 w-full rounded-xl border border-border bg-background px-3 text-sm font-medium"
-        >
-          <option value="TARGET_PER_SOURCE">
-            Destination received for 1 source
-          </option>
-          <option value="SOURCE_PER_TARGET">
-            Source per 1 destination (divisor)
-          </option>
-        </select>
-        <p className="mt-2 text-xs text-muted-foreground">
-          {basisLabel(quoteBasis)}
-        </p>
-      </div>
-
-      <div className="rounded-2xl border border-border bg-card p-4">
-        <div className="mb-2 flex items-center justify-between gap-2">
-          <Label
-            htmlFor={`${inputId}-source`}
-            className="text-sm text-muted-foreground"
-          >
-            Customer sends
-          </Label>
-          <span className="flex shrink-0 items-center gap-1.5 rounded-full bg-muted px-2.5 py-1 text-sm font-semibold">
-            <span aria-hidden="true">{selectedPair.fromFlag}</span>
-            {selectedPair.from}
-          </span>
-        </div>
-        <Input
-          id={`${inputId}-source`}
-          value="1"
-          readOnly
-          tabIndex={-1}
-          aria-label={`Customer sends 1 ${selectedPair.fromName}`}
-          className="h-10 w-full rounded-none border-0 bg-transparent! p-0 text-3xl! font-semibold shadow-none focus-visible:ring-0"
-        />
-      </div>
-
-      <div aria-hidden="true" className="flex h-6 items-center justify-center">
-        <span className="grid size-8 place-items-center rounded-full border border-border bg-background text-primary">
-          <ArrowDown className="size-4" />
-        </span>
-      </div>
-
-      <div className="rounded-2xl border border-primary/25 bg-primary/5 p-4 focus-within:border-primary focus-within:ring-2 focus-within:ring-primary/25">
-        <div className="mb-2 flex items-center justify-between gap-2">
-          <Label htmlFor={inputId} className="text-sm text-muted-foreground">
-            {inputLabel(selectedPair, quoteBasis)}
-          </Label>
-          <span className="flex shrink-0 items-center gap-1.5 rounded-full bg-card px-2.5 py-1 text-sm font-semibold">
-            <span aria-hidden="true">
-              {quoteBasis === "SOURCE_PER_TARGET"
-                ? selectedPair.fromFlag
-                : selectedPair.toFlag}
-            </span>
-            {quoteBasis === "SOURCE_PER_TARGET"
-              ? selectedPair.from
-              : selectedPair.to}
-          </span>
-        </div>
         <Input
           id={inputId}
           inputMode="decimal"
           autoComplete="off"
-          aria-label={inputLabel(selectedPair, quoteBasis)}
           aria-describedby={`${inputId}-preview`}
-          placeholder={rateQuery.isLoading ? "Loading…" : "0.00"}
+          placeholder="0.00"
           value={rate}
           onChange={(event) => {
             setRate(event.target.value);
@@ -464,13 +398,53 @@ function DirectionRateEditor({
             rateQuery.isLoading ||
             rateQuery.isError
           }
-          className="h-10 w-full rounded-none border-0 bg-transparent! p-0 text-3xl! font-semibold shadow-none focus-visible:ring-0"
+          className="h-11 min-w-0 bg-background px-2 text-base! font-semibold tabular-nums"
         />
+        <Label htmlFor={basisId} className="sr-only">
+          Rate units
+        </Label>
+        <select
+          id={basisId}
+          value={quoteBasis}
+          onChange={(event) => {
+            setQuoteBasis(event.target.value as RateQuoteBasis);
+            setRateAttemptKey(null);
+          }}
+          disabled={
+            updateRateMutation.isPending ||
+            rateQuery.isLoading ||
+            rateQuery.isError
+          }
+          className="h-11 min-w-0 w-full rounded-md border border-input bg-background px-2 text-sm focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-50"
+        >
+          <option value="TARGET_PER_SOURCE">
+            {selectedPair.to} for 1 {selectedPair.from}
+          </option>
+          <option value="SOURCE_PER_TARGET">
+            {selectedPair.from} for 1 {selectedPair.to}
+          </option>
+        </select>
+        <Button
+          onClick={submitRate}
+          aria-label={selectedPair.saveLabel}
+          aria-busy={updateRateMutation.isPending}
+          className="h-11 px-3 font-semibold"
+          disabled={
+            updateRateMutation.isPending ||
+            rateQuery.isLoading ||
+            rateQuery.isError ||
+            oppositeRateQuery.isLoading ||
+            oppositeRateQuery.isError ||
+            !validDraft
+          }
+        >
+          Save
+        </Button>
       </div>
 
       <div
         id={`${inputId}-preview`}
-        className="text-xs text-muted-foreground"
+        className="flex flex-wrap gap-x-3 text-xs text-muted-foreground empty:hidden"
         aria-live="polite"
       >
         {directionError && (
@@ -508,21 +482,6 @@ function DirectionRateEditor({
           </Button>
         </div>
       )}
-      <Button
-        onClick={submitRate}
-        aria-label={selectedPair.saveLabel}
-        className="h-12 w-full rounded-full text-base font-semibold"
-        disabled={
-          updateRateMutation.isPending ||
-          rateQuery.isLoading ||
-          rateQuery.isError ||
-          oppositeRateQuery.isLoading ||
-          oppositeRateQuery.isError ||
-          !validDraft
-        }
-      >
-        {updateRateMutation.isPending ? "Saving..." : "Save rate"}
-      </Button>
     </section>
   );
 }

@@ -21,30 +21,30 @@ const normalizeMoney = ({ value }: { value: unknown }) =>
 
 export class CreateInternalTransferLimitPolicyDto {
   @IsIn(['NGN', 'GHS'])
-  currency: WalletCurrency;
+  currency!: WalletCurrency;
 
   @IsIn(['TIER_2', 'TIER_3'])
-  kycTier: KYCTier;
+  kycTier!: KYCTier;
 
   @Transform(normalizeMoney)
   @IsString()
   @Matches(MONEY_AMOUNT_PATTERN)
-  perTransaction: string;
+  perTransaction!: string;
 
   @Transform(normalizeMoney)
   @IsString()
   @Matches(MONEY_AMOUNT_PATTERN)
-  daily: string;
+  daily!: string;
 
   @Transform(normalizeMoney)
   @IsString()
   @Matches(MONEY_AMOUNT_PATTERN)
-  monthly: string;
+  monthly!: string;
 
   @IsString()
   @MinLength(10)
   @MaxLength(500)
-  reason: string;
+  reason!: string;
 }
 
 export class ApproveInternalTransferLimitPolicyDto extends AdminActionReasonDto {}
@@ -70,5 +70,5 @@ export class InternalTransferLimitPolicyQueryDto {
 
 export class InternalTransferLimitPolicyIdParamDto {
   @IsUUID()
-  policyId: string;
+  policyId!: string;
 }
