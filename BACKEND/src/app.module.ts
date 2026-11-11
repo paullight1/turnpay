@@ -1,3 +1,7 @@
+import {
+  financialConfigurationFields,
+  runtimeConfigurationFiles,
+} from './deployment/runtime-configuration';
 import { koraConfigurationFields } from './kora/kora-capabilities.service';
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
@@ -51,17 +55,14 @@ const defaultNodeEnv =
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
-      // Load the real local env first so it wins over placeholder values in
-      // the example template during development.
-      envFilePath: ['.env', '.env.example'],
+      // Only development/test read local files. Deployed processes must use
+      // their secret store and must never inherit example feature flags.
+      ...runtimeConfigurationFiles(process.env.NODE_ENV ?? defaultNodeEnv),
       validationSchema: Joi.object({
         ...koraConfigurationFields,
+        ...financialConfigurationFields,
         NODE_ENV: Joi.string()
-          .trim()
-          .lowercase()
           .valid('development', 'production', 'test', 'staging')
-          .empty('')
-          .empty('value')
           .default(defaultNodeEnv),
         PORT: Joi.number().empty('').empty('value').default(3000),
         SENTRY_DSN: Joi.string()
@@ -229,18 +230,6 @@ const defaultNodeEnv =
         OTP_PROVIDER: Joi.string()
           .valid('supabase_email')
           .default('supabase_email'),
-        BANKING_ENABLED: Joi.boolean()
-          .truthy('true')
-          .falsy('false')
-          .default(true),
-        VIRTUAL_ACCOUNTS_ENABLED: Joi.boolean()
-          .truthy('true')
-          .falsy('false')
-          .default(true),
-        WITHDRAWALS_ENABLED: Joi.boolean()
-          .truthy('true')
-          .falsy('false')
-          .default(true),
         INTERNAL_TRANSFERS_ENABLED: internalTransfersEnabledSchema,
         PAYSTACK_SECRET_KEY: Joi.when('NODE_ENV', {
           is: 'production',
@@ -260,10 +249,6 @@ const defaultNodeEnv =
           .max(64)
           .allow('')
           .optional(),
-        PAYSTACK_CHECKOUT_ENABLED: Joi.boolean()
-          .truthy('true')
-          .falsy('false')
-          .default(true),
         PAYSTACK_FUNDING_ALLOWED_CHANNELS: Joi.string()
           .trim()
           .pattern(
@@ -314,10 +299,6 @@ const defaultNodeEnv =
           .default('TrustPay'),
         BANKING_PROVIDER_FALLBACK: Joi.string().valid('').allow('').default(''),
         SUPPORTED_BANKING_CURRENCIES: Joi.string().default('NGN'),
-        BANKING_SANDBOX_MODE: Joi.boolean()
-          .truthy('true')
-          .falsy('false')
-          .default(true),
         PII_ENCRYPTION_KEY: Joi.when('NODE_ENV', {
           is: deployedEnvironment,
           then: Joi.string().min(32).required(),
@@ -355,7 +336,6 @@ const defaultNodeEnv =
           otherwise: Joi.string().trim().max(64).default('v1'),
         }),
         VTU_PROVIDER: Joi.string().valid('vtpass').default('vtpass'),
-        VTU_ENABLED: Joi.boolean().truthy('true').falsy('false').default(true),
         VTU_SIMULATION_ENABLED: Joi.boolean()
           .truthy('true')
           .falsy('false')

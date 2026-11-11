@@ -1,9 +1,15 @@
-# Files that must be present in the exact release candidate for the exchange
-# quote execution guard. Keep this manifest alongside the migration and source
-# changes; the release gate verifies that every listed path is tracked by git.
-candidate_name=039_exchange_quote_execution_guard
+# Required financial guards, migrations and deployment evidence for this
+# production-readiness candidate. Every listed path must be tracked in the
+# exact reviewed commit; the release gate also requires a clean checkout.
+candidate_name=production_readiness_2026_11_03
 required_path=BACKEND/prisma/migrations/039_exchange_quote_execution_guard/migration.sql
 required_path=BACKEND/prisma/schema.prisma
 required_path=BACKEND/src/exchange/exchange.service.ts
 required_path=BACKEND/src/exchange/exchange.controller.ts
 required_path=DOCS/EXCHANGE-READINESS-2026-09-06.md
+required_path=BACKEND/prisma/migrations/054_transactional_email_outbox/migration.sql
+required_path=BACKEND/scripts/start-production.sh
+required_path=render.production.yaml
+required_path=scripts/check-production-manifests.sh
+required_path=DOCS/PRODUCTION-READINESS/2026-11-03-CHECKLIST.md
+required_path=BACKEND/prisma/migrations/055_manual_direct_account_exchange/migration.sql

@@ -17,7 +17,7 @@ describe('PaymentService.reconcilePendingWithdrawals', () => {
     user: {
       updateMany: jest.fn(),
     },
-    $transaction: jest.fn(async (fn: any) => fn(prisma)),
+    $transaction: jest.fn(async (fn: any): Promise<unknown> => fn(prisma)),
   };
 
   const monnifyBanks = {
@@ -57,7 +57,7 @@ describe('PaymentService.reconcilePendingWithdrawals', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     service = new PaymentService(
-      prisma as PrismaService,
+      prisma as unknown as PrismaService,
       {} as any,
       monnifyBanks as any,
       config as any,

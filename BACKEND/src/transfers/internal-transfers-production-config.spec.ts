@@ -31,6 +31,7 @@ describe('internal transfer production configuration', () => {
     TRANSACTION_PIN_REQUIRED: 'true',
     INTERNAL_TRANSFERS_ENABLED: 'false',
     BANKING_ENABLED: 'false',
+    BANKING_SANDBOX_MODE: 'false',
     BANKING_PROVIDER_PRIMARY: 'monnify',
     PAYSTACK_CHECKOUT_ENABLED: 'false',
     VIRTUAL_ACCOUNTS_ENABLED: 'false',
@@ -38,8 +39,9 @@ describe('internal transfer production configuration', () => {
     KYC_PROVIDER: 'monnify',
     MONNIFY_API_KEY: 'test-monnify-api-key',
     MONNIFY_SECRET_KEY: 'test-monnify-secret-key',
-    MONNIFY_BASE_URL: 'https://api.monnify.example.com',
+    MONNIFY_BASE_URL: 'https://api.monnify.com',
     PII_ENCRYPTION_KEY: 'test-pii-key-with-at-least-32-characters',
+    VTU_ENABLED: 'true',
     VTU_PROVIDER: 'vtpass',
     VTPASS_BASE_URL: 'https://vtpass.com/api',
     VTPASS_API_KEY: 'test-vtpass-api-key',
@@ -179,7 +181,7 @@ describe('internal transfer production configuration', () => {
   it.each(['SUPABASE_URL', 'SUPABASE_PUBLISHABLE_KEY'])(
     'rejects missing email auth prerequisite %s',
     (key) => {
-      const env = {
+      const env: NodeJS.ProcessEnv = {
         ...productionEnv,
         SUPABASE_URL: 'https://project.supabase.co',
         SUPABASE_PUBLISHABLE_KEY: 'test-publishable',

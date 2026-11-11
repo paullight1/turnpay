@@ -31,6 +31,7 @@ describe('VTpass production configuration', () => {
     INTERNAL_TRANSFERS_ENABLED: 'false',
     TRANSACTION_PIN_REQUIRED: 'true',
     BANKING_ENABLED: 'false',
+    BANKING_SANDBOX_MODE: 'false',
     BANKING_PROVIDER_PRIMARY: 'monnify',
     PAYSTACK_CHECKOUT_ENABLED: 'false',
     VIRTUAL_ACCOUNTS_ENABLED: 'false',
@@ -38,7 +39,7 @@ describe('VTpass production configuration', () => {
     KYC_PROVIDER: 'monnify',
     MONNIFY_API_KEY: 'test-monnify-api-key',
     MONNIFY_SECRET_KEY: 'test-monnify-secret-key',
-    MONNIFY_BASE_URL: 'https://api.monnify.example.com',
+    MONNIFY_BASE_URL: 'https://api.monnify.com',
     PII_ENCRYPTION_KEY: 'test-pii-key-with-at-least-32-characters',
     VTU_ENABLED: 'true',
     VTU_SIMULATION_ENABLED: 'false',
@@ -52,7 +53,7 @@ describe('VTpass production configuration', () => {
   };
 
   const validate = (overrides: Record<string, string | undefined> = {}) => {
-    const env = { ...productionEnv, ...overrides };
+    const env: NodeJS.ProcessEnv = { ...productionEnv, ...overrides };
     for (const [key, value] of Object.entries(env)) {
       if (value === undefined) delete env[key];
     }

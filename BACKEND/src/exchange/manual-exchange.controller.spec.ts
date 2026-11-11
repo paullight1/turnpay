@@ -10,6 +10,7 @@ import {
   ManualExchangeController,
   AdminManualExchangeController,
 } from './manual-exchange.controller';
+import { ReceiptScanService } from './receipt-scan.service';
 import { ManualExchangeService } from './manual-exchange.service';
 import { ManualExchangeReconciliationService } from './manual-exchange-reconciliation.service';
 import { SupabaseService } from '../supabase/supabase.service';
@@ -20,6 +21,7 @@ describe('manual exchange HTTP authorization and validation', () => {
   let role = 'USER';
   const service = {
     list: jest.fn().mockResolvedValue([]),
+    get: jest.fn().mockResolvedValue({ id: 'order' }),
     queue: jest
       .fn()
       .mockResolvedValue({ items: [], nextCursor: null, counts: {} }),
@@ -47,11 +49,18 @@ describe('manual exchange HTTP authorization and validation', () => {
     review: jest.fn(),
     uploadHandoverUrl: jest.fn(),
   };
+  const receiptScanner = {
+    scan: jest.fn().mockResolvedValue({
+      receiptName: 'Alex Morgan',
+      bankReference: 'TRF-00123',
+    }),
+  };
   beforeAll(async () => {
     const module = await Test.createTestingModule({
       controllers: [ManualExchangeController, AdminManualExchangeController],
       providers: [
         { provide: ManualExchangeService, useValue: service },
+        { provide: ReceiptScanService, useValue: receiptScanner },
         { provide: ManualExchangeReconciliationService, useValue: {} },
         { provide: ConfigService, useValue: new ConfigService() },
         {
@@ -103,6 +112,25 @@ describe('manual exchange HTTP authorization and validation', () => {
   });
   afterAll(async () => {
     await app.close();
+  });
+
+  it('scans a receipt only after authenticating the customer and checking order access', async () => {
+    const id = '3b59bf60-39b8-4a85-8c64-0be3a6aaa215';
+    const url = `/api/exchange/manual-orders/${id}/receipt-scan`;
+    const image = Buffer.from('synthetic receipt');
+    await request(app.getHttpServer())
+      .post(url)
+      .attach('image', image, 'receipt.png')
+      .expect(401);
+    expect(receiptScanner.scan).not.toHaveBeenCalled();
+    await request(app.getHttpServer())
+      .post(url)
+      .set('Authorization', 'Bearer synthetic')
+      .attach('image', image, 'receipt.png')
+      .expect('Cache-Control', 'no-store')
+      .expect(201, { receiptName: 'Alex Morgan', bankReference: 'TRF-00123' });
+    expect(service.get).toHaveBeenCalledWith(id, 'customer');
+    expect(receiptScanner.scan).toHaveBeenCalledWith(image);
   });
 
   it('rejects missing authentication and prevents a customer reaching the admin queue', async () => {

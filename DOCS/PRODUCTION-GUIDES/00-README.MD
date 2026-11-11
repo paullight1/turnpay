@@ -1,98 +1,40 @@
-# TRUSTPAY Production Guides
+# TRUSTPAY production guides
 
-These guides cover TRUSTPAY production functions that cannot be fully completed on a local machine without live credentials, live webhooks, provider dashboards, app-store accounts, or production infrastructure access.
+Use these guides with `DOCS/SECURITY-RULES.MD`. Production approval requires evidence for an exact candidate; sandbox success and a healthy API do not establish live provider acceptance.
 
-Do not treat sandbox success as launch approval. Every money movement path must satisfy `DOCS/SECURITY-RULES.MD` before live enablement: idempotency, Prisma transactions for balances, DTO validation, auth guards, webhook signature checks, Decimal money handling, no negative balances, and audit logging.
+## Current operational references
 
-## Guide Index
-
-| Guide | Scope |
+| Area | Reference |
 | --- | --- |
-| `01-AUTH-SUPABASE.MD` | Supabase project, auth keys, JWT mode, OTP/SMS, web and mobile auth config |
-| `02-DATABASE-REDIS.MD` | PostgreSQL, Prisma migrations, Redis, backups, TLS, operational checks |
-| `03-PAYMENTS-FUNDING.MD` | Monnify reserved-account funding and webhook crediting |
-| `04-VIRTUAL-ACCOUNTS.MD` | Monnify-only virtual-account activation |
-| `05-WITHDRAWALS.MD` | Beneficiaries, bank resolution, payouts, reversals, and admin verification |
-| `06-INTERNAL-TRANSFERS.MD` | TRUSTPAY user-to-user wallet transfers and ledger invariants |
-| `07-EXCHANGE.MD` | NGN/GHS exchange, rate feeds, quotes, execution, and limits |
-| `08-VTU.MD` | Airtime, data, cable, electricity, provider credentials, and reversals |
-| `09-ADMIN-OPS.MD` | Admin launch controls, review queues, permissions, audit and support operations |
-| `10-RECONCILIATION.MD` | Daily provider, ledger, wallet, webhook, and settlement reconciliation |
-| `11-MOBILE-WEB-DEPLOYMENT.MD` | Backend, web, admin, Flutter, stores, monitoring, rollback |
-| `12-TEST-LINT-MOCK-TYPING.MD` | Test/lint status and remaining typed-mock cleanup |
-| `13-MONNIFY-ONLY-VIRTUAL-ACCOUNTS-STATUS.MD` | Current Monnify-only NGN virtual-account decision and activation checklist |
-| `14-MANUAL-EXCHANGE-RECEIPT-FLOW.MD` | Manual and Monnify-verified exchange deposit review flow |
-| `19-INTERNAL-TRANSFER-OPERATIONS.md` | Internal-transfer alerts, incident freeze, reconciliation, reversal, and recovery runbook |
-| `20-INTERNAL-TRANSFER-CERTIFICATION.md` | Internal-transfer staging evidence, external approvals, and canary certification register |
-| `21-SUPABASE-RENDER-VERCEL-LAUNCH.MD` | Authoritative V1 hosting topology, dashboard setup order, secrets, and verification gates |
-| `22-YOUVERIFY-PRODUCTION-READINESS.md` | Historical Youverify readiness record; superseded for the active path |
-| `23-NINJA-KYC-PRODUCTION-READINESS.md` | Historical Ninja record; superseded by Monnify-only KYC |
+| Current providers and permitted product scope | [Provider source of truth](../PROVIDER-SOURCE-OF-TRUTH.MD) |
+| Paystack funding, dedicated accounts, withdrawals and genuine webhook acceptance | [Paystack activation](../PAYSTACK-ACTIVATION.md) |
+| Tier 1 BVN and bank validation, Tier 2 NIN upgrades and audited manual fallback | [KYC guide](../KYC-GUIDE.MD) |
+| Ghana activation gates and unsupported payout methods | [Kora Ghana setup](../KORA-GHANA-SETUP.md) |
+| Hosting templates and production promotion | [Supabase, Render and Vercel launch](21-SUPABASE-RENDER-VERCEL-LAUNCH.MD) |
+| Database, Redis, encrypted backups and restore evidence | [Database and Redis](02-DATABASE-REDIS.MD) |
+| Applying and verifying the current migration history | [Migration runbook](20-MIGRATION-RUNBOOK.md) |
+| Ledger/provider tie-out and incident review | [Reconciliation](10-RECONCILIATION.MD) |
+| Internal transfers and their enablement requirements | [Certification register](20-INTERNAL-TRANSFER-CERTIFICATION.md) and [operations](19-INTERNAL-TRANSFER-OPERATIONS.md) |
+| Transactional status email and uncertain-delivery handling | [BVN and account recovery implementation](../implementation/2026-11-03-bvn-account-recovery-and-email.md) |
+| Current launch decision and local evidence | [Production checklist](../PRODUCTION-READINESS/2026-11-03-CHECKLIST.md) |
 
-For V1 infrastructure, guide 21 is authoritative if an older guide mentions
-DigitalOcean, Fly.io, Render Postgres, or a self-hosted production Postgres.
+Older platform, Monnify-only, SMS OTP and provider-evaluation guides are historical unless reconciled with these references. New NGN banking uses Paystack; Monnify is retained only for existing obligations. Approved Ninja verification upgrades BVN-verified users with a verified NIN; audited manual evidence review remains the fallback. VTU uses VTpass only.
 
-## Production Env Groups
+## Configuration boundaries
 
-Keep live values in the deployment secret manager, not in committed files. Use different values for local, staging, and production.
+- Customer OTP is six-digit Supabase email with a maximum five-minute challenge and three verification attempts. Verify the matching project's templates, SMTP delivery and quotas. Email verification does not grant KYC tiers.
+- Transactional status email is a separate outbox transport. `EMAIL_PROVIDER=disabled` queues work without delivery. Configure either SMTP with mandatory TLS or Resend after sender verification; never automatically retry an ambiguous acceptance.
+- JWT, database, encryption, storage service-role and provider credentials belong only in the backend secret store. Only publishable configuration may enter `NEXT_PUBLIC_*` variables or Flutter defines.
+- Sentry is optional under the owner's current instruction. Structured error logs, financial/admin audit trails, retention and operational alerting remain required.
+- `render.yaml` remains staging. `render.production.yaml` is an opt-in paid proposal with live financial features disabled and automatic deployment off. Selecting it does not supply production secrets, provider approvals, backups, managed Redis security or release certification.
+- Use the owner's selected production host and verify its actual deployed settings. A repository template does not establish whether a running service uses Render, Dokploy or another approved host.
 
-| Group | Variables |
-| --- | --- |
-| Runtime | `NODE_ENV`, `PORT`, `LOG_LEVEL`, `SENTRY_DSN` |
-| Database | `DATABASE_URL` |
-| Supabase | `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_JWT_SECRET` |
-| Website | `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `NEXT_PUBLIC_API_URL`, `NEXT_PUBLIC_WEBSITE_URL`, `NEXT_PUBLIC_ADMIN_URL` |
-| Mobile build | `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, API base URL build config |
-| Redis | `REDIS_URL`, `REDIS_ALLOW_MEMORY_FALLBACK`, `TRUST_PROXY_HOPS` |
-| OTP/SMS | `OTP_EXPIRES_IN`, `OTP_LENGTH`, `OTP_DEV_CODE`, `SMS_PROVIDER`, `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_PHONE_NUMBER` |
-| Monnify | `MONNIFY_BASE_URL`, `MONNIFY_API_KEY`, `MONNIFY_SECRET_KEY`, `MONNIFY_CONTRACT_CODE`, `MONNIFY_WEBHOOK_URL`, `MONNIFY_EXCHANGE_COLLECTION_ACCOUNT_NUMBER`, `MONNIFY_GET_ALL_AVAILABLE_BANKS`, `MONNIFY_RESTRICT_PAYMENT_SOURCE` |
-| Banking flags | `BANKING_ENABLED`, `VIRTUAL_ACCOUNTS_ENABLED`, `WITHDRAWALS_ENABLED`, `BANKING_PROVIDER_PRIMARY`, `SUPPORTED_BANKING_CURRENCIES`, `BANKING_SANDBOX_MODE` |
-| Privacy | `PII_ENCRYPTION_KEY`, `PII_KEY_VERSION`, `BANK_ACCOUNT_ENCRYPTION_KEY`, `IDEMPOTENCY_RESPONSE_ENCRYPTION_KEY`, `IDEMPOTENCY_RESPONSE_ENCRYPTION_KEY_ID` |
-| Jobs | `RECONCILIATION_CRON`, `WEBHOOK_QUEUE_NAME`, `DLQ_NAME`, `ADMIN_REVIEW_WEBHOOK_ALERT_CHANNEL` |
-| VTpass | `VTU_PROVIDER`, `VTPASS_BASE_URL`, `VTPASS_API_KEY`, `VTPASS_PUBLIC_KEY`, `VTPASS_SECRET_KEY`, `VTPASS_WEBHOOK_SECRET` |
-| Monnify KYC | `KYC_PROVIDER`, `MONNIFY_BASE_URL`, `MONNIFY_API_KEY`, `MONNIFY_SECRET_KEY`, `PII_ENCRYPTION_KEY` |
-| FX | `FX_RATE_API_URL`, `FX_RATE_API_KEY` |
+## Release gates
 
-## Sandbox To Live Pattern
-
-1. Keep live feature flags off: `BANKING_ENABLED=false`, `VIRTUAL_ACCOUNTS_ENABLED=false`, `WITHDRAWALS_ENABLED=false`, `BANKING_SANDBOX_MODE=true`.
-2. Configure sandbox keys and webhook URLs in provider dashboards.
-3. Run one complete sandbox happy path and one provider failure path for each feature.
-4. Confirm idempotency by replaying the same request or webhook reference.
-5. Confirm audit logs mask account numbers, OTPs, secrets, signatures, BVN, NIN, and tokens.
-6. Switch to live keys in the production secret manager only after provider approval and compliance sign-off.
-7. Set `BANKING_SANDBOX_MODE=false`, then enable only the approved feature flag.
-8. Run a low-value live smoke test and reconcile it before increasing limits.
-
-## Current Active Banking Decision
-
-As of 2026-05-22, TRUSTPAY's active virtual-account path is:
-
-- Monnify only.
-- NGN only.
-- No Nomba.
-- No banking or payment fallback provider.
-- Admin review required before Monnify-verified NGN exchange deposits credit GHS.
-
-Treat older multi-provider notes as historical planning. `DOCS/PROVIDER-SOURCE-OF-TRUTH.MD` is authoritative.
-
-## Global Verification Checklist
-
-- [ ] Live secrets are present only in the secret manager or deployment platform.
-- [ ] Production database requires SSL/TLS and has automated backups with restore testing.
-- [ ] Redis requires authentication and is reachable only from trusted services.
-- [ ] Webhooks use HTTPS public URLs and provider signature verification.
-- [ ] Every mutation request uses `Idempotency-Key`.
-- [ ] Wallet debits and credits are inside Prisma transactions.
-- [ ] No protected route is reachable without `JwtAuthGuard` or equivalent Supabase auth guard.
-- [ ] Admin routes require role authorization and audit logs.
-- [ ] Sentry or equivalent error tracking is active for backend, web, and mobile.
-- [ ] Reconciliation and dead-letter review have named owners.
-
-## Global Launch Blockers
-
-- Missing live provider approval, settlement account, or transfer permission.
-- Any live secret committed to git, logged, or exposed through `NEXT_PUBLIC_*`.
-- Weak JWT, Supabase, Redis, PII, or bank-account encryption secrets.
-- Webhook signature verification not confirmed against the live provider.
-- Reconciliation cannot explain wallet totals, provider totals, and ledger totals.
-- Any unresolved path that can double-credit, double-debit, or create a negative balance.
+- [ ] Clean reviewed candidate, matching build digest, full CI and financial/fault regression evidence.
+- [ ] Isolated production database, all migrations applied, no unexplained security-advisor findings, private evidence buckets and protected credentials.
+- [ ] Persistent authenticated Redis, reviewed network/TLS policy, no memory fallback, and tested multi-instance outage behavior.
+- [ ] Genuine signed provider callbacks, independently verified economic outcomes, idempotent retries and low-value reconciled acceptance for every enabled feature.
+- [ ] Daily encrypted backups retained for at least 30 days, successful timed restore, tested alerts and named finance/on-call owners.
+- [ ] Public mobile security/signing evidence; the Android internal-testing system-TLS exception is not public-release approval.
+- [ ] Internal transfers and unactivated Ghana capabilities remain disabled until their respective certification and approval gates pass.

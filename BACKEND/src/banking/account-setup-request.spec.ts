@@ -37,7 +37,7 @@ describe('Receiving account setup intent', () => {
       {} as any,
       {} as any,
       {
-        get: (key, fallback) =>
+        get: (key: string, fallback?: unknown) =>
           key === 'BANKING_PROVIDER_PRIMARY'
             ? 'paystack'
             : ['BANKING_ENABLED', 'VIRTUAL_ACCOUNTS_ENABLED'].includes(key)

@@ -765,6 +765,7 @@ describe('manual exchange financial boundaries (real PostgreSQL)', () => {
     });
     const filteredFirst = await service.queue({ status: 'REJECTED' });
     expect(filteredFirst.nextCursor).toBeTruthy();
+    expect(filteredFirst.items[0]?.customerName).toBe('Financial sender');
     const expectedRemaining = rows
       .filter((row) => !filteredFirst.items.some((item) => item.id === row.id))
       .map((row) => row.id);
@@ -904,14 +905,16 @@ describe('manual exchange financial boundaries (real PostgreSQL)', () => {
     objects.set(upload.objectKey, pdf);
     const proof = {
       objectKey: upload.objectKey,
-      bankReference: 'BANK-' + randomUUID(),
+      receiptName: 'Synthetic Sender',
     };
     const key = randomUUID();
     await Promise.allSettled([
       service.attach(created.id, user(), proof, key),
       service.attach(created.id, user(), proof, key),
     ]);
-    await service.attach(created.id, user(), proof, key);
+    const submitted = await service.attach(created.id, user(), proof, key);
+    expect(submitted.receiptName).toBe('Synthetic Sender');
+    expect(submitted.bankReference).toBeNull();
     expect(
       await prisma.paymentNotification.count({
         where: { orderId: created.id, audience: 'ADMIN' },

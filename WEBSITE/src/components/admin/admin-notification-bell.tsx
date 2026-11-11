@@ -1,8 +1,10 @@
 "use client";
 
+import { manualExchangeRequestHref } from "@/lib/admin-manual-exchange";
+
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { queryOptions, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Bell,
   Check,
@@ -93,13 +95,12 @@ function formatNotificationDate(value: string) {
   });
 }
 
-function notificationDestination(notification: AdminNotification) {
+export function notificationDestination(notification: AdminNotification) {
   const eventKey = notification.eventKey.toLowerCase();
-  const encodedOrderId = encodeURIComponent(notification.orderId);
 
   if (eventKey.startsWith("manual-exchange:")) {
     return {
-      href: `/admin/exchange/manual-orders?orderId=${encodedOrderId}`,
+      href: manualExchangeRequestHref(notification.orderId),
       label: "Exchange request",
     };
   }
@@ -119,6 +120,17 @@ function notificationDestination(notification: AdminNotification) {
   return { href: "/admin", label: "Admin overview" };
 }
 
+export function adminNotificationsQueryOptions(adminId: string | null) {
+  return queryOptions({
+    queryKey: [notificationsQueryPrefix, adminId],
+    queryFn: async () => {
+      const response = await adminNotificationsApi.list();
+      return normalizeNotifications(response.data);
+    },
+    staleTime: 10_000,
+  });
+}
+
 export function AdminNotificationBell() {
   const { user, profile, isLoading: authLoading } = useAuth();
   const queryClient = useQueryClient();
@@ -128,10 +140,8 @@ export function AdminNotificationBell() {
   const readAttemptKeysRef = useRef<Map<string, string>>(new Map());
   const adminId = profile?.id ?? user?.id ?? null;
   const allowed = hasAdminAccess(user) || hasAdminAccess(profile);
-  const queryKey = useMemo(
-    () => [notificationsQueryPrefix, adminId] as const,
-    [adminId],
-  );
+  const listOptions = adminNotificationsQueryOptions(adminId);
+  const { queryKey } = listOptions;
   const unreadCountQueryKey = useMemo(
     () => [unreadCountQueryPrefix, adminId] as const,
     [adminId],
@@ -151,13 +161,8 @@ export function AdminNotificationBell() {
   }, []);
 
   const notificationsQuery = useQuery({
-    queryKey,
-    queryFn: async () => {
-      const response = await adminNotificationsApi.list();
-      return normalizeNotifications(response.data);
-    },
+    ...listOptions,
     enabled: !authLoading && allowed && Boolean(adminId),
-    staleTime: 10_000,
     refetchInterval: isForeground ? 15_000 : false,
     refetchIntervalInBackground: false,
     refetchOnWindowFocus: true,
@@ -326,12 +331,12 @@ export function AdminNotificationBell() {
               : `Admin notifications${unreadCount ? `, ${unreadCount} unread` : ""}`
           }
           data-testid="admin-notifications-trigger"
-          className="relative text-white/70 hover:text-white"
+          className="relative size-11 text-foreground hover:text-foreground"
         >
-          <Bell className="size-4" />
+          <Bell aria-hidden="true" className="size-6" strokeWidth={2.5} />
           {hasKnownUnreadCount && unreadCount > 0 && (
             <span
-              className="absolute -right-0.5 -top-0.5 flex min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold leading-4 text-white shadow-sm"
+              className="absolute right-0 top-0 flex min-w-5 items-center justify-center rounded-full bg-red-600 px-1 text-[11px] font-bold leading-5 text-white shadow-sm"
               data-testid="admin-notification-unread-count"
               aria-label={`${unreadCount} unread notifications`}
             >
@@ -343,13 +348,13 @@ export function AdminNotificationBell() {
       <DropdownMenuContent
         align="end"
         sideOffset={10}
-        className="w-96 max-w-[calc(100vw-2rem)] border-white/10 bg-[#11161d] p-0 text-white"
+        className="w-96 max-w-[calc(100vw-2rem)] border-border p-0 dark:bg-[#11161d]"
         data-testid="admin-notification-inbox"
       >
         <div className="flex items-start justify-between gap-4 px-4 py-3">
           <div>
             <p className="text-sm font-semibold">Admin inbox</p>
-            <p className="mt-0.5 text-xs text-white/48">
+            <p className="mt-0.5 text-xs text-muted-foreground">
               {isNotificationLoading
                 ? "Checking for updates…"
                 : unreadCountUnavailable
@@ -365,28 +370,28 @@ export function AdminNotificationBell() {
           </div>
           {isNotificationFetching && !isNotificationLoading && (
             <LoaderCircle
-              className="mt-0.5 size-4 animate-spin text-white/45"
+              className="mt-0.5 size-4 animate-spin text-muted-foreground"
               aria-label="Refreshing notifications"
             />
           )}
         </div>
-        <DropdownMenuSeparator className="bg-white/10" />
+        <DropdownMenuSeparator className="bg-border" />
 
         {notificationsQuery.isPending ? (
           <div className="space-y-2 p-3" aria-label="Loading notifications">
             {["one", "two", "three"].map((key) => (
               <div
                 key={key}
-                className="h-16 animate-pulse rounded-lg bg-white/[0.06]"
+                className="h-16 animate-pulse rounded-lg bg-muted"
               />
             ))}
           </div>
         ) : notificationsQuery.isError ? (
           <div className="flex flex-col items-center gap-3 px-5 py-8 text-center">
-            <CircleAlert className="size-6 text-amber-300" />
+            <CircleAlert className="size-6 text-amber-700 dark:text-amber-300" />
             <div>
               <p className="text-sm font-medium">Notifications unavailable</p>
-              <p className="mt-1 text-xs text-white/52">
+              <p className="mt-1 text-xs text-muted-foreground">
                 {getErrorMessage(
                   notificationsQuery.error,
                   "Try again to refresh the admin inbox.",
@@ -396,7 +401,7 @@ export function AdminNotificationBell() {
             <Button
               variant="outline"
               size="sm"
-              className="border-white/15 bg-transparent text-white hover:bg-white/[0.08] hover:text-white"
+              className="border-border bg-transparent text-foreground hover:bg-muted hover:text-foreground"
               onClick={retryNotifications}
             >
               <RefreshCw className="size-3.5" />
@@ -405,9 +410,9 @@ export function AdminNotificationBell() {
           </div>
         ) : notifications.length === 0 ? (
           <div className="flex flex-col items-center gap-2 px-5 py-9 text-center">
-            <Bell className="size-6 text-white/35" />
+            <Bell className="size-6 text-muted-foreground" />
             <p className="text-sm font-medium">No admin notifications</p>
-            <p className="text-xs text-white/48">
+            <p className="text-xs text-muted-foreground">
               New exchange and service updates will appear here.
             </p>
           </div>
@@ -415,7 +420,7 @@ export function AdminNotificationBell() {
           <div className="max-h-[min(32rem,calc(100vh-10rem))] space-y-2 overflow-y-auto p-3">
             {unreadCountQuery.isError && (
               <div
-                className="flex items-center justify-between gap-3 rounded-lg border border-amber-300/20 bg-amber-400/10 px-3 py-2 text-xs text-amber-100"
+                className="flex items-center justify-between gap-3 rounded-lg border border-amber-300/20 bg-amber-400/10 px-3 py-2 text-xs text-amber-900 dark:text-amber-100"
                 role="alert"
               >
                 <span>Unread count unavailable; refresh to try again.</span>
@@ -441,7 +446,7 @@ export function AdminNotificationBell() {
                 <div
                   key={`${notification.id}:${notification.eventKey}`}
                   className={cn(
-                    "rounded-lg border border-white/10 bg-white/[0.035] p-3 transition-colors",
+                    "rounded-lg border border-border bg-muted/50 p-3 transition-colors",
                     !notification.readAt && "border-red-400/25 bg-red-500/[0.06]",
                   )}
                   data-testid={`admin-notification-${notification.id}`}
@@ -449,7 +454,7 @@ export function AdminNotificationBell() {
                   <div className="flex gap-3">
                     <span
                       className={cn(
-                        "mt-1.5 size-2 shrink-0 rounded-full bg-white/20",
+                        "mt-1.5 size-2 shrink-0 rounded-full bg-muted-foreground/40",
                         !notification.readAt && "bg-red-400",
                       )}
                       aria-hidden="true"
@@ -460,22 +465,22 @@ export function AdminNotificationBell() {
                         onClick={() => setOpen(false)}
                         className="block rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-red-400"
                       >
-                        <span className="block text-sm font-medium leading-5 text-white">
+                        <span className="block text-sm font-medium leading-5 text-foreground">
                           {notification.title}
                         </span>
-                        <span className="mt-1 block text-[11px] text-white/45">
+                        <span className="mt-1 block text-[11px] text-muted-foreground">
                           {destination.label} · {formatNotificationDate(notification.createdAt)}
                         </span>
                       </Link>
                       <div className="mt-2 flex items-center justify-between gap-2">
                         {notification.readAt ? (
-                          <span className="inline-flex items-center gap-1 text-[11px] text-emerald-300/80">
+                          <span className="inline-flex items-center gap-1 text-[11px] text-emerald-800 dark:text-emerald-300">
                             <Check className="size-3" /> Read
                           </span>
                         ) : (
                           <button
                             type="button"
-                            className="rounded px-1.5 py-1 text-[11px] font-medium text-red-200 underline-offset-2 hover:bg-red-400/10 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400 disabled:cursor-not-allowed disabled:opacity-50"
+                            className="rounded px-1.5 py-1 text-[11px] font-medium text-red-800 dark:text-red-200 underline-offset-2 hover:bg-red-400/10 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400 disabled:cursor-not-allowed disabled:opacity-50"
                             disabled={isMarkingRead}
                             onClick={(event) => {
                               event.preventDefault();
@@ -489,7 +494,7 @@ export function AdminNotificationBell() {
                         )}
                         <Badge
                           variant="outline"
-                          className="border-white/10 px-1.5 text-[10px] text-white/45"
+                          className="border-border px-1.5 text-[10px] text-muted-foreground"
                         >
                           {notification.audience}
                         </Badge>
@@ -497,14 +502,14 @@ export function AdminNotificationBell() {
                       {readError && (
                         <div className="mt-2 flex items-center justify-between gap-2 rounded border border-red-400/20 bg-red-500/10 px-2 py-1.5">
                           <p
-                            className="min-w-0 text-[11px] text-red-200"
+                            className="min-w-0 text-[11px] text-red-800 dark:text-red-200"
                             role="alert"
                           >
                             {readError}
                           </p>
                           <button
                             type="button"
-                            className="shrink-0 text-[11px] font-semibold text-red-100 underline underline-offset-2 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400"
+                            className="shrink-0 text-[11px] font-semibold text-red-800 underline underline-offset-2 dark:text-red-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400"
                             onClick={() => handleMarkRead(notification.id)}
                           >
                             Retry

@@ -16,7 +16,7 @@ describe('SupportService', () => {
     auditLog: {
       create: jest.fn(),
     },
-    $transaction: jest.fn(async (input: any) => {
+    $transaction: jest.fn(async (input: any): Promise<unknown> => {
       if (Array.isArray(input)) {
         return Promise.all(input);
       }
@@ -32,7 +32,7 @@ describe('SupportService', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
-    service = new SupportService(prisma, logger as any);
+    service = new SupportService(prisma as never, logger as any);
   });
 
   it('creates a customer support ticket linked to the user transaction', async () => {

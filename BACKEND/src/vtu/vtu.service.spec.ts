@@ -39,7 +39,7 @@ describe('VtuService purchase ledger handling', () => {
       findUnique: jest.fn(),
       update: jest.fn(),
     },
-    $transaction: jest.fn(async (fn: any) => fn(prisma)),
+    $transaction: jest.fn(async (fn: any): Promise<unknown> => fn(prisma)),
   };
 
   const walletsService = {
@@ -129,7 +129,7 @@ describe('VtuService purchase ledger handling', () => {
     });
     prisma.webhookLog.update.mockResolvedValue({});
     service = new VtuService(
-      prisma,
+      prisma as never,
       walletsService as any,
       vtuApi as any,
       configService as any,

@@ -33,7 +33,7 @@ describe('BankingService', () => {
     kycDocument: {
       findMany: jest.fn(),
     },
-    $transaction: jest.fn(async (fn: any) => fn(prisma)),
+    $transaction: jest.fn(async (fn: any): Promise<unknown> => fn(prisma)),
   };
 
   const monnifyVirtualAccounts = {
@@ -72,7 +72,7 @@ describe('BankingService', () => {
     prisma.virtualAccount.findUnique.mockReset();
     prisma.kycDocument.findMany.mockResolvedValue([]);
     service = new BankingService(
-      prisma,
+      prisma as never,
       ledger as unknown as LedgerService,
       monnifyVirtualAccounts as any,
       configService as any,

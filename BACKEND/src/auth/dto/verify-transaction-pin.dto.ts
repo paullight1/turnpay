@@ -5,5 +5,5 @@ export class VerifyTransactionPinDto {
   @Matches(/^\d{4,6}$/, {
     message: 'Transaction PIN must be 4 to 6 digits',
   })
-  pin: string;
+  pin!: string;
 }

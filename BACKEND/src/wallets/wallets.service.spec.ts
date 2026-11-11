@@ -32,7 +32,7 @@ describe('WalletsService', () => {
       findMany: jest.fn(),
       findUnique: jest.fn(),
     },
-    $transaction: jest.fn(async (fn: any) => {
+    $transaction: jest.fn(async (fn: any): Promise<unknown> => {
       if (typeof fn === 'function') {
         return fn(mockPrisma);
       }

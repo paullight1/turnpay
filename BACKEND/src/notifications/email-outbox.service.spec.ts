@@ -45,7 +45,7 @@ function makeRow(overrides: Record<string, unknown> = {}) {
 }
 
 function makePrisma(rows = [makeRow()]) {
-  const state = [...rows];
+  const state: Array<Record<string, any>> = [...rows];
   const emailOutbox = {
     updateMany: jest.fn(async ({ where, data }: any) => {
       let count = 0;

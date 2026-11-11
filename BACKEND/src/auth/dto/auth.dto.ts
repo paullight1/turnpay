@@ -29,7 +29,7 @@ export class RegisterDto {
   @Transform(({ value }) => normalizeEmail(value))
   @IsEmail()
   @MaxLength(254)
-  email: string;
+  email!: string;
 
   @Transform(({ value }) => trimString(value))
   @IsString()
@@ -37,7 +37,7 @@ export class RegisterDto {
   @Matches(E164_PHONE_REGEX, {
     message: 'Phone number must be a valid E.164 phone number',
   })
-  phone: string;
+  phone!: string;
 
   @IsString()
   @Transform(({ value }) => trimString(value))
@@ -45,13 +45,13 @@ export class RegisterDto {
   @Matches(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/, {
     message: 'Password must contain uppercase, lowercase, and number',
   })
-  password: string;
+  password!: string;
 
   @IsString()
   @Matches(/^\d{4,6}$/, {
     message: 'Transaction PIN must be 4 to 6 digits',
   })
-  transactionPin: string;
+  transactionPin!: string;
 
   @IsString()
   @IsOptional()
@@ -71,11 +71,11 @@ export class LoginDto {
   @Transform(({ value }) => normalizeEmail(value))
   @IsEmail()
   @MaxLength(254)
-  email: string;
+  email!: string;
 
   @IsString()
   @Transform(({ value }) => trimString(value))
-  password: string;
+  password!: string;
 
   @IsString()
   @IsOptional()
@@ -87,7 +87,7 @@ export class LoginDto {
 export class ChangePasswordDto {
   @IsString()
   @Transform(({ value }) => trimString(value))
-  currentPassword: string;
+  currentPassword!: string;
 
   @IsString()
   @Transform(({ value }) => trimString(value))
@@ -95,13 +95,13 @@ export class ChangePasswordDto {
   @Matches(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/, {
     message: 'Password must contain uppercase, lowercase, and number',
   })
-  newPassword: string;
+  newPassword!: string;
 }
 
 export class RefreshTokenDto {
   @IsString()
   @Transform(({ value }) => trimString(value))
-  refreshToken: string;
+  refreshToken!: string;
 
   @IsString()
   @IsOptional()
@@ -121,7 +121,7 @@ export class EmailDto {
   @Transform(({ value }) => normalizeEmail(value))
   @IsEmail()
   @MaxLength(254)
-  email: string;
+  email!: string;
 }
 
 export class PhoneDto {
@@ -131,7 +131,7 @@ export class PhoneDto {
   @Matches(E164_PHONE_REGEX, {
     message: 'Phone number must be a valid E.164 phone number',
   })
-  phone: string;
+  phone!: string;
 }
 
 export class VerifyOtpDto extends EmailDto {
@@ -140,7 +140,7 @@ export class VerifyOtpDto extends EmailDto {
   @Matches(SIX_DIGIT_OTP_REGEX, {
     message: 'OTP must be exactly 6 digits',
   })
-  otp: string;
+  otp!: string;
 }
 
 export class SetTransactionPinDto {
@@ -149,7 +149,7 @@ export class SetTransactionPinDto {
   @Matches(/^\d{4,6}$/, {
     message: 'Transaction PIN must be 4 to 6 digits',
   })
-  pin: string;
+  pin!: string;
 }
 
 export class ResetTransactionPinDto {
@@ -158,7 +158,7 @@ export class ResetTransactionPinDto {
   @Matches(/^\d{4,6}$/, {
     message: 'Transaction PIN must be 4 to 6 digits',
   })
-  newPin: string;
+  newPin!: string;
 
   @IsString()
   @IsOptional()
@@ -184,7 +184,7 @@ export class StaffRegisterDto {
   @Matches(/^[^@\s]+@trustpayhq\.com$/, {
     message: 'Staff signup requires a trustpayhq.com email address',
   })
-  email: string;
+  email!: string;
 
   @IsString()
   @MinLength(8)
@@ -192,7 +192,7 @@ export class StaffRegisterDto {
   @Matches(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/, {
     message: 'Password must contain uppercase, lowercase, and number',
   })
-  password: string;
+  password!: string;
 
   @IsOptional()
   @IsString()

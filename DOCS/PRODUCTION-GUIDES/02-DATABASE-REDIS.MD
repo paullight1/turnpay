@@ -7,17 +7,12 @@ Use this guide for production PostgreSQL, Prisma migrations, Redis, backups, TLS
 ## Required Env Vars
 
 ```env
-DATABASE_URL=postgresql://USER:PASSWORD@HOST:5432/DB?schema=public
-REDIS_HOST=
-REDIS_PORT=6379
-REDIS_PASSWORD=
-RECONCILIATION_CRON=0 */1 * * *
-WEBHOOK_QUEUE_NAME=banking-webhooks
-DLQ_NAME=banking-dead-letter
-ADMIN_REVIEW_WEBHOOK_ALERT_CHANNEL=
+DATABASE_URL=postgresql://USER:PASSWORD@SUPABASE_HOST:5432/postgres?sslmode=require&schema=public
+REDIS_URL=rediss://USER:PASSWORD@REVIEWED_HOST:6379
+REDIS_ALLOW_MEMORY_FALLBACK=false
 ```
 
-Production `DATABASE_URL` should require SSL/TLS where supported by the host. Do not reuse local credentials.
+Production `DATABASE_URL` must require TLS and use the approved Supabase direct/session-pooler endpoint on port 5432. Production startup requires `REDIS_URL`; separate host/port/password variables do not replace it. Verify authentication, persistence and the actual TLS/private-network policy. Do not reuse staging or local credentials.
 
 ## Backup policy and restore evidence
 
@@ -58,7 +53,7 @@ the CI fixture is synthetic evidence only.
 
 1. Provision production PostgreSQL with private networking, TLS, point-in-time recovery, and daily backups.
 2. Provision Redis with authentication, encryption in transit where available, and private access.
-3. Set production `DATABASE_URL`, `REDIS_HOST`, `REDIS_PORT`, and `REDIS_PASSWORD`.
+3. Set production `DATABASE_URL` and authenticated `REDIS_URL`, with `REDIS_ALLOW_MEMORY_FALLBACK=false`.
 4. Run migrations during a release window with rollback and backup references recorded.
 5. Confirm connection pooling and maximum database connections match deployment concurrency.
 6. Enable database, Redis, and application health alerts.

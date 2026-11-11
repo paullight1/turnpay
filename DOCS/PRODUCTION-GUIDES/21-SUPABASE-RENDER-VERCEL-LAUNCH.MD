@@ -1,7 +1,8 @@
 # TRUSTPAY V1 — Supabase, Render, and Vercel Launch
 
-The current deployment target is **free staging**, not production. Do not send
-real customer, KYC, or financial traffic through this environment.
+The default `render.yaml` blueprint is **free staging**, not production. Do not send
+real customer, KYC, or financial traffic through that environment. These are repository
+templates; confirm the actual host and settings of the running deployment separately.
 
 - Supabase project `zsewjppvfcssqllfefsm`: staging Auth, PostgreSQL, and private Storage buckets.
 - Render Frankfurt: the NestJS backend and a free, non-persistent Key Value instance.
@@ -94,3 +95,17 @@ Before production, upgrade both Render resources, enable Key Value persistence,
 move migrations back to a paid `preDeployCommand`, set
 `RUN_MIGRATIONS_ON_STARTUP=false`, and replace every sandbox credential and URL
 with its live equivalent.
+
+
+## Reviewed production proposal
+
+`render.production.yaml` is a separate opt-in proposal. It uses paid web/Key Value plans, explicit persistent non-evicting Redis storage, production validation, a pre-deploy migration job and no startup migrations. Automatic deploys and financial feature flags are off. Applying the file creates paid resources; first review sizing, resource names, domain ownership, production isolation and the owner's chosen hosting platform. Do not attach the same API domain to staging and production simultaneously.
+
+Set `REDIS_URL` manually to the reviewed authenticated production endpoint. The proposal deliberately does not inherit Render's default unauthenticated internal connection. Internal authentication, TLS/routing, access controls and multi-instance failure testing require actual service evidence. Render's internal authentication is a dashboard setting, and external TLS endpoints need a reviewed client allowlist; do not open access to all addresses to bypass setup. See [Render Key Value connections](https://render.com/docs/key-value) and [Blueprint fields](https://render.com/docs/blueprint-spec).
+
+Select only one transactional delivery transport after verifying the sender: SMTP with `SMTP_REQUIRE_TLS=true`, or Resend with its backend-only key. Both Render templates and Compose pass through the supported settings. Keep `EMAIL_PROVIDER=disabled` until configured; outbox records remain queued. Supabase OTP/recovery SMTP remains independently configured and tested.
+
+If production uses Dokploy or another approved host, use the same Docker startup validation and apply the same secret, release-job, persistent Redis, backup, TLS and provider gates there. Do not create a second production stack merely because a Render proposal exists.
+
+
+Retain the existing Monnify API/secret/contract/base-URL settings only while legacy obligations remain. The production startup guard requires their live endpoint even with Paystack primary; new NGN activity still uses Paystack. Confirm the live credentials and endpoint in the existing secret store, following [Monnify's live-mode checklist](https://developers.monnify.com/docs/live).

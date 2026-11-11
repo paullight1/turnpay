@@ -1178,6 +1178,7 @@ model ManualExchangeOrder {
   destinationAccount     String?
   destinationName        String?
   proofKey               String?
+  receiptName            String?
   bankReference          String?
   depositReference       String?                  @unique
   payoutReference        String?                  @unique

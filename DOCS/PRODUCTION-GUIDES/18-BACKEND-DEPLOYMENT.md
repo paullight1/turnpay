@@ -1,5 +1,7 @@
 # 🚀 Backend Production Deployment — Fly.io
 
+> Historical guide. Superseded for current deployment/provider decisions. Use [the current operations index](00-README.MD), [Paystack activation](../PAYSTACK-ACTIVATION.md), and [the migration runbook](20-MIGRATION-RUNBOOK.md). Customer OTP is Supabase email; Sentry is optional; Monnify is legacy-only; the recorded active backend host is Dokploy. Do not apply the old SMS/provider/platform setup below to production.
+
 > **Guide ID:** `PROD-18-BACKEND`
 > **Stream:** STREAM-INFRA Phase 1.4
 > **Target Platform:** Fly.io (Johannesburg region `jnb`)

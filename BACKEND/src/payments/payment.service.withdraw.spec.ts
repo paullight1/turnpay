@@ -33,7 +33,7 @@ describe('PaymentService withdrawals', () => {
     ledgerEntry: {
       findFirst: jest.fn(),
     },
-    $transaction: jest.fn(async (fn: any) => fn(prisma)),
+    $transaction: jest.fn(async (fn: any): Promise<unknown> => fn(prisma)),
   };
 
   const wallets = {
@@ -81,7 +81,7 @@ describe('PaymentService withdrawals', () => {
     jest.clearAllMocks();
     prisma.transaction.findUnique.mockResolvedValue(null);
     service = new PaymentService(
-      prisma,
+      prisma as never,
       wallets as any,
       monnifyBanks as any,
       config as any,

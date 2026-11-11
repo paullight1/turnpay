@@ -1,5 +1,7 @@
 # Production Guide: Auth And Supabase
 
+> Historical guide. Superseded for current deployment/provider decisions. Use [the current operations index](00-README.MD), [Paystack activation](../PAYSTACK-ACTIVATION.md), and [the migration runbook](20-MIGRATION-RUNBOOK.md). Customer OTP is Supabase email; Sentry is optional; Monnify is legacy-only; the recorded active backend host is Dokploy. Do not apply the old SMS/provider/platform setup below to production.
+
 ## Scope
 
 Use this guide for Supabase project setup, backend Supabase credentials, website public auth config, Flutter auth config, JWT compatibility, and OTP/SMS behavior. Local development can validate code paths, but production requires live Supabase project settings, real callback domains, and SMS provider credentials.

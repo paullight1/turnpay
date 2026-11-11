@@ -29,7 +29,7 @@ const SUPPORT_STATUSES = [
 export class CreateSupportTicketDto {
   @IsString()
   @IsIn(SUPPORT_CATEGORIES)
-  category: (typeof SUPPORT_CATEGORIES)[number];
+  category!: (typeof SUPPORT_CATEGORIES)[number];
 
   @IsString()
   @IsOptional()
@@ -44,13 +44,13 @@ export class CreateSupportTicketDto {
   @IsString()
   @MinLength(20)
   @MaxLength(1000)
-  description: string;
+  description!: string;
 }
 
 export class ResolveSupportTicketDto {
   @IsString()
   @IsIn(['RESOLVED', 'CLOSED', 'ESCALATED'])
-  status: 'RESOLVED' | 'CLOSED' | 'ESCALATED';
+  status!: 'RESOLVED' | 'CLOSED' | 'ESCALATED';
 
   @IsString()
   @IsOptional()
@@ -60,7 +60,7 @@ export class ResolveSupportTicketDto {
   @IsString()
   @MinLength(10)
   @MaxLength(500)
-  reason: string;
+  reason!: string;
 }
 
 export type SupportTicketStatus = (typeof SUPPORT_STATUSES)[number];

@@ -1,4 +1,6 @@
-# Monnify-Verified Exchange Deposit Flow
+# Historical Monnify-Verified Exchange Deposit Flow
+
+This guide documents retained legacy receipt obligations. New direct-account V1 exchanges use `/api/exchange/manual-orders`; follow [the current manual-exchange instructions](../MANUAL-EXCHANGE-ADMIN-TRIGGERS.md). Do not activate new Monnify collection or reinterpret an existing wallet credit as an external payout.
 
 ## Current Implementation Status
 

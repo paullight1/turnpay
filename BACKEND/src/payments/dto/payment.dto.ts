@@ -20,11 +20,11 @@ export class WithdrawDto {
   @Matches(MONEY_AMOUNT_PATTERN, {
     message: 'amount must be a positive decimal with at most 2 decimal places',
   })
-  amount: string;
+  amount!: string;
 
   @IsString()
   @IsIn(SUPPORTED_CURRENCIES)
-  currency: (typeof SUPPORTED_CURRENCIES)[number];
+  currency!: (typeof SUPPORTED_CURRENCIES)[number];
 
   @IsString()
   @IsOptional()
@@ -59,33 +59,33 @@ export class WithdrawDto {
 export class ResolveBankDto {
   @IsString()
   @Matches(/^\d{10}$/)
-  accountNumber: string;
+  accountNumber!: string;
 
   @IsString()
   @MaxLength(32)
-  bankCode: string;
+  bankCode!: string;
 }
 
 export class AuthorizeWithdrawalDto {
   @IsString()
   @Matches(/^\d{6,8}$/)
-  authorizationCode: string;
+  authorizationCode!: string;
 }
 
 export class InitializePaymentDto {
   @Transform(({ value }) => normalizeDecimalInput(value))
   @IsString()
   @Matches(MONEY_AMOUNT_PATTERN)
-  amount: string;
+  amount!: string;
 
   @IsString()
   @IsIn(['NGN'])
-  currency: 'NGN';
+  currency!: 'NGN';
 }
 
 export class PaymentReferenceDto {
   @IsString()
   @MaxLength(128)
   @Matches(/^[A-Za-z0-9_.=-]+$/)
-  reference: string;
+  reference!: string;
 }

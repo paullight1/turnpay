@@ -1,0 +1,178 @@
+# Opt-in production proposal. Applying this file creates PAID resources.
+# Review names, domains, sizing and production secrets before deployment.
+# Financial features remain off until the corresponding provider acceptance.
+# The existing render.yaml remains the staging blueprint.
+services:
+  - type: web
+    name: trustpay-backend-production
+    runtime: docker
+    plan: 0.5c-512mb
+    region: frankfurt
+    branch: main
+    autoDeployTrigger: "off"
+    preDeployCommand: npx prisma migrate deploy
+    domains:
+      - api.trustpayhq.com
+    dockerfilePath: ./BACKEND/Dockerfile
+    dockerContext: ./BACKEND
+    healthCheckPath: /api/health/ready
+    envVars:
+      - key: NODE_ENV
+        value: "production"
+      - key: RUN_MIGRATIONS_ON_STARTUP
+        value: "false"
+      - key: WEB_URL
+        value: "https://www.trustpayhq.com"
+      - key: ADMIN_URL
+        value: "https://www.trustpayhq.com"
+      - key: SENTRY_DSN
+        value: "" # Optional: set a real DSN to enable Sentry.
+      - key: EMAIL_PROVIDER
+        value: "disabled" # Choose smtp or resend only after sender verification.
+      - key: EMAIL_FROM
+        sync: false
+      - key: EMAIL_REPLY_TO
+        value: ""
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        value: "465"
+      - key: SMTP_SECURE
+        value: "true"
+      - key: SMTP_REQUIRE_TLS
+        value: "true"
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
+      - key: RESEND_API_KEY
+        sync: false
+      - key: EMAIL_OUTBOX_BATCH_SIZE
+        value: "25"
+      - key: EMAIL_OUTBOX_LEASE_SECONDS
+        value: "300"
+      - key: EMAIL_OUTBOX_RETRY_BASE_SECONDS
+        value: "60"
+      - key: EMAIL_OUTBOX_MAX_ATTEMPTS
+        value: "5"
+      - key: OTP_EXPIRES_IN
+        value: "5m"
+      - key: OTP_LENGTH
+        value: "6"
+      - key: OTP_DEV_CODE
+        value: ""
+      - key: OTP_PROVIDER
+        value: "supabase_email"
+      - key: PORT
+        value: "3000"
+      - key: LOG_LEVEL
+        value: "info"
+      - key: DATABASE_URL
+        sync: false # Isolated PRODUCTION Supabase session pooler, TLS required.
+      - key: REDIS_URL
+        sync: false # Reviewed authenticated production URL; verify TLS/private routing before launch.
+      - key: REDIS_ALLOW_MEMORY_FALLBACK
+        value: "false"
+      - key: TRUST_PROXY_HOPS
+        # Fallback for non-Render production runs; Render is detected via its
+        # platform-provided RENDER variable and trusts its normalized chain.
+        value: "2"
+      - key: JWT_SECRET
+        generateValue: true
+      - key: JWT_REFRESH_SECRET
+        generateValue: true
+      - key: PII_ENCRYPTION_KEY
+        generateValue: true
+      - key: IDEMPOTENCY_RESPONSE_ENCRYPTION_KEY
+        sync: false # Exactly 32 random bytes encoded as base64
+      - key: IDEMPOTENCY_RESPONSE_ENCRYPTION_KEY_ID
+        value: "v1"
+      - key: BANK_ACCOUNT_ENCRYPTION_KEY
+        generateValue: true
+      - key: PII_KEY_VERSION
+        value: "1"
+      - key: TRANSACTION_PIN_REQUIRED
+        value: "true"
+      - key: INTERNAL_TRANSFERS_ENABLED
+        value: "false"
+      - key: KORA_GHS_ENABLED
+        value: "false"
+      - key: KORA_GHS_VIRTUAL_ACCOUNTS_ENABLED
+        value: "false"
+      - key: KORA_GHS_MOMO_COLLECTIONS_ENABLED
+        value: "false"
+      - key: KORA_GHS_MOMO_PAYOUTS_ENABLED
+        value: "false"
+      - key: KORA_EXCHANGE_USE_CASE_APPROVED
+        value: "false"
+      - key: PAYSTACK_EXCHANGE_USE_CASE_APPROVED
+        value: "false"
+      - key: BANKING_ENABLED
+        value: "false"
+      - key: VIRTUAL_ACCOUNTS_ENABLED
+        value: "false"
+      - key: WITHDRAWALS_ENABLED
+        value: "false"
+      - key: BANKING_SANDBOX_MODE
+        value: "false"
+      - key: KYC_PROVIDER
+        value: "paystack"
+      - key: NINJA_NIN_ENABLED
+        value: "false"
+      - key: NINJA_BASE_URL
+        value: "https://api.ninja.boucloud.io"
+      - key: NINJA_SECRET_KEY
+        sync: false # Server-only Ninja live secret; never put its value in this file.
+      - key: KYC_DOCUMENT_BUCKET
+        value: "kyc-documents"
+      - key: EXCHANGE_RECEIPT_BUCKET
+        value: "exchange-receipts"
+      - key: VTU_PROVIDER
+        value: "vtpass"
+      - key: VTU_ENABLED
+        value: "false"
+      - key: VTU_SIMULATION_ENABLED
+        value: "false"
+      - key: VTPASS_BASE_URL
+        value: "https://vtpass.com/api"
+      - key: VTPASS_LOW_BALANCE_THRESHOLD
+        value: "5000"
+      - key: VTPASS_API_KEY
+        sync: false
+      - key: VTPASS_PUBLIC_KEY
+        sync: false
+      - key: VTPASS_SECRET_KEY
+        sync: false
+      - key: VTPASS_WEBHOOK_SECRET
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_PUBLISHABLE_KEY
+        sync: false
+      - key: SUPABASE_ANON_KEY
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: BANKING_PROVIDER_PRIMARY
+        value: "paystack"
+      - key: MONNIFY_API_KEY
+        sync: false # Retain only while existing Monnify obligations remain.
+      - key: MONNIFY_SECRET_KEY
+        sync: false # Retain only while existing Monnify obligations remain.
+      - key: MONNIFY_CONTRACT_CODE
+        sync: false # Retain only while existing Monnify obligations remain.
+      - key: MONNIFY_BASE_URL
+        sync: false # Retain only while existing Monnify obligations remain.
+      - key: PAYSTACK_SECRET_KEY
+        sync: false
+      - key: PAYSTACK_CHECKOUT_ENABLED
+        value: "false"
+
+  - type: keyvalue
+    name: trustpay-redis-production
+    plan: 256mb
+    region: frankfurt
+    # Idempotency, lockout, and OTP keys must never be silently evicted.
+    persistenceMode: journal-snapshot
+    maxmemoryPolicy: noeviction
+    ipAllowList: []

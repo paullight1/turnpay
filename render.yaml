@@ -22,6 +22,34 @@ services:
         value: "https://www.trustpayhq.com"
       - key: SENTRY_DSN
         value: "" # Optional: set a real DSN to enable Sentry.
+      - key: EMAIL_PROVIDER
+        value: "disabled" # Choose smtp or resend only after sender verification.
+      - key: EMAIL_FROM
+        sync: false
+      - key: EMAIL_REPLY_TO
+        value: ""
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        value: "465"
+      - key: SMTP_SECURE
+        value: "true"
+      - key: SMTP_REQUIRE_TLS
+        value: "true"
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
+      - key: RESEND_API_KEY
+        sync: false
+      - key: EMAIL_OUTBOX_BATCH_SIZE
+        value: "25"
+      - key: EMAIL_OUTBOX_LEASE_SECONDS
+        value: "300"
+      - key: EMAIL_OUTBOX_RETRY_BASE_SECONDS
+        value: "60"
+      - key: EMAIL_OUTBOX_MAX_ATTEMPTS
+        value: "5"
       - key: OTP_EXPIRES_IN
         value: "5m"
       - key: OTP_LENGTH

@@ -6,6 +6,7 @@ import {
 import type { Metadata } from "next";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
+import { decodeSessionCookie, SESSION_COOKIE_NAME } from "@/lib/server-auth-session";
 import { createServerClientInstance } from "@/lib/supabase-server";
 
 export const metadata: Metadata = {
@@ -14,31 +15,9 @@ export const metadata: Metadata = {
   robots: { index: false, follow: false },
 };
 
-const LOCAL_SESSION_COOKIE_NAME = "supabase.auth.token";
 const apiBaseUrl = resolveApiOrigin(undefined, {
   fallback: DEFAULT_API_ORIGIN,
 });
-
-type LocalSessionCookie = { access_token?: string };
-
-// Recovers a candidate bearer token from the locally-persisted cookie. NOT
-// trusted on its own — always re-validated against the backend below.
-function readLocalCandidateToken(value?: string): string | null {
-  if (!value?.startsWith("base64-")) {
-    return null;
-  }
-
-  try {
-    const json = Buffer.from(
-      value.slice("base64-".length),
-      "base64url",
-    ).toString("utf8");
-    const parsed = JSON.parse(json) as LocalSessionCookie;
-    return parsed.access_token ?? null;
-  } catch {
-    return null;
-  }
-}
 
 // Confirms the admin role from a trusted server call (backend /api/auth/bootstrap),
 // never from client-editable Supabase user_metadata.
@@ -78,9 +57,11 @@ export default async function AdminLayout({
   // Defense in depth: the middleware already gates /admin, but we re-verify the
   // role from a trusted server call here so a page render can never rely on
   // client-side user_metadata for authorization.
-  const supabase = await createServerClientInstance();
-
-  let candidateToken: string | null = null;
+  const cookieStore = await cookies();
+  let candidateToken = decodeSessionCookie(
+    cookieStore.get(SESSION_COOKIE_NAME)?.value,
+  )?.access_token ?? null;
+  const supabase = candidateToken ? null : await createServerClientInstance();
   if (supabase) {
     const {
       data: { user },
@@ -91,13 +72,6 @@ export default async function AdminLayout({
       } = await supabase.auth.getSession();
       candidateToken = session?.access_token ?? null;
     }
-  }
-
-  if (!candidateToken) {
-    const cookieStore = await cookies();
-    candidateToken = readLocalCandidateToken(
-      cookieStore.get(LOCAL_SESSION_COOKIE_NAME)?.value,
-    );
   }
 
   if (!candidateToken) {

@@ -21,6 +21,7 @@ import { UsersModule } from '../users/users.module';
 import { WalletsModule } from '../wallets/wallets.module';
 import { BankingModule } from '../banking/banking.module';
 import { ReconciliationModule } from '../common/services/reconciliation.module';
+import { ReceiptScanService } from './receipt-scan.service';
 
 @Module({
   imports: [
@@ -43,6 +44,7 @@ import { ReconciliationModule } from '../common/services/reconciliation.module';
   providers: [
     ExchangeService,
     ManualExchangeService,
+    ReceiptScanService,
     ManualExchangeReconciliationService,
     RateService,
     RateAlertService,

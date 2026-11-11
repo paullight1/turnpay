@@ -155,6 +155,8 @@ jobs:
           IDEMPOTENCY_RESPONSE_ENCRYPTION_KEY_ID: v1
           TRANSACTION_PIN_REQUIRED: "true"
           BANKING_ENABLED: "true"
+          BANKING_SANDBOX_MODE: "false"
+          PAYSTACK_CHECKOUT_ENABLED: "false"
           VIRTUAL_ACCOUNTS_ENABLED: "true"
           WITHDRAWALS_ENABLED: "true"
           INTERNAL_TRANSFERS_ENABLED: "false"

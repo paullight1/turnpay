@@ -77,6 +77,18 @@ export class AttachManualProofDto {
   @IsString()
   @Matches(/^[A-Z0-9._-]{4,100}$/)
   bankReference?: string;
+
+  @ValidateIf(
+    (_dto: AttachManualProofDto, value: unknown) => value !== undefined,
+  )
+  @Transform(({ value }: { value: unknown }) =>
+    typeof value === 'string' ? value.trim() : value,
+  )
+  @IsString()
+  @MinLength(1)
+  @MaxLength(120)
+  @Matches(/^[^\p{Cc}]+$/u)
+  receiptName?: string;
 }
 
 /**

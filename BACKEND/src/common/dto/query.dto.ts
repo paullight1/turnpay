@@ -83,5 +83,5 @@ export class TransactionQueryDto extends PaginationQueryDto {
 export class ReferenceParamDto {
   @IsString()
   @Matches(/^[A-Za-z0-9_-]{6,120}$/)
-  reference: string;
+  reference!: string;
 }

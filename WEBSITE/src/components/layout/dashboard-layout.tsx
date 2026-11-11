@@ -10,6 +10,7 @@ import { TrustPayLogo } from "@/components/brand/trustpay-logo";
 import { AdminNotificationBell } from "@/components/admin/admin-notification-bell";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { useTrustpayTheme } from "@/components/theme-provider";
 import { ThemeToggle } from "@/components/theme-toggle";
 import {
   DropdownMenu,
@@ -34,15 +35,18 @@ import {
   Banknote,
   BarChart3,
   ClipboardList,
+  ChevronDown,
   FileCheck2,
   Landmark,
   LifeBuoy,
   Menu,
+  Moon,
   ScrollText,
-  ShieldAlert,
+  Settings,
   ShieldCheck,
   LogOut,
   Smartphone,
+  Sun,
   Send,
   UserRound,
   type LucideIcon,
@@ -73,11 +77,6 @@ const navItems: NavItem[] = [
 
 const adminItems: NavItem[] = [
   { label: "Overview", href: "/admin", icon: ShieldCheck },
-  {
-    label: "Funding review",
-    href: "/admin/payments/adverse-funding",
-    icon: ShieldAlert,
-  },
   { label: "Transactions", href: "/admin?tab=finance", icon: BarChart3 },
   { label: "Customers", href: "/admin?tab=users", icon: UserRound },
   {
@@ -125,7 +124,9 @@ function Sidebar({
               "group/nav relative flex min-h-10 items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-all duration-150",
               active
                 ? "bg-red-600 text-white shadow-sm shadow-red-950/30 after:absolute after:-left-3 after:top-1/2 after:h-6 after:w-0.5 after:-translate-y-1/2 after:rounded-full after:bg-red-400"
-                : "text-white/58 hover:translate-x-1 hover:bg-white/[0.06] hover:text-white",
+                : admin
+                  ? "text-muted-foreground hover:translate-x-1 hover:bg-muted hover:text-foreground"
+                  : "text-white/58 hover:translate-x-1 hover:bg-white/[0.06] hover:text-white",
             )}
           >
             <Icon className="size-4 transition-transform group-hover/nav:scale-110" />
@@ -143,6 +144,7 @@ export default function DashboardLayout({
   children: React.ReactNode;
 }) {
   const { user, signOut, isLoading } = useAuth();
+  const { resolvedTheme, setTheme } = useTrustpayTheme();
   const pathname = usePathname();
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -169,6 +171,7 @@ export default function DashboardLayout({
     if (!adminWorkspace || typeof window === "undefined") return;
 
     const handleTouchStart = (event: TouchEvent) => {
+      if (event.target instanceof Element && event.target.closest('[role="dialog"]')) return;
       if (!open && window.scrollY <= 0) {
         pullStartY.current = event.touches[0]?.clientY ?? null;
       }
@@ -210,8 +213,8 @@ export default function DashboardLayout({
 
   if (isLoading || !user || redirectingStaff) {
     return (
-      <div className="dark flex min-h-screen items-center justify-center bg-[#050505] text-white">
-        <div className="flex flex-col items-center gap-3 text-white/58">
+      <div className={cn("flex min-h-screen items-center justify-center", adminWorkspace ? "bg-background text-foreground" : "dark bg-[#050505] text-white")}>
+        <div className={cn("flex flex-col items-center gap-3", adminWorkspace ? "text-muted-foreground" : "text-white/58")}>
           <div className="size-10 rounded-full border-2 border-red-600/20 border-t-red-600 animate-spin" />
           <p className="text-sm">Preparing your workspace...</p>
         </div>
@@ -240,15 +243,68 @@ export default function DashboardLayout({
     window.setTimeout(() => setIsNavigating(false), 1500);
   };
 
+  const adminAccount = (
+    <div className="mt-auto shrink-0 border-t border-border p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+      <details className="group/settings">
+        <summary className="flex min-h-11 cursor-pointer list-none items-center gap-3 rounded-lg px-3 text-sm text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring [&::-webkit-details-marker]:hidden">
+          <Settings aria-hidden="true" className="size-4 shrink-0" />
+          Settings
+          <ChevronDown aria-hidden="true" className="ml-auto size-4 shrink-0 group-open/settings:rotate-180" />
+        </summary>
+        <div role="group" aria-label="Appearance" className="grid grid-cols-2 gap-2 px-3 pb-2">
+          <Button
+            type="button"
+            variant={resolvedTheme === "light" ? "secondary" : "outline"}
+            aria-pressed={resolvedTheme === "light"}
+            className="min-h-11 aria-pressed:border-primary aria-pressed:bg-accent aria-pressed:text-accent-foreground"
+            onClick={() => setTheme("light")}
+          >
+            <Sun aria-hidden="true" /> Light
+          </Button>
+          <Button
+            type="button"
+            variant={resolvedTheme === "dark" ? "secondary" : "outline"}
+            aria-pressed={resolvedTheme === "dark"}
+            className="min-h-11 aria-pressed:border-primary aria-pressed:bg-accent aria-pressed:text-accent-foreground"
+            onClick={() => setTheme("dark")}
+          >
+            <Moon aria-hidden="true" /> Dark
+          </Button>
+        </div>
+      </details>
+      <div className="flex min-w-0 items-center gap-2 px-3 py-2">
+        <Avatar className="size-8 shrink-0">
+          <AvatarFallback className="bg-primary text-xs text-primary-foreground">
+            {initials}
+          </AvatarFallback>
+        </Avatar>
+        <div className="min-w-0">
+          <p className="text-sm font-semibold">Admin account</p>
+          <p className="wrap-anywhere text-xs text-muted-foreground">{user.email}</p>
+        </div>
+      </div>
+      <Button
+        variant="ghost"
+        className="min-h-11 w-full justify-start gap-3 px-3 text-sm text-muted-foreground hover:text-foreground"
+        disabled={isSigningOut}
+        onClick={handleSignOut}
+      >
+        <LogOut aria-hidden="true" className="size-4" />
+        {isSigningOut ? "Signing out…" : "Log out"}
+      </Button>
+      {signOutError && <p role="alert" className="px-3 text-sm text-destructive">{signOutError}</p>}
+    </div>
+  );
+
   return (
-    <div className={cn("dark flex min-h-screen flex-col bg-[#050505] text-white", adminWorkspace && "trustpay-admin-console")}>
+    <div className={cn("flex min-h-screen flex-col", adminWorkspace ? "trustpay-admin-console bg-background text-foreground" : "dark bg-[#050505] text-white")}>
       {adminWorkspace && pullDistance > 0 && (
         <div
           className="pointer-events-none fixed inset-x-0 top-16 z-40 flex justify-center"
           role="status"
           aria-live="polite"
         >
-          <span className="rounded-full border border-white/10 bg-black/85 px-3 py-1 text-xs text-white/70 shadow-lg">
+          <span className="rounded-full border border-border bg-popover px-3 py-1 text-xs text-muted-foreground shadow-lg">
             {pullDistance >= 64 ? "Release to refresh" : "Pull to refresh"}
           </span>
         </div>
@@ -258,9 +314,9 @@ export default function DashboardLayout({
           <div className="h-full w-1/3 animate-[nav-progress_900ms_ease-in-out_infinite] bg-red-500" />
         </div>
       )}
-      <header className="sticky top-0 z-30 border-b border-white/10 bg-black/88 backdrop-blur-xl">
+      <header className={cn("sticky top-0 z-30 border-b backdrop-blur-xl", adminWorkspace ? "border-border bg-card/90 dark:bg-black/88" : "border-white/10 bg-black/88")}>
         <div className="container mx-auto flex h-16 items-center justify-between px-4">
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-1 min-[375px]:gap-3">
             <Sheet open={open} onOpenChange={setOpen}>
               <SheetTrigger asChild>
                 <Button
@@ -274,29 +330,32 @@ export default function DashboardLayout({
               </SheetTrigger>
               <SheetContent
                 side="left"
-                className="dark w-72 border-white/10 bg-[#050505] p-0 text-white"
+                className={cn("w-72 gap-0 p-0", adminWorkspace ? "border-border dark:bg-[#050505]" : "dark border-white/10 bg-[#050505] text-white")}
               >
                 <SheetTitle className="sr-only">Navigation menu</SheetTitle>
                 <SheetDescription className="sr-only">
                   Choose where to go in TrustPay.
                 </SheetDescription>
-                <div className="border-b border-white/10 px-4 py-4">
+                <div className={cn("shrink-0 border-b px-4 py-4", adminWorkspace ? "border-border" : "border-white/10")}>
                   <TrustPayLogo
                     imageClassName="size-10"
                     textClassName="text-base font-bold"
                   />
-                  <p className="mt-1 text-xs text-white/48">
+                  <p className={cn("mt-1 text-xs", adminWorkspace ? "text-muted-foreground" : "text-white/48")}>
                     {adminWorkspace
                       ? "Operations and oversight"
                       : "Wallet workspace"}
                   </p>
                 </div>
-                <Sidebar
-                  items={allItems}
-                  pathname={pathname}
-                  admin={adminWorkspace}
-                  onNavigate={() => { setOpen(false); startNavigation(); }}
-                />
+                <div className="min-h-0 flex-1 overflow-y-auto">
+                  <Sidebar
+                    items={allItems}
+                    pathname={pathname}
+                    admin={adminWorkspace}
+                    onNavigate={() => { setOpen(false); startNavigation(); }}
+                  />
+                </div>
+                {adminWorkspace && adminAccount}
               </SheetContent>
             </Sheet>
             <TrustPayLogo
@@ -306,90 +365,64 @@ export default function DashboardLayout({
             {adminWorkspace && (
               <Badge
                 variant="secondary"
-                className="hidden border-red-500/20 bg-red-600/10 text-red-200 sm:inline-flex"
+                className="hidden border-red-500/20 bg-red-600/10 text-red-800 sm:inline-flex dark:text-red-200"
               >
                 Admin workspace
               </Badge>
             )}
           </div>
-          <div className="flex items-center gap-2 sm:gap-4">
-            {adminWorkspace && <AdminNotificationBell />}
-            <ThemeToggle />
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="ghost" className="flex items-center gap-2">
-                  <Avatar className="size-8">
-                    <AvatarFallback className="bg-primary text-xs text-primary-foreground">
-                      {initials}
-                    </AvatarFallback>
-                  </Avatar>
-                  <span className="hidden max-w-44 truncate text-sm sm:inline">
-                    {displayEmail}
-                  </span>
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-48">
-                {!adminWorkspace && (
-                  <>
-                    <DropdownMenuItem asChild>
-                      <Link
-                        href="/dashboard/profile"
-                        className="cursor-pointer"
-                      >
-                        Profile
-                      </Link>
-                    </DropdownMenuItem>
-                    <DropdownMenuItem asChild>
-                      <Link
-                        href="/dashboard/transactions"
-                        className="cursor-pointer"
-                      >
-                        Transactions
-                      </Link>
-                    </DropdownMenuItem>
-                    <DropdownMenuSeparator />
-                  </>
-                )}
-                <DropdownMenuItem
-                  className="cursor-pointer gap-2 text-destructive"
-                  disabled={isSigningOut}
-                  onClick={handleSignOut}
-                >
-                  <LogOut className="size-4" />
-                  {isSigningOut ? "Signing out..." : "Sign Out"}
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+          <div className="flex items-center gap-1 min-[375px]:gap-2 sm:gap-4">
+            {adminWorkspace ? <AdminNotificationBell /> : <ThemeToggle />}
+            {!adminWorkspace && (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="ghost" className="flex items-center gap-2">
+                    <Avatar className="size-8">
+                      <AvatarFallback className="bg-primary text-xs text-primary-foreground">
+                        {initials}
+                      </AvatarFallback>
+                    </Avatar>
+                    <span className="hidden max-w-44 truncate text-sm sm:inline">
+                      {displayEmail}
+                    </span>
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-48">
+                  <DropdownMenuItem asChild>
+                    <Link href="/dashboard/profile" className="cursor-pointer">Profile</Link>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem asChild>
+                    <Link href="/dashboard/transactions" className="cursor-pointer">Transactions</Link>
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    className="cursor-pointer gap-2 text-destructive"
+                    disabled={isSigningOut}
+                    onClick={handleSignOut}
+                  >
+                    <LogOut className="size-4" />
+                    {isSigningOut ? "Signing out..." : "Sign Out"}
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
           </div>
         </div>
       </header>
       <div className="flex flex-1">
-        <aside className="sticky top-16 hidden h-[calc(100vh-4rem)] w-60 shrink-0 self-start flex-col border-r border-white/10 bg-[#0b0b0b] md:flex">
-          <Sidebar
-            items={allItems}
-            pathname={pathname}
-            admin={adminWorkspace}
-            onNavigate={startNavigation}
-          />
-          {adminWorkspace && (
-            <div className="mt-auto border-t border-white/10 p-3">
-              <p className="px-3 pb-2 text-[11px] font-medium uppercase tracking-wide text-white/35">
-                Account
-              </p>
-              <Button
-                variant="ghost"
-                className="w-full justify-start gap-3 px-3 text-sm text-white/60 hover:text-white"
-                disabled={isSigningOut}
-                onClick={handleSignOut}
-              >
-                <LogOut className="size-4" />
-                {isSigningOut ? "Signing out..." : "Log out"}
-              </Button>
-            </div>
-          )}
+        <aside className={cn("sticky top-16 hidden h-[calc(100vh-4rem)] w-60 shrink-0 self-start flex-col border-r md:flex", adminWorkspace ? "border-border bg-card dark:bg-[#0b0b0b]" : "border-white/10 bg-[#0b0b0b]")}>
+          <div className="min-h-0 flex-1 overflow-y-auto">
+            <Sidebar
+              items={allItems}
+              pathname={pathname}
+              admin={adminWorkspace}
+              onNavigate={startNavigation}
+            />
+          </div>
+          {adminWorkspace && adminAccount}
         </aside>
-        <main className="trustpay-dashboard-motion min-w-0 flex-1 bg-[#0c1015] p-4 sm:p-6 lg:p-8">
-          {signOutError && (
+        <main className={cn("trustpay-dashboard-motion min-w-0 flex-1 p-4 sm:p-6 lg:p-8", !adminWorkspace && "bg-[#0c1015]")}>
+          {!adminWorkspace && signOutError && (
             <div
               role="alert"
               className="mx-auto mb-4 max-w-3xl rounded-lg border border-red-400/40 bg-red-950/40 px-4 py-3 text-sm text-red-200"

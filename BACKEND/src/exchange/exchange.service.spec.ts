@@ -27,7 +27,7 @@ describe('ExchangeService', () => {
   };
 
   const mockPrisma = {
-    $transaction: jest.fn(async (fn: any) => fn(mockPrisma)),
+    $transaction: jest.fn(async (fn: any): Promise<unknown> => fn(mockPrisma)),
     $queryRaw: jest.fn().mockResolvedValue([
       {
         id: 'w',

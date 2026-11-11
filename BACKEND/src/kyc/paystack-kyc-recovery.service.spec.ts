@@ -56,8 +56,9 @@ function makeHarness(
   const state = makeState(overrides);
   const prisma = {
     $queryRaw: jest.fn().mockResolvedValue([]),
-    $transaction: jest.fn(async (callback: (tx: typeof prisma) => unknown) =>
-      callback(prisma),
+    $transaction: jest.fn(
+      async (callback: (tx: unknown) => unknown): Promise<unknown> =>
+        callback(prisma),
     ),
     paystackCustomer: {
       findUnique: jest.fn().mockResolvedValue(state.customer),

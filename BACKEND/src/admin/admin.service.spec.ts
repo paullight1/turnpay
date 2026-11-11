@@ -71,8 +71,9 @@ describe('AdminService banking operations', () => {
     providerEvent: {
       findMany: jest.fn(),
     },
-    $transaction: jest.fn(async (arg: any) =>
-      typeof arg === 'function' ? arg(prisma) : Promise.all(arg),
+    $transaction: jest.fn(
+      async (arg: any): Promise<unknown> =>
+        typeof arg === 'function' ? arg(prisma) : Promise.all(arg),
     ),
   };
 
@@ -117,7 +118,7 @@ describe('AdminService banking operations', () => {
     jest.clearAllMocks();
     prisma.vtuWebhookInbox.findMany.mockResolvedValue([]);
     service = new AdminService(
-      prisma,
+      prisma as never,
       logger as any,
       ledger as any,
       configService as any,
@@ -1769,7 +1770,7 @@ describe('AdminService banking operations', () => {
     prisma.transaction.findUnique.mockResolvedValue({
       id: 'tx-1',
       reference: 'TX-DRILL',
-      type: 'FUND',
+      type: 'EXCHANGE',
       amount: new Decimal(1200),
       currency: 'NGN',
       status: 'SUCCESS',
@@ -1820,6 +1821,18 @@ describe('AdminService banking operations', () => {
           token: 'shh',
         },
       },
+      manualExchangeOrder: {
+        id: 'order-1',
+        status: 'PROOF_SUBMITTED',
+        settlementMode: 'BANK',
+        destinationInstitution: 'Test Bank',
+        destinationAccount: '1234567890',
+        destinationName: 'Test Recipient',
+        targetAmount: new Decimal(50),
+        targetCurrency: 'GHS',
+        proofKey: 'private/deposit',
+        payoutProofKey: null,
+      },
       disputes: [],
     });
 
@@ -1840,12 +1853,25 @@ describe('AdminService banking operations', () => {
     expect(result).toEqual(
       expect.objectContaining({
         reference: 'TX-DRILL',
-        type: 'FUND',
+        type: 'EXCHANGE',
         metadata: {
           note: 'approved',
         },
       }),
     );
+    expect(result.manualExchange).toEqual({
+      id: 'order-1',
+      status: 'PROOF_SUBMITTED',
+      settlementMode: 'BANK',
+      destinationInstitution: 'Test Bank',
+      destinationAccount: '1234567890',
+      destinationName: 'Test Recipient',
+      targetAmount: new Decimal(50),
+      targetCurrency: 'GHS',
+      hasProof: true,
+      hasPayoutProof: false,
+    });
+    expect(result).not.toHaveProperty('manualExchangeOrder');
     expect(result.ledgerEntries[0].metadata).toEqual({
       reference: 'REF-1',
     });
