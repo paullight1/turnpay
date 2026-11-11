@@ -540,10 +540,19 @@ test.describe("Admin manual exchange queue", () => {
     await order.getByRole("button", { name: "Review MX-WALLET-001" }).click();
     const summary = detail.getByRole("region", { name: "Transaction summary" });
     const swipe = (start: number, end: number) => summary.evaluate((element, points) => {
-      const touch = (clientX: number) => new Touch({ identifier: 1, target: element, clientX, clientY: 200 });
-      const start = [touch(points.start)];
-      element.dispatchEvent(new TouchEvent("touchstart", { bubbles: true, touches: start, targetTouches: start, changedTouches: start }));
-      element.dispatchEvent(new TouchEvent("touchend", { bubbles: true, changedTouches: [touch(points.end)] }));
+      const dispatchTouch = (type: string, clientX: number) => {
+        const touch = { identifier: 1, target: element, clientX, clientY: 200 };
+        const activeTouches = type === "touchstart" ? [touch] : [];
+        const event = new Event(type, { bubbles: true });
+        Object.defineProperties(event, {
+          touches: { value: activeTouches },
+          targetTouches: { value: activeTouches },
+          changedTouches: { value: [touch] },
+        });
+        element.dispatchEvent(event);
+      };
+      dispatchTouch("touchstart", points.start);
+      dispatchTouch("touchend", points.end);
     }, { start, end });
     await swipe(280, 100);
     await expect(summary).toContainText("MX-PAYOUT-001");

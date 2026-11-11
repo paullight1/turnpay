@@ -177,6 +177,7 @@ test.describe("web session hardening", () => {
 
     await page.goto("/admin");
     await expect(page).toHaveURL(/\/admin/);
+    await expect(page.getByRole("button", { name: /Admin notifications/ })).toBeVisible();
     await expect.poll(() => readStoredSession(page)).toBeNull();
 
     await page.goto("/staff?callbackUrl=%2Fadmin%3Ftab%3Dexchange");
