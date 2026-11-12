@@ -377,81 +377,269 @@ class _ComingSoonCard extends StatelessWidget {
     final accent = _comingSoonColor(index);
     final brightSurface = Color.lerp(accent, Colors.white, 0.72)!;
 
-    return Container(
-      key: ValueKey('coming-soon-${item.slug}'),
-      width: double.infinity,
-      height: largeText ? 144 : 112,
-      decoration: BoxDecoration(
-        color: brightSurface,
+    return Semantics(
+      button: true,
+      label: '${item.title}. Preview this upcoming feature',
+      onTap: () => context
+          .push(AppRoutes.comingSoon.replaceFirst(':feature', item.slug)),
+      excludeSemantics: true,
+      child: Material(
+        color: Colors.transparent,
         borderRadius: BorderRadius.circular(AppRadius.lg),
-        border: Border.all(color: accent.withValues(alpha: 0.24)),
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: Stack(
-        fit: StackFit.expand,
-        children: [
-          Image.asset(
-            item.backgroundAsset!,
-            key: ValueKey('coming-soon-artwork-${item.slug}'),
-            fit: BoxFit.cover,
-            alignment: Alignment.centerRight,
-            color: accent.withValues(alpha: 0.52),
-            colorBlendMode: BlendMode.screen,
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: () => context.push(
+            AppRoutes.comingSoon.replaceFirst(':feature', item.slug),
           ),
-          DecoratedBox(
+          child: Container(
+            key: ValueKey('coming-soon-${item.slug}'),
+            width: double.infinity,
+            height: largeText ? 144 : 112,
             decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.centerLeft,
-                end: Alignment.centerRight,
-                colors: [
-                  brightSurface,
-                  brightSurface.withValues(alpha: 0.94),
-                  accent.withValues(alpha: 0.34),
-                ],
-                stops: const [0.12, 0.58, 1],
-              ),
+              color: brightSurface,
+              borderRadius: BorderRadius.circular(AppRadius.lg),
+              border: Border.all(color: accent.withValues(alpha: 0.24)),
+            ),
+            clipBehavior: Clip.antiAlias,
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                Image.asset(
+                  item.backgroundAsset!,
+                  key: ValueKey('coming-soon-artwork-${item.slug}'),
+                  fit: BoxFit.cover,
+                  alignment: Alignment.centerRight,
+                  color: accent.withValues(alpha: 0.52),
+                  colorBlendMode: BlendMode.screen,
+                ),
+                DecoratedBox(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.centerLeft,
+                      end: Alignment.centerRight,
+                      colors: [
+                        brightSurface,
+                        brightSurface.withValues(alpha: 0.94),
+                        accent.withValues(alpha: 0.34),
+                      ],
+                      stops: const [0.12, 0.58, 1],
+                    ),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: AppSpacing.md,
+                    vertical: 12,
+                  ),
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: FractionallySizedBox(
+                      widthFactor: 0.72,
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            item.title,
+                            style: AppTextStyles.labelL.copyWith(
+                              color: const Color(0xFF101828),
+                              fontWeight: FontWeight.w900,
+                              height: 1.12,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          const SizedBox(height: AppSpacing.xs),
+                          Text(
+                            item.subtitle,
+                            style: AppTextStyles.bodyS.copyWith(
+                              color: const Color(0xFF344054),
+                              fontWeight: FontWeight.w600,
+                              height: 1.3,
+                            ),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
-          Padding(
-            padding: const EdgeInsets.symmetric(
-              horizontal: AppSpacing.md,
-              vertical: 12,
-            ),
-            child: Align(
-              alignment: Alignment.centerLeft,
-              child: FractionallySizedBox(
-                widthFactor: 0.72,
+        ),
+      ),
+    );
+  }
+}
+
+/// A local preview only: opening an advert never starts a financial action.
+class ComingSoonFeatureScreen extends StatelessWidget {
+  const ComingSoonFeatureScreen({super.key, required this.slug});
+
+  final String slug;
+
+  static const _stories = <String, (String, List<String>)>{
+    'airtime-cash': (
+      'Give unused airtime a new purpose.',
+      [
+        'Convert eligible airtime into wallet funds',
+        'Review conversion details before you decide',
+        'Keep track of your conversions in one place'
+      ],
+    ),
+    'virtual-cards': (
+      'A little more control over online spending.',
+      [
+        'Create a card for online payments',
+        'Manage your card from your wallet',
+        'Freeze your card when you need to'
+      ],
+    ),
+    'book-hotels': (
+      'Your next stay, all in one place.',
+      [
+        'Explore stays for your next trip',
+        'Review booking details before paying',
+        'Keep your reservations together'
+      ],
+    ),
+    'pay-flights': (
+      'Make room for your next destination.',
+      [
+        'Explore flights for your journey',
+        'Review fares and travel details',
+        'Keep booking receipts close at hand'
+      ],
+    ),
+    'betting-wallet': (
+      'Wallet controls, brought together.',
+      [
+        'Manage supported wallet connections',
+        'Review transfers before confirming',
+        'Track wallet activity in one place'
+      ],
+    ),
+    'gift-cards': (
+      'Something thoughtful, sent digitally.',
+      [
+        'Explore gift cards from supported brands',
+        'Choose a gift for the occasion',
+        'Keep digital gift details together'
+      ],
+    ),
+  };
+
+  @override
+  Widget build(BuildContext context) {
+    AppColors.watch(context);
+    final index =
+        HomeTaskScreen._comingSoon.indexWhere((item) => item.slug == slug);
+    final item = index < 0 ? null : HomeTaskScreen._comingSoon[index];
+    final story = _stories[slug];
+    final accent = _comingSoonColor(index < 0 ? 0 : index);
+
+    return Scaffold(
+      key: ValueKey('feature-advert-$slug'),
+      backgroundColor: AppColors.background,
+      body: SafeArea(
+        child: SingleChildScrollView(
+          child: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 680),
+              child: Padding(
+                padding: const EdgeInsets.all(AppSpacing.lg),
                 child: Column(
-                  mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      item.title,
-                      style: AppTextStyles.labelL.copyWith(
-                        color: const Color(0xFF101828),
-                        fontWeight: FontWeight.w900,
-                        height: 1.12,
+                    TpPageHeader(
+                        label: item?.title ?? 'Feature preview',
+                        edgeToEdge: false),
+                    const SizedBox(height: AppSpacing.lg),
+                    if (item == null || story == null) ...[
+                      Text('Feature unavailable',
+                          style: AppTextStyles.headingL),
+                      const SizedBox(height: AppSpacing.sm),
+                      Text('Return to More to explore upcoming features.',
+                          style: AppTextStyles.bodyM),
+                    ] else ...[
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(AppRadius.lg),
+                        child: AspectRatio(
+                          aspectRatio: 1.8,
+                          child: Image.asset(
+                            item.backgroundAsset!,
+                            fit: BoxFit.cover,
+                            excludeFromSemantics: true,
+                            color: accent.withValues(alpha: 0.32),
+                            colorBlendMode: BlendMode.screen,
+                          ),
+                        ),
                       ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    const SizedBox(height: AppSpacing.xs),
-                    Text(
-                      item.subtitle,
-                      style: AppTextStyles.bodyS.copyWith(
-                        color: const Color(0xFF344054),
-                        fontWeight: FontWeight.w600,
-                        height: 1.3,
+                      const SizedBox(height: AppSpacing.lg),
+                      Text('IN THE WORKS',
+                          style: AppTextStyles.caption.copyWith(
+                              color: AppColors.primary,
+                              letterSpacing: 1.4,
+                              fontWeight: FontWeight.w800)),
+                      const SizedBox(height: AppSpacing.sm),
+                      Text(story.$1,
+                          style:
+                              AppTextStyles.headingXL.copyWith(height: 1.15)),
+                      const SizedBox(height: AppSpacing.md),
+                      Text(item.subtitle, style: AppTextStyles.bodyM),
+                      const SizedBox(height: AppSpacing.xl),
+                      Text('What to expect', style: AppTextStyles.headingM),
+                      const SizedBox(height: AppSpacing.md),
+                      for (final benefit in story.$2)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: AppSpacing.md),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Icon(Icons.check_circle_outline_rounded,
+                                  color: AppColors.primary, size: 22),
+                              const SizedBox(width: AppSpacing.sm),
+                              Expanded(
+                                  child: Text(benefit,
+                                      style: AppTextStyles.bodyM)),
+                            ],
+                          ),
+                        ),
+                      const SizedBox(height: AppSpacing.lg),
+                      SizedBox(
+                        width: double.infinity,
+                        child: FilledButton(
+                          key: const ValueKey('coming-soon-cta'),
+                          onPressed: null,
+                          style: FilledButton.styleFrom(
+                            minimumSize: const Size(0, 52),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 20, vertical: 16),
+                            disabledBackgroundColor:
+                                AppColors.primary.withValues(alpha: 0.16),
+                            disabledForegroundColor: AppColors.textPrimary,
+                            shape: RoundedRectangleBorder(
+                                borderRadius:
+                                    BorderRadius.circular(AppRadius.md)),
+                          ),
+                          child: const Text('Coming soon'),
+                        ),
                       ),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                    ),
+                      const SizedBox(height: AppSpacing.sm),
+                      Text(
+                          'This feature is still being built. Availability and details may change before launch.',
+                          style: AppTextStyles.bodyS,
+                          textAlign: TextAlign.center),
+                    ],
+                    const SizedBox(height: AppSpacing.md),
                   ],
                 ),
               ),
             ),
           ),
-        ],
+        ),
       ),
     );
   }
