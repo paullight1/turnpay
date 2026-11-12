@@ -17,6 +17,9 @@ describe('LedgerService', () => {
     ledgerEntry: {
       create: jest.fn(),
     },
+    emailOutbox: {
+      createMany: jest.fn(),
+    },
     reconciliationRun: {
       findMany: jest.fn(),
     },
@@ -38,6 +41,7 @@ describe('LedgerService', () => {
     prisma.reconciliationRun.findMany.mockResolvedValue([]);
     prisma.auditLog.findMany.mockResolvedValue([]);
     prisma.fundingAdverseCase.findMany.mockResolvedValue([]);
+    prisma.emailOutbox.createMany.mockResolvedValue({ count: 1 });
     prisma.$queryRaw.mockImplementation(async (query: any) =>
       query.sql?.includes('FOR UPDATE OF w')
         ? [
@@ -101,6 +105,94 @@ describe('LedgerService', () => {
       },
     });
     expect(result.balanceAfter.equals(1250)).toBe(true);
+  });
+
+  it('queues one immutable wallet-credit email for a non-deposit ledger movement', async () => {
+    prisma.wallet.findUnique.mockResolvedValue({
+      id: 'wallet-1',
+      userId: 'user-1',
+      currency: 'GHS',
+      balance: new Decimal(10),
+    });
+    prisma.wallet.update.mockResolvedValue({
+      id: 'wallet-1',
+      balance: new Decimal(22.5),
+    });
+    prisma.ledgerEntry.create.mockResolvedValue({ id: 'ledger-credit-1' });
+
+    await service.creditWallet({
+      userId: 'user-1',
+      currency: 'GHS',
+      amount: new Decimal('12.50'),
+      transactionId: 'tx-1',
+      reference: 'KORA-1',
+      source: 'KORA_DEPOSIT',
+    });
+
+    expect(prisma.emailOutbox.createMany).toHaveBeenCalledWith({
+      data: [
+        {
+          userId: 'user-1',
+          eventKey: 'wallet:movement:ledger-credit-1',
+          eventType: 'WALLET_CREDIT',
+          orderId: 'ledger-credit-1',
+        },
+      ],
+      skipDuplicates: true,
+    });
+  });
+
+  it('keeps the existing deposit email as the sole confirmation for DVA movements', async () => {
+    prisma.wallet.findUnique.mockResolvedValue({
+      id: 'wallet-1',
+      userId: 'user-1',
+      currency: 'NGN',
+      balance: new Decimal(10),
+    });
+    prisma.wallet.update.mockResolvedValue({
+      id: 'wallet-1',
+      balance: new Decimal(22.5),
+    });
+    prisma.ledgerEntry.create.mockResolvedValue({ id: 'ledger-deposit-1' });
+
+    await service.creditWallet({
+      userId: 'user-1',
+      currency: 'NGN',
+      amount: new Decimal('12.50'),
+      transactionId: 'tx-1',
+      reference: 'PAY-1',
+      source: 'PAYSTACK_DVA',
+    });
+
+    expect(prisma.emailOutbox.createMany).not.toHaveBeenCalled();
+  });
+
+  it('rolls the movement back when the transactional outbox write fails', async () => {
+    prisma.wallet.findUnique.mockResolvedValue({
+      id: 'wallet-1',
+      userId: 'user-1',
+      currency: 'GHS',
+      balance: new Decimal(10),
+    });
+    prisma.wallet.update.mockResolvedValue({
+      id: 'wallet-1',
+      balance: new Decimal(22.5),
+    });
+    prisma.ledgerEntry.create.mockResolvedValue({ id: 'ledger-credit-2' });
+    prisma.emailOutbox.createMany.mockRejectedValueOnce(
+      new Error('outbox unavailable'),
+    );
+
+    await expect(
+      service.creditWallet({
+        userId: 'user-1',
+        currency: 'GHS',
+        amount: new Decimal('12.50'),
+        transactionId: 'tx-1',
+        reference: 'KORA-2',
+        source: 'KORA_DEPOSIT',
+      }),
+    ).rejects.toThrow('outbox unavailable');
   });
 
   it('rejects non-positive credit amounts', async () => {

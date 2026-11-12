@@ -20,6 +20,7 @@ import { PinoLogger } from 'nestjs-pino';
 import { Prisma, TransactionStatus } from '@prisma/client';
 import { Decimal } from '@prisma/client/runtime/library';
 import { LedgerService } from '../wallets/ledger.service';
+import { enqueueTransactionStatusEmail } from '../notifications/financial-notifications';
 import { MonnifyVirtualAccountProvider } from '../banking/providers/monnify-virtual-account.provider';
 import {
   decryptSensitiveValue,
@@ -65,6 +66,27 @@ interface WithdrawalRecord {
     createdAt: Date;
     updatedAt: Date;
   }>;
+}
+
+type TerminalTransactionStatus = Extract<
+  TransactionStatus,
+  'SUCCESS' | 'FAILED' | 'REVERSED'
+>;
+type ReversalTransactionStatus = Extract<
+  TransactionStatus,
+  'FAILED' | 'REVERSED'
+>;
+
+function isTerminalTransactionStatus(
+  status: TransactionStatus,
+): status is TerminalTransactionStatus {
+  return status === 'SUCCESS' || status === 'FAILED' || status === 'REVERSED';
+}
+
+function isReversalTransactionStatus(
+  status: TransactionStatus,
+): status is ReversalTransactionStatus {
+  return status === 'FAILED' || status === 'REVERSED';
 }
 
 @Injectable()
@@ -450,9 +472,18 @@ export class PaymentService {
       // Guarded: only transition a still-PENDING withdrawal. A disbursement
       // webhook may have already marked it terminal (e.g. REVERSED + refund);
       // this sync path must not overwrite that.
-      await this.prisma.transaction.updateMany({
-        where: { reference: withdrawalRecord.reference, status: 'PENDING' },
-        data: { status: finalStatus },
+      await this.prisma.$transaction(async (tx) => {
+        const transitioned = await tx.transaction.updateMany({
+          where: { reference: withdrawalRecord.reference, status: 'PENDING' },
+          data: { status: finalStatus },
+        });
+        if (transitioned.count === 1 && finalStatus === 'SUCCESS') {
+          await enqueueTransactionStatusEmail(tx, {
+            userId,
+            transactionId: withdrawalRecord.id,
+            status: 'SUCCESS',
+          });
+        }
       });
 
       await this.prisma.transferAttempt.update({
@@ -476,13 +507,14 @@ export class PaymentService {
         },
       });
 
-      if (['FAILED', 'REVERSED'].includes(finalStatus)) {
+      if (isReversalTransactionStatus(finalStatus)) {
         await this.reverseWithdrawal(
           userId,
           dto.currency,
           amount,
           withdrawalRecord,
           destination,
+          finalStatus,
         );
 
         this.logger.error(
@@ -538,6 +570,7 @@ export class PaymentService {
           amount,
           withdrawalRecord,
           destination,
+          'FAILED',
         );
         this.logger.warn(
           { reference: withdrawalRecord.reference },
@@ -634,13 +667,14 @@ export class PaymentService {
             },
           });
 
-          if (['FAILED', 'REVERSED'].includes(reconciledStatus)) {
+          if (isReversalTransactionStatus(reconciledStatus)) {
             await this.reverseWithdrawal(
               userId,
               dto.currency,
               amount,
               withdrawalRecord,
               destination,
+              reconciledStatus,
             );
 
             this.logger.error(
@@ -872,10 +906,23 @@ export class PaymentService {
         },
       });
 
+      // A successful OTP authorization is a committed terminal transition;
+      // enqueue its notification in the same transaction so a rollback cannot
+      // leave an email claiming a withdrawal completed. Failed/reversed
+      // authorizations are enqueued by reverseWithdrawal after the refund
+      // ledger entry is committed. Pending must never create a success email.
+      if (finalStatus === 'SUCCESS') {
+        await enqueueTransactionStatusEmail(tx, {
+          userId,
+          transactionId: reconciled.id,
+          status: 'SUCCESS',
+        });
+      }
+
       return true;
     });
 
-    if (updatedTransaction && ['FAILED', 'REVERSED'].includes(finalStatus)) {
+    if (updatedTransaction && isReversalTransactionStatus(finalStatus)) {
       const withdrawalMetadata =
         reconciled.metadata &&
         typeof reconciled.metadata === 'object' &&
@@ -906,6 +953,7 @@ export class PaymentService {
             (withdrawalMetadata.accountNumberMasked as string | undefined) ||
             maskAccountNumber('0000000000'),
         },
+        finalStatus,
       );
     }
 
@@ -1060,7 +1108,7 @@ export class PaymentService {
 
       if (
         updatedTransaction.count === 1 &&
-        ['FAILED', 'REVERSED'].includes(finalStatus)
+        isReversalTransactionStatus(finalStatus)
       ) {
         const existingReversal = await tx.ledgerEntry.findFirst({
           where: {
@@ -1105,6 +1153,17 @@ export class PaymentService {
             },
           });
         }
+      }
+
+      if (
+        updatedTransaction.count === 1 &&
+        isTerminalTransactionStatus(finalStatus)
+      ) {
+        await enqueueTransactionStatusEmail(tx, {
+          userId: transaction.userId,
+          transactionId: transaction.id,
+          status: finalStatus,
+        });
       }
 
       await tx.providerEvent.update({
@@ -1211,6 +1270,7 @@ export class PaymentService {
       WithdrawalDestination,
       'beneficiaryId' | 'accountNumberMasked'
     >,
+    finalStatus: Extract<TransactionStatus, 'FAILED' | 'REVERSED'> = 'FAILED',
   ) {
     await this.prisma.$transaction(async (tx) => {
       const existingReversal = await tx.ledgerEntry.findFirst({
@@ -1247,6 +1307,11 @@ export class PaymentService {
       await tx.user.updateMany({
         where: { id: userId, monthlyWithdrawn: { gte: amount } },
         data: { monthlyWithdrawn: { decrement: amount } },
+      });
+      await enqueueTransactionStatusEmail(tx, {
+        userId,
+        transactionId: transaction.id,
+        status: finalStatus,
       });
     });
   }
@@ -1472,10 +1537,18 @@ export class PaymentService {
         },
       });
 
+      if (transition.count === 1 && reconciledStatus === 'SUCCESS') {
+        await enqueueTransactionStatusEmail(tx, {
+          userId,
+          transactionId: withdrawal.id,
+          status: 'SUCCESS',
+        });
+      }
+
       return transition.count === 1;
     });
 
-    if (updated && ['FAILED', 'REVERSED'].includes(reconciledStatus)) {
+    if (updated && isReversalTransactionStatus(reconciledStatus)) {
       const withdrawalMetadata =
         withdrawal.metadata &&
         typeof withdrawal.metadata === 'object' &&
@@ -1506,6 +1579,7 @@ export class PaymentService {
             (withdrawalMetadata.accountNumberMasked as string | undefined) ||
             maskAccountNumber('0000000000'),
         },
+        reconciledStatus,
       );
     }
 
@@ -1802,6 +1876,11 @@ export class PaymentService {
         where: { id: userId, monthlyWithdrawn: { gte: amount } },
         data: { monthlyWithdrawn: { decrement: amount } },
       });
+      await enqueueTransactionStatusEmail(tx, {
+        userId,
+        transactionId: record.id,
+        status: 'FAILED',
+      });
       await tx.auditLog.create({
         data: {
           action: requireExpiredApproval
@@ -1947,6 +2026,13 @@ export class PaymentService {
             data: { monthlyWithdrawn: { decrement: transaction.amount } },
           });
         }
+      }
+      if (isTerminalTransactionStatus(status)) {
+        await enqueueTransactionStatusEmail(tx, {
+          userId: transaction.userId,
+          transactionId: transaction.id,
+          status,
+        });
       }
       await tx.auditLog.create({
         data: {

@@ -40,6 +40,27 @@ describe('transactional email configuration and transport', () => {
     expect(settings.enabled).toBe(false);
   });
 
+  it('fails closed when the outbox cutover is not a valid timestamp', () => {
+    const values: Record<string, string | undefined> = {
+      EMAIL_PROVIDER: 'smtp',
+      EMAIL_FROM: 'TrustPay <support@trustpayhq.com>',
+      EMAIL_OUTBOX_NOT_BEFORE: 'not-a-timestamp',
+      SMTP_HOST: 'smtp.example.com',
+      SMTP_PORT: '587',
+      SMTP_SECURE: 'false',
+      SMTP_REQUIRE_TLS: 'true',
+      SMTP_USER: 'user',
+      SMTP_PASSWORD: 'password',
+    };
+    const settings = readEmailOutboxSettings({
+      get: <T>(key: string) => values[key] as T,
+    });
+
+    expect(settings.enabled).toBe(false);
+    expect(settings.notBefore).toBeUndefined();
+    expect(settings.configurationError).toBe('invalid_not_before');
+  });
+
   it('sends Resend requests to the fixed endpoint with the stable row key', async () => {
     const fetcher = jest.fn().mockResolvedValue({
       ok: true,

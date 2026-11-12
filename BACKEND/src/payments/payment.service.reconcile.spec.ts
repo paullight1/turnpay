@@ -14,6 +14,9 @@ describe('PaymentService.reconcilePendingWithdrawals', () => {
     ledgerEntry: {
       findFirst: jest.fn(),
     },
+    emailOutbox: {
+      createMany: jest.fn(),
+    },
     user: {
       updateMany: jest.fn(),
     },
@@ -56,6 +59,7 @@ describe('PaymentService.reconcilePendingWithdrawals', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    prisma.emailOutbox.createMany.mockResolvedValue({ count: 1 });
     service = new PaymentService(
       prisma as unknown as PrismaService,
       {} as any,
@@ -85,6 +89,34 @@ describe('PaymentService.reconcilePendingWithdrawals', () => {
 
     expect(result).toEqual({ checked: 2, resolved: 1 });
     expect(monnifyBanks.getTransferStatus).toHaveBeenCalledTimes(2);
+    expect(prisma.emailOutbox.createMany).toHaveBeenCalledTimes(1);
+    expect(prisma.emailOutbox.createMany).toHaveBeenCalledWith({
+      data: [
+        {
+          userId: 'u1',
+          eventKey: 'transaction:status:tx-1:SUCCESS',
+          eventType: 'TRANSACTION_SUCCESS',
+          orderId: 'tx-1',
+        },
+      ],
+      skipDuplicates: true,
+    });
+  });
+
+  it('does not notify again when another worker already finalized the withdrawal', async () => {
+    prisma.transaction.findMany.mockResolvedValue([
+      makeWithdrawal('tx-existing', 'u1', 'WD-existing'),
+    ]);
+    prisma.transaction.updateMany.mockResolvedValue({ count: 0 });
+    prisma.transferAttempt.update.mockResolvedValue({});
+    monnifyBanks.getTransferStatus.mockResolvedValue({
+      reference: 'WD-existing',
+      status: 'SUCCESS',
+    });
+
+    await service.reconcilePendingWithdrawals(25);
+
+    expect(prisma.emailOutbox.createMany).not.toHaveBeenCalled();
   });
 
   it('reverses funds when the provider reports the transfer failed', async () => {

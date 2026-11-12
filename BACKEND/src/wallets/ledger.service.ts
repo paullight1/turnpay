@@ -15,6 +15,7 @@ import {
   SettlementHoldService,
   settlementOperationForSource,
 } from '../common/services/settlement-hold.service';
+import { enqueueWalletMovementEmail } from '../notifications/financial-notifications';
 
 type LedgerCurrency = 'NGN' | 'GHS';
 type LedgerDirection = 'DEBIT' | 'CREDIT';
@@ -38,6 +39,7 @@ type LedgerClient = Pick<
   | 'exchangeReceipt'
   | 'reconciliationRun'
   | 'auditLog'
+  | 'emailOutbox'
   | '$queryRaw'
 >;
 
@@ -218,7 +220,7 @@ export class LedgerService {
         throw new BadRequestException('Wallet balance cannot be negative');
       }
 
-      await tx.ledgerEntry.create({
+      const ledgerEntry = await tx.ledgerEntry.create({
         data: {
           transactionId: input.transactionId,
           walletId,
@@ -232,6 +234,17 @@ export class LedgerService {
           metadata: input.metadata as Prisma.InputJsonValue | undefined,
         },
       });
+
+      // Paystack/DVA deposits already enqueue the established branded deposit
+      // event. Keeping those sources out of the generic movement stream avoids
+      // sending two confirmations for one committed funding transaction.
+      if (!usesExistingDepositEmail(input.source)) {
+        await enqueueWalletMovementEmail(tx, {
+          userId: input.userId,
+          ledgerEntryId: ledgerEntry.id,
+          direction,
+        });
+      }
 
       return {
         walletId,
@@ -252,4 +265,9 @@ export class LedgerService {
       throw new BadRequestException('Amount must be positive');
     }
   }
+}
+
+function usesExistingDepositEmail(source: string): boolean {
+  const normalized = source.toUpperCase();
+  return normalized === 'PAYSTACK_CHECKOUT' || normalized.endsWith('_DVA');
 }

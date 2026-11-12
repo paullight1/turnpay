@@ -38,6 +38,7 @@ import type { VtuProviderResult } from './providers/vtpass.types';
 import type { VtpassInboxEvent } from './vtu-webhook-inbox.service';
 import { VtuReceiptService } from './vtu-receipt.service';
 import { SettlementHoldService } from '../common/services/settlement-hold.service';
+import { enqueueTransactionStatusEmail } from '../notifications/financial-notifications';
 
 type VtuPricingContext = {
   amount: Decimal;
@@ -1610,6 +1611,11 @@ export class VtuService {
             completedAt: new Date(),
           },
         });
+        await enqueueTransactionStatusEmail(tx, {
+          userId: input.order.transaction.userId,
+          transactionId: input.order.transactionId,
+          status: 'SUCCESS',
+        });
       });
       return;
     }
@@ -1875,6 +1881,12 @@ export class VtuService {
           },
         });
       }
+
+      await enqueueTransactionStatusEmail(tx, {
+        userId,
+        transactionId: transaction.id,
+        status: finalStatus,
+      });
 
       return true;
     });
