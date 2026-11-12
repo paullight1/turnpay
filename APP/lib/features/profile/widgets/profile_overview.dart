@@ -25,65 +25,92 @@ class ProfileOverview extends StatelessWidget {
       children: [
         Text('My Profile',
             style:
-                AppTextStyles.headingXL.copyWith(fontWeight: FontWeight.w800)),
-        const SizedBox(height: 28),
+                AppTextStyles.headingL.copyWith(fontWeight: FontWeight.w800)),
+        const SizedBox(height: AppSpacing.lg),
         if (user == null)
-          identityStatus ?? const SizedBox.shrink()
+          _ProfileIdentityState(
+            status: identityStatus ??
+                const LinearProgressIndicator(
+                  semanticsLabel: 'Loading account details',
+                ),
+          )
         else
-          Material(
-            color: AppColors.surface,
-            borderRadius: BorderRadius.circular(16),
-            child: InkWell(
-              borderRadius: BorderRadius.circular(16),
-              onTap: () => context.push(AppRoutes.profileAccount),
-              child: Padding(
-                padding: const EdgeInsets.all(20),
-                child: Row(children: [
-                  Stack(clipBehavior: Clip.none, children: [
-                    Container(
-                      width: 76,
-                      height: 76,
-                      padding: const EdgeInsets.all(3),
-                      decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          border:
-                              Border.all(color: AppColors.primary, width: 2)),
-                      child: CircleAvatar(
-                          backgroundColor:
-                              AppColors.primary.withValues(alpha: .12),
-                          child: Text(user.initials,
-                              style: AppTextStyles.headingL.copyWith(
-                                  color: AppColors.primary,
-                                  fontWeight: FontWeight.w800))),
-                    ),
-                    Positioned(
-                        right: -2,
-                        bottom: -2,
-                        child: Container(
-                            width: 30,
-                            height: 30,
-                            decoration: BoxDecoration(
-                                color: AppColors.surfaceVariant,
-                                shape: BoxShape.circle,
-                                border: Border.all(
-                                    color: AppColors.surface, width: 2)),
-                            child: Icon(Icons.edit_outlined,
-                                color: AppColors.primary, size: 16))),
-                  ]),
-                  const SizedBox(width: 20),
-                  Expanded(
-                      child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                        Text(user.displayName, style: AppTextStyles.headingM),
-                        const SizedBox(height: 6),
-                        Text(user.email, style: AppTextStyles.bodyM),
-                      ])),
-                ]),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Material(
+                color: AppColors.surface,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(AppRadius.md),
+                  side: BorderSide(color: AppColors.border),
+                ),
+                clipBehavior: Clip.antiAlias,
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(AppRadius.md),
+                  onTap: () => context.push(AppRoutes.profileAccount),
+                  child: Padding(
+                    padding: const EdgeInsets.all(AppSpacing.md),
+                    child: Row(children: [
+                      Stack(clipBehavior: Clip.none, children: [
+                        Container(
+                          width: 60,
+                          height: 60,
+                          padding: const EdgeInsets.all(2),
+                          decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              border: Border.all(
+                                  color: AppColors.primary, width: 2)),
+                          child: CircleAvatar(
+                              backgroundColor:
+                                  AppColors.primary.withValues(alpha: .12),
+                              child: Text(user.initials,
+                                  style: AppTextStyles.headingL.copyWith(
+                                      color: AppColors.primary,
+                                      fontWeight: FontWeight.w800))),
+                        ),
+                        Positioned(
+                            right: -2,
+                            bottom: -2,
+                            child: Container(
+                                width: 24,
+                                height: 24,
+                                decoration: BoxDecoration(
+                                    color: AppColors.surfaceVariant,
+                                    shape: BoxShape.circle,
+                                    border: Border.all(
+                                        color: AppColors.surface, width: 2)),
+                                child: Icon(Icons.edit_outlined,
+                                    color: AppColors.primary, size: 14))),
+                      ]),
+                      const SizedBox(width: AppSpacing.sm + 4),
+                      Expanded(
+                          child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                            Text(user.displayName,
+                                style: AppTextStyles.headingM),
+                            const SizedBox(height: AppSpacing.xs),
+                            Text(user.email,
+                                style: AppTextStyles.bodyM,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis),
+                          ])),
+                    ]),
+                  ),
+                ),
               ),
-            ),
+              if (identityStatus != null)
+                Padding(
+                  padding: const EdgeInsets.only(
+                    top: AppSpacing.xs,
+                    left: AppSpacing.xs,
+                    right: AppSpacing.xs,
+                  ),
+                  child: identityStatus,
+                ),
+            ],
           ),
-        const SizedBox(height: 28),
+        const SizedBox(height: AppSpacing.lg),
         _sectionLabel('Account'),
         const SizedBox(height: 12),
         _ProfileGroup(children: [
@@ -112,7 +139,7 @@ class ProfileOverview extends StatelessWidget {
               label: 'Notifications',
               onTap: () => context.push(AppRoutes.notifications)),
         ]),
-        const SizedBox(height: 28),
+        const SizedBox(height: AppSpacing.lg),
         _sectionLabel('Preferences'),
         const SizedBox(height: 12),
         _ProfileGroup(children: [
@@ -150,6 +177,60 @@ class ProfileOverview extends StatelessWidget {
 
   Widget _sectionLabel(String label) => Text(label,
       style: AppTextStyles.labelL.copyWith(fontWeight: FontWeight.w600));
+}
+
+class _ProfileIdentityState extends StatelessWidget {
+  final Widget status;
+
+  const _ProfileIdentityState({required this.status});
+
+  @override
+  Widget build(BuildContext context) {
+    AppColors.watch(context);
+    return Material(
+      color: AppColors.surface,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(AppRadius.md),
+        side: BorderSide(color: AppColors.border),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(AppSpacing.md),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Container(
+                  width: 60,
+                  height: 60,
+                  decoration: BoxDecoration(
+                    color: AppColors.surfaceVariant,
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(
+                    Icons.person_outline_rounded,
+                    color: AppColors.textHint,
+                    size: 28,
+                  ),
+                ),
+                const SizedBox(width: AppSpacing.sm + 4),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Account profile', style: AppTextStyles.labelL),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: AppSpacing.md),
+            status,
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 class _ProfileGroup extends StatelessWidget {

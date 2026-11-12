@@ -185,7 +185,10 @@ SystemUiOverlayStyle _overlayStyle(Brightness brightness) {
     statusBarColor: Colors.transparent,
     statusBarBrightness: brightness,
     statusBarIconBrightness: icons,
+    systemStatusBarContrastEnforced: false,
     systemNavigationBarColor: Colors.transparent,
+    systemNavigationBarDividerColor: Colors.transparent,
     systemNavigationBarIconBrightness: icons,
+    systemNavigationBarContrastEnforced: false,
   );
 }

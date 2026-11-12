@@ -33,6 +33,9 @@ describe('PaymentService withdrawals', () => {
     ledgerEntry: {
       findFirst: jest.fn(),
     },
+    emailOutbox: {
+      createMany: jest.fn(),
+    },
     $transaction: jest.fn(async (fn: any): Promise<unknown> => fn(prisma)),
   };
 
@@ -80,6 +83,8 @@ describe('PaymentService withdrawals', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     prisma.transaction.findUnique.mockResolvedValue(null);
+    prisma.transaction.updateMany.mockResolvedValue({ count: 1 });
+    prisma.emailOutbox.createMany.mockResolvedValue({ count: 1 });
     service = new PaymentService(
       prisma as never,
       wallets as any,
@@ -426,6 +431,17 @@ describe('PaymentService withdrawals', () => {
       }),
     );
     expect(ledger.creditWallet).not.toHaveBeenCalled();
+    expect(prisma.emailOutbox.createMany).toHaveBeenCalledWith({
+      data: [
+        {
+          userId: 'user-1',
+          eventKey: 'transaction:status:tx-1:SUCCESS',
+          eventType: 'TRANSACTION_SUCCESS',
+          orderId: 'tx-1',
+        },
+      ],
+      skipDuplicates: true,
+    });
   });
 
   it('returns duplicate result when a transfer webhook event is already processed', async () => {
@@ -822,6 +838,67 @@ describe('PaymentService withdrawals', () => {
       reference: 'WD-1',
       status: 'PENDING',
       message: 'Withdrawal authorization submitted',
+    });
+  });
+
+  it('queues a success alert when Monnify OTP authorization commits success', async () => {
+    prisma.transaction.findFirst.mockResolvedValue({
+      id: 'tx-1',
+      reference: 'WD-1',
+      amount: new Decimal(1000),
+      currency: 'NGN',
+      status: 'PENDING',
+      metadata: { accountNumberMasked: '******6789' },
+      transferAttempts: [
+        {
+          id: 'attempt-1',
+          providerReference: 'WD-1',
+          providerStatus: 'PENDING_AUTHORIZATION',
+          status: 'PENDING',
+          attemptNo: 1,
+          lastCheckedAt: null,
+          metadata: {
+            beneficiaryId: 'beneficiary-1',
+            accountNumberMasked: '******6789',
+            providerTransactionReference: 'MNF-1',
+          },
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+      ],
+    });
+    prisma.transaction.updateMany.mockResolvedValue({ count: 1 });
+    prisma.transferAttempt.update.mockResolvedValue({ id: 'attempt-1' });
+    monnifyBanks.getTransferStatus.mockResolvedValue({
+      reference: 'MNF-1',
+      status: 'PENDING_AUTHORIZATION',
+      raw: {},
+    });
+    monnifyBanks.authorizeTransfer.mockResolvedValue({
+      reference: 'MNF-1',
+      transactionReference: 'MNF-1',
+      status: 'SUCCESS',
+      responseMessage: 'Transfer completed',
+      raw: {},
+    });
+
+    const result = await service.authorizeWithdrawal(
+      'user-1',
+      'WD-1',
+      '123456',
+    );
+
+    expect(result.status).toBe('SUCCESS');
+    expect(prisma.emailOutbox.createMany).toHaveBeenCalledWith({
+      data: [
+        {
+          userId: 'user-1',
+          eventKey: 'transaction:status:tx-1:SUCCESS',
+          eventType: 'TRANSACTION_SUCCESS',
+          orderId: 'tx-1',
+        },
+      ],
+      skipDuplicates: true,
     });
   });
 

@@ -478,6 +478,94 @@ void main() {
   });
 
   testWidgets(
+      'electricity meter details use explicit labels and a visible meter type choice',
+      (tester) async {
+    final semantics = tester.ensureSemantics();
+    await _render(tester, MoneyActionKind.electricity);
+
+    expect(find.text('Meter type'), findsOneWidget);
+    expect(find.text('Prepaid'), findsOneWidget);
+    expect(find.text('Postpaid'), findsOneWidget);
+    expect(find.text('Provider'), findsOneWidget);
+    expect(find.text('Ikeja Electric'), findsOneWidget);
+    expect(find.text('Meter number'), findsOneWidget);
+    expect(find.text('Contact phone number'), findsOneWidget);
+    expect(find.text('Local and +234 numbers accepted'), findsOneWidget);
+    expect(
+      tester.getSemantics(find.bySemanticsLabel('Prepaid meter')),
+      matchesSemantics(
+        label: 'Prepaid meter',
+        isButton: true,
+        isSelected: true,
+        hasSelectedState: true,
+        hasTapAction: true,
+      ),
+    );
+
+    expect(
+      find.byWidgetPredicate(
+        (widget) =>
+            widget is TextField &&
+            widget.decoration?.labelText == 'Meter number',
+      ),
+      findsNothing,
+    );
+    expect(
+      find.byWidgetPredicate(
+        (widget) =>
+            widget is TextField &&
+            widget.decoration?.labelText == 'Contact phone number',
+      ),
+      findsNothing,
+    );
+
+    final postpaid =
+        tester.getSemantics(find.bySemanticsLabel('Postpaid meter'));
+    tester.binding.platformDispatcher.onSemanticsActionEvent!(
+      ui.SemanticsActionEvent(
+        type: ui.SemanticsAction.tap,
+        viewId: tester.view.viewId,
+        nodeId: postpaid.id,
+      ),
+    );
+    await tester.pump();
+    expect(
+      tester.getSemantics(find.bySemanticsLabel('Postpaid meter')),
+      matchesSemantics(
+        label: 'Postpaid meter',
+        isButton: true,
+        isSelected: true,
+        hasSelectedState: true,
+        hasTapAction: true,
+      ),
+    );
+    semantics.dispose();
+  });
+
+  for (final size in [
+    const Size(320, 740),
+    const Size(768, 1024),
+  ]) {
+    testWidgets(
+        'electricity details stay readable at ${size.width.toInt()}px with large text',
+        (tester) async {
+      await _render(
+        tester,
+        MoneyActionKind.electricity,
+        size: size,
+        textScale: size.width == 320 ? 1.5 : 1,
+      );
+      expect(tester.takeException(), isNull);
+      final verifyButton =
+          find.widgetWithText(FilledButton, 'Verify meter & continue');
+      expect(verifyButton, findsOneWidget);
+      await tester.ensureVisible(verifyButton);
+      expect(tester.widget<FilledButton>(verifyButton).onPressed, isNotNull);
+      expect(tester.takeException(), isNull);
+    });
+  }
+
+  testWidgets(
       'manual override survives formatting and reaches the amount screen',
       (tester) async {
     await _render(tester, MoneyActionKind.airtime);

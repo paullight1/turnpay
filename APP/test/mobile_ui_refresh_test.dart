@@ -81,7 +81,8 @@ void main() {
     expect(find.text('0123456789'), findsOneWidget);
     expect(find.text('Synthetic Bank'), findsOneWidget);
     expect(find.text('Account holder'), findsOneWidget);
-    expect(find.textContaining('For currency exchange'), findsOneWidget);
+    expect(find.textContaining('For currency exchange'), findsNothing);
+    expect(find.text('View deposits & account status'), findsNothing);
     final copyIcon = find.byTooltip('Copy account number');
     await tester.ensureVisible(copyIcon);
     await tester.tap(copyIcon);

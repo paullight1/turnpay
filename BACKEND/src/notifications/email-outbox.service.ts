@@ -5,6 +5,16 @@ import { PrismaService } from '../prisma/prisma.service';
 import { PinoLogger } from 'nestjs-pino';
 import { randomUUID } from 'crypto';
 import nodemailer, { Transporter } from 'nodemailer';
+import {
+  FinancialEmailContext,
+  FinancialEmailEventType,
+  renderFinancialEmail,
+} from './financial-notifications';
+import { EMAIL_RECIPIENT_VERIFIER } from './email-recipient-verifier';
+import type {
+  EmailRecipientVerification,
+  EmailRecipientVerifier,
+} from './email-recipient-verifier';
 
 export type EmailProvider = 'disabled' | 'resend' | 'smtp';
 
@@ -28,6 +38,9 @@ export interface EmailOutboxSettings {
   leaseSeconds: number;
   retryBaseSeconds: number;
   maxAttempts?: number;
+  notBefore?: Date;
+  /** Explicit configuration error; delivery remains fail-closed until fixed. */
+  configurationError?: 'invalid_not_before';
 }
 
 export interface EmailMessage {
@@ -57,6 +70,7 @@ export const TRANSACTIONAL_EMAIL_TRANSPORT = Symbol(
 
 const RESEND_ENDPOINT = 'https://api.resend.com/emails';
 const PROVIDER_TIMEOUT_MS = 15_000;
+const RECIPIENT_VERIFY_TIMEOUT_MS = 10_000;
 const MAX_SEND_CONCURRENCY = 5;
 
 type FetchLike = (
@@ -125,6 +139,12 @@ export function readEmailOutboxSettings(
     1,
     20,
   );
+  const notBeforeValue = config.get<string>('EMAIL_OUTBOX_NOT_BEFORE')?.trim();
+  const notBefore = parseDate(notBeforeValue);
+  const invalidNotBefore = Boolean(notBeforeValue && !notBefore);
+  const configurationError = invalidNotBefore
+    ? ('invalid_not_before' as const)
+    : undefined;
 
   const smtpSecure = parseBoolean(config.get<string>('SMTP_SECURE'), true);
   const smtpRequireTls = parseBoolean(
@@ -148,8 +168,9 @@ export function readEmailOutboxSettings(
       : undefined;
 
   const enabled =
-    (provider === 'resend' && Boolean(from && resendApiKey)) ||
-    (provider === 'smtp' && Boolean(from && smtp && smtp.requireTls));
+    !invalidNotBefore &&
+    ((provider === 'resend' && Boolean(from && resendApiKey)) ||
+      (provider === 'smtp' && Boolean(from && smtp && smtp.requireTls)));
 
   return {
     provider,
@@ -162,6 +183,8 @@ export function readEmailOutboxSettings(
     leaseSeconds,
     retryBaseSeconds,
     maxAttempts,
+    notBefore,
+    configurationError,
   };
 }
 
@@ -185,6 +208,12 @@ function boundedInteger(
 
 function parsePort(value: unknown, fallback: number): number {
   return boundedInteger(value, fallback, 1, 65535);
+}
+
+function parseDate(value: unknown): Date | undefined {
+  if (typeof value !== 'string' || !value.trim()) return undefined;
+  const parsed = new Date(value.trim());
+  return Number.isNaN(parsed.getTime()) ? undefined : parsed;
 }
 
 export function renderAccountEmail(eventType: string): {
@@ -225,7 +254,16 @@ export class TransactionalEmailOutboxService {
     @Inject(TRANSACTIONAL_EMAIL_TRANSPORT)
     private readonly transport: EmailTransport,
     private readonly logger: PinoLogger,
-  ) {}
+    @Inject(EMAIL_RECIPIENT_VERIFIER)
+    private readonly recipientVerifier: EmailRecipientVerifier,
+  ) {
+    if (this.settings.configurationError) {
+      this.logger.error(
+        { code: this.settings.configurationError },
+        'Transactional email delivery disabled by invalid configuration',
+      );
+    }
+  }
 
   @Cron(CronExpression.EVERY_5_SECONDS)
   async processPendingEmails(): Promise<EmailDispatchSummary> {
@@ -287,6 +325,9 @@ export class TransactionalEmailOutboxService {
         where: {
           status: { in: ['PENDING', 'FAILED'] },
           nextAttemptAt: { lte: now },
+          ...(this.settings.notBefore
+            ? { createdAt: { gte: this.settings.notBefore } }
+            : {}),
         },
         orderBy: [{ nextAttemptAt: 'asc' }, { createdAt: 'asc' }],
         // Keep the total claimed work bounded by both the configured batch
@@ -343,17 +384,6 @@ export class TransactionalEmailOutboxService {
     now: Date,
     from: string,
   ): Promise<DispatchResult> {
-    const content = renderAccountEmail(row.eventType);
-    if (!content) {
-      return (
-        (await this.finalizeFailure(
-          row,
-          'unsupported_event_type',
-          now,
-          false,
-        )) ?? 'UNKNOWN'
-      );
-    }
     if (!row.user.email?.trim()) {
       return (
         (await this.finalizeFailure(row, 'missing_recipient', now, false)) ??
@@ -361,6 +391,53 @@ export class TransactionalEmailOutboxService {
       );
     }
 
+    const recipientVerification = await verifyRecipientWithDeadline(
+      this.recipientVerifier,
+      { userId: row.userId, email: row.user.email },
+    );
+    if (!recipientVerification.verified) {
+      return (
+        (await this.finalizeFailure(
+          row,
+          recipientVerification.code,
+          now,
+          recipientVerification.retryable,
+        )) ?? 'UNKNOWN'
+      );
+    }
+
+    let rendered: {
+      content?: { subject: string; text: string; html: string };
+      errorCode?: string;
+      unknownCode?: string;
+    };
+    try {
+      rendered = await this.renderEvent(row);
+    } catch {
+      return (
+        (await this.finalizeFailure(row, 'render_error', now, true)) ??
+        'UNKNOWN'
+      );
+    }
+    if (rendered.unknownCode) {
+      const finalized = await this.finalizeUnknown(
+        row,
+        rendered.unknownCode,
+        now,
+      );
+      if (!finalized) return 'UNKNOWN';
+      return 'UNKNOWN';
+    }
+    if (!rendered.content) {
+      return (
+        (await this.finalizeFailure(
+          row,
+          rendered.errorCode ?? 'unsupported_event_type',
+          now,
+          false,
+        )) ?? 'UNKNOWN'
+      );
+    }
     let outcome: EmailTransportResult;
     try {
       // The network call is outside the claim transaction. Only a stable row
@@ -371,7 +448,7 @@ export class TransactionalEmailOutboxService {
         from,
         ...(this.settings.replyTo ? { replyTo: this.settings.replyTo } : {}),
         to: row.user.email,
-        ...content,
+        ...rendered.content,
       });
     } catch {
       outcome = { status: 'UNKNOWN', code: 'transport_error' };
@@ -432,6 +509,136 @@ export class TransactionalEmailOutboxService {
       'Transactional email delivery outcome is unknown',
     );
     return 'UNKNOWN';
+  }
+
+  private async renderEvent(row: ClaimedEmailOutboxRow): Promise<{
+    content?: { subject: string; text: string; html: string };
+    errorCode?: string;
+    unknownCode?: string;
+  }> {
+    if (row.eventType === 'DEPOSIT_RECEIVED') {
+      const deposit = await this.prisma.transaction.findUnique({
+        where: { id: row.orderId },
+        select: {
+          userId: true,
+          ledgerEntries: {
+            where: { direction: 'CREDIT' },
+            orderBy: { createdAt: 'asc' },
+            take: 1,
+            select: {
+              amount: true,
+              balanceAfter: true,
+              currency: true,
+              direction: true,
+              reference: true,
+              source: true,
+              wallet: { select: { userId: true } },
+            },
+          },
+        },
+      });
+      if (!deposit) return { errorCode: 'transaction_not_found' };
+      if (deposit.userId !== row.userId)
+        return { errorCode: 'transaction_ownership_mismatch' };
+      const ledger = deposit.ledgerEntries[0];
+      if (!ledger) return { content: renderAccountEmail(row.eventType)! };
+      if (ledger.wallet.userId !== row.userId)
+        return { errorCode: 'ledger_ownership_mismatch' };
+      const content = renderFinancialEmail(
+        'WALLET_CREDIT',
+        {
+          amount: ledger.amount.toString(),
+          balanceAfter: ledger.balanceAfter.toString(),
+          currency: ledger.currency,
+          direction: ledger.direction,
+          reference: ledger.reference,
+          source: ledger.source,
+        },
+        { subject: 'Your TrustPay deposit is confirmed' },
+      );
+      return content ? { content } : { errorCode: 'unsupported_event_type' };
+    }
+
+    const accountContent = renderAccountEmail(row.eventType);
+    if (accountContent) return { content: accountContent };
+
+    if (isFinancialEventType(row.eventType)) {
+      if (isWalletMovementEventType(row.eventType)) {
+        const ledger = await this.prisma.ledgerEntry.findUnique({
+          where: { id: row.orderId },
+          select: {
+            id: true,
+            amount: true,
+            balanceAfter: true,
+            currency: true,
+            direction: true,
+            reference: true,
+            source: true,
+            createdAt: true,
+            wallet: { select: { userId: true } },
+            transaction: {
+              select: {
+                userId: true,
+                type: true,
+                status: true,
+              },
+            },
+          },
+        });
+        if (!ledger) return { errorCode: 'ledger_not_found' };
+        if (ledger.wallet.userId !== row.userId)
+          return { errorCode: 'ledger_ownership_mismatch' };
+
+        const expectedDirection =
+          row.eventType === 'WALLET_CREDIT' ? 'CREDIT' : 'DEBIT';
+        if (ledger.direction !== expectedDirection)
+          return { errorCode: 'ledger_direction_mismatch' };
+
+        const context: FinancialEmailContext = {
+          amount: ledger.amount.toString(),
+          balanceAfter: ledger.balanceAfter.toString(),
+          currency: ledger.currency,
+          direction: ledger.direction,
+          reference: ledger.reference,
+          source: ledger.source,
+          status: ledger.transaction.status,
+          transactionType: ledger.transaction.type,
+        };
+        const content = renderFinancialEmail(row.eventType, context);
+        return content ? { content } : { errorCode: 'unsupported_event_type' };
+      }
+
+      const transaction = await this.prisma.transaction.findUnique({
+        where: { id: row.orderId },
+        select: {
+          id: true,
+          userId: true,
+          amount: true,
+          currency: true,
+          reference: true,
+          status: true,
+          type: true,
+        },
+      });
+      if (!transaction) return { errorCode: 'transaction_not_found' };
+      if (transaction.userId !== row.userId)
+        return { errorCode: 'transaction_ownership_mismatch' };
+      const expectedStatus = transactionStatusForEventType(row.eventType);
+      if (!expectedStatus || transaction.status !== expectedStatus)
+        return { unknownCode: 'transaction_status_changed' };
+
+      const context: FinancialEmailContext = {
+        amount: transaction.amount.toString(),
+        currency: transaction.currency,
+        reference: transaction.reference,
+        status: transaction.status,
+        transactionType: transaction.type,
+      };
+      const content = renderFinancialEmail(row.eventType, context);
+      return content ? { content } : { errorCode: 'unsupported_event_type' };
+    }
+
+    return { errorCode: 'unsupported_event_type' };
   }
 
   private async finalizeSent(
@@ -679,6 +886,64 @@ export class DisabledEmailTransport implements EmailTransport {
 
 export function sanitizeErrorCode(code: string): string {
   return /^[A-Za-z0-9:_-]{1,64}$/.test(code) ? code : 'transport_error';
+}
+
+function isFinancialEventType(
+  eventType: string,
+): eventType is FinancialEmailEventType {
+  return (
+    eventType === 'WALLET_CREDIT' ||
+    eventType === 'WALLET_DEBIT' ||
+    eventType === 'TRANSACTION_SUCCESS' ||
+    eventType === 'TRANSACTION_FAILED' ||
+    eventType === 'TRANSACTION_REVERSED'
+  );
+}
+
+function isWalletMovementEventType(
+  eventType: FinancialEmailEventType,
+): eventType is 'WALLET_CREDIT' | 'WALLET_DEBIT' {
+  return eventType === 'WALLET_CREDIT' || eventType === 'WALLET_DEBIT';
+}
+
+function transactionStatusForEventType(
+  eventType: FinancialEmailEventType,
+): 'SUCCESS' | 'FAILED' | 'REVERSED' | null {
+  switch (eventType) {
+    case 'TRANSACTION_SUCCESS':
+      return 'SUCCESS';
+    case 'TRANSACTION_FAILED':
+      return 'FAILED';
+    case 'TRANSACTION_REVERSED':
+      return 'REVERSED';
+    default:
+      return null;
+  }
+}
+
+async function verifyRecipientWithDeadline(
+  verifier: EmailRecipientVerifier,
+  input: { userId: string; email: string },
+): Promise<EmailRecipientVerification> {
+  let deadline: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const verification = verifier.verify(input);
+    const deadlinePromise = new Promise<never>((_, reject) => {
+      deadline = setTimeout(
+        () => reject(new Error('recipient_verification_deadline')),
+        RECIPIENT_VERIFY_TIMEOUT_MS,
+      );
+    });
+    return await Promise.race([verification, deadlinePromise]);
+  } catch {
+    return {
+      verified: false,
+      code: 'recipient_identity_unavailable',
+      retryable: true,
+    };
+  } finally {
+    if (deadline) clearTimeout(deadline);
+  }
 }
 
 async function mapWithConcurrency<T, R>(

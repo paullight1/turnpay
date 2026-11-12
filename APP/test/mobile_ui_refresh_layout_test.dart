@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 import 'dart:ui' as ui;
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
@@ -49,6 +50,46 @@ void main() {
 
     expect(find.text('Alex Morgan'), findsOneWidget);
     expect(find.byType(LinearProgressIndicator), findsNothing);
+  });
+
+  testWidgets('auth rejection does not present cached profile identity',
+      (tester) async {
+    final cached = HomeUser.fromJson({
+      'id': 'cached-user',
+      'fullName': 'Cached Account',
+      'email': 'cached@example.test',
+    });
+    await tester.pumpWidget(MaterialApp(
+      theme: AppTheme.light,
+      home: DashboardProfileScreen(
+        homeDataService: _RejectedProfile(cached),
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Cached Account'), findsNothing);
+    expect(find.text('Your session expired. Sign in again.'), findsOneWidget);
+    expect(find.text('Retry'), findsOneWidget);
+  });
+
+  testWidgets('transient profile failure keeps identity with retry status',
+      (tester) async {
+    final cached = HomeUser.fromJson({
+      'id': 'cached-user',
+      'fullName': 'Cached Account',
+      'email': 'cached@example.test',
+    });
+    await tester.pumpWidget(MaterialApp(
+      theme: AppTheme.light,
+      home: DashboardProfileScreen(
+        homeDataService: _UnavailableProfile(cached),
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Cached Account'), findsOneWidget);
+    expect(find.text('Could not load account details'), findsOneWidget);
+    expect(find.text('Retry'), findsOneWidget);
   });
 
   for (final variant in [
@@ -190,4 +231,44 @@ class _DelayedProfile extends HomeDataService {
 
   @override
   Future<HomeUser> fetchCurrentUser() => user.future;
+}
+
+class _RejectedProfile extends HomeDataService {
+  _RejectedProfile(this.cached);
+
+  final HomeUser cached;
+
+  @override
+  HomeUser? get lastKnownUser => cached;
+
+  @override
+  Future<HomeUser> fetchCurrentUser() async {
+    throw DioException(
+      requestOptions: RequestOptions(path: '/api/auth/bootstrap'),
+      response: Response<dynamic>(
+        requestOptions: RequestOptions(path: '/api/auth/bootstrap'),
+        statusCode: 401,
+      ),
+    );
+  }
+}
+
+class _UnavailableProfile extends HomeDataService {
+  _UnavailableProfile(this.cached);
+
+  final HomeUser cached;
+
+  @override
+  HomeUser? get lastKnownUser => cached;
+
+  @override
+  Future<HomeUser> fetchCurrentUser() async {
+    throw DioException(
+      requestOptions: RequestOptions(path: '/api/auth/bootstrap'),
+      response: Response<dynamic>(
+        requestOptions: RequestOptions(path: '/api/auth/bootstrap'),
+        statusCode: 503,
+      ),
+    );
+  }
 }

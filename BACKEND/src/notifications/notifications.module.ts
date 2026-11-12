@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { PrismaModule } from '../prisma/prisma.module';
+import { SupabaseModule } from '../supabase/supabase.module';
 import { ProviderNotificationsService } from '../exchange/provider-notifications.service';
 import {
   NotificationsController,
@@ -17,13 +18,20 @@ import {
   TransactionalEmailOutboxService,
   TRANSACTIONAL_EMAIL_TRANSPORT,
 } from './email-outbox.service';
+import { EMAIL_RECIPIENT_VERIFIER } from './email-recipient-verifier';
+import { SupabaseEmailRecipientVerifier } from './supabase-email-recipient-verifier';
 
 @Module({
-  imports: [PrismaModule, ConfigModule],
+  imports: [PrismaModule, ConfigModule, SupabaseModule],
   controllers: [NotificationsController, AdminNotificationsController],
   providers: [
     ProviderNotificationsService,
     AccountNotificationsService,
+    SupabaseEmailRecipientVerifier,
+    {
+      provide: EMAIL_RECIPIENT_VERIFIER,
+      useExisting: SupabaseEmailRecipientVerifier,
+    },
     {
       provide: EMAIL_OUTBOX_SETTINGS,
       inject: [ConfigService],

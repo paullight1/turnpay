@@ -18,9 +18,25 @@ class HomeDataService {
   HomeUser? get lastKnownUser => _lastKnownUser;
 
   Future<Response<dynamic>> _bootstrap() => _pendingBootstrap ??=
-          _apiClient.client.post('/api/auth/bootstrap').whenComplete(() {
+          _apiClient.client.post('/api/auth/bootstrap').then((response) {
+        // Keep this cache on the service instance: MainShell shares one
+        // service for the signed-in account, and no user data crosses a
+        // logout/new-session boundary through a process-wide cache. Updating
+        // it as soon as bootstrap resolves lets Profile render known identity
+        // details while slower dashboard collections are still loading.
+        _rememberBootstrapUser(response);
+        return response;
+      }).whenComplete(() {
         _pendingBootstrap = null;
       });
+
+  void _rememberBootstrapUser(Response<dynamic> response) {
+    final data = response.data;
+    if (data is! Map<String, dynamic>) return;
+    final rawUser = data['user'];
+    if (rawUser is! Map<String, dynamic>) return;
+    _lastKnownUser = HomeUser.fromJson(rawUser);
+  }
 
   /// Lightweight, uncached reads for foreground balance updates.
   Future<List<HomeWallet>> fetchWalletBalances() async {
@@ -46,6 +62,24 @@ class HomeDataService {
     }
     return _lastKnownUser =
         HomeUser.fromJson(data['user'] as Map<String, dynamic>);
+  }
+
+  /// Loads only the data needed by the Account Details route.
+  ///
+  /// The dashboard also includes transactions and beneficiaries, but those
+  /// collections are not needed to render identity, KYC, or receiving-account
+  /// details. Keep this request scoped to the signed-in service instance so it
+  /// cannot become a cross-account cache.
+  Future<HomeAccountDetailsData> fetchAccountDetails() async {
+    final responses = await Future.wait<dynamic>([
+      fetchCurrentUser(),
+      fetchVirtualAccounts(),
+    ]);
+
+    return HomeAccountDetailsData(
+      user: responses[0] as HomeUser,
+      virtualAccounts: responses[1] as List<HomeVirtualAccount>,
+    );
   }
 
   Future<HomeDashboardData> fetchDashboard() async {
@@ -609,6 +643,16 @@ class HomeDashboardData {
     }
     return null;
   }
+}
+
+class HomeAccountDetailsData {
+  final HomeUser user;
+  final List<HomeVirtualAccount> virtualAccounts;
+
+  const HomeAccountDetailsData({
+    required this.user,
+    required this.virtualAccounts,
+  });
 }
 
 class HomeUser {

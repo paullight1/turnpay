@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -19,6 +20,8 @@ class TpPageMenuAction {
 }
 
 class TpPageHeader extends StatelessWidget {
+  static const double _headerHeight = 58;
+
   final String label;
   final bool showBackButton;
   final VoidCallback? onBack;
@@ -51,12 +54,75 @@ class TpPageHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     AppColors.watch(context);
     final width = MediaQuery.sizeOf(context).width;
-    final handleBack = _resolveBackAction(context);
+    final mediaPadding = MediaQuery.paddingOf(context);
+    final paintedHeader = ColoredBox(
+      color: AppColors.primary,
+      child: SafeArea(
+        bottom: false,
+        child: LayoutBuilder(
+          builder: (safeContext, _) {
+            final view = View.of(safeContext);
+            final rawViewportWidth =
+                view.physicalSize.width / view.devicePixelRatio;
+            final rawViewPadding = EdgeInsets.fromViewPadding(
+              view.viewPadding,
+              view.devicePixelRatio,
+            );
+            // TrustPayApp constrains MediaQuery.size to the already-safe
+            // width at its root. In that case, adding raw side cutouts again
+            // would double-pad. A nested SafeArea keeps the original view
+            // width, so full-bleed overflow must honor the raw view padding.
+            final viewportAlreadyInset = width < rawViewportWidth - 0.5;
+            final horizontalInset = edgeToEdge && !viewportAlreadyInset
+                ? rawViewPadding
+                : EdgeInsets.zero;
+            final header = _buildHeader(safeContext, width, horizontalInset);
+            if (!edgeToEdge) return header;
+            return SizedBox(
+              height: _headerHeight,
+              child: OverflowBox(
+                alignment: Alignment.center,
+                minWidth: width,
+                maxWidth: width,
+                minHeight: _headerHeight,
+                maxHeight: _headerHeight,
+                child: header,
+              ),
+            );
+          },
+        ),
+      ),
+    );
 
-    final header = Container(
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      value: _headerOverlayStyle(),
+      child: edgeToEdge
+          ? SizedBox(
+              height: _headerHeight + mediaPadding.top,
+              child: OverflowBox(
+                alignment: Alignment.center,
+                minWidth: width,
+                maxWidth: width,
+                child: paintedHeader,
+              ),
+            )
+          : paintedHeader,
+    );
+  }
+
+  Widget _buildHeader(
+    BuildContext context,
+    double width,
+    EdgeInsets horizontalInset,
+  ) {
+    final handleBack = _resolveBackAction(context);
+    return Container(
       width: edgeToEdge ? width : double.infinity,
-      height: 58,
-      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
+      height: _headerHeight,
+      padding: EdgeInsets.only(
+        left: AppSpacing.md + horizontalInset.left,
+        right: AppSpacing.md + horizontalInset.right,
+      ),
       decoration: BoxDecoration(color: AppColors.primary),
       child: Row(
         children: [
@@ -88,19 +154,19 @@ class TpPageHeader extends StatelessWidget {
         ],
       ),
     );
+  }
 
-    if (!edgeToEdge) return header;
-
-    return SizedBox(
-      height: 58,
-      child: OverflowBox(
-        alignment: Alignment.center,
-        minWidth: width,
-        maxWidth: width,
-        minHeight: 58,
-        maxHeight: 58,
-        child: header,
-      ),
+  SystemUiOverlayStyle _headerOverlayStyle() {
+    return SystemUiOverlayStyle(
+      statusBarColor: Colors.transparent,
+      statusBarBrightness: Brightness.dark,
+      statusBarIconBrightness: Brightness.light,
+      systemStatusBarContrastEnforced: false,
+      systemNavigationBarColor: Colors.transparent,
+      systemNavigationBarDividerColor: Colors.transparent,
+      systemNavigationBarIconBrightness:
+          AppColors.isDark ? Brightness.light : Brightness.dark,
+      systemNavigationBarContrastEnforced: false,
     );
   }
 
@@ -198,14 +264,11 @@ class TpAppHeader extends StatelessWidget implements PreferredSizeWidget {
     AppColors.watch(context);
     return Material(
       color: AppColors.primary,
-      child: SafeArea(
-        bottom: false,
-        child: TpPageHeader(
-          label: label,
-          onBack: onBack,
-          menuActions: menuActions,
-          edgeToEdge: false,
-        ),
+      child: TpPageHeader(
+        label: label,
+        onBack: onBack,
+        menuActions: menuActions,
+        edgeToEdge: false,
       ),
     );
   }

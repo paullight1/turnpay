@@ -301,35 +301,54 @@ class VtuPhoneField extends StatelessWidget {
       {super.key,
       required this.controller,
       this.label = 'Phone number',
-      this.enabled = true});
+      this.enabled = true,
+      this.showLabelAbove = false});
   final TextEditingController controller;
   final String label;
   final bool enabled;
+  final bool showLabelAbove;
 
   @override
-  Widget build(BuildContext context) => TextField(
-        controller: controller,
-        enabled: enabled,
-        keyboardType: TextInputType.phone,
-        textInputAction: TextInputAction.done,
-        autofillHints: const [AutofillHints.telephoneNumberNational],
-        inputFormatters: [
-          VtuPhoneFormatter(),
-          LengthLimitingTextInputFormatter(15)
-        ],
-        style: AppTextStyles.headingM.copyWith(letterSpacing: .5),
-        decoration: InputDecoration(
-          labelText: label,
-          hintText: '0803 123 4567',
-          prefixIcon:
-              Icon(Icons.phone_outlined, color: AppColors.textSecondary),
-          helperText: 'Local and +234 numbers accepted',
-          helperMaxLines: 2,
-          helperStyle: AppTextStyles.bodyS,
-          filled: true,
-          fillColor: AppColors.surface,
+  Widget build(BuildContext context) {
+    final field = TextField(
+      controller: controller,
+      enabled: enabled,
+      keyboardType: TextInputType.phone,
+      textInputAction: TextInputAction.done,
+      autofillHints: const [AutofillHints.telephoneNumberNational],
+      inputFormatters: [
+        VtuPhoneFormatter(),
+        LengthLimitingTextInputFormatter(15)
+      ],
+      style: AppTextStyles.headingM.copyWith(letterSpacing: .5),
+      decoration: InputDecoration(
+        labelText: showLabelAbove ? null : label,
+        hintText: '0803 123 4567',
+        prefixIcon: Icon(Icons.phone_outlined, color: AppColors.textSecondary),
+        helperText: 'Local and +234 numbers accepted',
+        helperMaxLines: 2,
+        helperStyle: AppTextStyles.bodyS,
+        filled: true,
+        fillColor: AppColors.surface,
+      ),
+    );
+
+    if (!showLabelAbove) return field;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(label, style: AppTextStyles.labelM),
+        const SizedBox(height: AppSpacing.sm),
+        Semantics(
+          container: true,
+          textField: true,
+          label: label,
+          child: field,
         ),
-      );
+      ],
+    );
+  }
 }
 
 class VtuSectionLabel extends StatelessWidget {

@@ -34,6 +34,9 @@ describe('VtuService purchase ledger handling', () => {
     ledgerEntry: {
       findFirst: jest.fn(),
     },
+    emailOutbox: {
+      createMany: jest.fn(),
+    },
     webhookLog: {
       create: jest.fn(),
       findUnique: jest.fn(),
@@ -121,6 +124,7 @@ describe('VtuService purchase ledger handling', () => {
     prisma.vtuOrder.updateMany.mockResolvedValue({ count: 1 });
     prisma.transaction.updateMany.mockResolvedValue({ count: 1 });
     prisma.vtuPricingRule.findFirst.mockResolvedValue(null);
+    prisma.emailOutbox.createMany.mockResolvedValue({ count: 1 });
     settlementHold.assertOutboundAllowed.mockResolvedValue(undefined);
     prisma.webhookLog.findUnique.mockResolvedValue({
       id: 'webhook-log-1',
@@ -1480,6 +1484,17 @@ describe('VtuService purchase ledger handling', () => {
       }),
     });
     expect(result).toEqual({ processed: true, status: 'success' });
+    expect(prisma.emailOutbox.createMany).toHaveBeenCalledWith({
+      data: [
+        {
+          userId: 'user-1',
+          eventKey: 'transaction:status:tx-1:SUCCESS',
+          eventType: 'TRANSACTION_SUCCESS',
+          orderId: 'tx-1',
+        },
+      ],
+      skipDuplicates: true,
+    });
   });
 
   it('repairs a legacy order status mismatch when its transaction is already terminal', async () => {

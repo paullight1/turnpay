@@ -43,6 +43,7 @@ import {
   quoteManualExchange,
 } from './manual-exchange.policy';
 import { SettlementHoldService } from '../common/services/settlement-hold.service';
+import { enqueueTransactionStatusEmail } from '../notifications/financial-notifications';
 
 const include = { events: { orderBy: { createdAt: 'asc' as const } } };
 type Order = Prisma.ManualExchangeOrderGetPayload<{ include: typeof include }>;
@@ -1109,6 +1110,12 @@ export class ManualExchangeService {
         await tx.transaction.update({
           where: { id: row.transactionId },
           data: { status: next === 'REJECTED' ? 'FAILED' : 'SUCCESS' },
+        });
+      if (next === 'CREDITED' || next === 'COMPLETED' || next === 'REJECTED')
+        await enqueueTransactionStatusEmail(tx, {
+          userId: row.userId,
+          transactionId: row.transactionId,
+          status: next === 'REJECTED' ? 'FAILED' : 'SUCCESS',
         });
       await this.event(
         tx,

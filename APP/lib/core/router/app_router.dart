@@ -64,6 +64,7 @@ class AppRoutes {
   static const activity = '/activity';
   static const vtuOrder = '/vtu/order/:reference';
   static const more = '/more';
+  static const comingSoon = '/coming-soon/:feature';
   static const profileAccount = '/profile/account';
   static const profileAppearance = '/profile/appearance';
   static const profileSecurity = '/profile/security';
@@ -443,6 +444,13 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         pageBuilder: (context, state) => _slideTransition(
           state,
           const HomeTaskScreen(),
+        ),
+      ),
+      GoRoute(
+        path: AppRoutes.comingSoon,
+        pageBuilder: (context, state) => _slideTransition(
+          state,
+          ComingSoonFeatureScreen(slug: state.pathParameters['feature'] ?? ''),
         ),
       ),
       GoRoute(

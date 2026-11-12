@@ -385,26 +385,42 @@ class _DashboardProfileScreenState extends State<DashboardProfileScreen> {
           child: FutureBuilder<HomeUser>(
             future: _future,
             builder: (context, snapshot) {
-              final user =
-                  snapshot.data ?? widget.homeDataService.lastKnownUser;
+              final authRejected = snapshot.error is DioException &&
+                  ApiClient.isAuthRejection(snapshot.error as DioException);
+              // A transient profile failure may keep rendering the last
+              // known identity, but an auth rejection must hand control back
+              // to the auth gate instead of presenting stale account data.
+              final user = authRejected
+                  ? null
+                  : snapshot.data ?? widget.homeDataService.lastKnownUser;
+              final Widget? identityStatus;
+              if (snapshot.hasError) {
+                identityStatus = Row(children: [
+                  Expanded(
+                    child: Text(
+                      authRejected
+                          ? 'Your session expired. Sign in again.'
+                          : 'Could not load account details',
+                      style: AppTextStyles.bodyS,
+                    ),
+                  ),
+                  TextButton(
+                    onPressed: () => setState(() {
+                      _future = widget.homeDataService.fetchCurrentUser();
+                    }),
+                    child: const Text('Retry'),
+                  ),
+                ]);
+              } else if (snapshot.connectionState == ConnectionState.waiting) {
+                identityStatus = const LinearProgressIndicator(
+                  semanticsLabel: 'Loading account details',
+                );
+              } else {
+                identityStatus = null;
+              }
               return ProfileOverview(
                 user: user,
-                identityStatus: snapshot.hasError
-                    ? Row(children: [
-                        Expanded(
-                          child: Text('Could not load account details',
-                              style: AppTextStyles.bodyS),
-                        ),
-                        TextButton(
-                          onPressed: () => setState(() {
-                            _future = widget.homeDataService.fetchCurrentUser();
-                          }),
-                          child: const Text('Retry'),
-                        ),
-                      ])
-                    : const LinearProgressIndicator(
-                        semanticsLabel: 'Loading account details',
-                      ),
+                identityStatus: identityStatus,
                 onLogout: () async {
                   await _authService.logout();
                   if (context.mounted) context.go(AppRoutes.login);
@@ -453,18 +469,82 @@ class ProfileActionScreen extends StatefulWidget {
 }
 
 class _ProfileActionScreenState extends State<ProfileActionScreen> {
-  late Future<HomeDashboardData> _future;
+  Future<HomeDashboardData>? _future;
+  Future<HomeAccountDetailsData>? _accountFuture;
 
   @override
   void initState() {
     super.initState();
-    _future = widget.homeDataService.fetchDashboard();
+    if (widget.kind == ProfileActionKind.account) {
+      _accountFuture = widget.homeDataService.fetchAccountDetails();
+    } else {
+      _future = widget.homeDataService.fetchDashboard();
+    }
+  }
+
+  Widget _accountDetailsContent() {
+    return FutureBuilder<HomeAccountDetailsData>(
+      future: _accountFuture,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const _LoadingPanel();
+        }
+        if (snapshot.hasError || !snapshot.hasData) {
+          return _ErrorPanel(
+            message: authErrorMessage(
+              snapshot.error ?? 'Could not load this page',
+              'Could not load this page',
+            ),
+            onRetry: () => setState(() {
+              _accountFuture = widget.homeDataService.fetchAccountDetails();
+            }),
+          );
+        }
+        final accountData = snapshot.data!;
+        return _AccountDetailsBody(
+          user: accountData.user,
+          accounts: accountData.virtualAccounts,
+          homeDataService: widget.homeDataService,
+        );
+      },
+    );
+  }
+
+  Widget _dashboardProfileContent(BuildContext context) {
+    return FutureBuilder<HomeDashboardData>(
+      future: _future,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const _LoadingPanel();
+        }
+        if (snapshot.hasError || !snapshot.hasData) {
+          return _ErrorPanel(
+            message: authErrorMessage(
+              snapshot.error ?? 'Could not load this page',
+              'Could not load this page',
+            ),
+            onRetry: () => setState(() {
+              _future = widget.homeDataService.fetchDashboard();
+            }),
+          );
+        }
+        return _profileBodyFor(
+          context,
+          widget.kind,
+          snapshot.data!,
+          widget.homeDataService,
+        );
+      },
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     AppColors.watch(context);
     final config = _profileConfigFor(widget.kind);
+    final content = widget.kind == ProfileActionKind.account
+        ? _accountDetailsContent()
+        : _dashboardProfileContent(context);
 
     return Scaffold(
       backgroundColor: AppColors.background,
@@ -489,31 +569,7 @@ class _ProfileActionScreenState extends State<ProfileActionScreen> {
                   const SizedBox(height: AppSpacing.sm),
                   Text(config.subtitle, style: AppTextStyles.bodyM),
                   const SizedBox(height: AppSpacing.xl),
-                  FutureBuilder<HomeDashboardData>(
-                    future: _future,
-                    builder: (context, snapshot) {
-                      if (snapshot.connectionState == ConnectionState.waiting) {
-                        return const _LoadingPanel();
-                      }
-                      if (snapshot.hasError || !snapshot.hasData) {
-                        return _ErrorPanel(
-                          message: authErrorMessage(
-                            snapshot.error ?? 'Could not load this page',
-                            'Could not load this page',
-                          ),
-                          onRetry: () => setState(() {
-                            _future = widget.homeDataService.fetchDashboard();
-                          }),
-                        );
-                      }
-                      return _profileBodyFor(
-                        context,
-                        widget.kind,
-                        snapshot.data!,
-                        widget.homeDataService,
-                      );
-                    },
-                  ),
+                  content,
                 ],
               ),
             ),
@@ -874,7 +930,8 @@ Widget _profileBodyFor(
   switch (kind) {
     case ProfileActionKind.account:
       return _AccountDetailsBody(
-        data: data,
+        user: data.user,
+        accounts: data.virtualAccounts,
         homeDataService: homeDataService,
       );
     case ProfileActionKind.appearance:
@@ -1090,11 +1147,13 @@ class _TierStatusCard extends StatelessWidget {
 }
 
 class _AccountDetailsBody extends StatefulWidget {
-  final HomeDashboardData data;
+  final HomeUser user;
+  final List<HomeVirtualAccount> accounts;
   final HomeDataService homeDataService;
 
   const _AccountDetailsBody({
-    required this.data,
+    required this.user,
+    required this.accounts,
     required this.homeDataService,
   });
 
@@ -1122,9 +1181,11 @@ class _AccountDetailsBodyState extends State<_AccountDetailsBody> {
   @override
   void initState() {
     super.initState();
-    _user = widget.data.user;
-    _accounts = widget.data.virtualAccounts;
-    _transactions = widget.data.transactions;
+    _user = widget.user;
+    _accounts = widget.accounts;
+    // Transactions are an optional summary on this route. Load them after the
+    // identity and receiving-account data are visible.
+    _transactions = const [];
     _closureRequests = widget.homeDataService.fetchSupportTickets(limit: 100);
     _fullNameController.text = _user.fullName;
     _yearOfBirthController.text = _user.yearOfBirth?.toString() ?? '';
@@ -1346,9 +1407,8 @@ class _AccountDetailsBodyState extends State<_AccountDetailsBody> {
     try {
       final account = await widget.homeDataService.provisionVirtualAccount(
         consentAccepted: true,
-        idempotencyKey: _provisionAttempt.keyFor(
-          'paystack-virtual-account|${widget.data.user.id}|NGN',
-        ),
+        idempotencyKey: _provisionAttempt
+            .keyFor('paystack-virtual-account|${_user.id}|NGN'),
       );
       _provisionAttempt.markFinalOutcome();
       if (!mounted) return;

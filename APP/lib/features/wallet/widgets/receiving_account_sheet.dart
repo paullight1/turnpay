@@ -6,7 +6,6 @@ import '../../../core/router/app_router.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../services/wallet_service.dart';
 import '../../auth/widgets/tp_button.dart';
-import 'account_setup_presenter.dart';
 
 /// Read-only account details. Provisioning retains the existing consent flow.
 class ReceivingAccountSheet extends StatefulWidget {
@@ -161,26 +160,6 @@ class _ReceivingAccountSheetState extends State<ReceivingAccountSheet> {
                         return Column(
                             crossAxisAlignment: CrossAxisAlignment.stretch,
                             children: [
-                              Container(
-                                  padding: const EdgeInsets.all(16),
-                                  decoration: BoxDecoration(
-                                      color: AppColors.primary
-                                          .withValues(alpha: .07),
-                                      borderRadius: BorderRadius.circular(12)),
-                                  child: Row(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        Icon(Icons.info_outline_rounded,
-                                            color: AppColors.primary, size: 22),
-                                        const SizedBox(width: 12),
-                                        Expanded(
-                                            child: Text(
-                                                AccountSetupCopy
-                                                    .walletFundingPurpose,
-                                                style: AppTextStyles.bodyS)),
-                                      ])),
-                              const SizedBox(height: 16),
                               _AccountLine(
                                   icon: Icons.credit_card_outlined,
                                   label: 'Account number',
@@ -209,12 +188,6 @@ class _ReceivingAccountSheetState extends State<ReceivingAccountSheet> {
                                   icon: Icons.person_outline_rounded,
                                   label: 'Account name',
                                   value: account.accountName),
-                              const SizedBox(height: 28),
-                              OutlinedButton(
-                                  onPressed: () => context
-                                      .push(AppRoutes.receivingAccountSetup),
-                                  child: const Text(
-                                      'View deposits & account status')),
                             ]);
                       },
                     ),
@@ -287,6 +260,6 @@ class AccountSheetPage extends Page<void> {
             MaterialLocalizations.of(context).modalBarrierDismissLabel,
         modalBarrierColor: Colors.black54,
         constraints: const BoxConstraints(maxWidth: 600),
-        builder: (_) => FractionallySizedBox(heightFactor: .64, child: child),
+        builder: (_) => child,
       );
 }

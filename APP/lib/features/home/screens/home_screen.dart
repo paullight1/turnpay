@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:math' as math;
 
+import 'package:dio/dio.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -288,6 +289,8 @@ class _HomeScreenState extends State<HomeScreen>
       viewportWidth < 360 ? AppSpacing.md : AppSpacing.lg,
       (viewportWidth - 640) / 2,
     );
+    final compactViewport = viewportWidth < 400;
+    final sectionGap = compactViewport ? AppSpacing.lg : AppSpacing.xl;
     return Scaffold(
       backgroundColor: AppColors.background,
       body: SafeArea(
@@ -306,6 +309,9 @@ class _HomeScreenState extends State<HomeScreen>
                   'Dashboard could not load',
                 ),
                 onRetry: _refreshDashboard,
+                sessionExpired: snapshot.error is DioException &&
+                    (snapshot.error as DioException).response?.statusCode ==
+                        401,
               );
             }
 
@@ -331,7 +337,7 @@ class _HomeScreenState extends State<HomeScreen>
                   ),
                   padding: EdgeInsets.fromLTRB(
                     gutter,
-                    AppSpacing.lg,
+                    compactViewport ? AppSpacing.md : AppSpacing.lg,
                     gutter,
                     88 + AppSpacing.md,
                   ),
@@ -345,7 +351,7 @@ class _HomeScreenState extends State<HomeScreen>
                       notificationCount: _unreadNotificationCount,
                       onNotifications: _openNotifications,
                     ),
-                    const SizedBox(height: AppSpacing.xl),
+                    SizedBox(height: sectionGap),
                     _BalancePanel(
                       data: data,
                       showBalances: _showBalances,
@@ -366,9 +372,9 @@ class _HomeScreenState extends State<HomeScreen>
                                 : AppRoutes.receiveMoney),
                       ),
                     ],
-                    const SizedBox(height: AppSpacing.xl),
+                    SizedBox(height: sectionGap),
                     const _VtuShortcuts(),
-                    const SizedBox(height: AppSpacing.xl),
+                    SizedBox(height: sectionGap),
                     if (data.user.kycStatus.toUpperCase() == 'VERIFIED')
                       const _PromoBanner()
                     else
@@ -382,7 +388,7 @@ class _HomeScreenState extends State<HomeScreen>
                         beneficiaries: data.beneficiaries,
                       ),
                     ],
-                    const SizedBox(height: AppSpacing.xl),
+                    SizedBox(height: sectionGap),
                     _RecentTransactionsSection(
                       transactions: data.transactions,
                     ),
@@ -411,11 +417,13 @@ class _HomeTopBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     AppColors.watch(context);
+    final compactViewport = MediaQuery.sizeOf(context).width < 400;
     return Row(
       children: [
         Container(
-          width: 48,
-          height: 48,
+          key: const ValueKey('home-avatar'),
+          width: compactViewport ? 44 : 48,
+          height: compactViewport ? 44 : 48,
           decoration: BoxDecoration(
             shape: BoxShape.circle,
             color: AppColors.primary,
@@ -437,16 +445,28 @@ class _HomeTopBar extends StatelessWidget {
             ),
           ),
         ),
-        const SizedBox(width: AppSpacing.md),
+        SizedBox(width: compactViewport ? 10 : AppSpacing.md),
         Expanded(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(_greeting(), style: AppTextStyles.bodyM),
-              const SizedBox(height: AppSpacing.xs),
+              Text(
+                _greeting(),
+                key: const ValueKey('home-greeting'),
+                style: compactViewport
+                    ? AppTextStyles.bodyS.copyWith(fontSize: 13)
+                    : AppTextStyles.bodyM,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+              SizedBox(height: compactViewport ? 2 : AppSpacing.xs),
               Text(
                 _compactName(user.displayName),
-                style: AppTextStyles.headingM.copyWith(
+                key: const ValueKey('home-customer-name'),
+                style: (compactViewport
+                        ? AppTextStyles.labelL
+                        : AppTextStyles.headingM)
+                    .copyWith(
                   color: AppColors.textPrimary,
                   fontWeight: FontWeight.w800,
                 ),
@@ -812,6 +832,7 @@ class _CurrencyBalanceSummary extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     AppColors.watch(context);
+    final compactViewport = MediaQuery.sizeOf(context).width < 400;
     final visibleAmount =
         showBalances ? _walletCardAmount(data.balanceDecimalString) : '******';
     final canRequestAccount = data.currency == 'NGN' &&
@@ -830,14 +851,22 @@ class _CurrencyBalanceSummary extends StatelessWidget {
               child: Row(
                 children: [
                   Flexible(
-                    child: Text(
-                      'Available balance',
-                      style: AppTextStyles.labelM.copyWith(
-                        color: AppColors.textSecondary,
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        'Available balance',
+                        maxLines: 1,
+                        softWrap: false,
+                        style: AppTextStyles.labelM.copyWith(
+                          color: AppColors.textSecondary,
+                        ),
                       ),
                     ),
                   ),
                   IconButton(
+                    padding: const EdgeInsets.only(left: 6),
+                    alignment: Alignment.centerLeft,
                     tooltip: showBalances ? 'Hide balance' : 'Show balance',
                     onPressed: onToggleBalances,
                     iconSize: 16,
@@ -853,22 +882,25 @@ class _CurrencyBalanceSummary extends StatelessWidget {
             ),
             if (data.currency == 'NGN') const SizedBox(width: AppSpacing.sm),
             if (data.currency == 'NGN')
-              Expanded(
-                child: Align(
-                  alignment: Alignment.centerRight,
-                  child: Tooltip(
-                    message: canRequestAccount
-                        ? 'Set up your receiving account'
-                        : 'View receiving account',
-                    child: TextButton(
-                      onPressed: onReceive,
-                      style: TextButton.styleFrom(
-                        backgroundColor: AppColors.surfaceVariant,
-                        foregroundColor: AppColors.textSecondary,
-                        textStyle: AppTextStyles.labelS,
-                      ),
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 132),
+                child: Tooltip(
+                  message: canRequestAccount
+                      ? 'Set up your receiving account'
+                      : 'View receiving account',
+                  child: TextButton(
+                    onPressed: onReceive,
+                    style: TextButton.styleFrom(
+                      backgroundColor: AppColors.surfaceVariant,
+                      foregroundColor: AppColors.textSecondary,
+                      textStyle: AppTextStyles.labelS,
+                    ),
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
                       child: Text(
                         canRequestAccount ? 'Request account' : accountLabel,
+                        maxLines: 1,
+                        softWrap: false,
                         textAlign: TextAlign.center,
                       ),
                     ),
@@ -895,8 +927,8 @@ class _CurrencyBalanceSummary extends StatelessWidget {
                 value: visibleAmount,
                 style: AppTextStyles.displayMedium.copyWith(
                   color: AppColors.textPrimary,
-                  fontSize: 42,
-                  height: 1,
+                  fontSize: compactViewport ? 38 : 42,
+                  height: compactViewport ? 1.05 : 1,
                   letterSpacing: 0,
                   fontWeight: FontWeight.w700,
                 ),
@@ -904,7 +936,7 @@ class _CurrencyBalanceSummary extends StatelessWidget {
             ),
           ],
         ),
-        const SizedBox(height: AppSpacing.lg),
+        SizedBox(height: compactViewport ? AppSpacing.md : AppSpacing.lg),
         if (LaunchCapabilities.moneyOutEnabled)
           Row(
             children: [
@@ -1249,6 +1281,7 @@ class _BalanceCtaButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     AppColors.watch(context);
+    final compactViewport = MediaQuery.sizeOf(context).width < 400;
     final tint = primary ? AppColors.primary : AppColors.textSecondary;
     final fill = primary
         ? Color.alphaBlend(tint.withValues(alpha: 0.11), AppColors.surface)
@@ -1260,7 +1293,10 @@ class _BalanceCtaButton extends StatelessWidget {
       pressedScale: 0.97,
       child: Container(
         constraints: const BoxConstraints(minHeight: 48),
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+        padding: EdgeInsets.symmetric(
+          horizontal: compactViewport ? 6 : 8,
+          vertical: 8,
+        ),
         decoration: BoxDecoration(
           color: fill,
           borderRadius: BorderRadius.circular(AppRadius.full),
@@ -1270,13 +1306,17 @@ class _BalanceCtaButton extends StatelessWidget {
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Container(
-              width: 26,
-              height: 26,
+              width: compactViewport ? 24 : 26,
+              height: compactViewport ? 24 : 26,
               decoration: BoxDecoration(
                 color: tint.withValues(alpha: 0.12),
                 shape: BoxShape.circle,
               ),
-              child: Icon(icon, color: AppColors.textPrimary, size: 14),
+              child: Icon(
+                icon,
+                color: AppColors.textPrimary,
+                size: compactViewport ? 13 : 14,
+              ),
             ),
             const SizedBox(width: AppSpacing.xs),
             Flexible(
@@ -1376,6 +1416,9 @@ class _VtuShortcuts extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     AppColors.watch(context);
+    final compactViewport = MediaQuery.sizeOf(context).width < 400;
+    final iconExtent = compactViewport ? 48.0 : 56.0;
+    final iconPadding = compactViewport ? 10.0 : 12.0;
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       spacing: AppSpacing.sm,
@@ -1385,6 +1428,7 @@ class _VtuShortcuts extends StatelessWidget {
             child: TextButton(
               onPressed: () => context.push(route),
               style: TextButton.styleFrom(
+                minimumSize: const Size(48, 48),
                 padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 4),
                 foregroundColor: AppColors.textPrimary,
               ),
@@ -1392,9 +1436,9 @@ class _VtuShortcuts extends StatelessWidget {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Container(
-                    width: 56,
-                    height: 56,
-                    padding: const EdgeInsets.all(12),
+                    width: iconExtent,
+                    height: iconExtent,
+                    padding: EdgeInsets.all(iconPadding),
                     decoration: BoxDecoration(
                       color: color.withValues(alpha: 0.12),
                       shape: BoxShape.circle,
@@ -1423,11 +1467,12 @@ class _PromoBanner extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     AppColors.watch(context);
+    final compactViewport = MediaQuery.sizeOf(context).width < 400;
     return TapScale(
       onTap: () => context.push(AppRoutes.exchange),
       borderRadius: BorderRadius.circular(16),
       child: Container(
-        constraints: const BoxConstraints(minHeight: 120),
+        constraints: BoxConstraints(minHeight: compactViewport ? 104 : 120),
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(16),
           border: Border.all(
@@ -1449,7 +1494,9 @@ class _PromoBanner extends StatelessWidget {
           ),
         ),
         child: Container(
-          padding: const EdgeInsets.all(AppSpacing.lg),
+          padding: EdgeInsets.all(
+            compactViewport ? AppSpacing.md : AppSpacing.lg,
+          ),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(16),
             gradient: LinearGradient(
@@ -2050,10 +2097,12 @@ class _HomeLoadingState extends StatelessWidget {
 class _HomeErrorState extends StatelessWidget {
   final String message;
   final VoidCallback onRetry;
+  final bool sessionExpired;
 
   const _HomeErrorState({
     required this.message,
     required this.onRetry,
+    required this.sessionExpired,
   });
 
   @override
@@ -2097,13 +2146,14 @@ class _HomeErrorState extends StatelessWidget {
                 ),
                 child: const Text('Retry'),
               ),
-              TextButton(
-                onPressed: () {
-                  Haptics.selection();
-                  context.go(AppRoutes.login);
-                },
-                child: const Text('Log in'),
-              ),
+              if (sessionExpired)
+                TextButton(
+                  onPressed: () {
+                    Haptics.selection();
+                    context.go(AppRoutes.login);
+                  },
+                  child: const Text('Log in'),
+                ),
             ],
           ),
         ),

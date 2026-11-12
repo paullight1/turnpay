@@ -13,6 +13,66 @@ void main() {
   Future<_DepositService> service() async => _DepositService(
       await buildTrustPayTestBundle().homeDataService.fetchDashboard());
 
+  testWidgets(
+      'small balance header shrinks to one line and keeps controls usable',
+      (tester) async {
+    tester.view.physicalSize = const Size(320, 740);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final api = (await tester.runAsync(service))!;
+    await tester.pumpWidget(MaterialApp(
+      builder: (context, child) => MediaQuery(
+        data: MediaQuery.of(context)
+            .copyWith(textScaler: const TextScaler.linear(1.5)),
+        child: child!,
+      ),
+      home: HomeScreen(homeDataService: api),
+    ));
+    await tester.pumpAndSettle();
+    final label = tester.renderObject(find.text('Available balance'));
+    expect(label.getTransformTo(null).storage[0].abs(), lessThan(1));
+    final toggle = find.byTooltip('Hide balance');
+    expect(tester.getSize(toggle).height, greaterThanOrEqualTo(44));
+    expect(tester.takeException(), isNull);
+    await tester.tap(toggle);
+    await tester.pumpAndSettle();
+    expect(find.byTooltip('Show balance'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('compact home header keeps identity and balance controls close',
+      (tester) async {
+    tester.view.physicalSize = const Size(384, 824);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final api = (await tester.runAsync(service))!;
+
+    await tester.pumpWidget(MaterialApp(
+      home: HomeScreen(homeDataService: api),
+    ));
+    await tester.pumpAndSettle();
+
+    final avatar = tester.getRect(find.byKey(const ValueKey('home-avatar')));
+    final greeting =
+        tester.getRect(find.byKey(const ValueKey('home-greeting')));
+    final name =
+        tester.getRect(find.byKey(const ValueKey('home-customer-name')));
+    final nameText = tester.widget<Text>(
+      find.byKey(const ValueKey('home-customer-name')),
+    );
+    final label = tester.getRect(find.text('Available balance'));
+    final eye = tester.getRect(find.byTooltip('Hide balance'));
+
+    expect(greeting.left - avatar.right, lessThanOrEqualTo(16));
+    expect(name.top - greeting.bottom, lessThanOrEqualTo(4));
+    expect(nameText.style?.fontSize, 16);
+    expect(eye.left - label.right, lessThanOrEqualTo(10));
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
   testWidgets('pulling down with a mouse refreshes the wallet on web',
       (tester) async {
     final api = (await tester.runAsync(service))!;

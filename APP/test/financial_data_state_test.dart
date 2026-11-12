@@ -185,7 +185,7 @@ void main() {
       final service = _homeServiceFor(
         route: '/api/transactions',
         statusCode: 503,
-        response: {'message': 'transactions temporarily unavailable'},
+        response: {'message': 'Internal database connection failed'},
       );
 
       await tester.pumpWidget(
@@ -197,7 +197,9 @@ void main() {
       await tester.pump(const Duration(milliseconds: 250));
 
       expect(find.text('No transactions yet'), findsNothing);
-      expect(find.text('transactions temporarily unavailable'), findsOneWidget);
+      expect(find.textContaining('TrustPay is temporarily unavailable'),
+          findsOneWidget);
+      expect(find.textContaining('Internal database'), findsNothing);
       expect(find.text('Retry'), findsOneWidget);
     });
 

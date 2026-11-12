@@ -521,6 +521,7 @@ describe('KYC HTTP flow (isolated PostgreSQL)', () => {
         settings,
         { send },
         logger as never,
+        { verify: async () => ({ verified: true as const }) },
       );
     await Promise.all([
       worker().dispatchPendingEmails(),

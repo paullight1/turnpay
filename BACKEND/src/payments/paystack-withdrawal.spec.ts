@@ -15,6 +15,7 @@ describe('Paystack withdrawal confirmation', () => {
     },
     transferAttempt: { update: jest.fn(), create: jest.fn() },
     ledgerEntry: { findFirst: jest.fn() },
+    emailOutbox: { createMany: jest.fn() },
     user: { updateMany: jest.fn(), findUnique: jest.fn() },
     auditLog: { create: jest.fn() },
     $transaction: jest.fn(),
@@ -34,6 +35,7 @@ describe('Paystack withdrawal confirmation', () => {
     );
     tx.transaction.updateMany.mockResolvedValue({ count: 1 });
     tx.ledgerEntry.findFirst.mockResolvedValue(null);
+    tx.emailOutbox.createMany.mockResolvedValue({ count: 1 });
     tx.transaction.findUnique.mockResolvedValue({
       id: 'tx',
       userId: 'owner',

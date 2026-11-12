@@ -330,6 +330,131 @@ describe('Internal transfer financial E2E (real PostgreSQL)', () => {
     });
   });
 
+  it('queues exactly one customer credit/debit alert per committed same-key transfer and rolls back outbox rows with the financial transaction', async () => {
+    if (!fixture) throw new Error('Financial fixture was not created');
+    const { transfers, ledger } = createRealTransferServices(prisma);
+    const context = fixture.context('outbox-same-key');
+    const request = {
+      recipientId: fixture.users.recipientA.id,
+      amount: '25.00',
+      currency: 'NGN' as const,
+    };
+
+    const first = await transfers.sendInternalTransfer(
+      fixture.users.sender.id,
+      request,
+      context,
+    );
+    await expect(
+      transfers.sendInternalTransfer(fixture.users.sender.id, request, context),
+    ).resolves.toEqual(first);
+
+    const customerRows = await prisma.emailOutbox.findMany({
+      where: {
+        userId: {
+          in: [fixture.users.sender.id, fixture.users.recipientA.id],
+        },
+        eventType: { in: ['WALLET_CREDIT', 'WALLET_DEBIT'] },
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+    expect(customerRows).toHaveLength(2);
+    expect(customerRows.map(({ eventType }) => eventType).sort()).toEqual([
+      'WALLET_CREDIT',
+      'WALLET_DEBIT',
+    ]);
+    expect(new Set(customerRows.map(({ eventKey }) => eventKey)).size).toBe(2);
+    const committedLedgerIds = await prisma.ledgerEntry.findMany({
+      where: { id: { in: customerRows.map(({ orderId }) => orderId) } },
+      select: { id: true },
+    });
+    expect(committedLedgerIds).toHaveLength(2);
+
+    const senderBefore = await walletBalance(
+      prisma,
+      fixture.users.sender.id,
+      'NGN',
+    );
+    const recipientBefore = await walletBalance(
+      prisma,
+      fixture.users.recipientB.id,
+      'NGN',
+    );
+    const outboxBefore = await prisma.emailOutbox.count({
+      where: { userId: fixture.users.recipientB.id },
+    });
+    const ledgerBefore = await prisma.ledgerEntry.count({
+      where: {
+        wallet: { userId: fixture.users.recipientB.id },
+      },
+    });
+
+    await expect(
+      prisma.$transaction(async (tx) => {
+        const senderTx = await tx.transaction.create({
+          data: {
+            userId: fixture!.users.sender.id,
+            type: 'INTERNAL_TRANSFER',
+            amount: new Decimal('7.00'),
+            currency: 'NGN',
+            status: 'SUCCESS',
+            reference: `${fixture!.prefix}-abort-out`,
+          },
+        });
+        const recipientTx = await tx.transaction.create({
+          data: {
+            userId: fixture!.users.recipientB.id,
+            type: 'INTERNAL_TRANSFER',
+            amount: new Decimal('7.00'),
+            currency: 'NGN',
+            status: 'SUCCESS',
+            reference: `${fixture!.prefix}-abort-in`,
+          },
+        });
+        await ledger.debitWallet(
+          {
+            userId: fixture!.users.sender.id,
+            currency: 'NGN',
+            amount: new Decimal('7.00'),
+            transactionId: senderTx.id,
+            reference: `${fixture!.prefix}-abort`,
+            source: 'TEST_ABORT_DEBIT',
+          },
+          tx,
+        );
+        await ledger.creditWallet(
+          {
+            userId: fixture!.users.recipientB.id,
+            currency: 'NGN',
+            amount: new Decimal('7.00'),
+            transactionId: recipientTx.id,
+            reference: `${fixture!.prefix}-abort`,
+            source: 'TEST_ABORT_CREDIT',
+          },
+          tx,
+        );
+        throw new Error('abort after outbox enqueue');
+      }),
+    ).rejects.toThrow('abort after outbox enqueue');
+
+    expect(await walletBalance(prisma, fixture.users.sender.id, 'NGN')).toEqual(
+      senderBefore,
+    );
+    expect(
+      await walletBalance(prisma, fixture.users.recipientB.id, 'NGN'),
+    ).toEqual(recipientBefore);
+    expect(
+      await prisma.emailOutbox.count({
+        where: { userId: fixture.users.recipientB.id },
+      }),
+    ).toBe(outboxBefore);
+    expect(
+      await prisma.ledgerEntry.count({
+        where: { wallet: { userId: fixture.users.recipientB.id } },
+      }),
+    ).toBe(ledgerBefore);
+  });
+
   it('serializes near-full-balance debits from two service instances', async () => {
     const isolated = await createFinancialTransferFixture(prisma, {
       senderBalance: '100.00',
