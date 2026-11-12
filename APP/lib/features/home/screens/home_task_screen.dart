@@ -543,99 +543,124 @@ class ComingSoonFeatureScreen extends StatelessWidget {
     return Scaffold(
       key: ValueKey('feature-advert-$slug'),
       backgroundColor: AppColors.background,
+      appBar: TpAppHeader(label: item?.title ?? 'Feature preview'),
+      bottomNavigationBar: item == null || story == null
+          ? null
+          : const _ComingSoonFeatureFooter(),
       body: SafeArea(
+        top: false,
+        bottom: false,
         child: SingleChildScrollView(
+          key: const ValueKey('feature-advert-content'),
+          padding: const EdgeInsets.all(AppSpacing.md),
           child: Center(
             child: ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 680),
-              child: Padding(
-                padding: const EdgeInsets.all(AppSpacing.lg),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    TpPageHeader(
-                        label: item?.title ?? 'Feature preview',
-                        edgeToEdge: false),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (item == null || story == null) ...[
+                    Text('Feature unavailable', style: AppTextStyles.headingL),
+                    const SizedBox(height: AppSpacing.sm),
+                    Text('Return to More to explore upcoming features.',
+                        style: AppTextStyles.bodyM),
+                  ] else ...[
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(AppRadius.lg),
+                      child: AspectRatio(
+                        aspectRatio: 1.8,
+                        child: Image.asset(
+                          item.backgroundAsset!,
+                          fit: BoxFit.cover,
+                          excludeFromSemantics: true,
+                          color: accent.withValues(alpha: 0.32),
+                          colorBlendMode: BlendMode.screen,
+                        ),
+                      ),
+                    ),
                     const SizedBox(height: AppSpacing.lg),
-                    if (item == null || story == null) ...[
-                      Text('Feature unavailable',
-                          style: AppTextStyles.headingL),
-                      const SizedBox(height: AppSpacing.sm),
-                      Text('Return to More to explore upcoming features.',
-                          style: AppTextStyles.bodyM),
-                    ] else ...[
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(AppRadius.lg),
-                        child: AspectRatio(
-                          aspectRatio: 1.8,
-                          child: Image.asset(
-                            item.backgroundAsset!,
-                            fit: BoxFit.cover,
-                            excludeFromSemantics: true,
-                            color: accent.withValues(alpha: 0.32),
-                            colorBlendMode: BlendMode.screen,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: AppSpacing.lg),
-                      Text('IN THE WORKS',
-                          style: AppTextStyles.caption.copyWith(
-                              color: AppColors.primary,
-                              letterSpacing: 1.4,
-                              fontWeight: FontWeight.w800)),
-                      const SizedBox(height: AppSpacing.sm),
-                      Text(story.$1,
-                          style:
-                              AppTextStyles.headingXL.copyWith(height: 1.15)),
-                      const SizedBox(height: AppSpacing.md),
-                      Text(item.subtitle, style: AppTextStyles.bodyM),
-                      const SizedBox(height: AppSpacing.xl),
-                      Text('What to expect', style: AppTextStyles.headingM),
-                      const SizedBox(height: AppSpacing.md),
-                      for (final benefit in story.$2)
-                        Padding(
-                          padding: const EdgeInsets.only(bottom: AppSpacing.md),
-                          child: Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Icon(Icons.check_circle_outline_rounded,
-                                  color: AppColors.primary, size: 22),
-                              const SizedBox(width: AppSpacing.sm),
-                              Expanded(
-                                  child: Text(benefit,
-                                      style: AppTextStyles.bodyM)),
-                            ],
-                          ),
-                        ),
-                      const SizedBox(height: AppSpacing.lg),
-                      SizedBox(
-                        width: double.infinity,
-                        child: FilledButton(
-                          key: const ValueKey('coming-soon-cta'),
-                          onPressed: null,
-                          style: FilledButton.styleFrom(
-                            minimumSize: const Size(0, 52),
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 20, vertical: 16),
-                            disabledBackgroundColor:
-                                AppColors.primary.withValues(alpha: 0.16),
-                            disabledForegroundColor: AppColors.textPrimary,
-                            shape: RoundedRectangleBorder(
-                                borderRadius:
-                                    BorderRadius.circular(AppRadius.md)),
-                          ),
-                          child: const Text('Coming soon'),
-                        ),
-                      ),
-                      const SizedBox(height: AppSpacing.sm),
-                      Text(
-                          'This feature is still being built. Availability and details may change before launch.',
-                          style: AppTextStyles.bodyS,
-                          textAlign: TextAlign.center),
-                    ],
+                    Text('IN THE WORKS',
+                        style: AppTextStyles.caption.copyWith(
+                            color: AppColors.primary,
+                            letterSpacing: 1.4,
+                            fontWeight: FontWeight.w800)),
+                    const SizedBox(height: AppSpacing.sm),
+                    Text(story.$1,
+                        style: AppTextStyles.headingXL.copyWith(height: 1.15)),
                     const SizedBox(height: AppSpacing.md),
+                    Text(item.subtitle, style: AppTextStyles.bodyM),
+                    const SizedBox(height: AppSpacing.xl),
+                    Text('What to expect', style: AppTextStyles.headingM),
+                    const SizedBox(height: AppSpacing.md),
+                    for (final benefit in story.$2)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: AppSpacing.md),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Icon(Icons.check_circle_outline_rounded,
+                                color: AppColors.primary, size: 22),
+                            const SizedBox(width: AppSpacing.sm),
+                            Expanded(
+                                child:
+                                    Text(benefit, style: AppTextStyles.bodyM)),
+                          ],
+                        ),
+                      ),
                   ],
-                ),
+                  const SizedBox(height: AppSpacing.md),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ComingSoonFeatureFooter extends StatelessWidget {
+  const _ComingSoonFeatureFooter();
+
+  @override
+  Widget build(BuildContext context) {
+    return ColoredBox(
+      color: AppColors.background,
+      child: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(
+              AppSpacing.md, AppSpacing.sm, AppSpacing.md, AppSpacing.md),
+          child: Align(
+            heightFactor: 1,
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 680),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  FilledButton(
+                    key: const ValueKey('coming-soon-cta'),
+                    onPressed: null,
+                    style: FilledButton.styleFrom(
+                      minimumSize: const Size(0, 52),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 20, vertical: 16),
+                      disabledBackgroundColor:
+                          AppColors.primary.withValues(alpha: 0.16),
+                      disabledForegroundColor: AppColors.textPrimary,
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(AppRadius.md)),
+                    ),
+                    child: const Text('Coming soon'),
+                  ),
+                  const SizedBox(height: AppSpacing.sm),
+                  Text(
+                    'This feature is still being built. Availability may change before launch.',
+                    style: AppTextStyles.bodyS,
+                    textAlign: TextAlign.center,
+                  ),
+                ],
               ),
             ),
           ),

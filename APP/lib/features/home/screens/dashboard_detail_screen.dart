@@ -548,32 +548,28 @@ class _ProfileActionScreenState extends State<ProfileActionScreen> {
 
     return Scaffold(
       backgroundColor: AppColors.background,
+      appBar: TpAppHeader(label: config.title),
       body: SafeArea(
-        child: CustomScrollView(
+        top: false,
+        child: SingleChildScrollView(
           physics: const AlwaysScrollableScrollPhysics(
             parent: BouncingScrollPhysics(),
           ),
-          slivers: [
-            SliverPadding(
-              padding: const EdgeInsets.fromLTRB(
-                AppSpacing.lg,
-                AppSpacing.md,
-                AppSpacing.lg,
-                AppSpacing.xxl,
-              ),
-              sliver: SliverList.list(
+          padding: const EdgeInsets.fromLTRB(
+              AppSpacing.md, AppSpacing.lg, AppSpacing.md, AppSpacing.xxl),
+          child: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 720),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  TpPageHeader(
-                    label: config.title,
-                  ),
-                  const SizedBox(height: AppSpacing.sm),
                   Text(config.subtitle, style: AppTextStyles.bodyM),
-                  const SizedBox(height: AppSpacing.xl),
+                  const SizedBox(height: AppSpacing.lg),
                   content,
                 ],
               ),
             ),
-          ],
+          ),
         ),
       ),
     );
@@ -987,7 +983,7 @@ _DetailConfig _profileConfigFor(ProfileActionKind kind) {
     case ProfileActionKind.account:
       return const _DetailConfig(
         title: 'Account Details',
-        subtitle: 'Your saved TrustPay account identity details.',
+        subtitle: 'Your identity and receiving account.',
       );
     case ProfileActionKind.appearance:
       return const _DetailConfig(
@@ -1071,22 +1067,15 @@ class _SecurityLimitsBody extends StatelessWidget {
         _ProfileActionRow(
           icon: Icons.password_rounded,
           label: 'Transaction PIN',
-          detail: 'Create or update the PIN used before transactions',
+          detail: 'Create or change your transaction PIN',
           onTap: onTransactionSecurity,
         ),
         _ProfileActionRow(
           icon: Icons.fingerprint_rounded,
           label: 'App unlock',
-          detail: 'Use a separate app PIN or your phone security',
+          detail: 'App PIN, fingerprint or face unlock',
           onTap: onTransactionSecurity,
         ),
-        _DataPanel(
-          child: Text(
-            'All money actions request a freshly entered transaction PIN before submission. Keep your PIN private and never share OTPs or passwords.',
-            style: AppTextStyles.bodyM,
-          ),
-        ),
-        const _ActiveSessionsPanel(),
       ],
     );
   }
@@ -1591,14 +1580,21 @@ class _ProfileIdentityPanel extends StatelessWidget {
     if (!canEdit) {
       return _DataPanel(
         child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            Text('Identity details', style: AppTextStyles.headingM),
+            const SizedBox(height: AppSpacing.md),
             _CompactInfoLine(label: 'Full name', value: user.fullName),
             _CompactInfoLine(
                 label: 'Year of birth',
                 value: '${user.yearOfBirth ?? 'Not set'}'),
             _CompactInfoLine(
               label: 'Country',
-              value: user.country.isEmpty ? 'Not set' : user.country,
+              value: switch (user.country) {
+                'NG' => 'Nigeria',
+                'GH' => 'Ghana',
+                _ => user.country.isEmpty ? 'Not set' : user.country,
+              },
             ),
             _CompactInfoLine(label: 'Phone', value: user.phone),
             _CompactInfoLine(label: 'Email', value: user.email),
@@ -1610,7 +1606,7 @@ class _ProfileIdentityPanel extends StatelessWidget {
                 const SizedBox(width: AppSpacing.xs),
                 Expanded(
                   child: Text(
-                    'Identity details can only be edited once.',
+                    'Your saved identity details are locked.',
                     style: AppTextStyles.bodyS,
                   ),
                 ),
@@ -1841,22 +1837,29 @@ class _CompactInfoLine extends StatelessWidget {
   Widget build(BuildContext context) {
     AppColors.watch(context);
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: AppSpacing.xs),
-      child: Row(
-        children: [
-          Expanded(child: Text(label, style: AppTextStyles.bodyM)),
-          const SizedBox(width: AppSpacing.md),
-          Flexible(
-            child: Text(
-              value.isEmpty ? 'Not set' : value,
-              style: AppTextStyles.labelM,
-              textAlign: TextAlign.right,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-        ],
-      ),
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: LayoutBuilder(builder: (context, constraints) {
+        final labelText = Text(label, style: AppTextStyles.bodyS);
+        final valueText = SelectableText(
+          value.isEmpty ? 'Not set' : value,
+          style: AppTextStyles.labelM,
+        );
+        if (constraints.maxWidth < 300 ||
+            MediaQuery.textScalerOf(context).scale(1) > 1.3) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [labelText, const SizedBox(height: 4), valueText],
+          );
+        }
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            SizedBox(width: 112, child: labelText),
+            const SizedBox(width: AppSpacing.md),
+            Expanded(child: valueText),
+          ],
+        );
+      }),
     );
   }
 }
@@ -1889,27 +1892,12 @@ class _VirtualAccountSummaryCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
+          Wrap(
+            spacing: AppSpacing.md,
+            runSpacing: AppSpacing.sm,
+            crossAxisAlignment: WrapCrossAlignment.center,
             children: [
-              Container(
-                width: 42,
-                height: 42,
-                decoration: BoxDecoration(
-                  color: AppColors.primary.withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(AppRadius.sm),
-                ),
-                child: Icon(
-                  Icons.account_balance_rounded,
-                  color: AppColors.primary,
-                ),
-              ),
-              const SizedBox(width: AppSpacing.md),
-              Expanded(
-                child: Text(
-                  'TrustPay NGN receiving account',
-                  style: AppTextStyles.headingM,
-                ),
-              ),
+              Text('NGN receiving account', style: AppTextStyles.headingM),
               if (current != null) _StatusPill(label: current.status),
             ],
           ),
@@ -1965,20 +1953,22 @@ class _VirtualAccountSummaryCard extends StatelessWidget {
               ),
             ),
           ] else ...[
-            Text(
-              current.displayAccountNumber.isEmpty
-                  ? current.accountNumberMasked
-                  : current.displayAccountNumber,
-              style: AppTextStyles.displayMedium.copyWith(
-                fontSize: 30,
-                letterSpacing: 0.4,
+            FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerLeft,
+              child: Text(
+                current.displayAccountNumber.isEmpty
+                    ? current.accountNumberMasked
+                    : current.displayAccountNumber,
+                style: AppTextStyles.displayMedium.copyWith(
+                  fontSize: 30,
+                  letterSpacing: 0.4,
+                ),
               ),
             ),
             const SizedBox(height: AppSpacing.md),
             _CompactInfoLine(label: 'Bank', value: current.bankName),
             _CompactInfoLine(label: 'Account name', value: current.accountName),
-            _CompactInfoLine(label: 'Currency', value: current.currency),
-            _CompactInfoLine(label: 'Provider', value: current.provider),
           ],
         ],
       ),
@@ -3577,8 +3567,6 @@ class _ProfileActionRow extends StatelessWidget {
                       Text(
                         detail,
                         style: AppTextStyles.bodyS,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
                       ),
                     ],
                   ),
@@ -3620,48 +3608,6 @@ class _DataPanel extends StatelessWidget {
         border: Border.all(color: AppColors.border),
       ),
       child: child,
-    );
-  }
-}
-
-class _ActiveSessionsPanel extends StatelessWidget {
-  const _ActiveSessionsPanel();
-
-  @override
-  Widget build(BuildContext context) {
-    AppColors.watch(context);
-    return Container(
-      width: double.infinity,
-      margin: const EdgeInsets.only(bottom: AppSpacing.sm),
-      padding: const EdgeInsets.all(AppSpacing.md),
-      decoration: BoxDecoration(
-        color: AppColors.surfaceVariant,
-        borderRadius: BorderRadius.circular(AppRadius.sm),
-        border: Border.all(color: AppColors.border),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Active Sessions',
-            style: AppTextStyles.bodyM,
-          ),
-          const SizedBox(height: AppSpacing.sm),
-          Row(
-            children: [
-              Icon(Icons.phone_iphone_rounded,
-                  size: 16, color: AppColors.textSecondary),
-              const SizedBox(width: AppSpacing.xs),
-              Expanded(
-                child: Text(
-                  'This device · Last active: just now',
-                  style: AppTextStyles.caption,
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
     );
   }
 }

@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:trustpay_app/core/theme/app_theme.dart';
+import 'package:trustpay_app/core/widgets/tp_page_header.dart';
 import 'package:trustpay_app/features/home/screens/home_task_screen.dart';
 
 void main() {
@@ -75,6 +76,44 @@ void main() {
       await tester.ensureVisible(find.byKey(const ValueKey('coming-soon-cta')));
       await tester.pumpAndSettle();
       expect(find.text('Coming soon'), findsWidgets);
+      expect(tester.takeException(), isNull);
+    });
+  }
+  for (final theme in [AppTheme.light, AppTheme.dark]) {
+    testWidgets(
+        'advert has a full-width header and a fixed, safe CTA in ${theme.brightness}',
+        (tester) async {
+      const size = Size(320, 640);
+      tester.view.physicalSize = size;
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      await tester.pumpWidget(MaterialApp(
+        theme: theme,
+        builder: (_, child) => MediaQuery(
+          data: const MediaQueryData(
+            size: size,
+            padding: EdgeInsets.fromLTRB(12, 44, 12, 24),
+            textScaler: TextScaler.linear(1.8),
+          ),
+          child: child!,
+        ),
+        home: const ComingSoonFeatureScreen(slug: 'virtual-cards'),
+      ));
+      await tester.pumpAndSettle();
+      final header = tester.getRect(find.byType(TpPageHeader));
+      expect(header.left, 0);
+      expect(header.width, size.width);
+      final button = find.byKey(const ValueKey('coming-soon-cta'));
+      final before = tester.getRect(button);
+      expect(before.left, 28);
+      expect(before.width, size.width - 56);
+      expect(before.top, greaterThan(header.bottom));
+      expect(before.bottom, lessThanOrEqualTo(size.height - 24));
+      await tester.drag(
+          find.byType(SingleChildScrollView), const Offset(0, -250));
+      await tester.pumpAndSettle();
+      expect(tester.getRect(button), before);
       expect(tester.takeException(), isNull);
     });
   }
