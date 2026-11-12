@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:trustpay_app/core/theme/app_theme.dart';
 import 'package:trustpay_app/core/widgets/tp_card.dart';
 import 'package:trustpay_app/core/widgets/tp_back_button.dart';
 import 'package:trustpay_app/core/widgets/tp_page_header.dart';
@@ -184,5 +185,90 @@ void main() {
     await tester.pump();
 
     expect(backTapped, isTrue);
+  });
+
+  testWidgets('shared page headers consume the status inset once',
+      (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(430, 932);
+    const cutout = FakeViewPadding(top: 32, left: 44, right: 44);
+    tester.view.viewPadding = cutout;
+    tester.view.padding = cutout;
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetViewPadding);
+    addTearDown(tester.view.resetPadding);
+
+    await tester.pumpWidget(const MaterialApp(
+      home: Scaffold(
+        body: TpPageHeader(label: 'Exchange', showBackButton: false),
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    final menu = tester.getRect(find.byTooltip('Menu'));
+    expect(menu.left, greaterThanOrEqualTo(44));
+    expect(menu.right, lessThanOrEqualTo(430 - 44));
+    expect(
+        tester.getTopLeft(find.text('Exchange')).dy, greaterThanOrEqualTo(32));
+    final orangeSurface = tester.widget<ColoredBox>(
+      find
+          .ancestor(
+            of: find.text('Exchange'),
+            matching: find.byType(ColoredBox),
+          )
+          .first,
+    );
+    expect(orangeSurface.color, AppColors.primary);
+    final region = tester.widget<AnnotatedRegion<SystemUiOverlayStyle>>(
+      find.byType(AnnotatedRegion<SystemUiOverlayStyle>),
+    );
+    expect(region.value.statusBarIconBrightness, Brightness.light);
+    expect(region.value.systemStatusBarContrastEnforced, isFalse);
+    expect(region.value.systemNavigationBarContrastEnforced, isFalse);
+
+    await tester.pumpWidget(const MaterialApp(
+      home: Scaffold(
+        body: SafeArea(
+          child: TpPageHeader(label: 'Exchange', showBackButton: false),
+        ),
+      ),
+    ));
+    await tester.pumpAndSettle();
+    final nestedMenu = tester.getRect(find.byTooltip('Menu'));
+    expect(nestedMenu.left, greaterThanOrEqualTo(44));
+    expect(nestedMenu.right, lessThanOrEqualTo(430 - 44));
+
+    await tester.pumpWidget(const MaterialApp(
+      home: Scaffold(
+        body: CustomScrollView(
+          slivers: [
+            SliverList(
+              delegate: SliverChildListDelegate.fixed(
+                [
+                  TpPageHeader(label: 'Exchange', showBackButton: false),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    ));
+    await tester.pumpAndSettle();
+    expect(find.byTooltip('Menu'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+
+    await tester.pumpWidget(const MaterialApp(
+      home: Scaffold(
+        appBar: TpAppHeader(label: 'Receive Money'),
+        body: SizedBox.shrink(),
+      ),
+    ));
+    await tester.pumpAndSettle();
+    expect(
+      tester.getTopLeft(find.text('Receive Money')).dy,
+      greaterThanOrEqualTo(32),
+    );
+    expect(tester.takeException(), isNull);
   });
 }

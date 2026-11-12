@@ -63,13 +63,6 @@ class HomeTaskScreen extends StatelessWidget {
       route: AppRoutes.electricity,
     ),
     _FeatureItem(
-      slug: 'paystack-account',
-      title: 'NGN account',
-      subtitle: 'Receive naira bank transfers',
-      iconAsset: 'assets/icons/feature-paystack-account.svg',
-      route: AppRoutes.virtualAccount,
-    ),
-    _FeatureItem(
       slug: 'wallets',
       title: 'Wallets',
       subtitle: 'Manage your currencies',
@@ -290,27 +283,25 @@ class _FeatureCard extends StatelessWidget {
       color: accent,
       size: 44,
     );
-    final cardHeight = compact ? 112.0 : 136.0;
+    final cardHeight = compact ? 100.0 : 116.0;
 
     return Semantics(
       button: true,
       label: '${item.title}. ${item.subtitle}',
       child: Material(
         key: ValueKey('feature-card-${item.slug}'),
-        color: AppColors.surface,
-        shape: RoundedRectangleBorder(
-          side: BorderSide(color: AppColors.border.withValues(alpha: 0.78)),
-          borderRadius: BorderRadius.circular(AppRadius.lg),
-        ),
+        color: Colors.transparent,
+        borderRadius: BorderRadius.circular(AppRadius.md),
         clipBehavior: Clip.antiAlias,
         child: InkWell(
           onTap: () => context.push(item.route!),
-          child: SizedBox(
-            height: cardHeight,
+          child: ConstrainedBox(
+            constraints: BoxConstraints(minHeight: cardHeight),
             child: Padding(
               padding: const EdgeInsets.all(12),
               child: Column(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                mainAxisSize: MainAxisSize.min,
+                mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   icon,
                   const SizedBox(height: AppSpacing.sm),

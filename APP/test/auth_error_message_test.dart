@@ -3,6 +3,93 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:trustpay_app/services/auth_service.dart';
 
 void main() {
+  for (final type in [
+    DioExceptionType.connectionError,
+    DioExceptionType.connectionTimeout,
+    DioExceptionType.receiveTimeout,
+    DioExceptionType.sendTimeout,
+    DioExceptionType.unknown,
+  ]) {
+    test('dashboard $type failures never expose transport diagnostics', () {
+      final request = RequestOptions(path: '/api/transactions');
+      final message = authErrorMessage(
+        DioException(
+          requestOptions: request,
+          type: type,
+          message: 'XMLHttpRequest onError: SocketException internal-host',
+        ),
+        'Dashboard could not load',
+      );
+      expect(message, isNot(contains('XMLHttpRequest')));
+      expect(message, isNot(contains('internal-host')));
+      expect(message, contains('TrustPay'));
+      expect(message.toLowerCase(), contains('try again'));
+    });
+  }
+  test('server outages hide internal payloads on protected reads', () {
+    final request = RequestOptions(path: '/api/wallets');
+    final message = authErrorMessage(
+      DioException(
+        requestOptions: request,
+        response: Response(
+          requestOptions: request,
+          statusCode: 503,
+          data: {'message': 'Prisma query failed at private-db:5432'},
+        ),
+      ),
+      'Unable to load wallets',
+    );
+    expect(message, contains('temporarily unavailable'));
+    expect(message, isNot(contains('Prisma')));
+    expect(message, isNot(contains('private-db')));
+  });
+  test('uncertain payment failures preserve the existing recovery instructions',
+      () {
+    final request = RequestOptions(path: '/api/vtu/airtime', method: 'POST');
+    const fallback = 'Check the original payment status before trying again.';
+    for (final status in [null, 502]) {
+      final error = DioException(
+        requestOptions: request,
+        message: 'XMLHttpRequest onError',
+        response: status == null
+            ? null
+            : Response(
+                requestOptions: request,
+                statusCode: status,
+                data: {'message': 'Bad Gateway'}),
+      );
+      expect(authErrorMessage(error, fallback), fallback);
+    }
+  });
+  test('protected read expiry offers sign-in instead of raw rejection text',
+      () {
+    final request = RequestOptions(path: '/api/transactions');
+    expect(
+        authErrorMessage(
+            DioException(
+              requestOptions: request,
+              response: Response(
+                  requestOptions: request,
+                  statusCode: 401,
+                  data: {'message': 'JWT expired at internal verifier'}),
+            ),
+            'Unable to load history'),
+        'Your session has expired. Please sign in again.');
+  });
+  test('business validation remains actionable', () {
+    final request = RequestOptions(path: '/api/transfers', method: 'POST');
+    expect(
+        authErrorMessage(
+            DioException(
+              requestOptions: request,
+              response: Response(
+                  requestOptions: request,
+                  statusCode: 400,
+                  data: {'message': 'Insufficient balance'}),
+            ),
+            'Transfer could not complete'),
+        'Insufficient balance');
+  });
   test(
       'an uncertain BVN response does not falsely claim submission or rejection',
       () {

@@ -5789,14 +5789,8 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
             title: 'Meter details',
             subtitle: 'Choose your provider and enter the meter details.',
             children: [
-              _ChoiceRow(
-                label: 'Meter type',
+              _ElectricityMeterTypeSelector(
                 value: _meterType,
-                values: const ['prepaid', 'postpaid'],
-                labels: const {
-                  'prepaid': 'Prepaid',
-                  'postpaid': 'Postpaid',
-                },
                 onChanged: (value) => setState(() {
                   _meterType = value;
                   _isElectricityPaymentStep = false;
@@ -5822,6 +5816,7 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
                     label: 'Biller',
                     value: _electricityBillerId,
                     providers: ghanaElectricityBillers,
+                    showLabelAbove: true,
                     onChanged: (value) => setState(() {
                       _electricityBillerId = value;
                       _isElectricityPaymentStep = false;
@@ -5848,6 +5843,7 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
                     label: 'Provider',
                     value: _vtuProvider,
                     providers: _localElectricityProviders,
+                    showLabelAbove: true,
                     onChanged: (value) => _setVtuProvider(value),
                   ),
                   const SizedBox(height: AppSpacing.md),
@@ -5856,6 +5852,8 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
               _InputField(
                 controller: _recipientController,
                 label: 'Meter number',
+                hintText: 'Enter meter number',
+                externalLabel: true,
                 keyboardType: TextInputType.number,
                 inputFormatters: [FilteringTextInputFormatter.digitsOnly],
               ),
@@ -5863,6 +5861,7 @@ class _MoneyActionScreenState extends State<MoneyActionScreen> {
               VtuPhoneField(
                   controller: _electricityPhoneController,
                   label: 'Contact phone number',
+                  showLabelAbove: true,
                   enabled: !_isSubmitting),
               const SizedBox(height: AppSpacing.lg),
               FilledButton(
@@ -6223,12 +6222,14 @@ class _VtuProviderSelector extends StatelessWidget {
   final String value;
   final List<VtuProviderOption> providers;
   final ValueChanged<String> onChanged;
+  final bool showLabelAbove;
 
   const _VtuProviderSelector({
     required this.label,
     required this.value,
     required this.providers,
     required this.onChanged,
+    this.showLabelAbove = false,
   });
 
   @override
@@ -6238,7 +6239,7 @@ class _VtuProviderSelector extends StatelessWidget {
         ? [VtuProviderOption(id: value, name: value, type: '', isActive: true)]
         : providers;
 
-    return DropdownButtonFormField<String>(
+    final field = DropdownButtonFormField<String>(
       isExpanded: true,
       initialValue:
           items.any((item) => item.id == value) ? value : items.first.id,
@@ -6258,8 +6259,106 @@ class _VtuProviderSelector extends StatelessWidget {
         if (next != null) onChanged(next);
       },
       dropdownColor: AppColors.surface,
-      decoration: _inputDecoration(label),
+      decoration: _inputDecoration(showLabelAbove ? null : label),
       style: AppTextStyles.bodyM.copyWith(color: AppColors.textPrimary),
+    );
+
+    if (!showLabelAbove) return field;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(label, style: AppTextStyles.labelM),
+        const SizedBox(height: AppSpacing.sm),
+        Semantics(
+          container: true,
+          label: label,
+          child: field,
+        ),
+      ],
+    );
+  }
+}
+
+class _ElectricityMeterTypeSelector extends StatelessWidget {
+  final String value;
+  final ValueChanged<String> onChanged;
+
+  const _ElectricityMeterTypeSelector({
+    required this.value,
+    required this.onChanged,
+  });
+
+  static const _options = <String, String>{
+    'prepaid': 'Prepaid',
+    'postpaid': 'Postpaid',
+  };
+
+  @override
+  Widget build(BuildContext context) {
+    AppColors.watch(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('Meter type', style: AppTextStyles.labelM),
+        const SizedBox(height: AppSpacing.sm),
+        Row(
+          children: [
+            for (final option in _options.entries) ...[
+              if (option.key == 'postpaid')
+                const SizedBox(width: AppSpacing.sm),
+              Expanded(
+                child: _buildOption(
+                  value: option.key,
+                  label: option.value,
+                ),
+              ),
+            ],
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _buildOption({
+    required String value,
+    required String label,
+  }) {
+    final selected = this.value == value;
+    return Semantics(
+      button: true,
+      selected: selected,
+      label: '$label meter',
+      onTap: () => onChanged(value),
+      excludeSemantics: true,
+      child: Material(
+        color: selected
+            ? AppColors.primary.withValues(alpha: 0.08)
+            : AppColors.surface,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(AppRadius.sm),
+          side: BorderSide(
+            color: selected ? AppColors.primary : AppColors.border,
+            width: selected ? 1.5 : 1,
+          ),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: () => onChanged(value),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(minHeight: 52),
+            child: Center(
+              child: Text(
+                label,
+                textAlign: TextAlign.center,
+                style: AppTextStyles.labelM.copyWith(
+                  color: selected ? AppColors.primary : AppColors.textPrimary,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
@@ -6441,14 +6540,12 @@ class _ChoiceRow extends StatelessWidget {
   final String label;
   final String value;
   final List<String> values;
-  final Map<String, String> labels;
   final ValueChanged<String> onChanged;
 
   const _ChoiceRow({
     required this.label,
     required this.value,
     required this.values,
-    this.labels = const {},
     required this.onChanged,
   });
 
@@ -6459,7 +6556,7 @@ class _ChoiceRow extends StatelessWidget {
       isExpanded: true,
       initialValue: value,
       items: values.map((item) {
-        final displayLabel = labels[item] ?? item;
+        final displayLabel = item;
         return DropdownMenuItem(
           value: item,
           child: Text(
@@ -6483,10 +6580,12 @@ class _InputField extends StatelessWidget {
   final TextEditingController controller;
   final String label;
   final bool enabled;
+  final bool externalLabel;
   final TextInputType? keyboardType;
   final List<TextInputFormatter>? inputFormatters;
   final ValueChanged<String>? onChanged;
   final String? prefixText;
+  final String? hintText;
   final int? maxCodePoints;
   final FocusNode? focusNode;
   final TextInputAction? textInputAction;
@@ -6496,10 +6595,12 @@ class _InputField extends StatelessWidget {
     required this.controller,
     required this.label,
     this.enabled = true,
+    this.externalLabel = false,
     this.keyboardType,
     this.inputFormatters,
     this.onChanged,
     this.prefixText,
+    this.hintText,
     this.maxCodePoints,
     this.focusNode,
     this.textInputAction,
@@ -6509,7 +6610,7 @@ class _InputField extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     AppColors.watch(context);
-    return TextField(
+    final field = TextField(
       enabled: enabled,
       controller: controller,
       focusNode: focusNode,
@@ -6523,11 +6624,31 @@ class _InputField extends StatelessWidget {
       onChanged: onChanged,
       onSubmitted: onSubmitted,
       style: AppTextStyles.bodyM.copyWith(color: AppColors.textPrimary),
-      decoration: _inputDecoration(label, prefixText: prefixText).copyWith(
+      decoration: _inputDecoration(
+        externalLabel ? null : label,
+        prefixText: prefixText,
+      ).copyWith(
+        hintText: hintText,
         counterText: maxCodePoints == null
             ? null
             : '${controller.text.runes.length}/$maxCodePoints',
       ),
+    );
+
+    if (!externalLabel) return field;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(label, style: AppTextStyles.labelM),
+        const SizedBox(height: AppSpacing.sm),
+        Semantics(
+          container: true,
+          textField: true,
+          label: label,
+          child: field,
+        ),
+      ],
     );
   }
 }
@@ -9347,7 +9468,7 @@ class _BarcodePainter extends CustomPainter {
   bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
 
-InputDecoration _inputDecoration(String label, {String? prefixText}) {
+InputDecoration _inputDecoration(String? label, {String? prefixText}) {
   return InputDecoration(
     labelText: label,
     labelStyle: AppTextStyles.bodyM,

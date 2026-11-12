@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:trustpay_app/features/home/screens/dashboard_detail_screen.dart';
@@ -13,6 +15,9 @@ class ClosureService extends HomeDataService {
   @override
   Future<HomeDashboardData> fetchDashboard() => delegate.fetchDashboard();
   @override
+  Future<HomeAccountDetailsData> fetchAccountDetails() =>
+      delegate.fetchAccountDetails();
+  @override
   Future<List<HomeTransaction>> fetchTransactions({int limit = 20}) =>
       delegate.fetchTransactions(limit: limit);
   @override
@@ -26,6 +31,36 @@ class ClosureService extends HomeDataService {
             createdAt: null,
             transactionReference: ''),
       ];
+}
+
+class _AccountDetailsFastPathService extends HomeDataService {
+  _AccountDetailsFastPathService(this.delegate);
+
+  final HomeDataService delegate;
+  final transactionsReleased = Completer<List<HomeTransaction>>();
+  bool dashboardRequested = false;
+
+  @override
+  Future<HomeDashboardData> fetchDashboard() async {
+    dashboardRequested = true;
+    throw StateError('Account Details should not load the full dashboard.');
+  }
+
+  @override
+  Future<HomeAccountDetailsData> fetchAccountDetails() =>
+      delegate.fetchAccountDetails();
+
+  @override
+  Future<List<HomeTransaction>> fetchTransactions({int limit = 20}) =>
+      transactionsReleased.future;
+
+  @override
+  Future<HomeVirtualAccountProvisioning> fetchVirtualAccountProvisioning() =>
+      delegate.fetchVirtualAccountProvisioning();
+
+  @override
+  Future<List<SupportTicket>> fetchSupportTickets({int limit = 10}) =>
+      delegate.fetchSupportTickets(limit: limit);
 }
 
 void main() {
@@ -61,6 +96,24 @@ void main() {
         find.text(
             'A support status does not by itself confirm account deletion.'),
         findsOneWidget);
+  });
+  testWidgets(
+      'account details renders before optional transaction volume finishes',
+      (tester) async {
+    final bundle = buildTrustPayTestBundle();
+    final service = _AccountDetailsFastPathService(bundle.homeDataService);
+    await tester.pumpWidget(MaterialApp(
+        home: ProfileActionScreen(
+            kind: ProfileActionKind.account, homeDataService: service)));
+    await tester.pumpAndSettle();
+
+    expect(service.dashboardRequested, isFalse);
+    expect(find.text('Identity details'), findsOneWidget);
+    expect(find.text('Transaction volume'), findsOneWidget);
+    expect(find.text('Updating...'), findsOneWidget);
+
+    service.transactionsReleased.complete(const []);
+    await tester.pumpAndSettle();
   });
   testWidgets('the History tab includes exchange orders', (tester) async {
     final bundle = buildTrustPayTestBundle(includeTransactions: false);

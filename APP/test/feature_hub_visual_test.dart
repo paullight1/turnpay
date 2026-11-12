@@ -29,7 +29,6 @@ void main() {
       'data',
       'cable-tv',
       'electricity',
-      'paystack-account',
       'wallets',
     ]) {
       final card = find.byKey(
@@ -78,9 +77,8 @@ void main() {
     final electricity = tester.getRect(
       find.byKey(const ValueKey('feature-card-electricity')),
     );
-    final account = tester.getRect(
-      find.byKey(const ValueKey('feature-card-paystack-account')),
-    );
+    expect(find.byKey(const ValueKey('feature-card-paystack-account')),
+        findsNothing);
     final wallets = tester.getRect(
       find.byKey(const ValueKey('feature-card-wallets')),
     );
@@ -91,8 +89,7 @@ void main() {
     expect(data.left, greaterThan(airtime.right));
     expect(cable.top, greaterThan(fund.bottom));
     expect(electricity.top, cable.top);
-    expect(account.top, cable.top);
-    expect(wallets.top, greaterThan(cable.bottom));
+    expect(wallets.top, cable.top);
     expect(find.text('More'), findsNothing);
     expect(tester.takeException(), isNull);
   });

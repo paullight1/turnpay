@@ -327,6 +327,36 @@ String authErrorMessage(Object error, String fallback) {
       );
     }
 
+    final isRead = const ['GET', 'HEAD']
+        .contains(error.requestOptions.method.toUpperCase());
+    if (error.response == null) {
+      // Mutations can have committed even when their response was lost. Keep
+      // the caller's original-payment/status recovery instructions intact.
+      if (!isRead || error.type == DioExceptionType.cancel) return fallback;
+      return switch (error.type) {
+        DioExceptionType.connectionTimeout ||
+        DioExceptionType.sendTimeout ||
+        DioExceptionType.receiveTimeout =>
+          'TrustPay is taking longer than expected. Please try again shortly.',
+        DioExceptionType.badCertificate =>
+          'A secure connection to TrustPay could not be established. Please try again later.',
+        _ =>
+          'We could not reach TrustPay. Check your connection and try again.',
+      };
+    }
+    final status = error.response?.statusCode ?? 0;
+    if (status >= 500) {
+      return isRead
+          ? 'TrustPay is temporarily unavailable. Please try again shortly.'
+          : fallback;
+    }
+    if (status == 401) {
+      return 'Your session has expired. Please sign in again.';
+    }
+    if (status == 429) {
+      return 'Too many requests. Please wait a moment and try again.';
+    }
+
     if (data is Map<String, dynamic>) {
       final message = data['message'];
       if (message is String && message.isNotEmpty) return message;
@@ -344,7 +374,7 @@ String authErrorMessage(Object error, String fallback) {
       }
     }
 
-    return error.message ?? fallback;
+    return fallback;
   }
 
   return fallback;
