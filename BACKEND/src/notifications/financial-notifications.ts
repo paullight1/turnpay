@@ -25,6 +25,7 @@ export interface TransactionStatusEmailInput {
 
 export interface FinancialEmailContext {
   amount: string;
+  serviceCharge?: string;
   balanceAfter?: string;
   currency: 'NGN' | 'GHS';
   direction?: 'CREDIT' | 'DEBIT';
@@ -100,13 +101,16 @@ export function renderFinancialEmail(
     const balanceLine = balance
       ? ` Your balance after this movement is ${balance}.`
       : '';
-    const text = `A ${kind} of ${amount} was ${verb} ${preposition} your TrustPay wallet.${balanceLine} Reference: ${reference}. If this was a wallet reservation, the external payment may still be processing. TrustPay will notify you when the transaction reaches a terminal state.`;
+    const feeLine = context.serviceCharge
+      ? ` A service charge of ${context.currency} ${formatMoney(context.serviceCharge)} was deducted from your deposit.`
+      : '';
+    const text = `A ${kind} of ${amount} was ${verb} ${preposition} your TrustPay wallet.${feeLine}${balanceLine} Reference: ${reference}. If this was a wallet reservation, the external payment may still be processing. TrustPay will notify you when the transaction reaches a terminal state.`;
     const htmlBalance = escapedBalance
       ? `<p style="font-size:16px;line-height:1.6">Balance after this movement: <strong>${escapedBalance}</strong></p>`
       : '';
     const html = emailShell(
       subject,
-      `<p style="font-size:16px;line-height:1.6">A ${escapeHtml(kind)} of <strong>${escapedAmount}</strong> was ${verb} ${preposition} your TrustPay wallet.</p>${htmlBalance}<p style="font-size:14px;line-height:1.6;color:#596273">Reference: ${escapedReference}</p><p style="font-size:14px;line-height:1.6;color:#596273">This is a wallet movement notice. External payment completion may still be processing.</p>`,
+      `<p style="font-size:16px;line-height:1.6">A ${escapeHtml(kind)} of <strong>${escapedAmount}</strong> was ${verb} ${preposition} your TrustPay wallet.${escapeHtml(feeLine)}</p>${htmlBalance}<p style="font-size:14px;line-height:1.6;color:#596273">Reference: ${escapedReference}</p><p style="font-size:14px;line-height:1.6;color:#596273">This is a wallet movement notice. External payment completion may still be processing.</p>`,
     );
     return { subject, text, html };
   }

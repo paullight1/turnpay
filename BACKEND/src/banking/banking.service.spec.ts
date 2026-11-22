@@ -57,6 +57,7 @@ describe('BankingService', () => {
 
   const ledger = {
     creditWallet: jest.fn(),
+    creditPaystackDepositWithFee: jest.fn(),
   };
 
   const logger = {
@@ -698,6 +699,71 @@ describe('BankingService', () => {
     expect(result).toEqual({ received: true, processed: false });
     expect(ledger.creditWallet).not.toHaveBeenCalled();
   });
+
+  it.each([
+    ['2000', '20', '2026-12-01T00:00:00Z'],
+    ['50000', '300', '2026-12-01T00:00:00Z'],
+    ['2000', '0', '2026-11-30T23:59:59Z'],
+    ['2000', '0', undefined],
+  ])(
+    'applies the Paystack fee to %s only under the active policy',
+    async (gross, fee, paidAt) => {
+      configService.get.mockReturnValueOnce('2026-12-01T00:00:00Z');
+      prisma.providerEvent.findUnique.mockResolvedValue(null);
+      prisma.providerEvent.create.mockResolvedValue({ id: 'event-1' });
+      prisma.virtualAccount.findUnique.mockResolvedValue({
+        id: 'va-1',
+        userId: 'user-1',
+        currency: 'NGN',
+        status: 'ACTIVE',
+        user: { isSuspended: false, kycStatus: 'VERIFIED', kycTier: 'TIER_2' },
+      });
+      prisma.transaction.create.mockResolvedValue({ id: 'tx-1' });
+      const balance = {
+        walletId: 'wallet-1',
+        balanceBefore: new Decimal(0),
+        balanceAfter: new Decimal(gross).minus(fee),
+      };
+      ledger.creditWallet.mockResolvedValue(balance);
+      ledger.creditPaystackDepositWithFee.mockResolvedValue(balance);
+      const event = {
+        provider: 'paystack' as const,
+        eventType: 'charge.success',
+        providerReference: 'PS-1',
+        accountNumber: '6254727989',
+        amount: new Decimal(gross),
+        currency: 'NGN' as const,
+        rawPayload: {},
+        paidAt,
+      };
+      await service.processVirtualAccountDeposit(event);
+      if (fee === '0') {
+        expect(ledger.creditPaystackDepositWithFee).not.toHaveBeenCalled();
+        expect(ledger.creditWallet).toHaveBeenCalledTimes(1);
+      } else {
+        expect(prisma.transaction.create).toHaveBeenCalledWith({
+          data: expect.objectContaining({
+            amount: new Decimal(gross),
+            fee: new Decimal(fee),
+          }),
+        });
+        expect(ledger.creditPaystackDepositWithFee).toHaveBeenCalledWith(
+          expect.objectContaining({
+            amount: new Decimal(gross),
+            transactionId: 'tx-1',
+          }),
+          new Decimal(fee),
+          prisma,
+        );
+        prisma.providerEvent.findUnique.mockResolvedValue({
+          id: 'event-1',
+          status: 'PROCESSED',
+        });
+        await service.processVirtualAccountDeposit(event);
+        expect(ledger.creditPaystackDepositWithFee).toHaveBeenCalledTimes(1);
+      }
+    },
+  );
 
   it('rejects deposits where the provider currency does not match the virtual account', async () => {
     prisma.providerEvent.findUnique.mockResolvedValue(null);

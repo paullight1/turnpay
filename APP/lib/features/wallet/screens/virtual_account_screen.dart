@@ -313,6 +313,10 @@ class _VirtualAccountScreenState extends State<VirtualAccountScreen>
               style: AppTextStyles.bodyM),
           if (ready) ...[
             const SizedBox(height: 24),
+            if (account.depositFeeNotice.isNotEmpty) ...[
+              Text(account.depositFeeNotice, style: AppTextStyles.bodyS),
+              const SizedBox(height: 12),
+            ],
             Text(account.bankName, style: AppTextStyles.labelM),
             const SizedBox(height: 8),
             SelectableText(account.displayAccountNumber,

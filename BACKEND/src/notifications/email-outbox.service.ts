@@ -521,6 +521,7 @@ export class TransactionalEmailOutboxService {
         where: { id: row.orderId },
         select: {
           userId: true,
+          fee: true,
           ledgerEntries: {
             where: { direction: 'CREDIT' },
             orderBy: { createdAt: 'asc' },
@@ -544,11 +545,18 @@ export class TransactionalEmailOutboxService {
       if (!ledger) return { content: renderAccountEmail(row.eventType)! };
       if (ledger.wallet.userId !== row.userId)
         return { errorCode: 'ledger_ownership_mismatch' };
+      const serviceCharge =
+        ledger.source === 'PAYSTACK_DVA' ? deposit.fee : undefined;
       const content = renderFinancialEmail(
         'WALLET_CREDIT',
         {
-          amount: ledger.amount.toString(),
-          balanceAfter: ledger.balanceAfter.toString(),
+          amount: ledger.amount.minus(serviceCharge ?? 0).toString(),
+          balanceAfter: ledger.balanceAfter
+            .minus(serviceCharge ?? 0)
+            .toString(),
+          serviceCharge: serviceCharge?.gt(0)
+            ? serviceCharge.toString()
+            : undefined,
           currency: ledger.currency,
           direction: ledger.direction,
           reference: ledger.reference,

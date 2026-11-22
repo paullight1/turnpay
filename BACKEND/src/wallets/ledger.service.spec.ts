@@ -107,6 +107,51 @@ describe('LedgerService', () => {
     expect(result.balanceAfter.equals(1250)).toBe(true);
   });
 
+  it('posts a gross deposit and service charge with only the net spendable', async () => {
+    prisma.wallet.findUnique.mockResolvedValue({ id: 'wallet-1' });
+    prisma.wallet.update.mockResolvedValue({
+      id: 'wallet-1',
+      balance: new Decimal(2980),
+    });
+    const result = await service.creditPaystackDepositWithFee(
+      {
+        userId: 'user-1',
+        currency: 'NGN',
+        amount: new Decimal(2000),
+        transactionId: 'tx-1',
+        reference: 'DEP-1',
+        source: 'PAYSTACK_DVA',
+      },
+      new Decimal(20),
+      prisma as never,
+    );
+
+    expect(prisma.wallet.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: { balance: { increment: new Decimal(1980) } },
+      }),
+    );
+    expect(prisma.ledgerEntry.create).toHaveBeenNthCalledWith(1, {
+      data: expect.objectContaining({
+        direction: 'CREDIT',
+        amount: new Decimal(2000),
+        balanceBefore: new Decimal(1000),
+        balanceAfter: new Decimal(3000),
+      }),
+    });
+    expect(prisma.ledgerEntry.create).toHaveBeenNthCalledWith(2, {
+      data: expect.objectContaining({
+        direction: 'DEBIT',
+        amount: new Decimal(20),
+        source: 'PAYSTACK_DVA_SERVICE_CHARGE',
+        balanceBefore: new Decimal(3000),
+        balanceAfter: new Decimal(2980),
+      }),
+    });
+    expect(result.balanceAfter.toFixed(2)).toBe('2980.00');
+    expect(prisma.emailOutbox.createMany).not.toHaveBeenCalled();
+  });
+
   it('queues one immutable wallet-credit email for a non-deposit ledger movement', async () => {
     prisma.wallet.findUnique.mockResolvedValue({
       id: 'wallet-1',

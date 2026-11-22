@@ -117,6 +117,7 @@ export interface Wallet {
 export interface VirtualAccount {
   id: string;
   provider: string;
+  depositFeeNotice?: string;
   accountNumber?: string | null;
   accountNumberMasked: string;
   accountName: string;

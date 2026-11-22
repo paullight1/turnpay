@@ -208,6 +208,59 @@ describe('Monnify webhook financial E2E (real PostgreSQL)', () => {
     );
   });
 
+  it('credits a Paystack deposit and debits its fee exactly once under concurrent delivery', async () => {
+    if (!fixture) throw new Error('Financial fixture was not created');
+    await prisma.virtualAccount.update({
+      where: { id: fixture.virtualAccountId },
+      data: { provider: 'PAYSTACK' },
+    });
+    const banking = new BankingService(
+      prisma as never,
+      new LedgerService(prisma as never),
+      {} as never,
+      {
+        get: (key: string) =>
+          key === 'PAYSTACK_DVA_FEE_EFFECTIVE_AT'
+            ? '2026-12-01T00:00:00Z'
+            : undefined,
+      } as never,
+      logger as never,
+    );
+    const event = {
+      provider: 'paystack' as const,
+      eventType: 'charge.success',
+      providerReference: fixture.providerReference,
+      accountNumber: fixture.accountNumber,
+      amount: new Decimal(2000),
+      settlementAmount: new Decimal(1980),
+      paidAt: '2026-12-01T01:00:00Z',
+      currency: 'NGN' as const,
+      rawPayload: {},
+    };
+    await Promise.all([
+      banking.processVirtualAccountDeposit(event),
+      banking.processVirtualAccountDeposit(event),
+    ]);
+    await expect(walletBalance(prisma, fixture)).resolves.toBe('1980.00');
+    const deposit = await prisma.transaction.findUniqueOrThrow({
+      where: { reference: event.providerReference },
+      include: { ledgerEntries: true },
+    });
+    expect(deposit.fee.toFixed(2)).toBe('20.00');
+    expect(
+      deposit.ledgerEntries.map((entry) => [
+        entry.direction,
+        entry.amount.toFixed(2),
+      ]),
+    ).toEqual(
+      expect.arrayContaining([
+        ['CREDIT', '2000.00'],
+        ['DEBIT', '20.00'],
+      ]),
+    );
+    expect(deposit.ledgerEntries).toHaveLength(2);
+  });
+
   function createServices(
     database: PrismaClient,
     currentFixture: NonNullable<typeof fixture>,

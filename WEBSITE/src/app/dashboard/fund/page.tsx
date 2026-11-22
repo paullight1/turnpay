@@ -446,6 +446,11 @@ export default function FundPage() {
                 </div>
               ) : ngnAccount ? (
                 <div className="grid gap-4">
+                  {ngnAccount.depositFeeNotice ? (
+                    <p className="text-sm text-muted-foreground">
+                      {ngnAccount.depositFeeNotice}
+                    </p>
+                  ) : null}
                   <div className="rounded-lg border bg-[linear-gradient(135deg,rgba(16,185,129,0.12),rgba(255,107,10,0.08),transparent_70%)] p-4">
                     <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                       <div className="flex min-w-0 gap-3">

@@ -46,6 +46,7 @@ export interface NormalizedDepositEvent {
   amount: Decimal;
   /** Net amount the provider settles after its fees, when reported. */
   settlementAmount?: Decimal;
+  paidAt?: string;
   currency: BankingCurrency;
   rawPayload: Record<string, unknown>;
 }
