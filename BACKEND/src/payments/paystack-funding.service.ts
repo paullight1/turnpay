@@ -25,6 +25,7 @@ type Payment = {
   currency: string;
   domain: string;
   fees?: number;
+  paid_at?: string;
   channel?: string;
   customer: { customer_code: string };
   authorization?: { channel?: string; receiver_bank_account_number?: string };
@@ -423,6 +424,7 @@ export class PaystackFundingService {
       accountNumber,
       amount,
       currency: 'NGN',
+      paidAt: payment.paid_at,
       settlementAmount:
         payment.fees === undefined
           ? undefined

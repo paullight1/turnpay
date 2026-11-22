@@ -724,7 +724,13 @@ export class PaystackAdverseFundingService {
         });
         const originalFunding = await tx.transaction.findUnique({
           where: { id: fresh.transactionId },
-          select: { amount: true, type: true, status: true, currency: true },
+          select: {
+            amount: true,
+            fee: true,
+            type: true,
+            status: true,
+            currency: true,
+          },
         });
         if (
           !originalFunding ||
@@ -740,7 +746,7 @@ export class PaystackAdverseFundingService {
         // Deduplicate repeated webhook deliveries by economic identity while
         // still summing recovered amounts from every event row. This caps two
         // overlapping refund cases at the greater verified amount for that
-        // refund and caps all refunds at the original funding amount.
+        // refund and caps wallet collection at the amount actually credited.
         const economicGroups = new Map<
           string,
           { exposure: Decimal; recovered: Decimal }
@@ -781,9 +787,10 @@ export class PaystackAdverseFundingService {
         const groupRemaining = currentGroup.exposure.minus(
           currentGroup.recovered,
         );
-        const aggregateRemaining = new Decimal(originalFunding.amount).minus(
-          totalRecovered,
+        const netFunding = new Decimal(originalFunding.amount).minus(
+          originalFunding.fee ?? 0,
         );
+        const aggregateRemaining = netFunding.minus(totalRecovered);
         const verifiedExposureRemaining =
           totalVerifiedExposure.minus(totalRecovered);
         const remaining = [
@@ -856,9 +863,12 @@ export class PaystackAdverseFundingService {
         });
 
         const nextRecovered = new Decimal(fresh.recoveredAmount).plus(amount);
-        const fullyRecovered = nextRecovered.greaterThanOrEqualTo(
-          new Decimal(fresh.exposureAmount ?? 0),
-        );
+        const fullyRecovered =
+          nextRecovered.greaterThanOrEqualTo(
+            new Decimal(fresh.exposureAmount ?? 0),
+          ) ||
+          (new Decimal(originalFunding.fee ?? 0).gt(0) &&
+            amount.eq(aggregateRemaining));
         const next = await tx.fundingAdverseCase.update({
           where: { id: caseId },
           data: {

@@ -297,52 +297,62 @@ describe('TransactionalEmailOutboxService', () => {
     );
   });
 
-  it('enriches the established deposit confirmation with its original ledger amount and balance snapshot', async () => {
-    const prisma = makePrisma([
-      makeRow({
-        eventKey: 'wallet:deposit-received:tx-deposit-1',
-        eventType: 'DEPOSIT_RECEIVED',
-        orderId: 'tx-deposit-1',
-      }),
-    ]);
-    prisma.transaction.findUnique.mockResolvedValue({
-      id: 'tx-deposit-1',
-      userId: 'user-1',
-      amount: new Decimal('50.00'),
-      currency: 'NGN',
-      reference: 'PAY-1',
-      status: 'SUCCESS',
-      type: 'FUND',
-      ledgerEntries: [
-        {
-          amount: new Decimal('50.00'),
-          balanceAfter: new Decimal('150.00'),
-          currency: 'NGN',
-          direction: 'CREDIT',
-          reference: 'PAY-1',
-          source: 'PAYSTACK_CHECKOUT',
-          wallet: { userId: 'user-1' },
-        },
-      ],
-    });
-    const transport: EmailTransport = {
-      send: jest.fn().mockResolvedValue({ status: 'SENT' }),
-    };
-    const service = new TransactionalEmailOutboxService(
-      prisma as never,
-      makeSettings(),
-      transport,
-      makeLogger() as never,
-      makeRecipientVerifier(),
-    );
+  it.each([
+    ['PAYSTACK_CHECKOUT', '0', '50.00', '150.00'],
+    ['PAYSTACK_DVA', '0.50', '49.50', '149.50'],
+  ])(
+    'shows the credited amount and resulting balance for %s',
+    async (source, fee, credit, balance) => {
+      const prisma = makePrisma([
+        makeRow({
+          eventKey: 'wallet:deposit-received:tx-deposit-1',
+          eventType: 'DEPOSIT_RECEIVED',
+          orderId: 'tx-deposit-1',
+        }),
+      ]);
+      prisma.transaction.findUnique.mockResolvedValue({
+        id: 'tx-deposit-1',
+        userId: 'user-1',
+        amount: new Decimal('50.00'),
+        fee: new Decimal(fee),
+        currency: 'NGN',
+        reference: 'PAY-1',
+        status: 'SUCCESS',
+        type: 'FUND',
+        ledgerEntries: [
+          {
+            amount: new Decimal('50.00'),
+            balanceAfter: new Decimal('150.00'),
+            currency: 'NGN',
+            direction: 'CREDIT',
+            reference: 'PAY-1',
+            source,
+            wallet: { userId: 'user-1' },
+          },
+        ],
+      });
+      const transport: EmailTransport = {
+        send: jest.fn().mockResolvedValue({ status: 'SENT' }),
+      };
+      const service = new TransactionalEmailOutboxService(
+        prisma as never,
+        makeSettings(),
+        transport,
+        makeLogger() as never,
+        makeRecipientVerifier(),
+      );
 
-    await service.dispatchPendingEmails(new Date('2026-11-03T10:00:00.000Z'));
+      await service.dispatchPendingEmails(new Date('2026-11-03T10:00:00.000Z'));
 
-    const message = (transport.send as jest.Mock).mock.calls[0][0];
-    expect(message.subject).toBe('Your TrustPay deposit is confirmed');
-    expect(message.text).toContain('NGN 50.00');
-    expect(message.text).toContain('NGN 150.00');
-  });
+      const message = (transport.send as jest.Mock).mock.calls[0][0];
+      expect(message.subject).toBe('Your TrustPay deposit is confirmed');
+      expect(message.text).toContain(`NGN ${credit}`);
+      expect(message.text).toContain(`NGN ${balance}`);
+      if (source === 'PAYSTACK_DVA') {
+        expect(message.text).toContain('A service charge of NGN 0.50');
+      }
+    },
+  );
 
   it('exhausts a wallet movement whose ledger ownership does not match the outbox user', async () => {
     const prisma = makePrisma([

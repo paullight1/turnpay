@@ -97,6 +97,9 @@ class _TransactionDetailScreenState extends State<TransactionDetailScreen> {
                         'Amount':
                             '${detail.currency} ${detail.amountDecimalString}',
                         'Fee': '${detail.currency} ${detail.feeDecimalString}',
+                        if (detail.type.toUpperCase() == 'FUND')
+                          'Wallet credit':
+                              '${detail.currency} ${(detail.exactAmount - detail.exactFee).decimalString}',
                         'Reference': detail.reference,
                         if (detail.createdAt != null)
                           'Date (UTC)': DateFormat('d MMM yyyy, HH:mm')
@@ -421,8 +424,8 @@ class _FeeBreakdown extends StatelessWidget {
     AppColors.watch(context);
     final symbol = detail.currency == 'NGN' ? '₦' : 'GH₵';
     final feeFormatted = NumberFormat('#,##0.00').format(detail.fee);
-    final netAmount = detail.amount - detail.fee;
-    final netFormatted = NumberFormat('#,##0.00').format(netAmount);
+    final netAmount = detail.exactAmount - detail.exactFee;
+    final netFormatted = NumberFormat('#,##0.00').format(netAmount.toDouble());
 
     return Container(
       padding: const EdgeInsets.all(AppSpacing.md),
@@ -442,12 +445,15 @@ class _FeeBreakdown extends StatelessWidget {
           ),
           const SizedBox(height: AppSpacing.sm),
           _DetailRow(
-            label: 'Fee',
+            label: detail.type.toUpperCase() == 'FUND' && detail.fee > 0
+                ? 'Service charge'
+                : 'Fee',
             value: feeFormatted == '0.00' ? 'Free' : '$symbol$feeFormatted',
           ),
           const Divider(height: AppSpacing.lg),
           _DetailRow(
-            label: 'Net',
+            label:
+                detail.type.toUpperCase() == 'FUND' ? 'Wallet credit' : 'Net',
             value: '$symbol$netFormatted',
           ),
         ],
@@ -525,7 +531,9 @@ class _LedgerEntriesCard extends StatelessWidget {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            entry.source,
+                            entry.source == 'PAYSTACK_DVA_SERVICE_CHARGE'
+                                ? 'Deposit service charge'
+                                : entry.source,
                             style: AppTextStyles.labelS,
                           ),
                           const SizedBox(height: 2),

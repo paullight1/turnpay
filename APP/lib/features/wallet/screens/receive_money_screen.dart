@@ -658,6 +658,10 @@ class _VirtualAccountCard extends StatelessWidget {
           if (accountNumber.isEmpty)
             _KycAccountNumberNotice(onCompleteKyc: onCompleteKyc)
           else ...[
+            if (account.depositFeeNotice.isNotEmpty) ...[
+              Text(account.depositFeeNotice, style: AppTextStyles.bodyS),
+              const SizedBox(height: AppSpacing.sm),
+            ],
             if (account.currency.toUpperCase() == 'NGN') ...[
               Text(AccountSetupCopy.walletFundingPurpose,
                   style: AppTextStyles.bodyS),

@@ -833,6 +833,7 @@ class HomeVirtualAccount {
   final String bankName;
   final String currency;
   final String status;
+  final String depositFeeNotice;
 
   const HomeVirtualAccount({
     required this.provider,
@@ -842,6 +843,7 @@ class HomeVirtualAccount {
     required this.bankName,
     required this.currency,
     required this.status,
+    this.depositFeeNotice = '',
   });
 
   factory HomeVirtualAccount.fromJson(Map<String, dynamic> json) {
@@ -853,6 +855,7 @@ class HomeVirtualAccount {
       bankName: _asString(json['bankName']),
       currency: _asString(json['currency'], fallback: 'NGN'),
       status: _asString(json['status'], fallback: 'PENDING'),
+      depositFeeNotice: _asString(json['depositFeeNotice']),
     );
   }
 

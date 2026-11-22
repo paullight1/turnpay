@@ -69,6 +69,24 @@ export class LedgerService {
     return this.postWalletMovement('DEBIT', input, client);
   }
 
+  creditPaystackDepositWithFee(
+    input: WalletMovementInput,
+    fee: Decimal,
+    client: LedgerClient,
+  ) {
+    this.assertPositiveAmount(fee);
+    if (
+      input.source !== 'PAYSTACK_DVA' ||
+      input.currency !== 'NGN' ||
+      fee.gte(input.amount)
+    ) {
+      throw new BadRequestException('Invalid Paystack deposit service charge');
+    }
+    // Apply only the net credit to spendable funds. The fee is part of this
+    // incoming deposit, so it never debits the customer's existing funds.
+    return this.postWalletMovement('CREDIT', input, client, false, fee);
+  }
+
   /**
    * Explicit operator-approved recovery is the only debit allowed to proceed
    * while an adverse-funding case is being resolved. The caller must already
@@ -87,6 +105,7 @@ export class LedgerService {
     input: WalletMovementInput,
     client?: LedgerClient,
     adverseFundingResolution = false,
+    depositFee?: Decimal,
   ) {
     this.assertPositiveAmount(input.amount);
 
@@ -123,8 +142,15 @@ export class LedgerService {
         }
       }
 
+      const walletAmount = depositFee
+        ? input.amount.minus(depositFee)
+        : input.amount;
       if (!adverseFundingResolution) {
-        await this.tierOneLimits.checkMovement(tx, input, direction);
+        await this.tierOneLimits.checkMovement(
+          tx,
+          { ...input, amount: walletAmount },
+          direction,
+        );
       }
 
       let walletId: string;
@@ -198,12 +224,12 @@ export class LedgerService {
                 currency: input.currency,
               },
             },
-            data: { balance: { increment: input.amount } },
+            data: { balance: { increment: walletAmount } },
           });
 
           walletId = wallet.id;
           balanceAfter = new Decimal(wallet.balance);
-          balanceBefore = balanceAfter.minus(input.amount);
+          balanceBefore = balanceAfter.minus(walletAmount);
         } catch (error: unknown) {
           if (
             error instanceof Prisma.PrismaClientKnownRequestError &&
@@ -228,12 +254,30 @@ export class LedgerService {
           amount: input.amount,
           currency: input.currency,
           balanceBefore,
-          balanceAfter,
+          balanceAfter: depositFee
+            ? balanceAfter.plus(depositFee)
+            : balanceAfter,
           reference: input.reference,
           source: input.source,
           metadata: input.metadata as Prisma.InputJsonValue | undefined,
         },
       });
+
+      if (depositFee) {
+        await tx.ledgerEntry.create({
+          data: {
+            transactionId: input.transactionId,
+            walletId,
+            direction: 'DEBIT',
+            amount: depositFee,
+            currency: input.currency,
+            balanceBefore: balanceAfter.plus(depositFee),
+            balanceAfter,
+            reference: input.reference,
+            source: 'PAYSTACK_DVA_SERVICE_CHARGE',
+          },
+        });
+      }
 
       // Paystack/DVA deposits already enqueue the established branded deposit
       // event. Keeping those sources out of the generic movement stream avoids

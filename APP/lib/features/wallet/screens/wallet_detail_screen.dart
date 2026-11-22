@@ -574,6 +574,10 @@ class _ActiveVirtualAccountCard extends StatelessWidget {
             value: account.bankName,
           ),
           const SizedBox(height: AppSpacing.sm),
+          if (account.depositFeeNotice.isNotEmpty) ...[
+            Text(account.depositFeeNotice, style: AppTextStyles.bodyS),
+            const SizedBox(height: AppSpacing.sm),
+          ],
           _AccountDetailRow(
             label: 'Account Number',
             value: account.accountNumberMasked,

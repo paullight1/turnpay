@@ -39,6 +39,8 @@ import { formatKycTier, isKycTierAtLeast } from '../common/utils/kyc-tier';
 import { allocateDepositReference } from '../common/services/deposit-allocation';
 
 type PrismaProvider = 'MONNIFY' | 'PAYSTACK' | 'KORA';
+const PAYSTACK_DVA_FEE_PERCENT = 1;
+const PAYSTACK_DVA_FEE_CAP = 300;
 
 @Injectable()
 export class BankingService {
@@ -81,12 +83,27 @@ export class BankingService {
       orderBy: { createdAt: 'desc' },
     });
 
-    if (canRevealAccountNumber) return accounts;
-
+    const feeEffectiveAt = this.paystackDepositFeeEffectiveAt();
     return accounts.map((account) => ({
       ...account,
-      accountNumber: '',
+      accountNumber: canRevealAccountNumber ? account.accountNumber : '',
+      ...(feeEffectiveAt &&
+      account.provider === 'PAYSTACK' &&
+      account.currency === 'NGN'
+        ? {
+            depositFeeNotice: `From ${feeEffectiveAt.toISOString().slice(0, 16).replace('T', ' ')} UTC, bank top-ups have a ${PAYSTACK_DVA_FEE_PERCENT}% service charge, capped at ₦${PAYSTACK_DVA_FEE_CAP}. The fee is deducted from the amount sent.`,
+          }
+        : {}),
     }));
+  }
+
+  private paystackDepositFeeEffectiveAt(): Date | undefined {
+    const value = this.configService.get<string>(
+      'PAYSTACK_DVA_FEE_EFFECTIVE_AT',
+    );
+    if (!value || !/(Z|[+-]\d{2}:\d{2})$/.test(value)) return undefined;
+    const date = new Date(value);
+    return Number.isFinite(date.getTime()) ? date : undefined;
   }
 
   async getAccountProvisioning(userId: string) {
@@ -609,6 +626,22 @@ export class BankingService {
   async processVirtualAccountDeposit(event: NormalizedDepositEvent) {
     const provider = this.normalizeProvider(event.provider);
     this.assertPositiveAmount(event.amount);
+    const effectiveAt =
+      provider === 'PAYSTACK' && event.currency === 'NGN'
+        ? this.paystackDepositFeeEffectiveAt()
+        : undefined;
+    const fee =
+      effectiveAt &&
+      event.paidAt &&
+      Date.parse(event.paidAt) >= effectiveAt.getTime()
+        ? Decimal.min(
+            event.amount
+              .mul(PAYSTACK_DVA_FEE_PERCENT)
+              .div(100)
+              .toDecimalPlaces(2, Decimal.ROUND_HALF_UP),
+            PAYSTACK_DVA_FEE_CAP,
+          )
+        : new Decimal(0);
 
     const existing = await this.prisma.providerEvent.findUnique({
       where: {
@@ -734,6 +767,7 @@ export class BankingService {
             userId: virtualAccount.userId,
             type: 'FUND',
             amount: event.amount,
+            fee,
             currency: event.currency,
             status: 'SUCCESS',
             reference: event.providerReference,
@@ -743,28 +777,26 @@ export class BankingService {
               virtualAccountId: virtualAccount.id,
               accountNumberMasked: virtualAccount.accountNumberMasked,
               providerEventId: providerEvent.id,
-              // Gross amount is credited; the net the provider settles is kept
-              // for fee reconciliation.
               settlementAmount: event.settlementAmount?.toString(),
             },
           },
         });
 
-        const creditResult = await this.ledger.creditWallet(
-          {
-            userId: virtualAccount.userId,
-            currency: event.currency,
-            amount: event.amount,
-            transactionId: transaction.id,
-            reference: event.providerReference,
-            source: `${provider}_DVA`,
-            metadata: {
-              providerEventId: providerEvent.id,
-              virtualAccountId: virtualAccount.id,
-            },
+        const movement = {
+          userId: virtualAccount.userId,
+          currency: event.currency,
+          amount: event.amount,
+          transactionId: transaction.id,
+          reference: event.providerReference,
+          source: `${provider}_DVA`,
+          metadata: {
+            providerEventId: providerEvent.id,
+            virtualAccountId: virtualAccount.id,
           },
-          tx,
-        );
+        };
+        const creditResult = fee.isZero()
+          ? await this.ledger.creditWallet(movement, tx)
+          : await this.ledger.creditPaystackDepositWithFee(movement, fee, tx);
 
         await tx.transaction.update({
           where: { id: transaction.id },
@@ -794,6 +826,12 @@ export class BankingService {
               providerEventId: providerEvent.id,
               walletId: creditResult.walletId,
               amount: event.amount.toFixed(2),
+              ...(fee.gt(0)
+                ? {
+                    serviceCharge: fee.toFixed(2),
+                    netCredit: event.amount.minus(fee).toFixed(2),
+                  }
+                : {}),
               currency: event.currency,
             },
           },

@@ -160,6 +160,11 @@ class _ReceivingAccountSheetState extends State<ReceivingAccountSheet> {
                         return Column(
                             crossAxisAlignment: CrossAxisAlignment.stretch,
                             children: [
+                              if (account.depositFeeNotice.isNotEmpty) ...[
+                                Text(account.depositFeeNotice,
+                                    style: AppTextStyles.bodyS),
+                                const SizedBox(height: 16),
+                              ],
                               _AccountLine(
                                   icon: Icons.credit_card_outlined,
                                   label: 'Account number',
