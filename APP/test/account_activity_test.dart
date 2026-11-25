@@ -2,6 +2,9 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:google_fonts/google_fonts.dart';
+import 'package:trustpay_app/core/theme/app_theme.dart';
+import 'package:trustpay_app/core/widgets/tp_page_header.dart';
 import 'package:trustpay_app/features/home/screens/dashboard_detail_screen.dart';
 import 'package:trustpay_app/features/notifications/services/notifications_service.dart';
 import 'package:trustpay_app/services/home_data_service.dart';
@@ -64,7 +67,64 @@ class _AccountDetailsFastPathService extends HomeDataService {
 }
 
 void main() {
-  setUp(() => setMockSecureStorage(refreshToken: 'refresh-token'));
+  setUp(() {
+    GoogleFonts.config.allowRuntimeFetching = false;
+    setMockSecureStorage(refreshToken: 'refresh-token');
+  });
+  testWidgets('security retains its controls without reminder or session cards',
+      (tester) async {
+    final bundle = buildTrustPayTestBundle();
+    await tester.pumpWidget(MaterialApp(
+      theme: AppTheme.dark,
+      home: ProfileActionScreen(
+          kind: ProfileActionKind.security,
+          homeDataService: bundle.homeDataService),
+    ));
+    await tester.pumpAndSettle();
+    expect(find.text('Transaction PIN'), findsOneWidget);
+    expect(find.text('App unlock'), findsOneWidget);
+    expect(find.text('Tier 1 verification'), findsOneWidget);
+    expect(find.text('Active Sessions'), findsNothing);
+    expect(find.textContaining('All money actions request'), findsNothing);
+  });
+  for (final size in [
+    const Size(320, 640),
+    const Size(430, 932),
+    const Size(1024, 768)
+  ]) {
+    testWidgets('account details keeps long values readable at $size',
+        (tester) async {
+      tester.view.physicalSize = size;
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final service =
+          _LongIdentityService(buildTrustPayTestBundle().homeDataService);
+      await tester.pumpWidget(MaterialApp(
+        theme: size.width == 430 ? AppTheme.light : AppTheme.dark,
+        builder: (_, child) => MediaQuery(
+            data: MediaQueryData(
+                size: size,
+                padding: const EdgeInsets.only(top: 44, bottom: 24),
+                textScaler: TextScaler.linear(size.width == 430 ? 1 : 1.8)),
+            child: child!),
+        home: ProfileActionScreen(
+            kind: ProfileActionKind.account, homeDataService: service),
+      ));
+      await tester.pumpAndSettle();
+      expect(find.byType(TpAppHeader), findsOneWidget);
+      expect(tester.getRect(find.byType(TpAppHeader)).width, size.width);
+      expect(find.text('Identity details'), findsOneWidget);
+      final email = find.byWidgetPredicate(
+          (w) => w is SelectableText && w.data == _LongIdentityService.email);
+      await tester.ensureVisible(email);
+      await tester.pumpAndSettle();
+      expect(tester.widget<SelectableText>(email).maxLines, isNull);
+      expect(tester.getRect(email).right, lessThanOrEqualTo(size.width - 16));
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+    });
+  }
   testWidgets(
       'notifications use the durable inbox instead of transaction synthesis',
       (tester) async {
@@ -128,6 +188,30 @@ void main() {
     expect(find.text('View review status'), findsOneWidget);
     expect(find.text('Our team is checking this payment'), findsOneWidget);
   });
+}
+
+class _LongIdentityService extends ClosureService {
+  _LongIdentityService(super.delegate);
+  static const email = 'alexandra.long.identity@example.test';
+  @override
+  Future<HomeAccountDetailsData> fetchAccountDetails() async {
+    final original = await delegate.fetchAccountDetails();
+    return HomeAccountDetailsData(
+      user: HomeUser.fromJson({
+        'id': original.user.id,
+        'email': email,
+        'phone': '+2348012345678',
+        'fullName': 'Alexandra Morgan Long Identity Name',
+        'role': 'USER',
+        'kycStatus': 'VERIFIED',
+        'kycTier': 'TIER_1',
+        'yearOfBirth': 1990,
+        'country': 'NG',
+        'profileDetailsUpdatedAt': '2026-11-01T00:00:00Z',
+      }),
+      virtualAccounts: original.virtualAccounts,
+    );
+  }
 }
 
 class _HistoryManualService extends ManualExchangeService {

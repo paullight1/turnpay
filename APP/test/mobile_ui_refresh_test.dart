@@ -83,6 +83,14 @@ void main() {
     expect(find.text('Account holder'), findsOneWidget);
     expect(find.textContaining('For currency exchange'), findsNothing);
     expect(find.text('View deposits & account status'), findsNothing);
+    expect(
+        find.text('For airtime, data, electricity and Cable TV only. '
+            'Money added here cannot be withdrawn.'),
+        findsOneWidget);
+    expect(find.text('Transfer naira to your personal receiving account.'),
+        findsNothing);
+    expect(find.widgetWithText(FilledButton, 'Copy'), findsOneWidget);
+    expect(find.byIcon(Icons.copy_rounded), findsNothing);
     final copyIcon = find.byTooltip('Copy account number');
     await tester.ensureVisible(copyIcon);
     await tester.tap(copyIcon);
